@@ -1,4 +1,4 @@
-package combined
+package blobreplacements
 
 import (
 	"fmt"
@@ -12,10 +12,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/ethpandaops/goomy-blob/scenariotypes"
-	"github.com/ethpandaops/goomy-blob/tester"
-	"github.com/ethpandaops/goomy-blob/txbuilder"
-	"github.com/ethpandaops/goomy-blob/utils"
+	"github.com/ethpandaops/spamoor/scenariotypes"
+	"github.com/ethpandaops/spamoor/tester"
+	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/utils"
 )
 
 type ScenarioOptions struct {
@@ -44,19 +44,19 @@ type Scenario struct {
 
 func NewScenario() scenariotypes.Scenario {
 	return &Scenario{
-		logger: logrus.WithField("scenario", "combined"),
+		logger: logrus.WithField("scenario", "blob-replacements"),
 	}
 }
 
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64VarP(&s.options.TotalCount, "count", "c", 0, "Total number of blob transactions to send")
 	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", 0, "Number of blob transactions to send per slot")
-	flags.Uint64VarP(&s.options.Sidecars, "sidecars", "b", 3, "Maximum number of blob sidecars per blob transactions")
+	flags.Uint64VarP(&s.options.Sidecars, "sidecars", "b", 1, "Number of blob sidecars per blob transactions")
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", 0, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", 0, "Maximum number of child wallets to use")
-	flags.Uint64Var(&s.options.Replace, "replace", 30, "Number of seconds to wait before replace a transaction")
-	flags.Uint64Var(&s.options.MaxReplacements, "max-replace", 4, "Maximum number of replacement transactions")
-	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", 30, "Number of seconds to wait before re-broadcasting a transaction")
+	flags.Uint64Var(&s.options.Replace, "replace", 10, "Number of seconds to wait before replace a transaction")
+	flags.Uint64Var(&s.options.MaxReplacements, "max-replace", 5, "Maximum number of replacement transactions")
+	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", 120, "Number of seconds to wait before re-broadcasting a transaction")
 	flags.Uint64Var(&s.options.BaseFee, "basefee", 20, "Max fee per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", 2, "Max tip per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", 20, "Max blob fee to use in blob transactions (in gwei)")
@@ -100,7 +100,7 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 	txCount := uint64(0)
 	startTime := time.Now()
 
-	s.logger.Infof("starting scenario: combined")
+	s.logger.Infof("starting scenario: replacements")
 
 	for {
 		txIdx := txIdxCounter
@@ -165,8 +165,8 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 	client := s.tester.GetClient(tester.SelectByIndex, int(txIdx))
 	wallet := s.tester.GetWallet(tester.SelectByIndex, int(txIdx))
 
-	if rand.Intn(100) < 20 {
-		// 20% chance to send transaction via another client
+	if rand.Intn(100) < 50 {
+		// 50% chance to send transaction via another client
 		// will cause some replacement txs being sent via different clients than the original tx
 		client = s.tester.GetClient(tester.SelectRandom, 0)
 	}

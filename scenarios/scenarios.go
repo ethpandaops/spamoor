@@ -1,23 +1,23 @@
 package scenarios
 
 import (
-	"github.com/ethpandaops/goomy-blob/scenariotypes"
+	"github.com/ethpandaops/spamoor/scenariotypes"
 
-	"github.com/ethpandaops/goomy-blob/scenarios/combined"
-	"github.com/ethpandaops/goomy-blob/scenarios/conflicting"
-	"github.com/ethpandaops/goomy-blob/scenarios/deploytx"
-	"github.com/ethpandaops/goomy-blob/scenarios/eoatx"
-	"github.com/ethpandaops/goomy-blob/scenarios/erctx"
-	"github.com/ethpandaops/goomy-blob/scenarios/normal"
-	"github.com/ethpandaops/goomy-blob/scenarios/replacements"
-	"github.com/ethpandaops/goomy-blob/scenarios/wallets"
+	blobcombined "github.com/ethpandaops/spamoor/scenarios/blob-combined"
+	blobconflicting "github.com/ethpandaops/spamoor/scenarios/blob-conflicting"
+	blobreplacements "github.com/ethpandaops/spamoor/scenarios/blob-replacements"
+	"github.com/ethpandaops/spamoor/scenarios/blobs"
+	"github.com/ethpandaops/spamoor/scenarios/deploytx"
+	"github.com/ethpandaops/spamoor/scenarios/eoatx"
+	"github.com/ethpandaops/spamoor/scenarios/erctx"
+	"github.com/ethpandaops/spamoor/scenarios/wallets"
 )
 
 var Scenarios map[string]func() scenariotypes.Scenario = map[string]func() scenariotypes.Scenario{
-	"combined":     combined.NewScenario,
-	"conflicting":  conflicting.NewScenario,
-	"normal":       normal.NewScenario,
-	"replacements": replacements.NewScenario,
+	"blob-combined":     blobcombined.NewScenario,
+	"blob-conflicting":  blobconflicting.NewScenario,
+	"blobs":             blobs.NewScenario,
+	"blob-replacements": blobreplacements.NewScenario,
 
 	"eoatx":    eoatx.NewScenario,
 	"erctx":    erctx.NewScenario,

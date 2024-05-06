@@ -5,9 +5,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/ethpandaops/goomy-blob/scenariotypes"
-	"github.com/ethpandaops/goomy-blob/tester"
-	"github.com/ethpandaops/goomy-blob/utils"
+	"github.com/ethpandaops/spamoor/scenariotypes"
+	"github.com/ethpandaops/spamoor/tester"
+	"github.com/ethpandaops/spamoor/utils"
 )
 
 type ScenarioOptions struct {

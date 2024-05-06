@@ -10,7 +10,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethpandaops/goomy-blob/txbuilder"
+	"github.com/ethpandaops/spamoor/txbuilder"
 )
 
 type CliArgs struct {

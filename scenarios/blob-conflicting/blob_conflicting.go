@@ -1,4 +1,4 @@
-package conflicting
+package blobconflicting
 
 import (
 	"fmt"
@@ -12,10 +12,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/ethpandaops/goomy-blob/scenariotypes"
-	"github.com/ethpandaops/goomy-blob/tester"
-	"github.com/ethpandaops/goomy-blob/txbuilder"
-	"github.com/ethpandaops/goomy-blob/utils"
+	"github.com/ethpandaops/spamoor/scenariotypes"
+	"github.com/ethpandaops/spamoor/tester"
+	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/utils"
 )
 
 type ScenarioOptions struct {
@@ -42,7 +42,7 @@ type Scenario struct {
 
 func NewScenario() scenariotypes.Scenario {
 	return &Scenario{
-		logger: logrus.WithField("scenario", "conflicting"),
+		logger: logrus.WithField("scenario", "blob-conflicting"),
 	}
 }
 

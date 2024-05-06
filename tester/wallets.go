@@ -11,8 +11,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethpandaops/goomy-blob/txbuilder"
-	"github.com/ethpandaops/goomy-blob/utils"
+	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/utils"
 	"github.com/holiman/uint256"
 )
 

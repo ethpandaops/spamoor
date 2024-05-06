@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethpandaops/goomy-blob/txbuilder"
-	"github.com/ethpandaops/goomy-blob/utils"
+	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/utils"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 )
