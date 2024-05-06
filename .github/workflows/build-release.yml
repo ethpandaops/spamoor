@@ -1,0 +1,151 @@
+
+name: Build Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version Number ('0.x.y')"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build_binaries:
+    name: "Build Spamoor"
+    uses: ./.github/workflows/_shared-build.yaml
+    with:
+      ref: ${{ github.sha }}
+      release: "v${{ inputs.version }}"
+      docker: true
+      docker_repository: "ethpandaops/spamoor"
+      docker_tag_prefix: "v${{ inputs.version }}"
+      additional_tags: "['v${{ inputs.version }}','latest']"
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  
+  create_release:
+    name: Create Release
+    needs: [build_binaries]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 100
+        ref: ${{ github.sha }}
+    - name: "Generate release changelog"
+      id: changelog
+      run: |
+        git fetch --tags
+        prev_tag=$(git tag --sort=-version:refname | grep -e "^v[0-9.]*$" | head -n 1)
+        echo "previous release: $prev_tag"
+        if [ "$prev_tag" ]; then
+          changelog=$(git log --oneline --no-decorate $prev_tag..HEAD)
+        else
+          changelog=$(git log --oneline --no-decorate)
+        fi
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo " - ${changelog//$'\n'/$'\n' - }" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    # download build artifacts
+    - name: "Download build artifacts"
+      uses: actions/download-artifact@v3
+
+    # create draft release
+    - name: Create latest release
+      uses: actions/create-release@v1
+      id: create_release
+      with:
+        draft: true
+        prerelease: false
+        release_name: "v${{ inputs.version }}"
+        tag_name: "v${{ inputs.version }}"
+        body: |
+          ### Changes
+          ${{ steps.changelog.outputs.changelog }}
+
+          ### Release Artifacts
+          Please read through the [wiki](https://github.com/ethpandaops/spamoor/wiki) for setup & configuration instructions.
+          | Release File  | Description |
+          | ------------- | ------------- |
+          | [spamoor_${{ inputs.version }}_windows_amd64.zip](https://github.com/ethpandaops/spamoor/releases/download/v${{ inputs.version }}/spamoor_${{ inputs.version }}_windows_amd64.zip) | spamoor executables for windows/amd64 |
+          | [spamoor_${{ inputs.version }}_linux_amd64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/v${{ inputs.version }}/spamoor_${{ inputs.version }}_linux_amd64.tar.gz) | spamoor executables for linux/amd64 |
+          | [spamoor_${{ inputs.version }}_linux_arm64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/v${{ inputs.version }}/spamoor_${{ inputs.version }}_linux_arm64.tar.gz) | spamoor executables for linux/arm64 |
+          | [spamoor_${{ inputs.version }}_darwin_amd64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/v${{ inputs.version }}/spamoor_${{ inputs.version }}_darwin_amd64.tar.gz) | spamoor executable for macos/amd64 |
+          | [spamoor_${{ inputs.version }}_darwin_arm64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/v${{ inputs.version }}/spamoor_${{ inputs.version }}_darwin_arm64.tar.gz) | spamoor executable for macos/arm64 |
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+
+    # generate & upload release artifacts
+    - name: "Generate release package: spamoor_${{ inputs.version }}_windows_amd64.zip"
+      run: |
+        cd spamoor_windows_amd64
+        zip -r -q ../spamoor_${{ inputs.version }}_windows_amd64.zip .
+    - name: "Upload release artifact: spamoor_${{ inputs.version }}_windows_amd64.zip"
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./spamoor_${{ inputs.version }}_windows_amd64.zip
+        asset_name: spamoor_${{ inputs.version }}_windows_amd64.zip
+        asset_content_type: application/octet-stream
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+    
+    - name: "Generate release package: spamoor_${{ inputs.version }}_linux_amd64.tar.gz"
+      run: |
+        cd spamoor_linux_amd64
+        tar -czf ../spamoor_${{ inputs.version }}_linux_amd64.tar.gz .
+    - name: "Upload release artifact: spamoor_${{ inputs.version }}_linux_amd64.tar.gz"
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./spamoor_${{ inputs.version }}_linux_amd64.tar.gz
+        asset_name: spamoor_${{ inputs.version }}_linux_amd64.tar.gz
+        asset_content_type: application/octet-stream
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+    
+    - name: "Generate release package: spamoor_${{ inputs.version }}_linux_arm64.tar.gz"
+      run: |
+        cd spamoor_linux_arm64
+        tar -czf ../spamoor_${{ inputs.version }}_linux_arm64.tar.gz .
+    - name: "Upload release artifact: spamoor_${{ inputs.version }}_linux_arm64.tar.gz"
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./spamoor_${{ inputs.version }}_linux_arm64.tar.gz
+        asset_name: spamoor_${{ inputs.version }}_linux_arm64.tar.gz
+        asset_content_type: application/octet-stream
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+    
+    - name: "Generate release package: spamoor_${{ inputs.version }}_darwin_amd64.tar.gz"
+      run: |
+        cd spamoor_darwin_amd64
+        tar -czf ../spamoor_${{ inputs.version }}_darwin_amd64.tar.gz .
+    - name: "Upload release artifact: spamoor_${{ inputs.version }}_darwin_amd64.tar.gz"
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./spamoor_${{ inputs.version }}_darwin_amd64.tar.gz
+        asset_name: spamoor_${{ inputs.version }}_darwin_amd64.tar.gz
+        asset_content_type: application/octet-stream
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+
+    - name: "Generate release package: spamoor_${{ inputs.version }}_darwin_arm64.tar.gz"
+      run: |
+        cd spamoor_darwin_arm64
+        tar -czf ../spamoor_${{ inputs.version }}_darwin_arm64.tar.gz .
+    - name: "Upload release artifact: spamoor_${{ inputs.version }}_darwin_arm64.tar.gz"
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./spamoor_${{ inputs.version }}_darwin_arm64.tar.gz
+        asset_name: spamoor_${{ inputs.version }}_darwin_arm64.tar.gz
+        asset_content_type: application/octet-stream
+      env:
+        GITHUB_TOKEN: ${{ github.token }}

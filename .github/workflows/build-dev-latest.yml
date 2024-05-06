@@ -1,0 +1,33 @@
+
+name: Build latest image
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+
+  check_source:
+    name: "Run code checks"
+    uses: ./.github/workflows/_shared-check.yaml
+
+  build_binaries:
+    name: "Build Spamoor"
+    needs: [check_source]
+    uses: ./.github/workflows/_shared-build.yaml
+    with:
+      ref: ${{ github.sha }}
+      release: "snapshot"
+      docker: true
+      docker_repository: "ethpandaops/spamoor"
+      docker_tag_prefix: "master"
+      additional_tags: "['master','master-latest','latest']"
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

@@ -5,10 +5,6 @@ spamoor is a simple tool that can be used to generate various types of random tr
 
 Spamoor can be used for stress testing (flooding the network with thousands of transactions) or to have a continuous amount of transactions over long time for testing purposes.
 
-Spamoor provides two commands:
-* `blob-sender`: Simple utility to send a single blob transaction with specified parameters.
-* `spamoor`: Tool for mass transaction spamming
-
 ## Build
 
 You can use this tool via pre-build docker images: [ethpandaops/spamoor](https://hub.docker.com/r/ethpandaops/spamoor)
@@ -18,8 +14,8 @@ Or build it yourself:
 ```
 git clone https://github.com/ethpandaops/spamoor.git
 cd spamoor
-go build ./cmd/spamoor
-go build ./cmd/blob-sender  # if needed
+make
+./bin/spamoor
 ```
 
 ## Usage
@@ -94,28 +90,3 @@ spamoor blob-combined -p "<PRIVKEY>" -h http://rpc-host1:8545 -h http://rpc-host
 The `wallets` scenario prepares & prints the list of child wallets that are used to send blob transactions from.\
 It's more intended for debugging. The tool takes care of these wallets internally, so there is nothing to do with them ;)
 
-### `blob-sender`
-
-`blob-sender` is a simple utility to send a single blob transaction with specified parameters.
-
-```
-Usage of blob-sender:
-      --addnonce int           Nonce offset to use for transactions (useful for replacement transactions)
-  -b, --blobs stringArray      The blobs to reference in the transaction (in hex format or special placeholders).
-      --chainid uint           ChainID of the network (For offline mode in combination with --output or to override transactions)
-  -n, --count uint             The number of transactions to send. (default 1)
-  -d, --data string            The transaction calldata.
-      --gaslimit uint          The gas limit for transactions. (default 500000)
-      --maxblobfee float32     The maximum blob fee per chunk in gwei. (default 10)
-      --maxfeepergas float32   The gas limit for transactions. (default 20)
-      --maxpriofee float32     The maximum priority fee per gas in gwei. (default 1.2)
-      --nonce uint             Current nonce of the wallet (For offline mode in combination with --output)
-  -o, --output                 Output signed transactions to stdout instead of broadcasting them (offline mode).
-  -p, --privkey string         The private key of the wallet to send blobs from.
-                               (Special: "env" to read from BLOBSENDER_PRIVKEY environment variable)
-      --random-privkey         Use random private key if no privkey supplied
-  -r, --rpchost string         The RPC host to send transactions to. (default "http://127.0.0.1:8545")
-  -t, --to string              The transaction to address.
-  -a, --value uint             The transaction value.
-  -v, --verbose                Run the script with verbose output
-```
