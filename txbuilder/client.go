@@ -82,10 +82,7 @@ func NewClient(rpchost string) (*Client, error) {
 
 func (client *Client) GetName() string {
 	url, _ := url.Parse(client.rpchost)
-	name := url.Host
-	if strings.HasSuffix(name, ".ethpandaops.io") {
-		name = name[:len(name)-len(".ethpandaops.io")]
-	}
+	name := strings.TrimSuffix(url.Host, ".ethpandaops.io")
 	return name
 }
 
@@ -117,28 +114,40 @@ func (client *Client) UpdateWallet(wallet *Wallet) error {
 	return nil
 }
 
-func (client *Client) getContext() context.Context {
+func (client *Client) getContext() (context.Context, context.CancelFunc) {
 	ctx := context.Background()
 	if client.Timeout > 0 {
-		ctx, _ = context.WithTimeout(ctx, client.Timeout)
+		return context.WithTimeout(ctx, client.Timeout)
 	}
-	return ctx
+	return context.WithCancel(ctx)
 }
 
 func (client *Client) GetChainId() (*big.Int, error) {
-	return client.client.ChainID(client.getContext())
+	ctx, cancel := client.getContext()
+	defer cancel()
+
+	return client.client.ChainID(ctx)
 }
 
 func (client *Client) GetNonceAt(wallet common.Address) (uint64, error) {
-	return client.client.NonceAt(client.getContext(), wallet, nil)
+	ctx, cancel := client.getContext()
+	defer cancel()
+
+	return client.client.NonceAt(ctx, wallet, nil)
 }
 
 func (client *Client) GetPendingNonceAt(wallet common.Address) (uint64, error) {
-	return client.client.PendingNonceAt(client.getContext(), wallet)
+	ctx, cancel := client.getContext()
+	defer cancel()
+
+	return client.client.PendingNonceAt(ctx, wallet)
 }
 
 func (client *Client) GetBalanceAt(wallet common.Address) (*big.Int, error) {
-	return client.client.BalanceAt(client.getContext(), wallet, nil)
+	ctx, cancel := client.getContext()
+	defer cancel()
+
+	return client.client.BalanceAt(ctx, wallet, nil)
 }
 
 func (client *Client) GetSuggestedFee() (*big.Int, *big.Int, error) {
@@ -149,11 +158,14 @@ func (client *Client) GetSuggestedFee() (*big.Int, *big.Int, error) {
 		return client.lastGasCap, client.lastTipCap, nil
 	}
 
-	gasCap, err := client.client.SuggestGasPrice(client.getContext())
+	ctx, cancel := client.getContext()
+	defer cancel()
+
+	gasCap, err := client.client.SuggestGasPrice(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	tipCap, err := client.client.SuggestGasTipCap(client.getContext())
+	tipCap, err := client.client.SuggestGasTipCap(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -166,7 +178,11 @@ func (client *Client) GetSuggestedFee() (*big.Int, *big.Int, error) {
 
 func (client *Client) SendTransaction(tx *types.Transaction) error {
 	client.logger.Tracef("submitted transaction %v", tx.Hash().String())
-	return client.client.SendTransaction(client.getContext(), tx)
+
+	ctx, cancel := client.getContext()
+	defer cancel()
+
+	return client.client.SendTransaction(ctx, tx)
 }
 
 func (client *Client) SubmitTransaction(txBytes []byte) *common.Hash {
@@ -177,7 +193,10 @@ func (client *Client) SubmitTransaction(txBytes []byte) *common.Hash {
 		return nil
 	}
 
-	err = client.client.SendTransaction(client.getContext(), tx)
+	ctx, cancel := client.getContext()
+	defer cancel()
+
+	err = client.client.SendTransaction(ctx, tx)
 	if err != nil {
 		client.logger.Errorf("Error while sending transaction: %v", err)
 		return nil
@@ -192,11 +211,17 @@ func (client *Client) SubmitTransaction(txBytes []byte) *common.Hash {
 func (client *Client) GetTransactionReceipt(txHash []byte) *types.Receipt {
 	hash := common.Hash{}
 	hash.SetBytes(txHash)
+
 	client.logger.Tracef("get receipt: 0x%x", txHash)
-	receipt, err := client.client.TransactionReceipt(client.getContext(), hash)
+
+	ctx, cancel := client.getContext()
+	defer cancel()
+
+	receipt, err := client.client.TransactionReceipt(ctx, hash)
 	if err != nil {
 		return nil
 	}
+
 	return receipt
 }
 
@@ -209,7 +234,11 @@ func (client *Client) GetBlockHeight() (uint64, error) {
 	}
 
 	client.logger.Tracef("get block number")
-	blockHeight, err := client.client.BlockNumber(client.getContext())
+
+	ctx, cancel := client.getContext()
+	defer cancel()
+
+	blockHeight, err := client.client.BlockNumber(ctx)
 	if err != nil {
 		return blockHeight, err
 	}
@@ -232,14 +261,20 @@ func (client *Client) AwaitTransaction(tx *types.Transaction) (*types.Receipt, u
 	}
 
 	client.logger.Tracef("get receipt: %v", tx.Hash().String())
-	receipt, err := client.client.TransactionReceipt(client.getContext(), tx.Hash())
+
+	ctx, cancel := client.getContext()
+	defer cancel()
+
+	receipt, err := client.client.TransactionReceipt(ctx, tx.Hash())
 	if receipt != nil {
 		return receipt, blockHeight, nil
 	}
+
 	if err != nil && err.Error() != "not found" {
 		client.logger.Warnf("receipt error: %v\n", err)
 		return nil, blockHeight, err
 	}
+
 	return nil, blockHeight, nil
 }
 
@@ -308,7 +343,11 @@ func (client *Client) AwaitWalletNonce(wallet common.Address, nonce uint64, bloc
 func (client *Client) processWalletNonceAwaiter(wallet common.Address, awaiter *clientNonceAwait) error {
 	if awaiter.blockHeight == 0 {
 		client.logger.Tracef("get block number")
-		blockHeight, err := client.client.BlockNumber(client.getContext())
+
+		ctx, cancel := client.getContext()
+		defer cancel()
+
+		blockHeight, err := client.client.BlockNumber(ctx)
 		if err != nil {
 			return err
 		}
@@ -317,7 +356,11 @@ func (client *Client) processWalletNonceAwaiter(wallet common.Address, awaiter *
 
 	fetchLatestNonce := func(blockHeight uint64) error {
 		client.logger.Tracef("get nonce for %v at %v", wallet.String(), blockHeight)
-		currentNonce, err := client.client.NonceAt(client.getContext(), wallet, big.NewInt(int64(blockHeight)))
+
+		ctx, cancel := client.getContext()
+		defer cancel()
+
+		currentNonce, err := client.client.NonceAt(ctx, wallet, big.NewInt(int64(blockHeight)))
 		if err != nil {
 			return err
 		}
@@ -408,7 +451,11 @@ func (client *Client) AwaitNextBlock(lastBlockHeight uint64) (uint64, error) {
 		time.Sleep(1 * time.Second)
 
 		client.logger.Tracef("get block number")
-		blockHeight, err := client.client.BlockNumber(client.getContext())
+
+		ctx, cancel := client.getContext()
+		blockHeight, err := client.client.BlockNumber(ctx)
+		cancel()
+
 		if err != nil {
 			return lastBlockHeight, err
 		}
