@@ -41,7 +41,6 @@ type Scenario struct {
 
 	bytecodes [][]byte
 
-	pendingCount  uint64
 	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
 }

@@ -40,7 +40,6 @@ type Scenario struct {
 
 	contractAddr common.Address
 
-	pendingCount  uint64
 	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
 }

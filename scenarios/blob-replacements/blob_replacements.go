@@ -37,7 +37,6 @@ type Scenario struct {
 	logger  *logrus.Entry
 	tester  *tester.Tester
 
-	pendingCount  uint64
 	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
 }

@@ -35,7 +35,6 @@ type Scenario struct {
 	logger  *logrus.Entry
 	tester  *tester.Tester
 
-	pendingCount  uint64
 	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
 }
@@ -259,8 +258,8 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 		wg.Done()
 	}()
 	go func() {
-		delayMs := time.Duration(rand.Int63n(500)) * time.Millisecond
-		time.Sleep(delayMs)
+		delay := time.Duration(rand.Int63n(500)) * time.Millisecond
+		time.Sleep(delay)
 		err2 = client2.SendTransaction(tx2)
 		if err2 != nil {
 			s.logger.WithField("client", client2.GetName()).Warnf("error while sending dynfee tx %v: %v", txIdx, err2)
