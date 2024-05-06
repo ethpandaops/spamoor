@@ -25,10 +25,6 @@ type CliArgs struct {
 	seed         string
 }
 
-func mainArgs(flags *pflag.FlagSet, cliArgs *CliArgs) {
-
-}
-
 func main() {
 	cliArgs := CliArgs{}
 	flags := pflag.NewFlagSet("main", pflag.ContinueOnError)
