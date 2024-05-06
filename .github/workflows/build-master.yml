@@ -34,44 +34,6 @@ jobs:
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-  
-  update_project_wiki:
-    name: Generate project documentation
-    needs: [check_source]
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout base code
-      uses: actions/checkout@v2
-      with:
-        path: code
-    - name: Checkout wiki code
-      uses: actions/checkout@v2
-      with:
-        repository: ${{github.repository}}.wiki
-        path: wiki
-    - name: Generate wiki from docs
-      run: |
-        touch ./wiki.md
-
-        for filename in code/docs/*.md; do
-          while IFS= read -r line; do
-          if [[ "$line" =~ ^"#!!" ]]; then
-            bash -c "cd code && ${line:3}" >> ./wiki.md
-          else
-            echo "$line" >> ./wiki.md
-          fi
-          done <<< $(cat $filename)
-          echo "" >> ./wiki.md
-        done
-
-        cp ./wiki.md ./wiki/Home.md
-    - name: Push to wiki
-      run: |
-        cd wiki
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add .
-        git diff-index --quiet HEAD || git commit -m "Add changes" && git push
 
   create_snapshot_release:
     name: Create snapshot release
