@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	gasburnertx "github.com/ethpandaops/spamoor/scenarios/gasburnertx/contracts"
 	"github.com/ethpandaops/spamoor/utils"
 	"math/big"
 	"sync"
@@ -50,13 +49,13 @@ func NewScenario() scenariotypes.Scenario {
 }
 
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
-	flags.Uint64VarP(&s.options.TotalCount, "count", "c", 0, "Total number of large transactions to send")
-	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", 0, "Number of large transactions to send per slot")
+	flags.Uint64VarP(&s.options.TotalCount, "count", "c", 0, "Total number of gasburner transactions to send")
+	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", 0, "Number of gasburner transactions to send per slot")
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", 0, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", 0, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", 120, "Number of seconds to wait before re-broadcasting a transaction")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", 20, "Max fee per gas to use in large transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", 2, "Max tip per gas to use in large transactions (in gwei)")
+	flags.Uint64Var(&s.options.BaseFee, "basefee", 20, "Max fee per gas to use in gasburner transactions (in gwei)")
+	flags.Uint64Var(&s.options.TipFee, "tipfee", 2, "Max tip per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasUnitsToBurn, "gas-units-to-burn", 2000000, "The number of gas units for each tx to cost")
 
 	return nil
@@ -90,8 +89,8 @@ func (s *Scenario) Init(testerCfg *tester.TesterConfig) error {
 	return nil
 }
 
-func (s *Scenario) Run(testerCfg *tester.Tester) error {
-	s.tester = testerCfg
+func (s *Scenario) Run(tester *tester.Tester) error {
+	s.tester = tester
 	txIdxCounter := uint64(0)
 	counterMutex := sync.Mutex{}
 	waitGroup := sync.WaitGroup{}
@@ -177,7 +176,7 @@ func (s *Scenario) DeployGasBurnerContract() (*types.Receipt, *txbuilder.Client,
 		return nil, nil, err
 	}
 
-	_, deployTx, _, err := gasburnertx.DeployGasBurner(transactor, client.GetEthClient())
+	_, deployTx, _, err := DeployGasBurner(transactor, client.GetEthClient())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -356,12 +355,7 @@ func (s *Scenario) awaitTx(txIdx uint64, tx *types.Transaction, client *txbuilde
 	gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
 	gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
 
-	txStatus := "failure"
-	if receipt.Status == 1 {
-		txStatus = "success"
-	}
-
-	s.logger.WithField("client", client.GetName()).Infof(" transaction %d confirmed in block #%v with %s. total gas units: %d, total fee: %v gwei (base: %v, blob: %v)", txIdx+1, blockNum, txStatus, receipt.GasUsed, gweiTotalFee, gweiBaseFee, gweiBlobFee)
+	s.logger.WithField("client", client.GetName()).Infof(" transaction %d confirmed in block #%v. total gas units: %d, total fee: %v gwei (base: %v, blob: %v)", txIdx+1, blockNum, receipt.GasUsed, gweiTotalFee, gweiBaseFee, gweiBlobFee)
 }
 
 func (s *Scenario) delayedResend(txIdx uint64, tx *types.Transaction, awaitConfirmation *bool) {
@@ -390,7 +384,7 @@ func (s *Scenario) GetTransactor(wallet *txbuilder.Wallet, noSend bool, value *b
 	return transactor, nil
 }
 
-func (s *Scenario) GetGasBurner() (*gasburnertx.GasBurner, error) {
+func (s *Scenario) GetGasBurner() (*GasBurner, error) {
 	client := s.tester.GetClient(tester.SelectByIndex, 0)
-	return gasburnertx.NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
+	return NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
 }

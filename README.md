@@ -84,7 +84,7 @@ Required (at least one of):
   -t, --throughput uint       Number of blob transactions to send per slot
   
 Optional:
-      --basefee uint             Max fee per gas to use in large transactions (in gwei) (default 20)
+      --basefee uint             Max fee per gas to use in gasburner transactions (in gwei) (default 20)
       --gas-units-to-burn uint   The number of gas units for each tx to cost (default 2000000)
       --max-pending uint         Maximum number of pending transactions
       --max-wallets uint         Maximum number of child wallets to use
@@ -93,7 +93,7 @@ Optional:
   -h, --rpchost stringArray      The RPC host to send transactions to.
       --rpchost-file string      File with a list of RPC hosts to send transactions to.
   -s, --seed string              The child wallet seed.
-      --tipfee uint              Max tip per gas to use in large transactions (in gwei) (default 2)
+      --tipfee uint              Max tip per gas to use in gasburner transactions (in gwei) (default 2)
       --trace                    Run the script with tracing output
   -v, --verbose                  Run the script with verbose output
 ```
