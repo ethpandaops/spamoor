@@ -1,14 +1,14 @@
 package gasburnertx
 
 import (
-	"context"
 	"fmt"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	"github.com/ethpandaops/spamoor/utils"
 	"math/big"
 	"sync"
 	"time"
 
+	"github.com/ethpandaops/spamoor/utils"
+
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethpandaops/spamoor/scenariotypes"
@@ -37,7 +37,6 @@ type Scenario struct {
 
 	gasBurnerContractAddr common.Address
 
-	pendingCount  uint64
 	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
 }
@@ -101,7 +100,7 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 	s.logger.Infof("starting scenario: gasburnertx")
 
 	s.logger.Infof("deploying gas burner contract...")
-	receipt, _, err := s.DeployGasBurnerContract()
+	receipt, _, err := s.sendDeploymentTx()
 	if err != nil {
 		return err
 	}
@@ -167,29 +166,7 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 	return nil
 }
 
-func (s *Scenario) DeployGasBurnerContract() (*types.Receipt, *txbuilder.Client, error) {
-	wallet := s.tester.GetRootWallet()
-	client := s.tester.GetClient(tester.SelectByIndex, 0)
-
-	transactor, err := s.GetTransactor(wallet, true, big.NewInt(0))
-	if err != nil {
-		return nil, nil, err
-	}
-
-	_, deployTx, _, err := DeployGasBurner(transactor, client.GetEthClient())
-	if err != nil {
-		return nil, nil, err
-	}
-
-	receipt, _, err := s.sendDeploymentTx(deployTx)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return receipt, client, nil
-}
-
-func (s *Scenario) sendDeploymentTx(deployTx *types.Transaction) (*types.Receipt, *txbuilder.Client, error) {
+func (s *Scenario) sendDeploymentTx() (*types.Receipt, *txbuilder.Client, error) {
 	client := s.tester.GetClient(tester.SelectByIndex, 0)
 	wallet := s.tester.GetWallet(tester.SelectByIndex, 0)
 
@@ -218,19 +195,14 @@ func (s *Scenario) sendDeploymentTx(deployTx *types.Transaction) (*types.Receipt
 		tipCap = big.NewInt(1000000000)
 	}
 
-	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       2000000,
-		To:        nil,
-		Value:     uint256.NewInt(0),
-		Data:      deployTx.Data(),
+	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+		_, deployTx, _, err := DeployGasBurner(transactOpts, client.GetEthClient())
+		return deployTx, err
 	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	tx, err := wallet.BuildDynamicFeeTx(txData)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -281,30 +253,12 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 		return nil, nil, err
 	}
 
-	transactor, err := s.GetTransactor(wallet, true, big.NewInt(0))
-	if err != nil {
-		return nil, nil, err
-	}
-
-	gasBurnerTx, err := gasBurnerContract.BurnGasUnits(transactor, big.NewInt(int64(s.options.GasUnitsToBurn)))
-	if err != nil {
-		s.logger.Errorf("could not generate transaction: %v", err)
-		return nil, nil, err
-	}
-
-	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasBurnerTx.Gas(),
-		To:        &s.gasBurnerContractAddr,
-		Value:     uint256.NewInt(0),
-		Data:      gasBurnerTx.Data(),
+	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+		return gasBurnerContract.BurnGasUnits(transactOpts, big.NewInt(int64(s.options.GasUnitsToBurn)))
 	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	tx, err := wallet.BuildDynamicFeeTx(txData)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -370,18 +324,6 @@ func (s *Scenario) delayedResend(txIdx uint64, tx *types.Transaction, awaitConfi
 		client.SendTransaction(tx)
 		s.logger.WithField("client", client.GetName()).Infof(" transaction %d re-broadcasted.", txIdx+1)
 	}
-}
-
-func (s *Scenario) GetTransactor(wallet *txbuilder.Wallet, noSend bool, value *big.Int) (*bind.TransactOpts, error) {
-	transactor, err := bind.NewKeyedTransactorWithChainID(wallet.GetPrivateKey(), wallet.GetChainId())
-	if err != nil {
-		return nil, err
-	}
-	transactor.Context = context.Background()
-	transactor.NoSend = noSend
-	transactor.Value = value
-
-	return transactor, nil
 }
 
 func (s *Scenario) GetGasBurner() (*GasBurner, error) {

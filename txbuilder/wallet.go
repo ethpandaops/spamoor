@@ -1,11 +1,13 @@
 package txbuilder
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"errors"
 	"math/big"
 	"sync"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -76,10 +78,6 @@ func (wallet *Wallet) GetBalance() *big.Int {
 	return wallet.balance
 }
 
-func (wallet *Wallet) GetPrivateKey() *ecdsa.PrivateKey {
-	return wallet.privkey
-}
-
 func (wallet *Wallet) SetChainId(chainid *big.Int) {
 	wallet.chainid = chainid
 }
@@ -122,6 +120,35 @@ func (wallet *Wallet) BuildBlobTx(txData *types.BlobTx) (*types.Transaction, err
 	wallet.nonce++
 	wallet.nonceMutex.Unlock()
 	return wallet.signTx(txData)
+}
+
+func (wallet *Wallet) BuildBoundTx(txData *TxMetadata, buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
+	transactor, err := bind.NewKeyedTransactorWithChainID(wallet.privkey, wallet.chainid)
+	if err != nil {
+		return nil, err
+	}
+
+	wallet.nonceMutex.Lock()
+	defer wallet.nonceMutex.Unlock()
+
+	transactor.Context = context.Background()
+	transactor.From = wallet.address
+	transactor.Nonce = big.NewInt(0).SetUint64(wallet.nonce)
+	wallet.nonce++
+
+	transactor.GasTipCap = txData.GasTipCap.ToBig()
+	transactor.GasFeeCap = txData.GasFeeCap.ToBig()
+	transactor.GasLimit = txData.Gas
+	transactor.Value = txData.Value.ToBig()
+	transactor.NoSend = true
+
+	tx, err := buildFn(transactor)
+	if err != nil {
+		wallet.nonce--
+		return nil, err
+	}
+
+	return tx, nil
 }
 
 func (wallet *Wallet) ReplaceDynamicFeeTx(txData *types.DynamicFeeTx, nonce uint64) (*types.Transaction, error) {
