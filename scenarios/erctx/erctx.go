@@ -7,13 +7,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
-	"golang.org/x/crypto/sha3"
 
+	"github.com/ethpandaops/spamoor/scenarios/erctx/contract"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/tester"
 	"github.com/ethpandaops/spamoor/txbuilder"
@@ -196,19 +197,16 @@ func (s *Scenario) sendDeploymentTx() (*types.Receipt, *txbuilder.Client, error)
 		tipCap = big.NewInt(1000000000)
 	}
 
-	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       2000000,
-		To:        nil,
 		Value:     uint256.NewInt(0),
-		Data:      common.FromHex(TokenContractCode),
+	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+		_, deployTx, _, err := contract.DeployContract(transactOpts, client.GetEthClient())
+		return deployTx, err
 	})
-	if err != nil {
-		return nil, nil, err
-	}
 
-	tx, err := wallet.BuildDynamicFeeTx(txData)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -270,30 +268,19 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 		toAddr = common.Address(addrBytes)
 	}
 
-	transferFnSignature := []byte("transferMint(address,uint256)")
-	hash := sha3.NewLegacyKeccak256()
-	hash.Write(transferFnSignature)
-	methodID := hash.Sum(nil)[:4]
-	paddedAddress := common.LeftPadBytes(toAddr.Bytes(), 32)
-	paddedAmount := common.LeftPadBytes(amount.Bytes(), 32)
-	var txCallData []byte
-	txCallData = append(txCallData, methodID...)
-	txCallData = append(txCallData, paddedAddress...)
-	txCallData = append(txCallData, paddedAmount...)
-
-	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
-		GasFeeCap: uint256.MustFromBig(feeCap),
-		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       100000,
-		To:        &s.contractAddr,
-		Value:     uint256.NewInt(0),
-		Data:      txCallData,
-	})
+	testToken, err := contract.NewContract(s.contractAddr, client.GetEthClient())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	tx, err := wallet.BuildDynamicFeeTx(txData)
+	tx, err := wallet.BuildBoundTx(&txbuilder.TxMetadata{
+		GasFeeCap: uint256.MustFromBig(feeCap),
+		GasTipCap: uint256.MustFromBig(tipCap),
+		Gas:       100000,
+		Value:     uint256.NewInt(0),
+	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+		return testToken.TransferMint(transactOpts, toAddr, amount.ToBig())
+	})
 	if err != nil {
 		return nil, nil, err
 	}
