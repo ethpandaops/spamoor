@@ -73,6 +73,32 @@ Optional:
       --tipfee uint           Max tip per gas to use in blob transactions (in gwei) (default 2)
 ```
 
+### `spamoor gasburnertx`
+
+The `gasburnertx` scenario sends out transactions with a configurable amount of gas units. Note that the estimated gas units is not 100% accurate.
+
+```
+Usage of spamoor gasburnertx:
+Required (at least one of):
+  -c, --count uint            Total number of blob transactions to send
+  -t, --throughput uint       Number of blob transactions to send per slot
+  
+Optional:
+      --basefee uint             Max fee per gas to use in gasburner transactions (in gwei) (default 20)
+      --gas-units-to-burn uint   The number of gas units for each tx to cost (default 2000000)
+      --max-pending uint         Maximum number of pending transactions
+      --max-wallets uint         Maximum number of child wallets to use
+  -p, --privkey string           The private key of the wallet to send funds from.
+      --rebroadcast uint         Number of seconds to wait before re-broadcasting a transaction (default 120)
+  -h, --rpchost stringArray      The RPC host to send transactions to.
+      --rpchost-file string      File with a list of RPC hosts to send transactions to.
+  -s, --seed string              The child wallet seed.
+      --tipfee uint              Max tip per gas to use in gasburner transactions (in gwei) (default 2)
+      --trace                    Run the script with tracing output
+  -v, --verbose                  Run the script with verbose output
+```
+
+
 ##### Examples:
 
 Continuous random blob spamming (~2-4 sidecars per block):
