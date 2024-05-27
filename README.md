@@ -80,8 +80,8 @@ The `gasburnertx` scenario sends out transactions with a configurable amount of 
 ```
 Usage of spamoor gasburnertx:
 Required (at least one of):
-  -c, --count uint            Total number of blob transactions to send
-  -t, --throughput uint       Number of blob transactions to send per slot
+  -c, --count uint            Total number of gasburner transactions to send
+  -t, --throughput uint       Number of gasburner transactions to send per slot
   
 Optional:
       --basefee uint             Max fee per gas to use in gasburner transactions (in gwei) (default 20)
