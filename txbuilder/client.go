@@ -86,6 +86,10 @@ func (client *Client) GetName() string {
 	return name
 }
 
+func (client *Client) GetEthClient() *ethclient.Client {
+	return client.client
+}
+
 func (client *Client) GetRPCHost() string {
 	return client.rpchost
 }

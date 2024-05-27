@@ -76,6 +76,10 @@ func (wallet *Wallet) GetBalance() *big.Int {
 	return wallet.balance
 }
 
+func (wallet *Wallet) GetPrivateKey() *ecdsa.PrivateKey {
+	return wallet.privkey
+}
+
 func (wallet *Wallet) SetChainId(chainid *big.Int) {
 	wallet.chainid = chainid
 }
