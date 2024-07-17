@@ -124,7 +124,7 @@ func parseBlobRefs(tx *types.BlobTx, blobRefs []string) error {
 	}
 
 	tx.BlobHashes = append(tx.BlobHashes, blobCommitment.VersionedHash)
-	tx.Sidecar.Blobs = append(tx.Sidecar.Blobs, blobCommitment.Blob)
+	tx.Sidecar.Blobs = append(tx.Sidecar.Blobs, *blobCommitment.Blob)
 	tx.Sidecar.Commitments = append(tx.Sidecar.Commitments, blobCommitment.Commitment)
 	tx.Sidecar.Proofs = append(tx.Sidecar.Proofs, blobCommitment.Proof)
 	return nil
