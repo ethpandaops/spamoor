@@ -29,11 +29,12 @@ type Tester struct {
 }
 
 type TesterConfig struct {
-	RpcHosts      []string     // rpc host urls to use for blob tests
-	WalletPrivkey string       // pre-funded wallet privkey to use for blob tests
-	WalletCount   uint64       // number of child wallets to generate & use (based on walletPrivkey)
-	WalletPrefund *uint256.Int // amount of funds to send to each child wallet
-	WalletMinfund *uint256.Int // min amount of funds child wallets should hold - refill with walletPrefund if lower
+	RpcHosts       []string     // rpc host urls to use for blob tests
+	WalletPrivkey  string       // pre-funded wallet privkey to use for blob tests
+	WalletCount    uint64       // number of child wallets to generate & use (based on walletPrivkey)
+	WalletPrefund  *uint256.Int // amount of funds to send to each child wallet
+	WalletMinfund  *uint256.Int // min amount of funds child wallets should hold - refill with walletPrefund if lower
+	RefillInterval uint64
 }
 
 func NewTester(config *TesterConfig) *Tester {
@@ -105,7 +106,7 @@ func (tester *Tester) watchClientStatusLoop() {
 }
 
 func (tester *Tester) watchWalletBalancesLoop() {
-	sleepTime := 10 * time.Minute
+	sleepTime := time.Duration(tester.config.RefillInterval) * time.Second
 	for tester.running {
 		time.Sleep(sleepTime)
 
@@ -114,7 +115,7 @@ func (tester *Tester) watchWalletBalancesLoop() {
 			tester.logger.Warnf("could not check & resupply chile wallets: %v", err)
 			sleepTime = 1 * time.Minute
 		} else {
-			sleepTime = 10 * time.Minute
+			sleepTime = time.Duration(tester.config.RefillInterval) * time.Second
 		}
 	}
 }

@@ -17,12 +17,15 @@ import (
 )
 
 type CliArgs struct {
-	verbose      bool
-	trace        bool
-	rpchosts     []string
-	rpchostsFile string
-	privkey      string
-	seed         string
+	verbose        bool
+	trace          bool
+	rpchosts       []string
+	rpchostsFile   string
+	privkey        string
+	seed           string
+	refillAmount   uint64
+	refillBalance  uint64
+	refillInterval uint64
 }
 
 func main() {
@@ -35,6 +38,9 @@ func main() {
 	flags.StringVar(&cliArgs.rpchostsFile, "rpchost-file", "", "File with a list of RPC hosts to send transactions to.")
 	flags.StringVarP(&cliArgs.privkey, "privkey", "p", "", "The private key of the wallet to send funds from.")
 	flags.StringVarP(&cliArgs.seed, "seed", "s", "", "The child wallet seed.")
+	flags.Uint64Var(&cliArgs.refillAmount, "refill-amount", 5, "Amount of ETH to fund/refill each child wallet with.")
+	flags.Uint64Var(&cliArgs.refillBalance, "refill-balance", 2, "Min amount of ETH each child wallet should hold before refilling.")
+	flags.Uint64Var(&cliArgs.refillInterval, "refill-interval", 300, "Interval for child wallet rbalance check and refilling if needed (in sec).")
 
 	flags.Parse(os.Args)
 
@@ -98,11 +104,12 @@ func main() {
 	}
 
 	testerConfig := &tester.TesterConfig{
-		RpcHosts:      rpcHosts,
-		WalletPrivkey: cliArgs.privkey,
-		WalletCount:   100,
-		WalletPrefund: utils.EtherToWei(uint256.NewInt(5)),
-		WalletMinfund: utils.EtherToWei(uint256.NewInt(2)),
+		RpcHosts:       rpcHosts,
+		WalletPrivkey:  cliArgs.privkey,
+		WalletCount:    100,
+		WalletPrefund:  utils.EtherToWei(uint256.NewInt(cliArgs.refillAmount)),
+		WalletMinfund:  utils.EtherToWei(uint256.NewInt(cliArgs.refillBalance)),
+		RefillInterval: cliArgs.refillInterval,
 	}
 	err := scenario.Init(testerConfig)
 	if err != nil {

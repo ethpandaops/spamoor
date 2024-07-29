@@ -8,6 +8,7 @@ import (
 	blobconflicting "github.com/ethpandaops/spamoor/scenarios/blob-conflicting"
 	blobreplacements "github.com/ethpandaops/spamoor/scenarios/blob-replacements"
 	"github.com/ethpandaops/spamoor/scenarios/blobs"
+	deploydestruct "github.com/ethpandaops/spamoor/scenarios/deploy-destruct"
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
 	"github.com/ethpandaops/spamoor/scenarios/erctx"
@@ -20,10 +21,11 @@ var Scenarios map[string]func() scenariotypes.Scenario = map[string]func() scena
 	"blobs":             blobs.NewScenario,
 	"blob-replacements": blobreplacements.NewScenario,
 
-	"eoatx":       eoatx.NewScenario,
-	"erctx":       erctx.NewScenario,
-	"deploytx":    deploytx.NewScenario,
-	"gasburnertx": gasburnertx.NewScenario,
+	"eoatx":           eoatx.NewScenario,
+	"erctx":           erctx.NewScenario,
+	"deploy-destruct": deploydestruct.NewScenario,
+	"deploytx":        deploytx.NewScenario,
+	"gasburnertx":     gasburnertx.NewScenario,
 
 	"wallets": wallets.NewScenario,
 }

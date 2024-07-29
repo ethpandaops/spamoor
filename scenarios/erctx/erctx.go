@@ -67,7 +67,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 
 func (s *Scenario) Init(testerCfg *tester.TesterConfig) error {
 	if s.options.TotalCount == 0 && s.options.Throughput == 0 {
-		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them")
+		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
 	if s.options.MaxWallets > 0 {
@@ -327,7 +327,7 @@ func (s *Scenario) awaitTx(txIdx uint64, tx *types.Transaction, client *txbuilde
 	totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
 	wallet.SubBalance(totalAmount)
 
-	gweiTotalFee := new(big.Int).Div(totalAmount, big.NewInt(1000000000))
+	gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
 	gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
 	gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
 
