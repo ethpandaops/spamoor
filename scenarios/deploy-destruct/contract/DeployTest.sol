@@ -4,9 +4,10 @@ pragma solidity  ^0.8.22;
 contract DeployTest {
     event TestSeed(uint seed);
 
-    uint counter = 1;
-    uint childIdx = 0;
-    address[10] childAddresses;
+    uint public counter = 1;
+    uint public childIdx = 1;
+    mapping(uint => address) public childAddresses;
+    mapping(address => uint) childAddressIndex;
 
     function random() private returns (uint) {
         counter++;
@@ -34,9 +35,18 @@ contract DeployTest {
         return addr;
     }
 
-    function notify(address addr) public {
-        if(childIdx < 10) {
+    function notify(address addr, bool destroy) public {
+        if(destroy) {
+            uint index = childAddressIndex[addr];
+            if(index > 0) {
+                childAddressIndex[addr] = 0;
+                childIdx--;
+                childAddresses[index] = childAddresses[childIdx];
+                childAddressIndex[childAddresses[index]] = index;
+            }
+        } else {
             childAddresses[childIdx] = addr;
+            childAddressIndex[addr] = childIdx;
             childIdx++;
         }
     }
@@ -51,19 +61,22 @@ contract DeployTest {
         uint s1 = random2(seed, 0, 1);
         if(s1 % 50 < 30) {
             // deploy new contract
-            childIdx = 0;
             bytes memory code = abi.encodePacked(childCode(), abi.encode(s1, 0, address(this)));
-            create(address(this).balance, code);
+            address addr = create(address(this).balance, code);
+            notify(addr, false);
         } else if(s1 % 50 < 40) {
             // destruct child contracts
-            for(uint i = 0; i < childIdx; i++) {
-                address child = childAddresses[i];
-                DeployTestChild(child).destroy(random2(seed, 1, i));
+            for(uint i = 0; i < 50; i++) {
+                if(childIdx > 1 && gasleft() > 400000) {
+                    address child = childAddresses[1];
+                    DeployTestChild(child).destroy(random2(seed, 1, i));
+                    notify(child, true);
+                }
             }
         } else {
             // call child contracts
             uint256 value = address(this).balance;
-            for(uint i = 0; i < childIdx; i++) {
+            for(uint i = 1; i < childIdx; i++) {
                 address child = childAddresses[i];
                 uint s3 = random2(seed, 0, i);
                 uint256 childValue = value / 100 * (s3 % 80);
@@ -73,12 +86,22 @@ contract DeployTest {
         }
     }
 
+    function clean(uint count) public {
+        while(count > 0) {
+            if(childIdx > 1) {
+                address child = childAddresses[1];
+                DeployTestChild(child).destroy(5);
+                notify(child, true);
+            }
+            count--;
+        }
+    }
 
 }
 
 contract DeployTestChild {
-    address private _main;
-    uint private _seed;
+    address public _main;
+    uint public _seed;
 
     event ChildCreated(uint seed, uint depth);
     event ChildDestroyed(uint seed, address target);
@@ -94,12 +117,12 @@ contract DeployTestChild {
 
     function call(uint depth) public payable {
         uint s2 = random2(_seed, depth, 0);
-        uint256 value = msg.value;
+        uint256 value = address(this).balance;
         if(depth < 4 && s2 % 100 < 60) {
             // create up to 3 nested contracts (chance: 60%)
             bytes memory initCode = DeployTest(_main).childCode();
             for(uint i = 0; i < (s2 % 3)+1; i++) {
-                if(gasleft() < 1500000) {
+                if(gasleft() < 2000000) {
                     break;
                 }
 
@@ -109,9 +132,9 @@ contract DeployTestChild {
                 s3 = random2(_seed+1, depth, i);
                 uint256 childValue = value / 100 * (s3 % 80);
                 value -= childValue;
-                address childAddr;
 
                 // CREATE / CREATE2 (chance: 50%)
+                address childAddr;
                 if(s3 % 100 < 50) {
                     childAddr = create(childValue, code);
                 } else {
@@ -122,20 +145,16 @@ contract DeployTestChild {
                     break;
                 }
 
-                if(gasleft() < 500000) {
-                    break;
-                }
-
                 // selfdestruct on creation (chance: 50%)
                 s3 = random2(_seed+2, depth, i);
-                if(s3 % 100 < 50) {
+                if(s3 % 100 < 40) {
                     try DeployTestChild(childAddr).destroy(s3) {
                     } catch (bytes memory _err) {
                         emit CatchedRevert(_seed, 1, _err);
                     }
                 } else {
                     // notify main contract about this instance, so we can selfdestruct / call it later on
-                    try DeployTest(_main).notify(childAddr) {
+                    try DeployTest(_main).notify(childAddr, false) {
                     } catch (bytes memory _err) {
                         emit CatchedRevert(_seed, 2, _err);
                     }
@@ -173,7 +192,9 @@ contract DeployTestChild {
                 revert(0, 0)
             }
         }
-        require(addr != address(0), "create2 failed");
+        if(addr == address(0)) {
+            emit CatchedRevert(_seed, 3, abi.encode());
+        }
         return addr;
     }
 
@@ -195,8 +216,8 @@ contract DeployTestChild {
             // target: self
             target = address(this);
         } else if(action == 4) {
-            // target: 0 address
-            target = address(0);
+            // target: static address
+            target = address(0x49e0fd3800C117357057534E30c5B5115C673488);
         } else if(action == 5) {
             // target: main contract
             target = _main;
