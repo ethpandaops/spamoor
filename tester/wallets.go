@@ -38,37 +38,46 @@ func (tester *Tester) PrepareWallets(seed string) error {
 	if tester.config.WalletCount == 0 {
 		tester.childWallets = make([]*txbuilder.Wallet, 0)
 	} else {
-		client := tester.GetClient(SelectRandom, 0) // send all preparation transactions via this client to avoid rejections due to nonces
-		tester.childWallets = make([]*txbuilder.Wallet, tester.config.WalletCount)
+		var client *txbuilder.Client
+		var fundingTxs []*types.Transaction
 
-		var walletErr error
-		wg := &sync.WaitGroup{}
-		wl := make(chan bool, 50)
-		fundingTxs := make([]*types.Transaction, tester.config.WalletCount)
-		for childIdx := uint64(0); childIdx < tester.config.WalletCount; childIdx++ {
-			wg.Add(1)
-			wl <- true
-			go func(childIdx uint64) {
-				defer func() {
-					<-wl
-					wg.Done()
-				}()
-				if walletErr != nil {
-					return
-				}
+		for i := 0; i < 3; i++ {
+			client = tester.GetClient(SelectRandom, 0) // send all preparation transactions via this client to avoid rejections due to nonces
+			tester.childWallets = make([]*txbuilder.Wallet, 0, tester.config.WalletCount)
+			fundingTxs = make([]*types.Transaction, 0, tester.config.WalletCount)
 
-				childWallet, fundingTx, err := tester.prepareChildWallet(childIdx, client, seed)
-				if err != nil {
-					tester.logger.Errorf("could not prepare child wallet %v: %v", childIdx, err)
-					walletErr = err
-					return
-				}
+			var walletErr error
+			wg := &sync.WaitGroup{}
+			wl := make(chan bool, 50)
+			for childIdx := uint64(0); childIdx < tester.config.WalletCount; childIdx++ {
+				wg.Add(1)
+				wl <- true
+				go func(childIdx uint64) {
+					defer func() {
+						<-wl
+						wg.Done()
+					}()
+					if walletErr != nil {
+						return
+					}
 
-				tester.childWallets[childIdx] = childWallet
-				fundingTxs[childIdx] = fundingTx
-			}(childIdx)
+					childWallet, fundingTx, err := tester.prepareChildWallet(childIdx, client, seed)
+					if err != nil {
+						tester.logger.Errorf("could not prepare child wallet %v: %v", childIdx, err)
+						walletErr = err
+						return
+					}
+
+					tester.childWallets = append(tester.childWallets, childWallet)
+					fundingTxs = append(fundingTxs, fundingTx)
+				}(childIdx)
+			}
+			wg.Wait()
+
+			if len(tester.childWallets) > 0 {
+				break
+			}
 		}
-		wg.Wait()
 
 		fundingTxList := []*types.Transaction{}
 		for _, tx := range fundingTxs {
