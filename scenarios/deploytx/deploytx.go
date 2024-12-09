@@ -261,6 +261,10 @@ func (s *Scenario) awaitTx(txIdx uint64, tx *types.Transaction, client *txbuilde
 		return
 	}
 
+	if receipt == nil {
+		return
+	}
+
 	effectiveGasPrice := receipt.EffectiveGasPrice
 	if effectiveGasPrice == nil {
 		effectiveGasPrice = big.NewInt(0)
