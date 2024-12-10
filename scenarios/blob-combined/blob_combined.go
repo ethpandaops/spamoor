@@ -263,6 +263,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 	}
 
 	var awaitConfirmation bool = true
+	s.pendingWGroup.Add(1)
 	err = s.tester.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     rebroadcast,
@@ -308,8 +309,6 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 	if err != nil {
 		return nil, client, err
 	}
-
-	s.pendingWGroup.Add(1)
 
 	if s.options.Replace > 0 && replacementIdx < s.options.MaxReplacements && rand.Intn(100) < 70 {
 		go s.delayedReplace(txIdx, tx, &awaitConfirmation, replacementIdx)

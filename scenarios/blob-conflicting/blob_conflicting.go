@@ -256,6 +256,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	var err1, err2 error
+	s.pendingWGroup.Add(2)
 	go func() {
 		err1 = s.tester.GetTxPool().SendTransaction(context.Background(), wallet, tx1, &txbuilder.SendTransactionOptions{
 			Client:              client,
@@ -315,11 +316,9 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 
 	errCount := uint64(0)
 	if err1 == nil {
-		s.pendingWGroup.Add(1)
 		errCount++
 	}
 	if err2 == nil {
-		s.pendingWGroup.Add(1)
 		errCount++
 	}
 	if errCount == 0 {

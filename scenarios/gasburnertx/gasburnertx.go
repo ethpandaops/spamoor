@@ -286,6 +286,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 		rebroadcast = 10
 	}
 
+	s.pendingWGroup.Add(1)
 	err = s.tester.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     rebroadcast,
@@ -323,8 +324,6 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 	if err != nil {
 		return nil, client, err
 	}
-
-	s.pendingWGroup.Add(1)
 
 	return tx, client, nil
 }
