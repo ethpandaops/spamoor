@@ -19,6 +19,7 @@ type Tester struct {
 	running        bool
 	scenario       string
 	chainId        *big.Int
+	txpool         *txbuilder.TxPool
 	selectionMutex sync.Mutex
 	allClients     []*txbuilder.Client
 	goodClients    []*txbuilder.Client
@@ -71,6 +72,21 @@ func (tester *Tester) Start(seed string) error {
 	}
 	// watch client status
 	go tester.watchClientStatusLoop()
+
+	// prepare txpool
+	tester.txpool = txbuilder.NewTxPool(&txbuilder.TxPoolOptions{
+		GetClientFn: func(index int, random bool) *txbuilder.Client {
+			mode := SelectByIndex
+			if random {
+				mode = SelectRandom
+			}
+
+			return tester.GetClient(mode, index)
+		},
+		GetClientCountFn: func() int {
+			return len(tester.goodClients)
+		},
+	})
 
 	// prepare wallets
 	err = tester.PrepareWallets(seed)
@@ -144,6 +160,10 @@ func (tester *Tester) GetClient(mode SelectionMode, input int) *txbuilder.Client
 		}
 	}
 	return tester.goodClients[input]
+}
+
+func (tester *Tester) GetTxPool() *txbuilder.TxPool {
+	return tester.txpool
 }
 
 func (tester *Tester) GetWallet(mode SelectionMode, input int) *txbuilder.Wallet {

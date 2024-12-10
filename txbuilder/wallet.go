@@ -15,17 +15,29 @@ import (
 )
 
 type Wallet struct {
-	nonceMutex   sync.Mutex
-	balanceMutex sync.RWMutex
-	privkey      *ecdsa.PrivateKey
-	address      common.Address
-	chainid      *big.Int
-	nonce        uint64
-	balance      *big.Int
+	nonceMutex     sync.Mutex
+	balanceMutex   sync.RWMutex
+	privkey        *ecdsa.PrivateKey
+	address        common.Address
+	chainid        *big.Int
+	pendingNonce   uint64
+	confirmedNonce uint64
+	balance        *big.Int
+
+	txNonceChans     map[uint64]*nonceStatus
+	txNonceMutex     sync.Mutex
+	lastConfirmation uint64
+}
+
+type nonceStatus struct {
+	receipt *types.Receipt
+	channel chan bool
 }
 
 func NewWallet(privkey string) (*Wallet, error) {
-	wallet := &Wallet{}
+	wallet := &Wallet{
+		txNonceChans: map[uint64]*nonceStatus{},
+	}
 	err := wallet.loadPrivateKey(privkey)
 	if err != nil {
 		return nil, err
@@ -69,7 +81,7 @@ func (wallet *Wallet) GetChainId() *big.Int {
 }
 
 func (wallet *Wallet) GetNonce() uint64 {
-	return wallet.nonce
+	return wallet.pendingNonce
 }
 
 func (wallet *Wallet) GetBalance() *big.Int {
@@ -83,7 +95,8 @@ func (wallet *Wallet) SetChainId(chainid *big.Int) {
 }
 
 func (wallet *Wallet) SetNonce(nonce uint64) {
-	wallet.nonce = nonce
+	wallet.pendingNonce = nonce
+	wallet.confirmedNonce = nonce
 }
 
 func (wallet *Wallet) SetBalance(balance *big.Int) {
@@ -107,8 +120,8 @@ func (wallet *Wallet) AddBalance(amount *big.Int) {
 func (wallet *Wallet) BuildDynamicFeeTx(txData *types.DynamicFeeTx) (*types.Transaction, error) {
 	wallet.nonceMutex.Lock()
 	txData.ChainID = wallet.chainid
-	txData.Nonce = wallet.nonce
-	wallet.nonce++
+	txData.Nonce = wallet.pendingNonce
+	wallet.pendingNonce++
 	wallet.nonceMutex.Unlock()
 	return wallet.signTx(txData)
 }
@@ -116,8 +129,8 @@ func (wallet *Wallet) BuildDynamicFeeTx(txData *types.DynamicFeeTx) (*types.Tran
 func (wallet *Wallet) BuildBlobTx(txData *types.BlobTx) (*types.Transaction, error) {
 	wallet.nonceMutex.Lock()
 	txData.ChainID = uint256.MustFromBig(wallet.chainid)
-	txData.Nonce = wallet.nonce
-	wallet.nonce++
+	txData.Nonce = wallet.pendingNonce
+	wallet.pendingNonce++
 	wallet.nonceMutex.Unlock()
 	return wallet.signTx(txData)
 }
@@ -133,8 +146,8 @@ func (wallet *Wallet) BuildBoundTx(txData *TxMetadata, buildFn func(transactOpts
 
 	transactor.Context = context.Background()
 	transactor.From = wallet.address
-	transactor.Nonce = big.NewInt(0).SetUint64(wallet.nonce)
-	wallet.nonce++
+	transactor.Nonce = big.NewInt(0).SetUint64(wallet.pendingNonce)
+	wallet.pendingNonce++
 
 	transactor.GasTipCap = txData.GasTipCap.ToBig()
 	transactor.GasFeeCap = txData.GasFeeCap.ToBig()
@@ -144,7 +157,7 @@ func (wallet *Wallet) BuildBoundTx(txData *TxMetadata, buildFn func(transactOpts
 
 	tx, err := buildFn(transactor)
 	if err != nil {
-		wallet.nonce--
+		wallet.pendingNonce--
 		return nil, err
 	}
 
@@ -170,4 +183,25 @@ func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
 		return nil, err
 	}
 	return signedTx, nil
+}
+
+func (wallet *Wallet) getTxNonceChan(targetNonce uint64) *nonceStatus {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	if wallet.confirmedNonce > targetNonce {
+		return nil
+	}
+
+	nonceChan := wallet.txNonceChans[targetNonce]
+	if nonceChan != nil {
+		return nonceChan
+	}
+
+	nonceChan = &nonceStatus{
+		channel: make(chan bool),
+	}
+	wallet.txNonceChans[targetNonce] = nonceChan
+
+	return nonceChan
 }

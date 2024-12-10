@@ -1,6 +1,7 @@
 package eoatx
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"math/big"
@@ -218,65 +219,49 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 		return nil, nil, err
 	}
 
-	err = client.SendTransaction(tx)
+	rebroadcast := 0
+	if s.options.Rebroadcast > 0 {
+		rebroadcast = 10
+	}
+
+	s.pendingWGroup.Add(1)
+	err = s.tester.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
+		Client:              client,
+		MaxRebroadcasts:     rebroadcast,
+		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			defer func() {
+				if s.pendingChan != nil {
+					<-s.pendingChan
+				}
+				s.pendingWGroup.Done()
+			}()
+
+			if err != nil {
+				s.logger.WithField("client", client.GetName()).Warnf("tx %6d: await receipt failed: %v", txIdx+1, err)
+				return
+			}
+			if receipt == nil {
+				return
+			}
+
+			effectiveGasPrice := receipt.EffectiveGasPrice
+			if effectiveGasPrice == nil {
+				effectiveGasPrice = big.NewInt(0)
+			}
+			feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+			totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
+			wallet.SubBalance(totalAmount)
+
+			gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
+			gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
+
+			s.logger.WithField("client", client.GetName()).Infof(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, len(receipt.Logs))
+		},
+	})
 	if err != nil {
 		return nil, client, err
 	}
 
-	s.pendingWGroup.Add(1)
-	go s.awaitTx(txIdx, tx, client, wallet)
-
 	return tx, client, nil
-}
-
-func (s *Scenario) awaitTx(txIdx uint64, tx *types.Transaction, client *txbuilder.Client, wallet *txbuilder.Wallet) {
-	var awaitConfirmation bool = true
-	defer func() {
-		awaitConfirmation = false
-		if s.pendingChan != nil {
-			<-s.pendingChan
-		}
-		s.pendingWGroup.Done()
-	}()
-	if s.options.Rebroadcast > 0 {
-		go s.delayedResend(txIdx, tx, &awaitConfirmation)
-	}
-
-	receipt, blockNum, err := client.AwaitTransaction(tx)
-	if err != nil {
-		s.logger.WithField("client", client.GetName()).Warnf("error while awaiting tx receipt: %v", err)
-		return
-	}
-
-	effectiveGasPrice := receipt.EffectiveGasPrice
-	if effectiveGasPrice == nil {
-		effectiveGasPrice = big.NewInt(0)
-	}
-	blobGasPrice := receipt.BlobGasPrice
-	if blobGasPrice == nil {
-		blobGasPrice = big.NewInt(0)
-	}
-	feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-	totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
-	wallet.SubBalance(totalAmount)
-
-	gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
-	gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
-	gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
-
-	s.logger.WithField("client", client.GetName()).Infof(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v, blob: %v)", txIdx+1, blockNum, gweiTotalFee, gweiBaseFee, gweiBlobFee)
-}
-
-func (s *Scenario) delayedResend(txIdx uint64, tx *types.Transaction, awaitConfirmation *bool) {
-	for {
-		time.Sleep(time.Duration(s.options.Rebroadcast) * time.Second)
-
-		if !*awaitConfirmation {
-			break
-		}
-
-		client := s.tester.GetClient(tester.SelectRandom, 0)
-		client.SendTransaction(tx)
-		s.logger.WithField("client", client.GetName()).Infof(" transaction %d re-broadcasted.", txIdx+1)
-	}
 }
