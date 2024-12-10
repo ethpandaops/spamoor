@@ -1,6 +1,7 @@
 package blobcombined
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -256,74 +257,65 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 		return nil, client, err
 	}
 
-	err = client.SendTransaction(tx)
+	rebroadcast := 0
+	if s.options.Rebroadcast > 0 {
+		rebroadcast = 10
+	}
+
+	var awaitConfirmation bool = true
+	err = s.tester.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
+		Client:              client,
+		MaxRebroadcasts:     rebroadcast,
+		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			defer func() {
+				awaitConfirmation = false
+				if replacementIdx == 0 {
+					if s.pendingChan != nil {
+						<-s.pendingChan
+					}
+				}
+				s.pendingWGroup.Done()
+			}()
+
+			if err != nil {
+				s.logger.WithField("client", client.GetName()).Warnf("blob tx %6d.%v: await receipt failed: %v", txIdx+1, replacementIdx, err)
+				return
+			}
+			if receipt == nil {
+				return
+			}
+
+			effectiveGasPrice := receipt.EffectiveGasPrice
+			if effectiveGasPrice == nil {
+				effectiveGasPrice = big.NewInt(0)
+			}
+			blobGasPrice := receipt.BlobGasPrice
+			if blobGasPrice == nil {
+				blobGasPrice = big.NewInt(0)
+			}
+			feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+			totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
+			wallet.SubBalance(totalAmount)
+
+			gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
+			gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
+			gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
+
+			s.logger.WithField("client", client.GetName()).Infof("blob tx %6d.%v confirmed in block #%v!  total fee: %v gwei (base: %v, blob: %v)", txIdx+1, replacementIdx, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
+		},
+	})
 	if err != nil {
 		return nil, client, err
 	}
 
 	s.pendingWGroup.Add(1)
-	go s.awaitTx(txIdx, tx, client, wallet, replacementIdx)
 
-	return tx, client, nil
-}
-
-func (s *Scenario) awaitTx(txIdx uint64, tx *types.Transaction, client *txbuilder.Client, wallet *txbuilder.Wallet, replacementIdx uint64) {
-	var awaitConfirmation bool = true
-	defer func() {
-		awaitConfirmation = false
-		if replacementIdx == 0 {
-			if s.pendingChan != nil {
-				<-s.pendingChan
-			}
-		}
-		s.pendingWGroup.Done()
-	}()
 	if s.options.Replace > 0 && replacementIdx < s.options.MaxReplacements && rand.Intn(100) < 70 {
 		go s.delayedReplace(txIdx, tx, &awaitConfirmation, replacementIdx)
-	} else if s.options.Rebroadcast > 0 {
-		go s.delayedResend(txIdx, tx, &awaitConfirmation, replacementIdx)
 	}
 
-	receipt, blockNum, err := client.AwaitTransaction(tx)
-	if err != nil {
-		s.logger.WithField("client", client.GetName()).Warnf("blob tx %6d.%v: await receipt failed: %v", txIdx+1, replacementIdx, err)
-		return
-	}
-	if receipt == nil {
-		return
-	}
-
-	effectiveGasPrice := receipt.EffectiveGasPrice
-	if effectiveGasPrice == nil {
-		effectiveGasPrice = big.NewInt(0)
-	}
-	blobGasPrice := receipt.BlobGasPrice
-	if blobGasPrice == nil {
-		blobGasPrice = big.NewInt(0)
-	}
-	feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-	totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
-	wallet.SubBalance(totalAmount)
-
-	gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
-	gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
-	gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
-
-	s.logger.WithField("client", client.GetName()).Infof("blob tx %6d.%v confirmed in block #%v!  total fee: %v gwei (base: %v, blob: %v)", txIdx+1, replacementIdx, blockNum, gweiTotalFee, gweiBaseFee, gweiBlobFee)
-}
-
-func (s *Scenario) delayedResend(txIdx uint64, tx *types.Transaction, awaitConfirmation *bool, replacementIdx uint64) {
-	for {
-		time.Sleep(time.Duration(s.options.Rebroadcast) * time.Second)
-
-		if !*awaitConfirmation {
-			break
-		}
-
-		client := s.tester.GetClient(tester.SelectRandom, 0)
-		client.SendTransaction(tx)
-		s.logger.WithField("client", client.GetName()).Debugf("blob tx %6d.%v re-broadcasted.", txIdx+1, replacementIdx)
-	}
+	return tx, client, nil
 }
 
 func (s *Scenario) delayedReplace(txIdx uint64, tx *types.Transaction, awaitConfirmation *bool, replacementIdx uint64) {
@@ -336,7 +328,6 @@ func (s *Scenario) delayedReplace(txIdx uint64, tx *types.Transaction, awaitConf
 	replaceTx, client, err := s.sendBlobTx(txIdx, replacementIdx+1, tx.Nonce())
 	if err != nil {
 		s.logger.WithField("client", client.GetName()).Warnf("blob tx %6d.%v replacement failed: %v", txIdx+1, replacementIdx+1, err)
-		s.delayedResend(txIdx, tx, awaitConfirmation, replacementIdx)
 		return
 	}
 	s.logger.WithField("client", client.GetName()).Infof("blob tx %6d.%v sent:  %v (%v sidecars)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs))

@@ -21,4 +21,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN update-ca-certificates
 ENV PATH="$PATH:/app"
 COPY --from=build-env /app/* /app
-CMD ["./spamoor"]
+ENTRYPOINT ["./spamoor"]

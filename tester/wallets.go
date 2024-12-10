@@ -1,6 +1,7 @@
 package tester
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -49,6 +50,7 @@ func (tester *Tester) PrepareWallets(seed string) error {
 			var walletErr error
 			wg := &sync.WaitGroup{}
 			wl := make(chan bool, 50)
+			walletsMutex := &sync.Mutex{}
 			for childIdx := uint64(0); childIdx < tester.config.WalletCount; childIdx++ {
 				wg.Add(1)
 				wl <- true
@@ -58,6 +60,7 @@ func (tester *Tester) PrepareWallets(seed string) error {
 						wg.Done()
 					}()
 					if walletErr != nil {
+						fmt.Printf("Error: %v\n", walletErr)
 						return
 					}
 
@@ -68,8 +71,10 @@ func (tester *Tester) PrepareWallets(seed string) error {
 						return
 					}
 
+					walletsMutex.Lock()
 					tester.childWallets = append(tester.childWallets, childWallet)
 					fundingTxs = append(fundingTxs, fundingTx)
+					walletsMutex.Unlock()
 				}(childIdx)
 			}
 			wg.Wait()
@@ -79,7 +84,7 @@ func (tester *Tester) PrepareWallets(seed string) error {
 			}
 		}
 
-		fundingTxList := []*types.Transaction{}
+		fundingTxList := make([]*types.Transaction, 0, len(fundingTxs))
 		for _, tx := range fundingTxs {
 			if tx != nil {
 				fundingTxList = append(fundingTxList, tx)
@@ -209,6 +214,19 @@ func (tester *Tester) resupplyChildWallets() error {
 			return fundingTxList[a].Nonce() < fundingTxList[b].Nonce()
 		})
 
+		lastNonce := uint64(0)
+		for idx, tx := range fundingTxList {
+			if idx == 0 {
+				lastNonce = tx.Nonce()
+				continue
+			}
+
+			if tx.Nonce() != lastNonce+1 {
+				panic(fmt.Sprintf("Error: nonce mismatch: %v != %v + 1\n", tx.Nonce(), lastNonce))
+			}
+			lastNonce = tx.Nonce()
+		}
+
 		tester.logger.Infof("funding child wallets... (0/%v)", len(fundingTxList))
 		for txIdx := 0; txIdx < len(fundingTxList); txIdx += 200 {
 			endIdx := txIdx + 200
@@ -244,9 +262,25 @@ func (tester *Tester) CheckChildWalletBalance(childWallet *txbuilder.Wallet) (*t
 	}
 
 	if tx != nil {
-		_, _, err := client.AwaitTransaction(tx)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		var confirmErr error
+
+		err := tester.GetTxPool().SendTransaction(context.Background(), childWallet, tx, &txbuilder.SendTransactionOptions{
+			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				if err != nil {
+					confirmErr = err
+				}
+				wg.Done()
+			},
+		})
 		if err != nil {
 			return tx, err
+		}
+
+		wg.Wait()
+		if confirmErr != nil {
+			return tx, confirmErr
 		}
 	}
 
@@ -292,68 +326,49 @@ func (tester *Tester) buildWalletFundingTx(childWallet *txbuilder.Wallet, client
 }
 
 func (tester *Tester) sendTxRange(txList []*types.Transaction, client *txbuilder.Client) error {
-	awaitingTransactions := true
-	confirmedIdx := -1
-	sendTransactions := func(client *txbuilder.Client) error {
-		var txErr error
-		for idx, tx := range txList {
-			if idx <= confirmedIdx {
-				continue
-			}
-			//fmt.Printf("sending tx nonce %v\n", tx.Nonce())
-			err := client.SendTransaction(tx)
-			if err != nil {
-				if txErr == nil {
-					txErr = err
-				}
-				tester.logger.Debugf("could not send funding tx: %v", err)
-			}
-		}
-		return txErr
-	}
-	delayedResendTransactions := func() {
-		for {
-			time.Sleep(30 * time.Second)
-			if !awaitingTransactions {
-				return
-			}
-			client := tester.GetClient(SelectRandom, 0)
-			err := sendTransactions(client)
-			if err != nil {
-				tester.logger.Warnf("could not re-broadcast funding tx: %v", err)
-			} else {
-				tester.logger.Infof("re-broadcasted funding txs")
-			}
-		}
-	}
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	for idx := range txList {
+		err := func(idx int) error {
+			tx := txList[idx]
 
-	err := sendTransactions(client)
-	if err != nil {
-		tester.logger.Warnf("could not send funding tx: %v", err)
-	}
+			return tester.GetTxPool().SendTransaction(context.Background(), tester.rootWallet, tx, &txbuilder.SendTransactionOptions{
+				Client: client,
+				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+					defer wg.Done()
 
-	go delayedResendTransactions()
-	defer func() {
-		awaitingTransactions = false
-	}()
+					if err != nil {
+						tester.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
+						return
+					}
 
-	for idx, tx := range txList {
-		receipt, _, err := client.AwaitTransaction(tx)
-		confirmedIdx = idx
+					feeAmount := big.NewInt(0)
+					if receipt == nil {
+						tester.logger.Warnf("no receipt for funding tx %v", tx.Hash().String())
+					} else {
+						effectiveGasPrice := receipt.EffectiveGasPrice
+						if effectiveGasPrice == nil {
+							effectiveGasPrice = big.NewInt(0)
+						}
+						feeAmount = feeAmount.Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+					}
+
+					totalAmount := big.NewInt(0).Add(tx.Value(), feeAmount)
+					tester.rootWallet.SubBalance(totalAmount)
+				},
+
+				MaxRebroadcasts:     10,
+				RebroadcastInterval: 30 * time.Second,
+			})
+		}(idx)
+
 		if err != nil {
 			return err
 		}
-		if receipt == nil {
-			continue
-		}
-
-		effectiveGasPrice := receipt.EffectiveGasPrice
-		if effectiveGasPrice == nil {
-			effectiveGasPrice = big.NewInt(0)
-		}
-		feeAmount := big.NewInt(0).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-		totalAmount := big.NewInt(0).Add(tx.Value(), feeAmount)
-		tester.rootWallet.SubBalance(totalAmount)
+		wg.Add(1)
 	}
+
+	wg.Done()
+	wg.Wait()
 	return nil
 }
