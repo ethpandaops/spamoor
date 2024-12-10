@@ -1,6 +1,7 @@
 module github.com/ethpandaops/spamoor
 
-go 1.21.1
+go 1.22
+
 toolchain go1.22.5
 
 require (
