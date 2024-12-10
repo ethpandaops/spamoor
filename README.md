@@ -21,7 +21,7 @@ make
 ## Usage
 
 ### `spamoor`
-`spamoor` is a tool for sending mass blob transactions.
+`spamoor` is a tool for sending mass transactions.
 
 ```
 Usage of spamoor:
@@ -36,7 +36,117 @@ Optional:
   -v, --verbose               Run the tool with verbose output.
 ```
 
-The tool provides multiple scenarios, that focus on different aspects of blob transactions. One of the scenarios must be selected to run the tool:
+The tool provides multiple scenarios, that focus on different aspects of transactions. One of the scenarios must be selected to run the tool:
+
+#### `spamoor eoatx`
+
+The `eoatx` scenario sends normal dynamic fee transactions.
+
+```
+Usage of ./bin/spamoor eoatx:
+      --amount uint            Transfer amount per transaction (in gwei) (default 20)
+      --basefee uint           Max fee per gas to use in transfer transactions (in gwei) (default 20)
+  -c, --count uint             Total number of transfer transactions to send
+      --data string            Transaction call data to send
+      --gaslimit uint          Gas limit to use in transactions (default 21000)
+      --max-pending uint       Maximum number of pending transactions
+      --max-wallets uint       Maximum number of child wallets to use
+  -p, --privkey string         The private key of the wallet to send funds from.
+      --random-amount          Use random amounts for transactions (with --amount as limit)
+      --random-target          Use random to addresses for transactions
+      --rebroadcast uint       Number of seconds to wait before re-broadcasting a transaction (default 120)
+      --refill-amount uint     Amount of ETH to fund/refill each child wallet with. (default 5)
+      --refill-balance uint    Min amount of ETH each child wallet should hold before refilling. (default 2)
+      --refill-interval uint   Interval for child wallet rbalance check and refilling if needed (in sec). (default 300)
+  -h, --rpchost stringArray    The RPC host to send transactions to.
+      --rpchost-file string    File with a list of RPC hosts to send transactions to.
+  -s, --seed string            The child wallet seed.
+  -t, --throughput uint        Number of transfer transactions to send per slot
+      --tipfee uint            Max tip per gas to use in transfer transactions (in gwei) (default 2)
+      --trace                  Run the script with tracing output
+  -v, --verbose                Run the script with verbose output
+```
+
+#### `spamoor erctx`
+
+The `erctx` scenario deploys an ERC20 contract and performs token transfers.
+
+```
+Usage of ./bin/spamoor erctx:
+      --amount uint            Transfer amount per transaction (in gwei) (default 20)
+      --basefee uint           Max fee per gas to use in transfer transactions (in gwei) (default 20)
+  -c, --count uint             Total number of transfer transactions to send
+      --max-pending uint       Maximum number of pending transactions
+      --max-wallets uint       Maximum number of child wallets to use
+  -p, --privkey string         The private key of the wallet to send funds from.
+      --random-amount          Use random amounts for transactions (with --amount as limit)
+      --random-target          Use random to addresses for transactions
+      --rebroadcast uint       Number of seconds to wait before re-broadcasting a transaction (default 120)
+      --refill-amount uint     Amount of ETH to fund/refill each child wallet with. (default 5)
+      --refill-balance uint    Min amount of ETH each child wallet should hold before refilling. (default 2)
+      --refill-interval uint   Interval for child wallet rbalance check and refilling if needed (in sec). (default 300)
+  -h, --rpchost stringArray    The RPC host to send transactions to.
+      --rpchost-file string    File with a list of RPC hosts to send transactions to.
+  -s, --seed string            The child wallet seed.
+  -t, --throughput uint        Number of transfer transactions to send per slot
+      --tipfee uint            Max tip per gas to use in transfer transactions (in gwei) (default 2)
+      --trace                  Run the script with tracing output
+  -v, --verbose                Run the script with verbose output
+```
+
+#### `spamoor deploytx`
+
+The `deploytx` scenario sends contract deployment transactions.
+
+```
+Usage of ./bin/spamoor deploytx:
+      --basefee uint            Max fee per gas to use in deployment transactions (in gwei) (default 20)
+      --bytecodes string        Bytecodes to deploy (, separated list of hex bytecodes)
+      --bytecodes-file string   File with bytecodes to deploy (list with hex bytecodes)
+  -c, --count uint              Total number of deployment transactions to send
+      --gaslimit uint           Gas limit to use in deployment transactions (in gwei) (default 1000000)
+      --max-pending uint        Maximum number of pending transactions
+      --max-wallets uint        Maximum number of child wallets to use
+  -p, --privkey string          The private key of the wallet to send funds from.
+      --rebroadcast uint        Number of seconds to wait before re-broadcasting a transaction (default 120)
+      --refill-amount uint      Amount of ETH to fund/refill each child wallet with. (default 5)
+      --refill-balance uint     Min amount of ETH each child wallet should hold before refilling. (default 2)
+      --refill-interval uint    Interval for child wallet rbalance check and refilling if needed (in sec). (default 300)
+  -h, --rpchost stringArray     The RPC host to send transactions to.
+      --rpchost-file string     File with a list of RPC hosts to send transactions to.
+  -s, --seed string             The child wallet seed.
+  -t, --throughput uint         Number of deployment transactions to send per slot
+      --tipfee uint             Max tip per gas to use in deployment transactions (in gwei) (default 2)
+      --trace                   Run the script with tracing output
+  -v, --verbose                 Run the script with verbose output
+```
+
+#### `spamoor deploy-destruct`
+
+The `deploy-destruct` scenario deploys contracts that self-destruct.
+
+```
+Usage of ./bin/spamoor deploy-destruct:
+      --amount uint            Transfer amount per transaction (in gwei) (default 20)
+      --basefee uint           Max fee per gas to use in transfer transactions (in gwei) (default 20)
+  -c, --count uint             Total number of transfer transactions to send
+      --gaslimit uint          The gas limit for each deployment test tx (default 10000000)
+      --max-pending uint       Maximum number of pending transactions
+      --max-wallets uint       Maximum number of child wallets to use
+  -p, --privkey string         The private key of the wallet to send funds from.
+      --random-amount          Use random amounts for transactions (with --amount as limit)
+      --rebroadcast uint       Number of seconds to wait before re-broadcasting a transaction (default 120)
+      --refill-amount uint     Amount of ETH to fund/refill each child wallet with. (default 5)
+      --refill-balance uint    Min amount of ETH each child wallet should hold before refilling. (default 2)
+      --refill-interval uint   Interval for child wallet rbalance check and refilling if needed (in sec). (default 300)
+  -h, --rpchost stringArray    The RPC host to send transactions to.
+      --rpchost-file string    File with a list of RPC hosts to send transactions to.
+  -s, --seed string            The child wallet seed.
+  -t, --throughput uint        Number of transfer transactions to send per slot
+      --tipfee uint            Max tip per gas to use in transfer transactions (in gwei) (default 2)
+      --trace                  Run the script with tracing output
+  -v, --verbose                Run the script with verbose output
+```
 
 #### `spamoor blobs`
 
