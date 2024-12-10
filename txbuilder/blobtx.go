@@ -47,7 +47,7 @@ func BuildBlobTx(txData *TxMetadata, blobRefs [][]string) (*types.BlobTx, error)
 	return &tx, nil
 }
 
-func parseBlobRefs(tx *types.BlobTx, blobRefs []string) error {
+func ParseBlobRefsBytes(blobRefs []string, tx *types.BlobTx) ([]byte, error) {
 	var err error
 	var blobBytes []byte
 
@@ -61,20 +61,20 @@ func parseBlobRefs(tx *types.BlobTx, blobRefs []string) error {
 			case "file":
 				blobRefBytes, err = os.ReadFile(strings.Join(refParts[1:], ":"))
 				if err != nil {
-					return err
+					return nil, err
 				}
 			case "url":
 				blobRefBytes, err = loadUrlRef(strings.Join(refParts[1:], ":"))
 				if err != nil {
-					return err
+					return nil, err
 				}
 			case "repeat":
 				if len(refParts) != 3 {
-					return fmt.Errorf("invalid repeat ref format: %v", blobRef)
+					return nil, fmt.Errorf("invalid repeat ref format: %v", blobRef)
 				}
 				repeatCount, err := strconv.Atoi(refParts[2])
 				if err != nil {
-					return fmt.Errorf("invalid repeat count: %v", refParts[2])
+					return nil, fmt.Errorf("invalid repeat count: %v", refParts[2])
 				}
 				repeatBytes := common.FromHex(refParts[1])
 				repeatBytesLen := len(repeatBytes)
@@ -88,34 +88,46 @@ func parseBlobRefs(tx *types.BlobTx, blobRefs []string) error {
 					var err error
 					blobLen, err = strconv.Atoi(refParts[2])
 					if err != nil {
-						return fmt.Errorf("invalid repeat count: %v", refParts[2])
+						return nil, fmt.Errorf("invalid repeat count: %v", refParts[2])
 					}
 				} else {
 					blobLen = mathRand.Intn((params.BlobTxFieldElementsPerBlob * (params.BlobTxBytesPerFieldElement - 1)) - len(blobBytes))
 				}
 				blobRefBytes, err = randomBlobData(blobLen)
 				if err != nil {
-					return err
+					return nil, err
 				}
 			case "copy":
+				if tx == nil {
+					return nil, fmt.Errorf("copy ref not supported for non blob transactions: %v", blobRef)
+				}
 				if len(refParts) != 2 {
-					return fmt.Errorf("invalid copy ref format: %v", blobRef)
+					return nil, fmt.Errorf("invalid copy ref format: %v", blobRef)
 				}
 				copyIdx, err := strconv.Atoi(refParts[1])
 				if err != nil {
-					return fmt.Errorf("invalid copy index: %v", refParts[1])
+					return nil, fmt.Errorf("invalid copy index: %v", refParts[1])
 				}
 				if copyIdx >= len(tx.Sidecar.Blobs) {
-					return fmt.Errorf("invalid copy index: %v must be smaller than current blob index", refParts[1])
+					return nil, fmt.Errorf("invalid copy index: %v must be smaller than current blob index", refParts[1])
 				}
 				blobRefBytes = tx.Sidecar.Blobs[copyIdx][:]
 			}
 		}
 
 		if blobRefBytes == nil {
-			return fmt.Errorf("unknown blob ref: %v", blobRef)
+			return nil, fmt.Errorf("unknown blob ref: %v", blobRef)
 		}
 		blobBytes = append(blobBytes, blobRefBytes...)
+	}
+
+	return blobBytes, nil
+}
+
+func parseBlobRefs(tx *types.BlobTx, blobRefs []string) error {
+	blobBytes, err := ParseBlobRefsBytes(blobRefs, tx)
+	if err != nil {
+		return err
 	}
 
 	blobCommitment, err := EncodeBlob(blobBytes)

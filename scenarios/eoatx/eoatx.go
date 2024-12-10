@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,7 +29,9 @@ type ScenarioOptions struct {
 	Rebroadcast  uint64
 	BaseFee      uint64
 	TipFee       uint64
+	GasLimit     uint64
 	Amount       uint64
+	Data         string
 	RandomAmount bool
 	RandomTarget bool
 }
@@ -56,7 +59,9 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", 120, "Number of seconds to wait before re-broadcasting a transaction")
 	flags.Uint64Var(&s.options.BaseFee, "basefee", 20, "Max fee per gas to use in transfer transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", 2, "Max tip per gas to use in transfer transactions (in gwei)")
+	flags.Uint64Var(&s.options.GasLimit, "gaslimit", 21000, "Gas limit to use in transactions")
 	flags.Uint64Var(&s.options.Amount, "amount", 20, "Transfer amount per transaction (in gwei)")
+	flags.StringVar(&s.options.Data, "data", "", "Transaction call data to send")
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", false, "Use random amounts for transactions (with --amount as limit)")
 	flags.BoolVar(&s.options.RandomTarget, "random-target", false, "Use random to addresses for transactions")
 	return nil
@@ -203,12 +208,24 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 		toAddr = common.Address(addrBytes)
 	}
 
+	txCallData := []byte{}
+
+	if s.options.Data != "" {
+		dataBytes, err := txbuilder.ParseBlobRefsBytes(strings.Split(s.options.Data, ","), nil)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		txCallData = dataBytes
+	}
+
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       21000,
+		Gas:       s.options.GasLimit,
 		To:        &toAddr,
 		Value:     amount,
+		Data:      txCallData,
 	})
 	if err != nil {
 		return nil, nil, err
