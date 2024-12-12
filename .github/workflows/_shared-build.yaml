@@ -70,7 +70,7 @@ jobs:
 
     # upload artifacts
     - name: "Upload artifact: spamoor_linux_amd64"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ./bin/*
         name: spamoor_linux_amd64
@@ -109,7 +109,7 @@ jobs:
 
     # upload artifacts
     - name: "Upload artifact: spamoor_linux_arm64"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ./bin/*
         name: spamoor_linux_arm64
@@ -142,7 +142,7 @@ jobs:
 
     # upload artifacts
     - name: "Upload artifact: spamoor_windows_amd64"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ./bin/*
         name: spamoor_windows_amd64
@@ -175,7 +175,7 @@ jobs:
 
     # upload artifacts
     - name: "Upload artifact: spamoor_darwin_amd64"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ./bin/*
         name: spamoor_darwin_amd64
@@ -208,7 +208,7 @@ jobs:
 
     # upload artifacts
     - name: "Upload artifact: spamoor_darwin_arm64"
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ./bin/*
         name: spamoor_darwin_arm64
@@ -238,7 +238,7 @@ jobs:
 
     # download build artifacts
     - name: Download build artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: spamoor_linux_amd64
         path: ./bin
@@ -287,7 +287,7 @@ jobs:
 
     # download build artifacts
     - name: Download build artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: spamoor_linux_arm64
         path: ./bin
