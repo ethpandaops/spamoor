@@ -451,6 +451,10 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 			return receipt
 		}
 
+		if ctx.Err() != nil {
+			return nil
+		}
+
 		if retryCount > 2 {
 			logrus.WithFields(logrus.Fields{
 				"client": client.GetName(),
