@@ -120,9 +120,15 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 			}()
 
 			logger := s.logger
-			tx, client, err := s.sendBlobTx(txIdx)
+			tx, client, wallet, err := s.sendBlobTx(txIdx)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
+			}
+			if tx != nil {
+				logger = logger.WithField("nonce", tx.Nonce())
+			}
+			if wallet != nil {
+				logger = logger.WithField("wallet", s.tester.GetWalletIndex(wallet.GetAddress()))
 			}
 			if err != nil {
 				logger.Warnf("could not send blob transaction: %v", err)
@@ -155,7 +161,7 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 	return nil
 }
 
-func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, error) {
+func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
 	client := s.tester.GetClient(tester.SelectByIndex, int(txIdx))
 	client2 := s.tester.GetClient(tester.SelectRandom, 0)
 	wallet := s.tester.GetWallet(tester.SelectByIndex, int(txIdx))
@@ -178,7 +184,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 		var err error
 		feeCap, tipCap, err = client.GetSuggestedFee()
 		if err != nil {
-			return nil, client, err
+			return nil, client, wallet, err
 		}
 	}
 
@@ -225,7 +231,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 		Value:      uint256.NewInt(0),
 	}, blobRefs)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, wallet, err
 	}
 	normalTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
@@ -235,16 +241,16 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 		Value:     uint256.NewInt(0),
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, wallet, err
 	}
 
 	tx1, err := wallet.BuildBlobTx(blobTx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, wallet, err
 	}
 	tx2, err := wallet.ReplaceDynamicFeeTx(normalTx, tx1.Nonce())
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, wallet, err
 	}
 
 	rebroadcast := 0
@@ -279,6 +285,20 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 					s.processTxReceipt(txIdx, tx, receipt, client, wallet, "blob")
 				}
 			},
+			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
+				logger := s.logger.WithField("client", client.GetName())
+				if retry > 0 {
+					logger = logger.WithField("retry", retry)
+				}
+				if rebroadcast > 0 {
+					logger = logger.WithField("rebroadcast", rebroadcast)
+				}
+				if err != nil {
+					logger.Debugf("failed sending blob tx %6d.0: %v", txIdx+1, err)
+				} else if retry > 0 || rebroadcast > 0 {
+					logger.Debugf("successfully sent blob tx %6d.0", txIdx+1)
+				}
+			},
 		})
 		if err1 != nil {
 			s.logger.WithField("client", client.GetName()).Warnf("error while sending blob tx %v: %v", txIdx, err1)
@@ -306,6 +326,20 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 					s.processTxReceipt(txIdx, tx, receipt, client, wallet, "dynfee")
 				}
 			},
+			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
+				logger := s.logger.WithField("client", client.GetName())
+				if retry > 0 {
+					logger = logger.WithField("retry", retry)
+				}
+				if rebroadcast > 0 {
+					logger = logger.WithField("rebroadcast", rebroadcast)
+				}
+				if err != nil {
+					logger.Debugf("failed sending blob tx %6d.1: %v", txIdx+1, err)
+				} else if retry > 0 || rebroadcast > 0 {
+					logger.Debugf("successfully sent blob tx %6d.1", txIdx+1)
+				}
+			},
 		})
 		if err2 != nil {
 			s.logger.WithField("client", client2.GetName()).Warnf("error while sending dynfee tx %v: %v", txIdx, err2)
@@ -321,11 +355,15 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 	if err2 == nil {
 		errCount++
 	}
+	if errCount == 2 {
+		// reset nonce if tx was not sent
+		wallet.ResetPendingNonce(client)
+	}
 	if errCount == 0 {
-		return nil, nil, err1
+		return nil, nil, wallet, err1
 	}
 
-	return tx1, client, nil
+	return tx1, client, wallet, nil
 }
 
 func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *txbuilder.Client, wallet *txbuilder.Wallet, txLabel string) {
@@ -338,7 +376,9 @@ func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt
 		blobGasPrice = big.NewInt(0)
 	}
 	feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+	blobFeeAmount := new(big.Int).Mul(blobGasPrice, big.NewInt(int64(receipt.BlobGasUsed)))
 	totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
+	totalAmount = new(big.Int).Add(totalAmount, blobFeeAmount)
 	wallet.SubBalance(totalAmount)
 
 	gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))

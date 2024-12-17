@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/holiman/uint256"
@@ -186,4 +187,18 @@ func (tester *Tester) GetWallet(mode SelectionMode, input int) *txbuilder.Wallet
 
 func (tester *Tester) GetRootWallet() *txbuilder.Wallet {
 	return tester.rootWallet
+}
+
+func (tester *Tester) GetWalletIndex(address common.Address) int {
+	if tester.rootWallet.GetAddress() == address {
+		return 0
+	}
+
+	for i, wallet := range tester.childWallets {
+		if wallet.GetAddress() == address {
+			return i + 1
+		}
+	}
+
+	return -1
 }

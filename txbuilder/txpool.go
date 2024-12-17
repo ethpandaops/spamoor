@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ type TxPool struct {
 	wallets          map[common.Address]*Wallet
 	walletsMutex     sync.RWMutex
 	processStaleChan chan uint64
+	lastBlockNumber  uint64
 }
 
 type TxPoolOptions struct {
@@ -54,6 +56,12 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 }
 
 func (pool *TxPool) runTxPoolLoop() {
+	defer func() {
+		if err := recover(); err != nil {
+			logrus.WithError(err.(error)).Errorf("uncaught panic in TxPool.runTxPoolLoop subroutine: %v, stack: %v", err, string(debug.Stack()))
+		}
+	}()
+
 	highestBlockNumber := uint64(0)
 	for {
 		newHighestBlockNumber := pool.getHighestBlockNumber()
@@ -79,6 +87,12 @@ func (pool *TxPool) runTxPoolLoop() {
 }
 
 func (pool *TxPool) processStaleTransactionsLoop() {
+	defer func() {
+		if err := recover(); err != nil {
+			logrus.WithError(err.(error)).Errorf("uncaught panic in TxPool.processStaleTransactionsLoop subroutine: %v, stack: %v", err, string(debug.Stack()))
+		}
+	}()
+
 	for blockNumber := range pool.processStaleChan {
 		pool.walletsMutex.RLock()
 		wallets := make([]*Wallet, 0, len(pool.wallets))
@@ -94,6 +108,8 @@ func (pool *TxPool) processStaleTransactionsLoop() {
 }
 
 func (pool *TxPool) processBlock(blockNumber uint64) error {
+	pool.lastBlockNumber = blockNumber
+
 	pool.walletsMutex.RLock()
 	walletsLen := len(pool.wallets)
 	var chainId *big.Int
@@ -117,16 +133,20 @@ func (pool *TxPool) processBlock(blockNumber uint64) error {
 		return fmt.Errorf("could not load block body")
 	}
 
-	receipts := pool.getBlockReceipts(blockNumber)
+	txCount := len(blockBody.Transactions())
+	receipts := pool.getBlockReceipts(blockBody.Hash(), txCount)
 	if receipts == nil {
 		return fmt.Errorf("could not load block receipts")
 	}
+
+	logrus.Debugf("processing block %v  (%v transactions)", blockNumber, txCount)
 
 	signer := types.LatestSignerForChainID(chainId)
 
 	for idx, tx := range blockBody.Transactions() {
 		receipt := receipts[idx]
 		if receipt == nil {
+			logrus.Warnf("missing receipt for tx %v in block %v", idx, blockNumber)
 			continue
 		}
 
@@ -209,7 +229,7 @@ func (pool *TxPool) getBlockBody(blockNumber uint64) *types.Block {
 	return nil
 }
 
-func (pool *TxPool) getBlockReceipts(blockNumber uint64) []*types.Receipt {
+func (pool *TxPool) getBlockReceipts(blockHash common.Hash, txCount int) []*types.Receipt {
 	clientCount := pool.options.GetClientCountFn()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -221,11 +241,15 @@ func (pool *TxPool) getBlockReceipts(blockNumber uint64) []*types.Receipt {
 			continue
 		}
 
-		blockNum := rpc.BlockNumber(int64(blockNumber))
 		blockReceipts, err := client.client.BlockReceipts(ctx, rpc.BlockNumberOrHash{
-			BlockNumber: &blockNum,
+			BlockHash: &blockHash,
 		})
 		if err == nil {
+			if len(blockReceipts) != txCount {
+				logrus.Warnf("block %v has %v receipts, expected %v", blockHash, len(blockReceipts), txCount)
+				continue
+			}
+
 			return blockReceipts
 		}
 	}
@@ -258,6 +282,7 @@ func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *typ
 
 			if options.OnConfirm != nil {
 				defer func() {
+					time.Sleep(100 * time.Millisecond) // wait 100ms to get "cleaner" log outputs (all confirmations first, then new submissions)
 					options.OnConfirm(tx, receipt, err)
 				}()
 			}
@@ -345,7 +370,11 @@ func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *ty
 	pool.walletsMutex.Unlock()
 
 	txHash := tx.Hash()
-	nonceChan := wallet.getTxNonceChan(tx.Nonce())
+	nonceChan, isFirstPendingTx := wallet.getTxNonceChan(tx.Nonce())
+
+	if isFirstPendingTx && pool.lastBlockNumber > wallet.lastConfirmation+1 {
+		wallet.lastConfirmation = pool.lastBlockNumber - 1
+	}
 
 	if wg != nil {
 		wg.Done()
@@ -377,28 +406,25 @@ func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wall
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
-	if wallet.confirmedNonce > nonce {
-		return
+	if nonceChan := wallet.txNonceChans[nonce]; nonceChan != nil {
+		nonceChan.receipt = receipt
+	}
+
+	wallet.confirmedNonce = nonce + 1
+	if nonce+1 > wallet.pendingNonce.Load() {
+		wallet.pendingNonce.Store(nonce + 1)
+	}
+	if blockNumber > wallet.lastConfirmation {
+		wallet.lastConfirmation = blockNumber
 	}
 
 	for n := range wallet.txNonceChans {
-		if n == nonce {
-			wallet.txNonceChans[n].receipt = receipt
-		}
-
 		if n <= nonce {
 			close(wallet.txNonceChans[n].channel)
 			delete(wallet.txNonceChans, n)
 		}
 	}
 
-	wallet.confirmedNonce = nonce + 1
-	if wallet.confirmedNonce > wallet.pendingNonce {
-		wallet.pendingNonce = wallet.confirmedNonce
-	}
-	if blockNumber > wallet.lastConfirmation {
-		wallet.lastConfirmation = blockNumber
-	}
 }
 
 func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet) {
@@ -414,12 +440,16 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 			}
 		}
 
+		pendingNonce := 0
+		for n := range wallet.txNonceChans {
+			pendingNonce = int(n)
+			break
+		}
+
+		logrus.Debugf("recovering %v stale transactions for %v (current nonce %v, cache nonce %v, first pending nonce: %v)", len(wallet.txNonceChans), wallet.address.String(), lastNonce, wallet.confirmedNonce, pendingNonce)
+
 		wallet.txNonceMutex.Lock()
 		defer wallet.txNonceMutex.Unlock()
-
-		if wallet.confirmedNonce >= lastNonce {
-			return
-		}
 
 		for n := range wallet.txNonceChans {
 			if n < lastNonce {

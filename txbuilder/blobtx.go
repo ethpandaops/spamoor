@@ -111,7 +111,11 @@ func ParseBlobRefsBytes(blobRefs []string, tx *types.BlobTx) ([]byte, error) {
 				if copyIdx >= len(tx.Sidecar.Blobs) {
 					return nil, fmt.Errorf("invalid copy index: %v must be smaller than current blob index", refParts[1])
 				}
-				blobRefBytes = tx.Sidecar.Blobs[copyIdx][:]
+				blobLen := mathRand.Intn((params.BlobTxFieldElementsPerBlob * (params.BlobTxBytesPerFieldElement - 1)) - len(blobBytes))
+				if blobLen > len(tx.Sidecar.Blobs[copyIdx]) {
+					blobLen = len(tx.Sidecar.Blobs[copyIdx])
+				}
+				blobRefBytes = tx.Sidecar.Blobs[copyIdx][:blobLen]
 			}
 		}
 

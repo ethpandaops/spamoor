@@ -124,7 +124,7 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 			}()
 
 			logger := s.logger
-			tx, client, err := s.sendBlobTx(txIdx, 0, 0)
+			tx, client, wallet, err := s.sendBlobTx(txIdx, 0, 0)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -139,7 +139,7 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 			counterMutex.Lock()
 			txCount++
 			counterMutex.Unlock()
-			logger.Infof("blob tx %6d.0 sent:  %v (%v sidecars)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs))
+			logger.Infof("blob tx %6d.0 sent:  %v (%v sidecars), wallet: %v, nonce: %v", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), s.tester.GetWalletIndex(wallet.GetAddress()), tx.Nonce())
 		}(txIdx)
 
 		count := txCount + pendingCount
@@ -161,7 +161,7 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 	return nil
 }
 
-func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint64) (*types.Transaction, *txbuilder.Client, error) {
+func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
 	client := s.tester.GetClient(tester.SelectByIndex, int(txIdx))
 	wallet := s.tester.GetWallet(tester.SelectByIndex, int(txIdx))
 
@@ -190,7 +190,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 		var err error
 		feeCap, tipCap, err = client.GetSuggestedFee()
 		if err != nil {
-			return nil, client, err
+			return nil, client, wallet, err
 		}
 	}
 
@@ -244,7 +244,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 		Value:      uint256.NewInt(0),
 	}, blobRefs)
 	if err != nil {
-		return nil, client, err
+		return nil, client, wallet, err
 	}
 
 	var tx *types.Transaction
@@ -254,7 +254,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 		tx, err = wallet.ReplaceBlobTx(blobTx, txNonce)
 	}
 	if err != nil {
-		return nil, client, err
+		return nil, client, wallet, err
 	}
 
 	rebroadcast := 0
@@ -296,7 +296,9 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 				blobGasPrice = big.NewInt(0)
 			}
 			feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+			blobFeeAmount := new(big.Int).Mul(blobGasPrice, big.NewInt(int64(receipt.BlobGasUsed)))
 			totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
+			totalAmount = new(big.Int).Add(totalAmount, blobFeeAmount)
 			wallet.SubBalance(totalAmount)
 
 			gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
@@ -305,16 +307,35 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 
 			s.logger.WithField("client", client.GetName()).Infof("blob tx %6d.%v confirmed in block #%v!  total fee: %v gwei (base: %v, blob: %v)", txIdx+1, replacementIdx, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
 		},
+		LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
+			logger := s.logger.WithField("client", client.GetName())
+			if retry > 0 {
+				logger = logger.WithField("retry", retry)
+			}
+			if rebroadcast > 0 {
+				logger = logger.WithField("rebroadcast", rebroadcast)
+			}
+			if err != nil {
+				logger.Debugf("failed sending blob tx %6d.%v: %v", txIdx+1, replacementIdx, err)
+			} else if retry > 0 || rebroadcast > 0 {
+				logger.Debugf("successfully sent blob tx %6d.%v", txIdx+1, replacementIdx)
+			}
+		},
 	})
 	if err != nil {
-		return nil, client, err
+		if replacementIdx == 0 {
+			// reset nonce if tx was not sent
+			wallet.ResetPendingNonce(client)
+		}
+
+		return nil, client, wallet, err
 	}
 
 	if s.options.Replace > 0 && replacementIdx < s.options.MaxReplacements && rand.Intn(100) < 70 {
 		go s.delayedReplace(txIdx, tx, &awaitConfirmation, replacementIdx)
 	}
 
-	return tx, client, nil
+	return tx, client, wallet, nil
 }
 
 func (s *Scenario) delayedReplace(txIdx uint64, tx *types.Transaction, awaitConfirmation *bool, replacementIdx uint64) {
@@ -324,10 +345,18 @@ func (s *Scenario) delayedReplace(txIdx uint64, tx *types.Transaction, awaitConf
 		return
 	}
 
-	replaceTx, client, err := s.sendBlobTx(txIdx, replacementIdx+1, tx.Nonce())
+	logger := s.logger
+
+	replaceTx, client, wallet, err := s.sendBlobTx(txIdx, replacementIdx+1, tx.Nonce())
+	if tx != nil {
+		logger = logger.WithField("nonce", tx.Nonce())
+	}
+	if wallet != nil {
+		logger = logger.WithField("wallet", s.tester.GetWalletIndex(wallet.GetAddress()))
+	}
 	if err != nil {
-		s.logger.WithField("client", client.GetName()).Warnf("blob tx %6d.%v replacement failed: %v", txIdx+1, replacementIdx+1, err)
+		logger.WithField("client", client.GetName()).Warnf("blob tx %6d.%v replacement failed: %v", txIdx+1, replacementIdx+1, err)
 		return
 	}
-	s.logger.WithField("client", client.GetName()).Infof("blob tx %6d.%v sent:  %v (%v sidecars)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs))
+	logger.WithField("client", client.GetName()).Infof("blob tx %6d.%v sent:  %v (%v sidecars)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs))
 }

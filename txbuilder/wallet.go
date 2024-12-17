@@ -6,12 +6,14 @@ import (
 	"errors"
 	"math/big"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
+	"github.com/sirupsen/logrus"
 )
 
 type Wallet struct {
@@ -20,7 +22,7 @@ type Wallet struct {
 	privkey        *ecdsa.PrivateKey
 	address        common.Address
 	chainid        *big.Int
-	pendingNonce   uint64
+	pendingNonce   atomic.Uint64
 	confirmedNonce uint64
 	balance        *big.Int
 
@@ -81,7 +83,7 @@ func (wallet *Wallet) GetChainId() *big.Int {
 }
 
 func (wallet *Wallet) GetNonce() uint64 {
-	return wallet.pendingNonce
+	return wallet.pendingNonce.Load()
 }
 
 func (wallet *Wallet) GetBalance() *big.Int {
@@ -95,7 +97,14 @@ func (wallet *Wallet) SetChainId(chainid *big.Int) {
 }
 
 func (wallet *Wallet) SetNonce(nonce uint64) {
-	wallet.pendingNonce = nonce
+	wallet.nonceMutex.Lock()
+	defer wallet.nonceMutex.Unlock()
+
+	pendingNonce := wallet.pendingNonce.Load()
+	if nonce > pendingNonce {
+		wallet.pendingNonce.Store(nonce)
+	}
+
 	wallet.confirmedNonce = nonce
 }
 
@@ -120,8 +129,7 @@ func (wallet *Wallet) AddBalance(amount *big.Int) {
 func (wallet *Wallet) BuildDynamicFeeTx(txData *types.DynamicFeeTx) (*types.Transaction, error) {
 	wallet.nonceMutex.Lock()
 	txData.ChainID = wallet.chainid
-	txData.Nonce = wallet.pendingNonce
-	wallet.pendingNonce++
+	txData.Nonce = wallet.pendingNonce.Add(1) - 1
 	wallet.nonceMutex.Unlock()
 	return wallet.signTx(txData)
 }
@@ -129,8 +137,7 @@ func (wallet *Wallet) BuildDynamicFeeTx(txData *types.DynamicFeeTx) (*types.Tran
 func (wallet *Wallet) BuildBlobTx(txData *types.BlobTx) (*types.Transaction, error) {
 	wallet.nonceMutex.Lock()
 	txData.ChainID = uint256.MustFromBig(wallet.chainid)
-	txData.Nonce = wallet.pendingNonce
-	wallet.pendingNonce++
+	txData.Nonce = wallet.pendingNonce.Add(1) - 1
 	wallet.nonceMutex.Unlock()
 	return wallet.signTx(txData)
 }
@@ -146,8 +153,8 @@ func (wallet *Wallet) BuildBoundTx(txData *TxMetadata, buildFn func(transactOpts
 
 	transactor.Context = context.Background()
 	transactor.From = wallet.address
-	transactor.Nonce = big.NewInt(0).SetUint64(wallet.pendingNonce)
-	wallet.pendingNonce++
+	nonce := wallet.pendingNonce.Add(1) - 1
+	transactor.Nonce = big.NewInt(0).SetUint64(nonce)
 
 	transactor.GasTipCap = txData.GasTipCap.ToBig()
 	transactor.GasFeeCap = txData.GasFeeCap.ToBig()
@@ -157,7 +164,7 @@ func (wallet *Wallet) BuildBoundTx(txData *TxMetadata, buildFn func(transactOpts
 
 	tx, err := buildFn(transactor)
 	if err != nil {
-		wallet.pendingNonce--
+		wallet.pendingNonce.Store(nonce)
 		return nil, err
 	}
 
@@ -176,6 +183,21 @@ func (wallet *Wallet) ReplaceBlobTx(txData *types.BlobTx, nonce uint64) (*types.
 	return wallet.signTx(txData)
 }
 
+func (wallet *Wallet) ResetPendingNonce(client *Client) {
+	wallet.nonceMutex.Lock()
+	defer wallet.nonceMutex.Unlock()
+
+	nonce, err := client.GetPendingNonceAt(wallet.address)
+	if nonce < wallet.confirmedNonce {
+		nonce = wallet.confirmedNonce
+	}
+
+	if err == nil && wallet.pendingNonce.Load() != nonce {
+		logrus.Warnf("Resyncing pending nonce for %v from %d to %d", wallet.address.String(), wallet.pendingNonce.Load(), nonce)
+		wallet.pendingNonce.Store(nonce)
+	}
+}
+
 func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
 	tx := types.NewTx(txData)
 	signedTx, err := types.SignTx(tx, types.LatestSignerForChainID(wallet.chainid), wallet.privkey)
@@ -185,17 +207,17 @@ func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
 	return signedTx, nil
 }
 
-func (wallet *Wallet) getTxNonceChan(targetNonce uint64) *nonceStatus {
+func (wallet *Wallet) getTxNonceChan(targetNonce uint64) (*nonceStatus, bool) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
 	if wallet.confirmedNonce > targetNonce {
-		return nil
+		return nil, false
 	}
 
 	nonceChan := wallet.txNonceChans[targetNonce]
 	if nonceChan != nil {
-		return nonceChan
+		return nonceChan, false
 	}
 
 	nonceChan = &nonceStatus{
@@ -203,5 +225,5 @@ func (wallet *Wallet) getTxNonceChan(targetNonce uint64) *nonceStatus {
 	}
 	wallet.txNonceChans[targetNonce] = nonceChan
 
-	return nonceChan
+	return nonceChan, len(wallet.txNonceChans) == 1
 }

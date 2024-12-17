@@ -132,9 +132,15 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 			}()
 
 			logger := s.logger
-			tx, client, err := s.sendTx(txIdx)
+			tx, client, wallet, err := s.sendTx(txIdx)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
+			}
+			if tx != nil {
+				logger = logger.WithField("nonce", tx.Nonce())
+			}
+			if wallet != nil {
+				logger = logger.WithField("wallet", s.tester.GetWalletIndex(wallet.GetAddress()))
 			}
 			if err != nil {
 				logger.Warnf("could not send transaction: %v", err)
@@ -237,7 +243,7 @@ func (s *Scenario) sendDeploymentTx() (*types.Receipt, *txbuilder.Client, error)
 	return txReceipt, client, nil
 }
 
-func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, error) {
+func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
 	client := s.tester.GetClient(tester.SelectByIndex, int(txIdx))
 	wallet := s.tester.GetWallet(tester.SelectByIndex, int(txIdx))
 
@@ -255,7 +261,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 		var err error
 		feeCap, tipCap, err = client.GetSuggestedFee()
 		if err != nil {
-			return nil, client, err
+			return nil, client, wallet, err
 		}
 	}
 
@@ -268,7 +274,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 
 	gasBurnerContract, err := s.GetGasBurner()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, wallet, err
 	}
 
 	tx, err := wallet.BuildBoundTx(&txbuilder.TxMetadata{
@@ -278,7 +284,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 		return gasBurnerContract.BurnGasUnits(transactOpts, big.NewInt(int64(s.options.GasUnitsToBurn)))
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, wallet, err
 	}
 
 	rebroadcast := 0
@@ -320,12 +326,29 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 
 			s.logger.WithField("client", client.GetName()).Infof(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, len(receipt.Logs))
 		},
+		LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
+			logger := s.logger.WithField("client", client.GetName())
+			if retry > 0 {
+				logger = logger.WithField("retry", retry)
+			}
+			if rebroadcast > 0 {
+				logger = logger.WithField("rebroadcast", rebroadcast)
+			}
+			if err != nil {
+				logger.Debugf("failed sending tx %6d: %v", txIdx+1, err)
+			} else if retry > 0 || rebroadcast > 0 {
+				logger.Debugf("successfully sent tx %6d", txIdx+1)
+			}
+		},
 	})
 	if err != nil {
-		return nil, client, err
+		// reset nonce if tx was not sent
+		wallet.ResetPendingNonce(client)
+
+		return nil, client, wallet, err
 	}
 
-	return tx, client, nil
+	return tx, client, wallet, nil
 }
 
 func (s *Scenario) GetGasBurner() (*GasBurner, error) {
