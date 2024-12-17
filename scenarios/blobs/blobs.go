@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
@@ -90,11 +91,10 @@ func (s *Scenario) Init(testerCfg *tester.TesterConfig) error {
 func (s *Scenario) Run(tester *tester.Tester) error {
 	s.tester = tester
 	txIdxCounter := uint64(0)
-	counterMutex := sync.Mutex{}
-	waitGroup := sync.WaitGroup{}
-	pendingCount := uint64(0)
-	txCount := uint64(0)
+	pendingCount := atomic.Int64{}
+	txCount := atomic.Uint64{}
 	startTime := time.Now()
+	var lastChan chan bool
 
 	s.logger.Infof("starting scenario: normal")
 
@@ -106,17 +106,13 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 			// await pending transactions
 			s.pendingChan <- true
 		}
-		waitGroup.Add(1)
-		counterMutex.Lock()
-		pendingCount++
-		counterMutex.Unlock()
+		pendingCount.Add(1)
+		currentChan := make(chan bool, 1)
 
-		go func(txIdx uint64) {
+		go func(txIdx uint64, lastChan, currentChan chan bool) {
 			defer func() {
-				counterMutex.Lock()
-				pendingCount--
-				counterMutex.Unlock()
-				waitGroup.Done()
+				pendingCount.Add(-1)
+				currentChan <- true
 			}()
 
 			logger := s.logger
@@ -130,19 +126,23 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 			if wallet != nil {
 				logger = logger.WithField("wallet", s.tester.GetWalletIndex(wallet.GetAddress()))
 			}
+			if lastChan != nil {
+				<-lastChan
+				close(lastChan)
+			}
 			if err != nil {
 				logger.Warnf("could not send blob transaction: %v", err)
 				<-s.pendingChan
 				return
 			}
 
-			counterMutex.Lock()
-			txCount++
-			counterMutex.Unlock()
+			txCount.Add(1)
 			logger.Infof("sent blob tx #%6d: %v (%v sidecars)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs))
-		}(txIdx)
+		}(txIdx, lastChan, currentChan)
 
-		count := txCount + pendingCount
+		lastChan = currentChan
+
+		count := txCount.Load() + uint64(pendingCount.Load())
 		if s.options.TotalCount > 0 && count >= s.options.TotalCount {
 			break
 		}
@@ -152,7 +152,8 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 			}
 		}
 	}
-	waitGroup.Wait()
+	<-lastChan
+	close(lastChan)
 
 	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
 	s.pendingWGroup.Wait()
@@ -230,7 +231,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 		Value:      uint256.NewInt(0),
 	}, blobRefs)
 	if err != nil {
-		return nil, nil, wallet, err
+		return nil, client, wallet, err
 	}
 
 	tx, err := wallet.BuildBlobTx(blobTx)
@@ -251,6 +252,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			defer func() {
 				if s.pendingChan != nil {
+					time.Sleep(100 * time.Millisecond)
 					<-s.pendingChan
 				}
 				s.pendingWGroup.Done()
@@ -280,7 +282,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 			gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
 			gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
 
-			s.logger.WithField("client", client.GetName()).Infof(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v, blob: %v)", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
+			s.logger.WithField("client", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v, blob: %v)", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
 		},
 		LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("client", client.GetName())

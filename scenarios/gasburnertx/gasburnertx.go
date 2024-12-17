@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethpandaops/spamoor/utils"
@@ -92,11 +93,10 @@ func (s *Scenario) Init(testerCfg *tester.TesterConfig) error {
 func (s *Scenario) Run(tester *tester.Tester) error {
 	s.tester = tester
 	txIdxCounter := uint64(0)
-	counterMutex := sync.Mutex{}
-	waitGroup := sync.WaitGroup{}
-	pendingCount := uint64(0)
-	txCount := uint64(0)
+	pendingCount := atomic.Int64{}
+	txCount := atomic.Uint64{}
 	startTime := time.Now()
+	var lastChan chan bool
 
 	s.logger.Infof("starting scenario: gasburnertx")
 
@@ -118,17 +118,13 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 			// await pending transactions
 			s.pendingChan <- true
 		}
-		waitGroup.Add(1)
-		counterMutex.Lock()
-		pendingCount++
-		counterMutex.Unlock()
+		pendingCount.Add(1)
+		currentChan := make(chan bool, 1)
 
-		go func(txIdx uint64) {
+		go func(txIdx uint64, lastChan, currentChan chan bool) {
 			defer func() {
-				counterMutex.Lock()
-				pendingCount--
-				counterMutex.Unlock()
-				waitGroup.Done()
+				pendingCount.Add(-1)
+				currentChan <- true
 			}()
 
 			logger := s.logger
@@ -142,19 +138,23 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 			if wallet != nil {
 				logger = logger.WithField("wallet", s.tester.GetWalletIndex(wallet.GetAddress()))
 			}
+			if lastChan != nil {
+				<-lastChan
+				close(lastChan)
+			}
 			if err != nil {
 				logger.Warnf("could not send transaction: %v", err)
 				<-s.pendingChan
 				return
 			}
 
-			counterMutex.Lock()
-			txCount++
-			counterMutex.Unlock()
+			txCount.Add(1)
 			logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
-		}(txIdx)
+		}(txIdx, lastChan, currentChan)
 
-		count := txCount + pendingCount
+		lastChan = currentChan
+
+		count := txCount.Load() + uint64(pendingCount.Load())
 		if s.options.TotalCount > 0 && count >= s.options.TotalCount {
 			break
 		}
@@ -164,9 +164,10 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 			}
 		}
 	}
-	waitGroup.Wait()
 
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
+	<-lastChan
+	close(lastChan)
+
 	s.pendingWGroup.Wait()
 	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
 
@@ -300,6 +301,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			defer func() {
 				if s.pendingChan != nil {
+					time.Sleep(100 * time.Millisecond)
 					<-s.pendingChan
 				}
 				s.pendingWGroup.Done()
@@ -324,7 +326,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 			gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
 			gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
 
-			s.logger.WithField("client", client.GetName()).Infof(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, len(receipt.Logs))
+			s.logger.WithField("client", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, len(receipt.Logs))
 		},
 		LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("client", client.GetName())

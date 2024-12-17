@@ -128,6 +128,7 @@ func (pool *TxPool) processBlock(blockNumber uint64) error {
 		return nil
 	}
 
+	t1 := time.Now()
 	blockBody := pool.getBlockBody(blockNumber)
 	if blockBody == nil {
 		return fmt.Errorf("could not load block body")
@@ -139,9 +140,12 @@ func (pool *TxPool) processBlock(blockNumber uint64) error {
 		return fmt.Errorf("could not load block receipts")
 	}
 
-	logrus.Debugf("processing block %v  (%v transactions)", blockNumber, txCount)
+	loadingTime := time.Since(t1)
+	t1 = time.Now()
 
 	signer := types.LatestSignerForChainID(chainId)
+	confirmCount := 0
+	walletMap := map[common.Address]bool{}
 
 	for idx, tx := range blockBody.Transactions() {
 		receipt := receipts[idx]
@@ -158,6 +162,8 @@ func (pool *TxPool) processBlock(blockNumber uint64) error {
 
 		fromWallet := pool.getWallet(txFrom)
 		if fromWallet != nil {
+			confirmCount++
+			walletMap[txFrom] = true
 			pool.processTransactionInclusion(blockNumber, fromWallet, tx, receipt)
 		}
 
@@ -169,6 +175,8 @@ func (pool *TxPool) processBlock(blockNumber uint64) error {
 			}
 		}
 	}
+
+	logrus.Infof("processed block %v:  %v total tx, %v tx confirmed from %v wallets (%v, %v)", blockNumber, txCount, confirmCount, len(walletMap), loadingTime, time.Since(t1))
 
 	return nil
 }
@@ -282,7 +290,6 @@ func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *typ
 
 			if options.OnConfirm != nil {
 				defer func() {
-					time.Sleep(100 * time.Millisecond) // wait 100ms to get "cleaner" log outputs (all confirmations first, then new submissions)
 					options.OnConfirm(tx, receipt, err)
 				}()
 			}
