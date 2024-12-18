@@ -135,9 +135,9 @@ func (pool *TxPool) processBlock(blockNumber uint64) error {
 	}
 
 	txCount := len(blockBody.Transactions())
-	receipts := pool.getBlockReceipts(blockBody.Hash(), txCount)
+	receipts, err := pool.getBlockReceipts(blockNumber, txCount)
 	if receipts == nil {
-		return fmt.Errorf("could not load block receipts")
+		return fmt.Errorf("could not load block receipts: %w", err)
 	}
 
 	loadingTime := time.Since(t1)
@@ -237,11 +237,14 @@ func (pool *TxPool) getBlockBody(blockNumber uint64) *types.Block {
 	return nil
 }
 
-func (pool *TxPool) getBlockReceipts(blockHash common.Hash, txCount int) []*types.Receipt {
+func (pool *TxPool) getBlockReceipts(blockNumber uint64, txCount int) ([]*types.Receipt, error) {
 	clientCount := pool.options.GetClientCountFn()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	var receiptErr error
+	blockNum := rpc.BlockNumber(blockNumber)
 
 	for i := 0; i < clientCount; i++ {
 		client := pool.options.GetClientFn(i, false)
@@ -250,19 +253,21 @@ func (pool *TxPool) getBlockReceipts(blockHash common.Hash, txCount int) []*type
 		}
 
 		blockReceipts, err := client.client.BlockReceipts(ctx, rpc.BlockNumberOrHash{
-			BlockHash: &blockHash,
+			BlockNumber: &blockNum,
 		})
-		if err == nil {
+		if err != nil {
+			receiptErr = err
+		} else {
 			if len(blockReceipts) != txCount {
-				logrus.Warnf("block %v has %v receipts, expected %v", blockHash, len(blockReceipts), txCount)
+				logrus.Warnf("block %v has %v receipts, expected %v", blockNumber, len(blockReceipts), txCount)
 				continue
 			}
 
-			return blockReceipts
+			return blockReceipts, nil
 		}
 	}
 
-	return nil
+	return nil, receiptErr
 }
 
 func (pool *TxPool) getWallet(address common.Address) *Wallet {
