@@ -15,4 +15,5 @@ type TxMetadata struct {
 	Value      *uint256.Int
 	Data       []byte
 	AccessList types.AccessList
+	AuthList   []types.SetCodeAuthorization
 }

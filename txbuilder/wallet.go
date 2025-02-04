@@ -78,6 +78,10 @@ func (wallet *Wallet) GetAddress() common.Address {
 	return wallet.address
 }
 
+func (wallet *Wallet) GetPrivateKey() *ecdsa.PrivateKey {
+	return wallet.privkey
+}
+
 func (wallet *Wallet) GetChainId() *big.Int {
 	return wallet.chainid
 }
@@ -106,6 +110,12 @@ func (wallet *Wallet) SetNonce(nonce uint64) {
 	}
 
 	wallet.confirmedNonce = nonce
+}
+
+func (wallet *Wallet) GetNextNonce() uint64 {
+	wallet.nonceMutex.Lock()
+	defer wallet.nonceMutex.Unlock()
+	return wallet.pendingNonce.Add(1) - 1
 }
 
 func (wallet *Wallet) SetBalance(balance *big.Int) {
@@ -137,6 +147,14 @@ func (wallet *Wallet) BuildDynamicFeeTx(txData *types.DynamicFeeTx) (*types.Tran
 func (wallet *Wallet) BuildBlobTx(txData *types.BlobTx) (*types.Transaction, error) {
 	wallet.nonceMutex.Lock()
 	txData.ChainID = uint256.MustFromBig(wallet.chainid)
+	txData.Nonce = wallet.pendingNonce.Add(1) - 1
+	wallet.nonceMutex.Unlock()
+	return wallet.signTx(txData)
+}
+
+func (wallet *Wallet) BuildSetCodeTx(txData *types.SetCodeTx) (*types.Transaction, error) {
+	wallet.nonceMutex.Lock()
+	txData.ChainID = wallet.chainid.Uint64()
 	txData.Nonce = wallet.pendingNonce.Add(1) - 1
 	wallet.nonceMutex.Unlock()
 	return wallet.signTx(txData)

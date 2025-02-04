@@ -1,7 +1,6 @@
 package scenarios
 
 import (
-	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 
 	blobcombined "github.com/ethpandaops/spamoor/scenarios/blob-combined"
@@ -12,6 +11,8 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
 	"github.com/ethpandaops/spamoor/scenarios/erctx"
+	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
+	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 )
 
@@ -26,6 +27,7 @@ var Scenarios map[string]func() scenariotypes.Scenario = map[string]func() scena
 	"deploy-destruct": deploydestruct.NewScenario,
 	"deploytx":        deploytx.NewScenario,
 	"gasburnertx":     gasburnertx.NewScenario,
+	"setcodetx":       setcodetx.NewScenario,
 
 	"wallets": wallets.NewScenario,
 }
