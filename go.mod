@@ -8,7 +8,7 @@ require (
 	github.com/ethereum/go-ethereum v1.14.12
 	github.com/holiman/uint256 v1.3.2
 	github.com/sirupsen/logrus v1.9.3
-	github.com/spf13/pflag v1.0.5
+	github.com/spf13/pflag v1.0.6
 )
 
 require (
