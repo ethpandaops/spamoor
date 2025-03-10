@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
@@ -122,13 +124,24 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 	txIdxCounter := uint64(0)
 	pendingCount := atomic.Int64{}
 	txCount := atomic.Uint64{}
-	startTime := time.Now()
 
 	s.logger.Infof("starting scenario: eoatx")
 
 	var lastChan chan bool
 
+	initialRate := rate.Limit(float64(s.options.Throughput) / float64(utils.SecondsPerSlot))
+	if initialRate == 0 {
+		initialRate = rate.Inf
+	}
+	limiter := rate.NewLimiter(initialRate, int(s.options.Throughput))
+
 	for {
+		if err := limiter.Wait(context.Background()); err != nil {
+			s.logger.Debugf("rate limited: %s", err.Error())
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
 		txIdx := txIdxCounter
 		txIdxCounter++
 
@@ -176,11 +189,6 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 		count := txCount.Load() + uint64(pendingCount.Load())
 		if s.options.TotalCount > 0 && count >= s.options.TotalCount {
 			break
-		}
-		if s.options.Throughput > 0 {
-			for count/((uint64(time.Since(startTime).Seconds())/utils.SecondsPerSlot)+1) >= s.options.Throughput {
-				time.Sleep(100 * time.Millisecond)
-			}
 		}
 	}
 
