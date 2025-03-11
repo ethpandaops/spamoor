@@ -13,6 +13,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/erctx"
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
+	validatortopups "github.com/ethpandaops/spamoor/scenarios/validator-topups"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 )
 
@@ -28,6 +29,8 @@ var Scenarios map[string]func() scenariotypes.Scenario = map[string]func() scena
 	"deploytx":        deploytx.NewScenario,
 	"gasburnertx":     gasburnertx.NewScenario,
 	"setcodetx":       setcodetx.NewScenario,
+
+	"validator-topups": validatortopups.NewScenario,
 
 	"wallets": wallets.NewScenario,
 }

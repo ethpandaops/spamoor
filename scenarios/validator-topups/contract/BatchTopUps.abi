@@ -1,0 +1,52 @@
+[
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "depositContract",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "payable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "_depositContract",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes",
+        "name": "pubkey",
+        "type": "bytes"
+      }
+    ],
+    "name": "topup",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes",
+        "name": "pubkeys",
+        "type": "bytes"
+      }
+    ],
+    "name": "topupEqual",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  }
+]

@@ -1,0 +1,35 @@
+{
+    "language": "Solidity",
+    "sources": {
+        "contracts/BatchTopUps.sol": {
+            "content": "// SPDX-License-Identifier: MIT\npragma solidity  ^0.8.22;\n\ninterface IDepositContract {\n    function deposit(bytes calldata pubkey, bytes calldata withdrawal_credentials, bytes calldata signature, bytes32 deposit_data_root) external payable;\n}\n\ncontract BatchTopUps {\n    address public _depositContract;\n\n    constructor(address depositContract) payable {\n        _depositContract = depositContract;\n    }\n\n    function _topup(bytes calldata pubkey, uint256 amount) internal {\n        bytes32 withdrawal_credentials = 0x0000000000000000000000000000000000000000000000000000000000000000;\n        bytes memory amount_bytes = to_little_endian_64(uint64(amount / 1 gwei));\n        bytes memory signature = abi.encodePacked(bytes32(0), bytes32(0), bytes32(0));\n        bytes32 pubkey_root = sha256(abi.encodePacked(pubkey, bytes16(0)));\n        bytes32 signature_root = sha256(abi.encodePacked(\n            sha256(abi.encodePacked(bytes32(0), bytes32(0))),\n            sha256(abi.encodePacked(bytes32(0), bytes32(0)))\n        ));\n        bytes32 deposit_data_root = sha256(abi.encodePacked(\n            sha256(abi.encodePacked(pubkey_root, withdrawal_credentials)),\n            sha256(abi.encodePacked(amount_bytes, bytes24(0), signature_root))\n        ));\n        IDepositContract(_depositContract).deposit{value: amount}(pubkey, abi.encodePacked(withdrawal_credentials), signature, deposit_data_root);\n    }\n\n    function to_little_endian_64(uint64 value) internal pure returns (bytes memory ret) {\n        ret = new bytes(8);\n        bytes8 bytesValue = bytes8(value);\n        // Byteswapping during copying to bytes.\n        ret[0] = bytesValue[7];\n        ret[1] = bytesValue[6];\n        ret[2] = bytesValue[5];\n        ret[3] = bytesValue[4];\n        ret[4] = bytesValue[3];\n        ret[5] = bytesValue[2];\n        ret[6] = bytesValue[1];\n        ret[7] = bytesValue[0];\n    }\n\n    function topupEqual(bytes calldata pubkeys) public payable {\n        uint32 pubkeysLen = uint32(pubkeys.length);\n        uint256 amount = msg.value * 48 / pubkeysLen;\n        uint32 pos = 0;\n        require(amount >= 1 ether, \"amount too low\");\n\n        while (pos < pubkeysLen) {\n            _topup(pubkeys[pos:pos+48], amount);\n            unchecked { pos += 48; }\n        }\n    }\n\n    function topup(bytes calldata pubkey) public payable {\n        uint256 amount = msg.value;\n        require(amount >= 1 ether, \"amount too low\");\n        _topup(pubkey, amount);\n    }\n\n}\n"
+        }
+    },
+    "settings": {
+        "optimizer": {
+            "enabled": true,
+            "runs": 200
+        },
+        "outputSelection": {
+            "*": {
+                "": [
+                    "ast"
+                ],
+                "*": [
+                    "abi",
+                    "metadata",
+                    "devdoc",
+                    "userdoc",
+                    "storageLayout",
+                    "evm.legacyAssembly",
+                    "evm.bytecode",
+                    "evm.deployedBytecode",
+                    "evm.methodIdentifiers",
+                    "evm.gasEstimates",
+                    "evm.assembly"
+                ]
+            }
+        },
+        "remappings": []
+    }
+}

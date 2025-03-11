@@ -1,10 +1,14 @@
-package deploydestruct
+package validatortopups
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,7 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/ethpandaops/spamoor/scenarios/deploy-destruct/contract"
+	"github.com/ethpandaops/spamoor/scenarios/validator-topups/contract"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/tester"
 	"github.com/ethpandaops/spamoor/txbuilder"
@@ -24,16 +28,20 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount   uint64
-	Throughput   uint64
-	MaxPending   uint64
-	MaxWallets   uint64
-	Rebroadcast  uint64
-	BaseFee      uint64
-	TipFee       uint64
-	Amount       uint64
-	GasLimit     uint64
-	RandomAmount bool
+	TotalCount      uint64
+	ListCount       uint64
+	Throughput      uint64
+	MaxPending      uint64
+	MaxWallets      uint64
+	Rebroadcast     uint64
+	BaseFee         uint64
+	TipFee          uint64
+	Amount          uint64
+	GasLimit        uint64
+	RandomAmount    bool
+	PubkeyList      string
+	BatchSize       uint64
+	DepositContract string
 }
 
 type Scenario struct {
@@ -41,7 +49,12 @@ type Scenario struct {
 	logger  *logrus.Entry
 	tester  *tester.Tester
 
-	contractAddr common.Address
+	depositContractAddr common.Address
+	contractAddr        common.Address
+
+	pubkeyList      [][]byte
+	pubkeyPosition  uint64
+	pubkeyListCount uint64
 
 	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
@@ -49,12 +62,13 @@ type Scenario struct {
 
 func NewScenario() scenariotypes.Scenario {
 	return &Scenario{
-		logger: logrus.WithField("scenario", "deploy-destruct"),
+		logger: logrus.WithField("scenario", "validator-topups"),
 	}
 }
 
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64VarP(&s.options.TotalCount, "count", "c", 0, "Total number of transfer transactions to send")
+	flags.Uint64Var(&s.options.ListCount, "list-count", 0, "Total number of topups for each public key")
 	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", 0, "Number of transfer transactions to send per slot")
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", 0, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", 0, "Maximum number of child wallets to use")
@@ -62,8 +76,12 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", 20, "Max fee per gas to use in transfer transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", 2, "Max tip per gas to use in transfer transactions (in gwei)")
 	flags.Uint64Var(&s.options.Amount, "amount", 20, "Transfer amount per transaction (in gwei)")
-	flags.Uint64Var(&s.options.GasLimit, "gaslimit", 10000000, "The gas limit for each deployment test tx")
+	flags.Uint64Var(&s.options.GasLimit, "gaslimit", 10000000, "The gas limit for each topup tx")
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", false, "Use random amounts for transactions (with --amount as limit)")
+	flags.StringVar(&s.options.PubkeyList, "pubkey-list", "", "The list of public keys to use for the validator topups")
+	flags.Uint64Var(&s.options.BatchSize, "batch-size", 50, "The number of public keys to topup in each transaction")
+	flags.StringVar(&s.options.DepositContract, "deposit-contract", "0x4242424242424242424242424242424242424242", "The address of the deposit contract to use for the validator topups")
+
 	return nil
 }
 
@@ -92,6 +110,40 @@ func (s *Scenario) Init(testerCfg *tester.TesterConfig) error {
 		s.pendingChan = make(chan bool, s.options.MaxPending)
 	}
 
+	s.depositContractAddr = common.HexToAddress(s.options.DepositContract)
+
+	if s.options.PubkeyList == "" {
+		return fmt.Errorf("pubkey list is required")
+	}
+
+	// Read pubkey list file
+	pubkeyBytes, err := os.ReadFile(s.options.PubkeyList)
+	if err != nil {
+		return fmt.Errorf("failed to read pubkey list file: %v", err)
+	}
+
+	// Parse pubkeys line by line
+	scanner := bufio.NewScanner(strings.NewReader(string(pubkeyBytes)))
+	s.pubkeyList = make([][]byte, 0)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		pubkey, err := hex.DecodeString(strings.TrimPrefix(line, "0x"))
+		if err != nil {
+			return fmt.Errorf("invalid pubkey hex in list: %v", err)
+		}
+		s.pubkeyList = append(s.pubkeyList, pubkey)
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error scanning pubkey list: %v", err)
+	}
+
+	if len(s.pubkeyList) == 0 {
+		return fmt.Errorf("no valid pubkeys found in list")
+	}
+
 	return nil
 }
 
@@ -103,14 +155,14 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 	startTime := time.Now()
 	var lastChan chan bool
 
-	s.logger.Infof("starting scenario: deploy-destruct")
+	s.logger.Infof("starting scenario: validator-topups")
 	contractReceipt, _, err := s.sendDeploymentTx()
 	if err != nil {
-		s.logger.Errorf("could not deploy test contract: %v", err)
+		s.logger.Errorf("could not deploy batch contract: %v", err)
 		return err
 	}
 	s.contractAddr = contractReceipt.ContractAddress
-	s.logger.Infof("deployed test contract: %v (confirmed in block #%v)", s.contractAddr.String(), contractReceipt.BlockNumber.String())
+	s.logger.Infof("deployed batch contract: %v (confirmed in block #%v)", s.contractAddr.String(), contractReceipt.BlockNumber.String())
 
 	for {
 		txIdx := txIdxCounter
@@ -123,7 +175,7 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 		pendingCount.Add(1)
 		currentChan := make(chan bool, 1)
 
-		go func(txIdx uint64, lastChan, currentChan chan bool) {
+		func(txIdx uint64, lastChan, currentChan chan bool) {
 			defer func() {
 				pendingCount.Add(-1)
 				currentChan <- true
@@ -158,6 +210,9 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 
 		count := txCount.Load() + uint64(pendingCount.Load())
 		if s.options.TotalCount > 0 && count >= s.options.TotalCount {
+			break
+		}
+		if s.options.ListCount > 0 && s.pubkeyListCount >= s.options.ListCount {
 			break
 		}
 		if s.options.Throughput > 0 {
@@ -207,7 +262,7 @@ func (s *Scenario) sendDeploymentTx() (*types.Receipt, *txbuilder.Client, error)
 		Gas:       2000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		_, deployTx, _, err := contract.DeployContract(transactOpts, client.GetEthClient())
+		_, deployTx, _, err := contract.DeployContract(transactOpts, client.GetEthClient(), s.depositContractAddr)
 		return deployTx, err
 	})
 
@@ -276,16 +331,40 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 	amount := uint256.NewInt(s.options.Amount)
 	amount = amount.Mul(amount, uint256.NewInt(1000000000))
 	if s.options.RandomAmount {
-		n, err := rand.Int(rand.Reader, amount.ToBig())
+		limit := amount.ToBig()
+		if limit.Cmp(big.NewInt(1000000000)) < 0 {
+			limit = big.NewInt(1000000000)
+		}
+		n, err := rand.Int(rand.Reader, limit)
 		if err == nil {
 			amount = uint256.MustFromBig(n)
 		}
 	}
 
-	testToken, err := contract.NewContract(s.contractAddr, client.GetEthClient())
+	topupContract, err := contract.NewContract(s.contractAddr, client.GetEthClient())
 	if err != nil {
 		return nil, nil, wallet, err
 	}
+
+	pubkeys := make([]byte, 0, s.options.BatchSize*48)
+	pos := s.pubkeyPosition
+	count := uint64(0)
+	for i := uint64(0); i < s.options.BatchSize; i++ {
+		pubkeys = append(pubkeys, s.pubkeyList[pos]...)
+
+		pos++
+		count++
+		if pos >= uint64(len(s.pubkeyList)) {
+			pos = 0
+			s.pubkeyListCount++
+
+			if s.options.ListCount > 0 && s.pubkeyListCount >= s.options.ListCount {
+				break
+			}
+		}
+	}
+	s.pubkeyPosition = pos
+	amount = amount.Mul(amount, uint256.NewInt(uint64(count)))
 
 	tx, err := wallet.BuildBoundTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
@@ -293,7 +372,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 		Gas:       s.options.GasLimit,
 		Value:     uint256.MustFromBig(amount.ToBig()),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		return testToken.Test(transactOpts, big.NewInt(0))
+		return topupContract.TopupEqual(transactOpts, pubkeys)
 	})
 	if err != nil {
 		return nil, nil, wallet, err
