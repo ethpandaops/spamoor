@@ -107,7 +107,7 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 	if initialRate == 0 {
 		initialRate = rate.Inf
 	}
-	limiter := rate.NewLimiter(initialRate, int(s.options.Throughput))
+	limiter := rate.NewLimiter(initialRate, 1)
 
 	for {
 		if err := limiter.Wait(context.Background()); err != nil {
