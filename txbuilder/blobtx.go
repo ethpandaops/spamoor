@@ -86,9 +86,9 @@ func ParseBlobRefsBytes(blobRefs []string, tx *types.BlobTx) ([]byte, error) {
 				blobLen := -1
 				if len(refParts) > 1 {
 					var err error
-					blobLen, err = strconv.Atoi(refParts[2])
+					blobLen, err = strconv.Atoi(refParts[1])
 					if err != nil {
-						return nil, fmt.Errorf("invalid repeat count: %v", refParts[2])
+						return nil, fmt.Errorf("invalid random count: %v", refParts[1])
 					}
 				} else {
 					blobLen = mathRand.Intn((params.BlobTxFieldElementsPerBlob * (params.BlobTxBytesPerFieldElement - 1)) - len(blobBytes))
