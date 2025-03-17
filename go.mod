@@ -9,6 +9,7 @@ require (
 	github.com/holiman/uint256 v1.3.2
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/pflag v1.0.6
+	golang.org/x/time v0.5.0
 )
 
 require (
