@@ -77,22 +77,22 @@ func (client *Client) GetRPCHost() string {
 	return client.rpchost
 }
 
-func (client *Client) UpdateWallet(wallet *Wallet) error {
+func (client *Client) UpdateWallet(ctx context.Context, wallet *Wallet) error {
 	if wallet.GetChainId() == nil {
-		chainId, err := client.GetChainId()
+		chainId, err := client.GetChainId(ctx)
 		if err != nil {
 			return err
 		}
 		wallet.SetChainId(chainId)
 	}
 
-	nonce, err := client.GetNonceAt(wallet.GetAddress(), nil)
+	nonce, err := client.GetNonceAt(ctx, wallet.GetAddress(), nil)
 	if err != nil {
 		return err
 	}
 	wallet.SetNonce(nonce)
 
-	balance, err := client.GetBalanceAt(wallet.GetAddress())
+	balance, err := client.GetBalanceAt(ctx, wallet.GetAddress())
 	if err != nil {
 		return err
 	}
@@ -101,43 +101,42 @@ func (client *Client) UpdateWallet(wallet *Wallet) error {
 	return nil
 }
 
-func (client *Client) getContext() (context.Context, context.CancelFunc) {
-	ctx := context.Background()
+func (client *Client) getContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if client.Timeout > 0 {
 		return context.WithTimeout(ctx, client.Timeout)
 	}
 	return context.WithCancel(ctx)
 }
 
-func (client *Client) GetChainId() (*big.Int, error) {
-	ctx, cancel := client.getContext()
+func (client *Client) GetChainId(ctx context.Context) (*big.Int, error) {
+	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
 	return client.client.ChainID(ctx)
 }
 
-func (client *Client) GetNonceAt(wallet common.Address, blockNumber *big.Int) (uint64, error) {
-	ctx, cancel := client.getContext()
+func (client *Client) GetNonceAt(ctx context.Context, wallet common.Address, blockNumber *big.Int) (uint64, error) {
+	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
 	return client.client.NonceAt(ctx, wallet, blockNumber)
 }
 
-func (client *Client) GetPendingNonceAt(wallet common.Address) (uint64, error) {
-	ctx, cancel := client.getContext()
+func (client *Client) GetPendingNonceAt(ctx context.Context, wallet common.Address) (uint64, error) {
+	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
 	return client.client.PendingNonceAt(ctx, wallet)
 }
 
-func (client *Client) GetBalanceAt(wallet common.Address) (*big.Int, error) {
-	ctx, cancel := client.getContext()
+func (client *Client) GetBalanceAt(ctx context.Context, wallet common.Address) (*big.Int, error) {
+	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
 	return client.client.BalanceAt(ctx, wallet, nil)
 }
 
-func (client *Client) GetSuggestedFee() (*big.Int, *big.Int, error) {
+func (client *Client) GetSuggestedFee(ctx context.Context) (*big.Int, *big.Int, error) {
 	client.gasSuggestionMutex.Lock()
 	defer client.gasSuggestionMutex.Unlock()
 
@@ -145,7 +144,7 @@ func (client *Client) GetSuggestedFee() (*big.Int, *big.Int, error) {
 		return client.lastGasCap, client.lastTipCap, nil
 	}
 
-	ctx, cancel := client.getContext()
+	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
 	gasCap, err := client.client.SuggestGasPrice(ctx)
@@ -163,8 +162,8 @@ func (client *Client) GetSuggestedFee() (*big.Int, *big.Int, error) {
 	return gasCap, tipCap, nil
 }
 
-func (client *Client) SendTransaction2(tx *types.Transaction) error {
-	ctx, cancel := client.getContext()
+func (client *Client) SendTransaction2(ctx context.Context, tx *types.Transaction) error {
+	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
 	return client.SendTransactionCtx(ctx, tx)
@@ -182,7 +181,7 @@ func (client *Client) GetTransactionReceiptCtx(ctx context.Context, txHash commo
 	return client.client.TransactionReceipt(ctx, txHash)
 }
 
-func (client *Client) GetBlockHeight() (uint64, error) {
+func (client *Client) GetBlockHeight(ctx context.Context) (uint64, error) {
 	client.blockHeightMutex.Lock()
 	defer client.blockHeightMutex.Unlock()
 
@@ -192,7 +191,7 @@ func (client *Client) GetBlockHeight() (uint64, error) {
 
 	client.logger.Tracef("get block number")
 
-	ctx, cancel := client.getContext()
+	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
 	blockHeight, err := client.client.BlockNumber(ctx)

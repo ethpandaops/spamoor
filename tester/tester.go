@@ -1,6 +1,7 @@
 package tester
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -15,6 +16,9 @@ import (
 )
 
 type Tester struct {
+	baseCtx        context.Context
+	ctx            context.Context
+	cancel         context.CancelFunc
 	config         *TesterConfig
 	logger         *logrus.Entry
 	running        bool
@@ -39,10 +43,11 @@ type TesterConfig struct {
 	RefillInterval uint64
 }
 
-func NewTester(config *TesterConfig) *Tester {
+func NewTester(ctx context.Context, config *TesterConfig) *Tester {
 	return &Tester{
-		config: config,
-		logger: logrus.NewEntry(logrus.StandardLogger()),
+		baseCtx: ctx,
+		config:  config,
+		logger:  logrus.NewEntry(logrus.StandardLogger()),
 	}
 }
 
@@ -57,6 +62,7 @@ func (tester *Tester) Start(seed string) error {
 		return fmt.Errorf("already started")
 	}
 	tester.running = true
+	tester.ctx, tester.cancel = context.WithCancel(tester.baseCtx)
 
 	tester.logger.WithFields(logrus.Fields{
 		"version": utils.GetBuildVersion(),
@@ -103,8 +109,13 @@ func (tester *Tester) Start(seed string) error {
 
 func (tester *Tester) Stop() {
 	if tester.running {
+		tester.cancel()
 		tester.running = false
 	}
+}
+
+func (tester *Tester) GetContext() context.Context {
+	return tester.ctx
 }
 
 func (tester *Tester) watchClientStatusLoop() {

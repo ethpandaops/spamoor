@@ -48,7 +48,7 @@ func (s *Scenario) Run(t *tester.Tester) error {
 
 	for i := 0; i < int(s.wallets); i++ {
 		wallet := t.GetWallet(tester.SelectByIndex, i)
-		pendingNonce, _ := client.GetPendingNonceAt(wallet.GetAddress())
+		pendingNonce, _ := client.GetPendingNonceAt(t.GetContext(), wallet.GetAddress())
 
 		s.logger.Infof("Child Wallet %4d  %v  nonce: %6d (%6d)  balance: %v ETH", i+1, wallet.GetAddress().String(), wallet.GetNonce(), pendingNonce, utils.WeiToEther(uint256.MustFromBig(wallet.GetBalance())))
 	}

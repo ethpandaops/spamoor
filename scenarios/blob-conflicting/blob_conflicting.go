@@ -191,7 +191,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 
 	if feeCap == nil || tipCap == nil {
 		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee()
+		feeCap, tipCap, err = client.GetSuggestedFee(s.tester.GetContext())
 		if err != nil {
 			return nil, client, wallet, err
 		}
@@ -367,7 +367,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 	}
 	if errCount == 2 {
 		// reset nonce if tx was not sent
-		wallet.ResetPendingNonce(client)
+		wallet.ResetPendingNonce(s.tester.GetContext(), client)
 	}
 	if errCount == 0 {
 		return nil, nil, wallet, err1

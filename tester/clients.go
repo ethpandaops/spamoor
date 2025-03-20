@@ -27,7 +27,7 @@ func (tester *Tester) PrepareClients() error {
 				return
 			}
 			client.Timeout = 10 * time.Second
-			cliChainId, err := client.GetChainId()
+			cliChainId, err := client.GetChainId(tester.ctx)
 			if err != nil {
 				tester.logger.Errorf("failed getting chainid from '%v': %v", client.GetRPCHost(), err.Error())
 				return
@@ -64,7 +64,7 @@ func (tester *Tester) watchClientStatus() error {
 		go func(idx int, client *txbuilder.Client) {
 			defer wg.Done()
 
-			blockHeight, err := client.GetBlockHeight()
+			blockHeight, err := client.GetBlockHeight(tester.ctx)
 			if err != nil {
 				tester.logger.Warnf("client check failed: %v", err)
 			} else {

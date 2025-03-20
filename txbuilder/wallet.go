@@ -201,11 +201,11 @@ func (wallet *Wallet) ReplaceBlobTx(txData *types.BlobTx, nonce uint64) (*types.
 	return wallet.signTx(txData)
 }
 
-func (wallet *Wallet) ResetPendingNonce(client *Client) {
+func (wallet *Wallet) ResetPendingNonce(ctx context.Context, client *Client) {
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
 
-	nonce, err := client.GetPendingNonceAt(wallet.address)
+	nonce, err := client.GetPendingNonceAt(ctx, wallet.address)
 	if nonce < wallet.confirmedNonce {
 		nonce = wallet.confirmedNonce
 	}

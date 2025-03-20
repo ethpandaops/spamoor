@@ -24,7 +24,7 @@ func (tester *Tester) PrepareWallets(seed string) error {
 	}
 	tester.rootWallet = rootWallet
 
-	err = tester.GetClient(SelectRandom, 0).UpdateWallet(tester.rootWallet)
+	err = tester.GetClient(SelectRandom, 0).UpdateWallet(tester.ctx, tester.rootWallet)
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func (tester *Tester) prepareChildWallet(childIdx uint64, client *txbuilder.Clie
 	if err != nil {
 		return nil, nil, err
 	}
-	err = client.UpdateWallet(childWallet)
+	err = client.UpdateWallet(tester.ctx, childWallet)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -158,7 +158,7 @@ func (tester *Tester) prepareChildWallet(childIdx uint64, client *txbuilder.Clie
 func (tester *Tester) resupplyChildWallets() error {
 	client := tester.GetClient(SelectRandom, 0)
 
-	err := client.UpdateWallet(tester.rootWallet)
+	err := client.UpdateWallet(tester.ctx, tester.rootWallet)
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func (tester *Tester) resupplyChildWallets() error {
 			}
 
 			childWallet := tester.childWallets[childIdx]
-			err := client.UpdateWallet(childWallet)
+			err := client.UpdateWallet(tester.ctx, childWallet)
 			if err != nil {
 				walletErr = err
 				return
@@ -251,7 +251,7 @@ func (tester *Tester) resupplyChildWallets() error {
 
 func (tester *Tester) CheckChildWalletBalance(childWallet *txbuilder.Wallet) (*types.Transaction, error) {
 	client := tester.GetClient(SelectRandom, 0)
-	balance, err := client.GetBalanceAt(childWallet.GetAddress())
+	balance, err := client.GetBalanceAt(tester.ctx, childWallet.GetAddress())
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +296,7 @@ func (tester *Tester) buildWalletFundingTx(childWallet *txbuilder.Wallet, client
 	if client == nil {
 		client = tester.GetClient(SelectByIndex, 0)
 	}
-	feeCap, tipCap, err := client.GetSuggestedFee()
+	feeCap, tipCap, err := client.GetSuggestedFee(tester.ctx)
 	if err != nil {
 		return nil, err
 	}

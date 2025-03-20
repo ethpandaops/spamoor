@@ -24,6 +24,7 @@ type TxPool struct {
 }
 
 type TxPoolOptions struct {
+	Context          context.Context
 	GetClientFn      func(index int, random bool) *Client
 	GetClientCountFn func() int
 }
@@ -49,6 +50,10 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 		processStaleChan: make(chan uint64, 1),
 	}
 
+	if options.Context == nil {
+		options.Context = context.Background()
+	}
+
 	go pool.runTxPoolLoop()
 	go pool.processStaleTransactionsLoop()
 
@@ -68,7 +73,7 @@ func (pool *TxPool) runTxPoolLoop() {
 		if newHighestBlockNumber > highestBlockNumber {
 			if highestBlockNumber > 0 || newHighestBlockNumber < 10 {
 				for blockNumber := highestBlockNumber + 1; blockNumber <= newHighestBlockNumber; blockNumber++ {
-					err := pool.processBlock(blockNumber)
+					err := pool.processBlock(pool.options.Context, blockNumber)
 					if err != nil {
 						logrus.WithError(err).Errorf("error processing block %v", blockNumber)
 					}
@@ -78,11 +83,18 @@ func (pool *TxPool) runTxPoolLoop() {
 			highestBlockNumber = newHighestBlockNumber
 
 			select {
+			case <-pool.options.Context.Done():
+				return
 			case pool.processStaleChan <- highestBlockNumber:
 			default:
 			}
 		}
-		time.Sleep(3 * time.Second)
+
+		select {
+		case <-pool.options.Context.Done():
+			return
+		case <-time.After(3 * time.Second):
+		}
 	}
 }
 
@@ -93,21 +105,26 @@ func (pool *TxPool) processStaleTransactionsLoop() {
 		}
 	}()
 
-	for blockNumber := range pool.processStaleChan {
-		pool.walletsMutex.RLock()
-		wallets := make([]*Wallet, 0, len(pool.wallets))
-		for _, wallet := range pool.wallets {
-			wallets = append(wallets, wallet)
-		}
-		pool.walletsMutex.RUnlock()
+	for {
+		select {
+		case <-pool.options.Context.Done():
+			return
+		case blockNumber := <-pool.processStaleChan:
+			pool.walletsMutex.RLock()
+			wallets := make([]*Wallet, 0, len(pool.wallets))
+			for _, wallet := range pool.wallets {
+				wallets = append(wallets, wallet)
+			}
+			pool.walletsMutex.RUnlock()
 
-		for _, wallet := range wallets {
-			pool.processStaleConfirmations(blockNumber, wallet)
+			for _, wallet := range wallets {
+				pool.processStaleConfirmations(blockNumber, wallet)
+			}
 		}
 	}
 }
 
-func (pool *TxPool) processBlock(blockNumber uint64) error {
+func (pool *TxPool) processBlock(ctx context.Context, blockNumber uint64) error {
 	pool.lastBlockNumber = blockNumber
 
 	pool.walletsMutex.RLock()
@@ -129,13 +146,13 @@ func (pool *TxPool) processBlock(blockNumber uint64) error {
 	}
 
 	t1 := time.Now()
-	blockBody := pool.getBlockBody(blockNumber)
+	blockBody := pool.getBlockBody(ctx, blockNumber)
 	if blockBody == nil {
 		return fmt.Errorf("could not load block body")
 	}
 
 	txCount := len(blockBody.Transactions())
-	receipts, err := pool.getBlockReceipts(blockNumber, txCount)
+	receipts, err := pool.getBlockReceipts(ctx, blockNumber, txCount)
 	if receipts == nil {
 		return fmt.Errorf("could not load block receipts: %w", err)
 	}
@@ -216,10 +233,10 @@ func (pool *TxPool) getHighestBlockNumber() uint64 {
 	return highestBlockNumber
 }
 
-func (pool *TxPool) getBlockBody(blockNumber uint64) *types.Block {
+func (pool *TxPool) getBlockBody(ctx context.Context, blockNumber uint64) *types.Block {
 	clientCount := pool.options.GetClientCountFn()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	for i := 0; i < clientCount; i++ {
@@ -237,10 +254,10 @@ func (pool *TxPool) getBlockBody(blockNumber uint64) *types.Block {
 	return nil
 }
 
-func (pool *TxPool) getBlockReceipts(blockNumber uint64, txCount int) ([]*types.Receipt, error) {
+func (pool *TxPool) getBlockReceipts(ctx context.Context, blockNumber uint64, txCount int) ([]*types.Receipt, error) {
 	clientCount := pool.options.GetClientCountFn()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	var receiptErr error
@@ -446,7 +463,7 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 		var lastNonce uint64
 		var err error
 		for retry := 0; retry < 3; retry++ {
-			lastNonce, err = pool.options.GetClientFn(retry, true).GetNonceAt(wallet.address, big.NewInt(int64(blockNumber)))
+			lastNonce, err = pool.options.GetClientFn(retry, true).GetNonceAt(pool.options.Context, wallet.address, big.NewInt(int64(blockNumber)))
 			if err == nil {
 				break
 			}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -115,7 +116,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	tester := tester.NewTester(testerConfig)
+	tester := tester.NewTester(context.Background(), testerConfig)
 	err = tester.Start(cliArgs.seed)
 	if err != nil {
 		panic(err)

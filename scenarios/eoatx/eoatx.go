@@ -4,12 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"golang.org/x/time/rate"
 	"math/big"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -196,7 +197,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 
 	if feeCap == nil || tipCap == nil {
 		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee()
+		feeCap, tipCap, err = client.GetSuggestedFee(s.tester.GetContext())
 		if err != nil {
 			return nil, client, wallet, err
 		}
@@ -310,7 +311,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 	})
 	if err != nil {
 		// reset nonce if tx was not sent
-		wallet.ResetPendingNonce(client)
+		wallet.ResetPendingNonce(s.tester.GetContext(), client)
 
 		return nil, client, wallet, err
 	}
