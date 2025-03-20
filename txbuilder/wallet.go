@@ -154,7 +154,7 @@ func (wallet *Wallet) BuildBlobTx(txData *types.BlobTx) (*types.Transaction, err
 
 func (wallet *Wallet) BuildSetCodeTx(txData *types.SetCodeTx) (*types.Transaction, error) {
 	wallet.nonceMutex.Lock()
-	txData.ChainID = wallet.chainid.Uint64()
+	txData.ChainID = uint256.NewInt(wallet.chainid.Uint64())
 	txData.Nonce = wallet.pendingNonce.Add(1) - 1
 	wallet.nonceMutex.Unlock()
 	return wallet.signTx(txData)

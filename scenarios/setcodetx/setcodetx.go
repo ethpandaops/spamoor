@@ -385,7 +385,7 @@ func (s *Scenario) buildSetCodeAuthorizations(txIdx uint64) []types.SetCodeAutho
 		}
 
 		authorization := types.SetCodeAuthorization{
-			ChainID: s.tester.GetRootWallet().GetChainId().Uint64(),
+			ChainID: *uint256.NewInt(s.tester.GetRootWallet().GetChainId().Uint64()),
 			Address: codeAddr,
 			Nonce:   delegator.GetNextNonce(),
 		}

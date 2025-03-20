@@ -1,15 +1,15 @@
 module github.com/ethpandaops/spamoor
 
-go 1.22
+go 1.23.0
 
-toolchain go1.22.5
+toolchain go1.23.7
 
 require (
-	github.com/ethereum/go-ethereum v1.14.12
+	github.com/ethereum/go-ethereum v1.15.5
 	github.com/holiman/uint256 v1.3.2
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/pflag v1.0.6
-	golang.org/x/time v0.5.0
+	golang.org/x/time v0.9.0
 )
 
 require (
@@ -30,14 +30,12 @@ require (
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
-	github.com/supranational/blst v0.3.13 // indirect
+	github.com/supranational/blst v0.3.14 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
+	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa // indirect
 	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
+	golang.org/x/sys v0.29.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
-
-replace github.com/ethereum/go-ethereum => github.com/s1na/go-ethereum v0.0.0-20250103133732-7e1b0ba7e83f
