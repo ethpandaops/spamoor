@@ -17,7 +17,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/scenariotypes"
-	"github.com/ethpandaops/spamoor/tester"
+	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
@@ -35,17 +35,17 @@ type ScenarioOptions struct {
 }
 
 type Scenario struct {
-	options ScenarioOptions
-	logger  *logrus.Entry
-	tester  *tester.Tester
+	options    ScenarioOptions
+	logger     *logrus.Entry
+	walletPool *spamoor.WalletPool
 
 	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
 }
 
-func NewScenario() scenariotypes.Scenario {
+func NewScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
 	return &Scenario{
-		logger: logrus.WithField("scenario", "blobs"),
+		logger: logger.WithField("scenario", "blobs"),
 	}
 }
 
@@ -62,24 +62,26 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	return nil
 }
 
-func (s *Scenario) Init(testerCfg *tester.TesterConfig) error {
+func (s *Scenario) Init(walletPool *spamoor.WalletPool) error {
+	s.walletPool = walletPool
+
 	if s.options.TotalCount == 0 && s.options.Throughput == 0 {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
 	if s.options.MaxWallets > 0 {
-		testerCfg.WalletCount = s.options.MaxWallets
+		walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.TotalCount > 0 {
 		if s.options.TotalCount < 1000 {
-			testerCfg.WalletCount = s.options.TotalCount
+			walletPool.SetWalletCount(s.options.TotalCount)
 		} else {
-			testerCfg.WalletCount = 1000
+			walletPool.SetWalletCount(1000)
 		}
 	} else {
 		if s.options.Throughput*10 < 1000 {
-			testerCfg.WalletCount = s.options.Throughput * 10
+			walletPool.SetWalletCount(s.options.Throughput * 10)
 		} else {
-			testerCfg.WalletCount = 1000
+			walletPool.SetWalletCount(1000)
 		}
 	}
 
@@ -90,8 +92,7 @@ func (s *Scenario) Init(testerCfg *tester.TesterConfig) error {
 	return nil
 }
 
-func (s *Scenario) Run(tester *tester.Tester) error {
-	s.tester = tester
+func (s *Scenario) Run() error {
 	txIdxCounter := uint64(0)
 	pendingCount := atomic.Int64{}
 	txCount := atomic.Uint64{}
@@ -137,7 +138,7 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 				logger = logger.WithField("nonce", tx.Nonce())
 			}
 			if wallet != nil {
-				logger = logger.WithField("wallet", s.tester.GetWalletIndex(wallet.GetAddress()))
+				logger = logger.WithField("wallet", s.walletPool.GetWalletIndex(wallet.GetAddress()))
 			}
 			if lastChan != nil {
 				<-lastChan
@@ -171,8 +172,8 @@ func (s *Scenario) Run(tester *tester.Tester) error {
 }
 
 func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
-	client := s.tester.GetClient(tester.SelectByIndex, int(txIdx))
-	wallet := s.tester.GetWallet(tester.SelectByIndex, int(txIdx))
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 
 	var feeCap *big.Int
 	var tipCap *big.Int
@@ -190,7 +191,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 
 	if feeCap == nil || tipCap == nil {
 		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.tester.GetContext())
+		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
 		if err != nil {
 			return nil, client, wallet, err
 		}
@@ -229,7 +230,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 		}
 	}
 
-	toAddr := s.tester.GetWallet(tester.SelectByIndex, int(txIdx)+1).GetAddress()
+	toAddr := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
 	blobTx, err := txbuilder.BuildBlobTx(&txbuilder.TxMetadata{
 		GasFeeCap:  uint256.MustFromBig(feeCap),
 		GasTipCap:  uint256.MustFromBig(tipCap),
@@ -253,7 +254,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 	}
 
 	s.pendingWGroup.Add(1)
-	err = s.tester.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     rebroadcast,
 		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
@@ -309,7 +310,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 	})
 	if err != nil {
 		// reset nonce if tx was not sent
-		wallet.ResetPendingNonce(s.tester.GetContext(), client)
+		wallet.ResetPendingNonce(s.walletPool.GetContext(), client)
 
 		return nil, client, wallet, err
 	}
