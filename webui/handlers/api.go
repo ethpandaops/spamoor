@@ -10,6 +10,7 @@ import (
 
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
 
@@ -147,52 +148,6 @@ func (fh *FrontendHandler) CreateSpammer(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(spammer.GetID())
 }
 
-func (fh *FrontendHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id, err := strconv.ParseInt(vars["id"], 10, 64)
-	if err != nil {
-		http.Error(w, "Invalid spammer ID", http.StatusBadRequest)
-		return
-	}
-
-	spammer := fh.daemon.GetSpammer(id)
-	if spammer == nil {
-		http.Error(w, "Spammer not found", http.StatusNotFound)
-		return
-	}
-
-	// Get last 1000 log entries
-	logScope := spammer.GetLogScope()
-	entries := logScope.GetLogEntries(time.Time{}, 1000)
-
-	// Convert to a simpler format for JSON
-	type LogEntry struct {
-		Time    time.Time         `json:"time"`
-		Level   string            `json:"level"`
-		Message string            `json:"message"`
-		Fields  map[string]string `json:"fields"`
-	}
-
-	logs := make([]LogEntry, len(entries))
-	for i, entry := range entries {
-		// Convert fields to string map
-		fields := make(map[string]string)
-		for k, v := range entry.Data {
-			fields[k] = fmt.Sprint(v)
-		}
-
-		logs[i] = LogEntry{
-			Time:    entry.Time,
-			Level:   entry.Level.String(),
-			Message: entry.Message,
-			Fields:  fields,
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(logs)
-}
-
 func (fh *FrontendHandler) GetSpammerDetails(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
@@ -259,4 +214,120 @@ func (fh *FrontendHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+type LogEntry struct {
+	Time    string            `json:"time"`
+	Level   string            `json:"level"`
+	Message string            `json:"message"`
+	Fields  map[string]string `json:"fields"`
+}
+
+func (fh *FrontendHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid spammer ID", http.StatusBadRequest)
+		return
+	}
+
+	spammer := fh.daemon.GetSpammer(id)
+	if spammer == nil {
+		http.Error(w, "Spammer not found", http.StatusNotFound)
+		return
+	}
+
+	// Get last 1000 log entries
+	logScope := spammer.GetLogScope()
+	entries := logScope.GetLogEntries(time.Time{}, 1000)
+
+	logs := make([]LogEntry, len(entries))
+	for i, entry := range entries {
+		fields := make(map[string]string)
+		for k, v := range entry.Data {
+			fields[k] = fmt.Sprint(v)
+		}
+
+		logs[i] = LogEntry{
+			Time:    entry.Time.Format(time.RFC3339Nano),
+			Level:   entry.Level.String(),
+			Message: entry.Message,
+			Fields:  fields,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
+}
+
+func (fh *FrontendHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid spammer ID", http.StatusBadRequest)
+		return
+	}
+
+	spammer := fh.daemon.GetSpammer(id)
+	if spammer == nil {
+		http.Error(w, "Spammer not found", http.StatusNotFound)
+		return
+	}
+
+	// Set headers for SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	// Get initial timestamp
+	var lastTime time.Time
+	if timeStr := r.URL.Query().Get("since"); timeStr != "" {
+		if t, err := time.Parse(time.RFC3339Nano, timeStr); err == nil {
+			lastTime = t
+		} else {
+			logrus.Warnf("Failed to parse timestamp %s: %v", timeStr, err)
+		}
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	// Stream logs until client disconnects
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		default:
+			entries := spammer.GetLogScope().GetLogEntries(lastTime, 1000)
+			if len(entries) > 0 {
+				// Convert to JSON format
+				logs := make([]LogEntry, len(entries))
+				for i, entry := range entries {
+					fields := make(map[string]string)
+					for k, v := range entry.Data {
+						fields[k] = fmt.Sprint(v)
+					}
+
+					logs[i] = LogEntry{
+						Time:    entry.Time.Format(time.RFC3339Nano),
+						Level:   entry.Level.String(),
+						Message: entry.Message,
+						Fields:  fields,
+					}
+					lastTime = entry.Time
+				}
+
+				// Send as SSE event
+				data, _ := json.Marshal(logs)
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
 }

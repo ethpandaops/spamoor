@@ -72,7 +72,7 @@ func (lmb *logMemBuffer) GetLogEntries(from time.Time, limit int) []*logrus.Entr
 		return entries
 	}
 
-	for !from.IsZero() && len(entries) > 0 && entries[0].Time.Before(from) {
+	for !from.IsZero() && len(entries) > 0 && (entries[0].Time.Before(from) || entries[0].Time.Equal(from)) {
 		entries = entries[1:]
 	}
 

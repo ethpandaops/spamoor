@@ -33,6 +33,7 @@ type Spammer struct {
 	scenarioCtx    context.Context
 	scenarioCancel context.CancelFunc
 	running        bool
+	runningChan    chan struct{}
 }
 
 type SpammerConfig struct {
@@ -148,7 +149,13 @@ func (s *Spammer) Pause() error {
 	}
 
 	scenarioCancel()
-	return nil
+
+	select {
+	case <-s.runningChan:
+		return nil
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("failed to pause spammer: timeout")
+	}
 }
 
 func (s *Spammer) runScenario() {
@@ -161,6 +168,8 @@ func (s *Spammer) runScenario() {
 	if s.scenarioCancel != nil {
 		s.scenarioCancel()
 	}
+	runningChan := make(chan struct{})
+	s.runningChan = runningChan
 	s.scenarioCtx, s.scenarioCancel = context.WithCancel(s.daemon.ctx)
 
 	var scenarioErr error
@@ -175,6 +184,7 @@ func (s *Spammer) runScenario() {
 		}
 
 		s.daemon.spammerWg.Done()
+		close(s.runningChan)
 
 		if s.daemon.ctx.Err() != nil {
 			return

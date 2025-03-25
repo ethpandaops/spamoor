@@ -48,11 +48,11 @@
                 </button>
                 <div class="btn-group">
                   {{ if or (eq .Status 0) (eq .Status 2) (eq .Status 3) }}
-                    <button class="btn btn-sm btn-success" onclick="startSpammer({{ .ID }})" title="Start Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+                    <button class="btn btn-sm btn-success spammer-toggle-btn" onclick="startSpammer({{ .ID }})" title="Start Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                       <i class="fas fa-play"></i>
                     </button>
                   {{ else }}
-                    <button class="btn btn-sm btn-warning" onclick="pauseSpammer({{ .ID }})" title="Pause Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+                    <button class="btn btn-sm btn-warning spammer-toggle-btn" onclick="pauseSpammer({{ .ID }})" title="Pause Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                       <i class="fas fa-pause"></i>
                     </button>
                   {{ end }}
@@ -183,13 +183,53 @@ const MAX_LOG_ENTRIES = 5000;
 const logRefreshTimers = new Map();
 
 async function startSpammer(id) {
-  await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
-  window.location.reload();
+  try {
+    await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
+    
+    const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
+    const statusCell = row.querySelector('td:nth-child(4)');
+    const toggleButton = row.querySelector('.spammer-toggle-btn');
+    
+    statusCell.innerHTML = '<span class="badge bg-success">Running</span>';
+    
+    toggleButton.className = 'btn btn-sm btn-warning spammer-toggle-btn';
+    toggleButton.setAttribute('onclick', `pauseSpammer(${id})`);
+    toggleButton.setAttribute('title', 'Pause Spammer');
+    toggleButton.innerHTML = '<i class="fas fa-pause"></i>';
+
+    const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
+    if (tooltip) {
+      tooltip.dispose();
+    }
+    new bootstrap.Tooltip(toggleButton);
+  } catch (err) {
+    alert('Failed to start spammer: ' + err.message);
+  }
 }
 
 async function pauseSpammer(id) {
-  await fetch(`/api/spammer/${id}/pause`, {method: 'POST'});
-  window.location.reload();
+  try {
+    await fetch(`/api/spammer/${id}/pause`, {method: 'POST'});
+    
+    const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
+    const statusCell = row.querySelector('td:nth-child(4)');
+    const toggleButton = row.querySelector('.spammer-toggle-btn');
+    
+    statusCell.innerHTML = '<span class="badge bg-info">Paused</span>';
+    
+    toggleButton.className = 'btn btn-sm btn-success spammer-toggle-btn';
+    toggleButton.setAttribute('onclick', `startSpammer(${id})`);
+    toggleButton.setAttribute('title', 'Start Spammer');
+    toggleButton.innerHTML = '<i class="fas fa-play"></i>';
+
+    const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
+    if (tooltip) {
+      tooltip.dispose();
+    }
+    new bootstrap.Tooltip(toggleButton);
+  } catch (err) {
+    alert('Failed to pause spammer: ' + err.message);
+  }
 }
 
 async function deleteSpammer(id) {
@@ -251,98 +291,6 @@ async function submitNewSpammer() {
   }
 }
 
-async function toggleLogs(button, id) {
-  const tooltips = document.querySelectorAll('[data-bs-toggle="tooltip"]');
-  tooltips.forEach(el => bootstrap.Tooltip.getInstance(el)?.hide());
-
-  const icon = button.querySelector('i');
-  const logRow = document.querySelector(`tr.log-row[data-spammer-id="${id}"]`);
-  const logsDiv = logRow.querySelector('.logs');
-  
-  if (logRow.classList.contains('d-none')) {
-    icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
-    logRow.classList.remove('d-none');
-    await refreshLogs(id, logsDiv);
-    logRefreshTimers.set(id, setInterval(() => refreshLogs(id, logsDiv), LOG_REFRESH_INTERVAL));
-  } else {
-    icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
-    logRow.classList.add('d-none');
-    const timer = logRefreshTimers.get(id);
-    if (timer) {
-      clearInterval(timer);
-      logRefreshTimers.delete(id);
-    }
-  }
-}
-
-async function refreshLogs(id, logsDiv) {
-  try {
-    const container = logsDiv.closest('.log-container');
-    const isScrolledToBottom = isAtBottom(container);
-    const lastScrollTop = container.scrollTop;
-    const logs = await fetch(`/api/spammer/${id}/logs`).then(r => r.json());
-    
-    const formattedLogs = logs.map(log => {
-      const fields = Object.entries(log.fields)
-        .filter(([key]) => key !== 'scenario');
-      
-      let fieldBadges = '';
-      if (fields.length > 0) {
-        const rpcField = fields.find(([key]) => key === 'rpc');
-        const otherFields = fields.filter(([key]) => key !== 'rpc');
-        
-        const visibleFields = otherFields.slice(0, 2)
-          .map(([key, value]) => `<span class="badge">${key}=${value}</span>`)
-          .join('');
-          
-        const hiddenFields = [
-          ...(rpcField ? [rpcField] : []),
-          ...otherFields.slice(2)
-        ];
-        
-        const moreButton = hiddenFields.length > 0 
-          ? `<span class="badge more-fields" data-bs-toggle="tooltip" data-bs-placement="top" 
-              title="${hiddenFields.map(([k,v]) => `${k}=${v}`).join('\n')}">...</span>`
-          : '';
-
-        fieldBadges = `<div class="log-fields">${visibleFields}${moreButton}</div>`;
-      }
-
-      return `
-        <div class="log-entry ${getLogLevelClass(log.level)}">
-          <div class="d-flex align-items-center gap-2">
-            <span class="text-muted small">${new Date(log.time).toLocaleString()}</span>
-            <span class="badge ${getLogLevelBadge(log.level)}">${log.level}</span>
-            <span class="message-text">${log.message}</span>
-            ${fieldBadges}
-          </div>
-        </div>
-      `;
-    }).join('');
-    
-    logsDiv.innerHTML = formattedLogs;
-    
-    const entries = logsDiv.querySelectorAll('.log-entry');
-    if (entries.length > MAX_LOG_ENTRIES) {
-      const toRemove = entries.length - MAX_LOG_ENTRIES;
-      for (let i = 0; i < toRemove; i++) {
-        entries[i].remove();
-      }
-    }
-    
-    if (isScrolledToBottom) {
-      container.scrollTop = container.scrollHeight;
-    } else {
-      container.scrollTop = lastScrollTop;
-    }
-
-    const tooltips = logsDiv.querySelectorAll('[data-bs-toggle="tooltip"]');
-    tooltips.forEach(el => new bootstrap.Tooltip(el));
-  } catch (err) {
-    console.error('Failed to refresh logs:', err);
-  }
-}
-
 function isAtBottom(element) {
   const threshold = 50;
   return element.scrollHeight - element.scrollTop - element.clientHeight < threshold;
@@ -365,6 +313,143 @@ function getLogLevelBadge(level) {
     default: return 'bg-secondary';
   }
 }
+
+function toggleLogs(button, id) {
+  const tooltips = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+  tooltips.forEach(el => bootstrap.Tooltip.getInstance(el)?.hide());
+
+  const icon = button.querySelector('i');
+  const logRow = document.querySelector(`tr.log-row[data-spammer-id="${id}"]`);
+  const logsDiv = logRow.querySelector('.logs');
+  
+  if (logRow.classList.contains('d-none')) {
+    icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+    logRow.classList.remove('d-none');
+    startLogStream(id, logsDiv);
+  } else {
+    icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+    logRow.classList.add('d-none');
+    stopLogStream(id);
+  }
+}
+
+const logEventSources = new Map();
+
+function startLogStream(id, logsDiv) {
+  if (logEventSources.has(id)) {
+    return;
+  }
+
+  function connect() {
+    const lastEntry = logsDiv.querySelector('.log-entry:last-child');
+    const lastTime = lastEntry?.dataset.time;
+    
+    const url = new URL(`/api/spammer/${id}/logs/stream`, window.location.origin);
+    if (lastTime) {
+      url.searchParams.set('since', lastTime);
+    }
+    
+    const sse = new EventSource(url.toString());
+    
+    sse.onmessage = (event) => {
+      const logs = JSON.parse(event.data);
+      appendLogs(logs, logsDiv);
+    };
+
+    sse.onerror = (error) => {
+      console.error('Log stream error:', error);
+      sse.close();
+      logEventSources.delete(id);
+
+      const logRow = logsDiv.closest('.log-row');
+      if (!logRow.classList.contains('d-none')) {
+        console.log('Reconnecting log stream in 2 seconds...');
+        setTimeout(() => connect(), 2000);
+      }
+    };
+
+    logEventSources.set(id, sse);
+  }
+
+  connect();
+}
+
+function stopLogStream(id) {
+  const sse = logEventSources.get(id);
+  if (sse) {
+    sse.close();
+    logEventSources.delete(id);
+  }
+}
+
+function appendLogs(logs, logsDiv) {
+  const container = logsDiv.closest('.log-container');
+  const isScrolledToBottom = isAtBottom(container);
+  const lastScrollTop = container.scrollTop;
+
+  logs.forEach(log => {
+    const fields = Object.entries(log.fields)
+      .filter(([key]) => key !== 'scenario');
+    
+    let fieldBadges = '';
+    if (fields.length > 0) {
+      const rpcField = fields.find(([key]) => key === 'rpc');
+      const otherFields = fields.filter(([key]) => key !== 'rpc');
+      
+      const visibleFields = otherFields.slice(0, 2)
+        .map(([key, value]) => `<span class="badge">${key}=${value}</span>`)
+        .join('');
+        
+      const hiddenFields = [
+        ...(rpcField ? [rpcField] : []),
+        ...otherFields.slice(2)
+      ];
+      
+      const moreButton = hiddenFields.length > 0 
+        ? `<span class="badge more-fields" data-bs-toggle="tooltip" data-bs-placement="top" 
+            title="${hiddenFields.map(([k,v]) => `${k}=${v}`).join('\n')}">...</span>`
+        : '';
+
+      fieldBadges = `<div class="log-fields">${visibleFields}${moreButton}</div>`;
+    }
+
+    const logEntry = document.createElement('div');
+    logEntry.className = `log-entry ${getLogLevelClass(log.level)}`;
+    logEntry.dataset.time = log.time;
+    logEntry.innerHTML = `
+      <div class="d-flex align-items-center gap-2">
+        <span class="text-muted small">${new Date(log.time).toLocaleString()}</span>
+        <span class="badge ${getLogLevelBadge(log.level)}">${log.level}</span>
+        <span class="message-text">${log.message}</span>
+        ${fieldBadges}
+      </div>
+    `;
+
+    logsDiv.appendChild(logEntry);
+  });
+
+  const entries = logsDiv.querySelectorAll('.log-entry');
+  if (entries.length > MAX_LOG_ENTRIES) {
+    const toRemove = entries.length - MAX_LOG_ENTRIES;
+    for (let i = 0; i < toRemove; i++) {
+      entries[i].remove();
+    }
+  }
+
+  if (isScrolledToBottom) {
+    container.scrollTop = container.scrollHeight;
+  } else {
+    container.scrollTop = lastScrollTop;
+  }
+
+  const tooltips = logsDiv.querySelectorAll('[data-bs-toggle="tooltip"]');
+  tooltips.forEach(el => new bootstrap.Tooltip(el));
+}
+
+window.addEventListener('beforeunload', () => {
+  logEventSources.forEach((sse) => sse.close());
+  logEventSources.clear();
+});
 
 async function editSpammer(id) {
   try {

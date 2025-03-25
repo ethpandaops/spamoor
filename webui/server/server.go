@@ -40,6 +40,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	api.HandleFunc("/spammer/{id}/logs", frontendHandler.GetSpammerLogs).Methods("GET")
 	api.HandleFunc("/spammer/{id}", frontendHandler.GetSpammerDetails).Methods("GET")
 	api.HandleFunc("/spammer/{id}", frontendHandler.UpdateSpammer).Methods("PUT")
+	api.HandleFunc("/spammer/{id}/logs/stream", frontendHandler.StreamSpammerLogs).Methods("GET")
 
 	router.PathPrefix("/").Handler(frontend)
 
@@ -61,8 +62,8 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	}
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", config.Host, config.Port),
-		WriteTimeout: 10 * time.Second,
-		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 0,
+		ReadTimeout:  0,
 		IdleTimeout:  120 * time.Second,
 		Handler:      n,
 	}
