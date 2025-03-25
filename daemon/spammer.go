@@ -75,7 +75,11 @@ func (d *Daemon) NewSpammer(scenarioName string, config string, name string, des
 	d.spammerIdMtx.Lock()
 	scenarioCounter := 0
 	d.db.GetSpamoorState("scenario_counter", &scenarioCounter)
-	scenarioCounter++
+	if scenarioCounter < 100 {
+		scenarioCounter = 100
+	} else {
+		scenarioCounter++
+	}
 	d.db.SetSpamoorState(nil, "scenario_counter", scenarioCounter)
 	d.spammerIdMtx.Unlock()
 
