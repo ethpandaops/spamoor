@@ -351,7 +351,7 @@ function isAtBottom(element) {
 function getLogLevelClass(level) {
   switch (level.toLowerCase()) {
     case 'error': return 'text-danger';
-    case 'warn': return 'text-warning';
+    case 'warning': return 'text-warning';
     case 'info': return 'text-info';
     default: return '';
   }
@@ -360,7 +360,7 @@ function getLogLevelClass(level) {
 function getLogLevelBadge(level) {
   switch (level.toLowerCase()) {
     case 'error': return 'bg-danger';
-    case 'warn': return 'bg-warning';
+    case 'warning': return 'bg-warning';
     case 'info': return 'bg-info';
     default: return 'bg-secondary';
   }

@@ -67,6 +67,49 @@ tip_fee: 2
 amount: 20
 random_amount: false
 random_target: false
+', 0, 0, '{}'),
+
+-- Blob Transaction Spammer
+(3, 'blob-combined', 'Blob Transaction Spammer', '3 type-4 blob transactions per block with 1-2 blobs', '# wallet settings
+seed: blob-combined-3 # seed for the wallet
+refill_amount: 2000000000000000000 # refill 2 ETH when
+refill_balance: 1000000000000000000 # balance drops below 1 ETH
+refill_interval: 600 # check every 10 minutes
+
+# scenario: blob-combined
+total_count: 0
+throughput: 3
+sidecars: 2
+max_pending: 6
+max_wallets: 10
+replace: 30
+max_replacements: 4
+rebroadcast: 30
+base_fee: 20
+tip_fee: 2
+blob_fee: 20
+', 0, 0, '{}'),
+
+-- Big Block Spammer
+(4, 'eoatx', 'Big Block Spammer', '200 type-2 eoa transactions per slot with 25k zero bytes calldata each', '# wallet settings
+seed: eoatx-4 # seed for the wallet
+refill_amount: 2000000000000000000 # refill 2 ETH when
+refill_balance: 500000000000000000 # balance drops below 0.5 ETH
+refill_interval: 600 # check every 10 minutes
+
+# scenario: eoatx
+total_count: 0
+throughput: 200
+max_pending: 400
+max_wallets: 200
+rebroadcast: 120
+base_fee: 20
+tip_fee: 2
+gas_limit: 300000
+amount: 20
+data: "repeat:0x00:25000"
+random_amount: false
+random_target: false
 ', 0, 0, '{}');
 
 

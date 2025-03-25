@@ -143,5 +143,5 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	<-c
 
-	logrus.Println("exiting...")
+	daemon.Shutdown()
 }

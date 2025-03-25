@@ -45,7 +45,8 @@ type SpammerConfig struct {
 
 func (d *Daemon) restoreSpammer(dbEntity *db.Spammer) (*Spammer, error) {
 	logger := logscope.NewLogger(&logscope.ScopeOptions{
-		Parent: d.logger.WithField("spammer_id", dbEntity.ID),
+		Parent:     d.logger.WithField("spammer_id", dbEntity.ID),
+		BufferSize: 1000,
 	})
 	logger.GetLogger().SetLevel(logrus.GetLevel())
 
@@ -93,7 +94,8 @@ func (d *Daemon) NewSpammer(scenarioName string, config string, name string, des
 	}
 
 	logger := logscope.NewLogger(&logscope.ScopeOptions{
-		Parent: d.logger.WithField("spammer_id", dbEntity.ID),
+		Parent:     d.logger.WithField("spammer_id", dbEntity.ID),
+		BufferSize: 1000,
 	})
 	logger.GetLogger().SetLevel(logrus.GetLevel())
 
@@ -154,6 +156,8 @@ func (s *Spammer) runScenario() {
 		return
 	}
 	s.running = true
+	s.daemon.spammerWg.Add(1)
+
 	if s.scenarioCancel != nil {
 		s.scenarioCancel()
 	}
@@ -169,6 +173,8 @@ func (s *Spammer) runScenario() {
 				scenarioErr = fmt.Errorf("unknown panic: %v", err)
 			}
 		}
+
+		s.daemon.spammerWg.Done()
 
 		if s.daemon.ctx.Err() != nil {
 			return

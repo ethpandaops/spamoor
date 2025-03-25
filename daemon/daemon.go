@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/sirupsen/logrus"
@@ -17,6 +18,7 @@ import (
 
 type Daemon struct {
 	ctx        context.Context
+	cancel     context.CancelFunc
 	logger     logrus.FieldLogger
 	clientPool *spamoor.ClientPool
 	rootWallet *txbuilder.Wallet
@@ -26,11 +28,14 @@ type Daemon struct {
 	spammerIdMtx  sync.Mutex
 	spammerMap    map[int64]*Spammer
 	spammerMapMtx sync.RWMutex
+	spammerWg     sync.WaitGroup
 }
 
-func NewDaemon(ctx context.Context, logger logrus.FieldLogger, clientPool *spamoor.ClientPool, rootWallet *txbuilder.Wallet, txpool *txbuilder.TxPool, db *db.Database) *Daemon {
+func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool *spamoor.ClientPool, rootWallet *txbuilder.Wallet, txpool *txbuilder.TxPool, db *db.Database) *Daemon {
+	ctx, cancel := context.WithCancel(parentCtx)
 	return &Daemon{
 		ctx:        ctx,
+		cancel:     cancel,
 		logger:     logger,
 		clientPool: clientPool,
 		rootWallet: rootWallet,
@@ -142,4 +147,48 @@ func (d *Daemon) UpdateSpammer(id int64, name string, description string, config
 
 func (d *Daemon) GetRootWallet() *txbuilder.Wallet {
 	return d.rootWallet
+}
+
+func (d *Daemon) Shutdown() {
+	d.logger.Info("initiating graceful shutdown")
+
+	// Cancel context to stop all spammers
+	d.cancel()
+
+	// Get all running spammers
+	d.spammerMapMtx.RLock()
+	spammers := make([]*Spammer, 0, len(d.spammerMap))
+	for _, s := range d.spammerMap {
+		if s.running {
+			spammers = append(spammers, s)
+		}
+	}
+	d.spammerMapMtx.RUnlock()
+
+	// Wait for all spammers to finish with a timeout
+	if len(spammers) > 0 {
+		d.logger.Infof("waiting for %d spammers to stop", len(spammers))
+
+		done := make(chan struct{})
+		go func() {
+			d.spammerWg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			d.logger.Info("all spammers stopped successfully")
+		case <-time.After(10 * time.Second):
+			d.logger.Warn("timeout waiting for spammers to stop")
+		}
+	}
+
+	// Close database connection
+	if err := d.db.Close(); err != nil {
+		d.logger.Errorf("error closing database: %v", err)
+	} else {
+		d.logger.Info("database closed successfully")
+	}
+
+	d.logger.Info("shutdown complete")
 }
