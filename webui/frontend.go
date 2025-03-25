@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/ethpandaops/spamoor/webui/types"
-	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 )
 
@@ -27,7 +26,6 @@ var (
 type Frontend struct {
 	defaultHandler  http.Handler
 	rootFileSys     http.FileSystem
-	router          *mux.Router
 	NotFoundHandler func(http.ResponseWriter, *http.Request)
 }
 
