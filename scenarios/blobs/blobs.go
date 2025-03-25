@@ -167,7 +167,12 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}()
 
 			logger := s.logger
-			tx, client, wallet, err := s.sendBlobTx(ctx, txIdx)
+			tx, client, wallet, err := s.sendBlobTx(ctx, txIdx, func() {
+				if s.pendingChan != nil {
+					time.Sleep(100 * time.Millisecond)
+					<-s.pendingChan
+				}
+			})
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -207,9 +212,16 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+	transactionSubmitted := false
+
+	defer func() {
+		if !transactionSubmitted {
+			onComplete()
+		}
+	}()
 
 	var feeCap *big.Int
 	var tipCap *big.Int
@@ -290,16 +302,14 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transac
 	}
 
 	s.pendingWGroup.Add(1)
+	transactionSubmitted = true
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     rebroadcast,
 		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			defer func() {
-				if s.pendingChan != nil {
-					time.Sleep(100 * time.Millisecond)
-					<-s.pendingChan
-				}
+				onComplete()
 				s.pendingWGroup.Done()
 			}()
 
