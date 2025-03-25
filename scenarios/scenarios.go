@@ -2,7 +2,6 @@ package scenarios
 
 import (
 	"github.com/ethpandaops/spamoor/scenariotypes"
-	"github.com/sirupsen/logrus"
 
 	blobcombined "github.com/ethpandaops/spamoor/scenarios/blob-combined"
 	blobconflicting "github.com/ethpandaops/spamoor/scenarios/blob-conflicting"
@@ -17,18 +16,34 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 )
 
-var Scenarios map[string]func(logger logrus.FieldLogger) scenariotypes.Scenario = map[string]func(logger logrus.FieldLogger) scenariotypes.Scenario{
-	"blob-combined":     blobcombined.NewScenario,
-	"blob-conflicting":  blobconflicting.NewScenario,
-	"blobs":             blobs.NewScenario,
-	"blob-replacements": blobreplacements.NewScenario,
+var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
+	&blobcombined.ScenarioDescriptor,
+	&blobconflicting.ScenarioDescriptor,
+	&blobs.ScenarioDescriptor,
+	&blobreplacements.ScenarioDescriptor,
+	&deploydestruct.ScenarioDescriptor,
+	&deploytx.ScenarioDescriptor,
+	&eoatx.ScenarioDescriptor,
+	&erctx.ScenarioDescriptor,
+	&gasburnertx.ScenarioDescriptor,
+	&setcodetx.ScenarioDescriptor,
+	&wallets.ScenarioDescriptor,
+}
 
-	"eoatx":           eoatx.NewScenario,
-	"erctx":           erctx.NewScenario,
-	"deploy-destruct": deploydestruct.NewScenario,
-	"deploytx":        deploytx.NewScenario,
-	"gasburnertx":     gasburnertx.NewScenario,
-	"setcodetx":       setcodetx.NewScenario,
+func GetScenario(name string) *scenariotypes.ScenarioDescriptor {
+	for _, scenario := range ScenarioDescriptors {
+		if scenario.Name == name {
+			return scenario
+		}
+	}
 
-	"wallets": wallets.NewScenario,
+	return nil
+}
+
+func GetScenarioNames() []string {
+	names := make([]string, len(ScenarioDescriptors))
+	for i, scenario := range ScenarioDescriptors {
+		names[i] = scenario.Name
+	}
+	return names
 }

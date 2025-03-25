@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+	"gopkg.in/yaml.v3"
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
@@ -23,15 +24,15 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount  uint64
-	Throughput  uint64
-	Sidecars    uint64
-	MaxPending  uint64
-	MaxWallets  uint64
-	Rebroadcast uint64
-	BaseFee     uint64
-	TipFee      uint64
-	BlobFee     uint64
+	TotalCount  uint64 `yaml:"total_count"`
+	Throughput  uint64 `yaml:"throughput"`
+	Sidecars    uint64 `yaml:"sidecars"`
+	MaxPending  uint64 `yaml:"max_pending"`
+	MaxWallets  uint64 `yaml:"max_wallets"`
+	Rebroadcast uint64 `yaml:"rebroadcast"`
+	BaseFee     uint64 `yaml:"base_fee"`
+	TipFee      uint64 `yaml:"tip_fee"`
+	BlobFee     uint64 `yaml:"blob_fee"`
 }
 
 type Scenario struct {
@@ -43,30 +44,52 @@ type Scenario struct {
 	pendingWGroup sync.WaitGroup
 }
 
-func NewScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
+var ScenarioName = "blob-conflicting"
+var ScenarioDefaultOptions = ScenarioOptions{
+	TotalCount:  0,
+	Throughput:  0,
+	Sidecars:    3,
+	MaxPending:  0,
+	MaxWallets:  0,
+	Rebroadcast: 30,
+	BaseFee:     20,
+	TipFee:      2,
+	BlobFee:     20,
+}
+var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
+	Name:           ScenarioName,
+	Description:    "Send conflicting blob transactions",
+	DefaultOptions: ScenarioDefaultOptions,
+	NewScenario:    newScenario,
+}
+
+func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
 	return &Scenario{
-		logger: logger.WithField("scenario", "blob-conflicting"),
+		logger: logger.WithField("scenario", ScenarioName),
 	}
 }
 
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
-	flags.Uint64VarP(&s.options.TotalCount, "count", "c", 0, "Total number of blob transactions to send")
-	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", 0, "Number of blob transactions to send per slot")
-	flags.Uint64VarP(&s.options.Sidecars, "sidecars", "b", 3, "Number of blob sidecars per blob transactions")
-	flags.Uint64Var(&s.options.MaxPending, "max-pending", 0, "Maximum number of pending transactions")
-	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", 0, "Maximum number of child wallets to use")
-	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", 60, "Number of seconds to wait before re-broadcasting a transaction")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", 20, "Max fee per gas to use in blob transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", 2, "Max tip per gas to use in blob transactions (in gwei)")
-	flags.Uint64Var(&s.options.BlobFee, "blobfee", 20, "Max blob fee to use in blob transactions (in gwei)")
+	flags.Uint64VarP(&s.options.TotalCount, "count", "c", ScenarioDefaultOptions.TotalCount, "Total number of blob transactions to send")
+	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", ScenarioDefaultOptions.Throughput, "Number of blob transactions to send per slot")
+	flags.Uint64VarP(&s.options.Sidecars, "sidecars", "b", ScenarioDefaultOptions.Sidecars, "Number of blob sidecars per blob transactions")
+	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
+	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
+	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Number of seconds to wait before re-broadcasting a transaction")
+	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
+	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
+	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
 	return nil
 }
 
-func (s *Scenario) Init(walletPool *spamoor.WalletPool) error {
+func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 	s.walletPool = walletPool
 
-	if s.options.TotalCount == 0 && s.options.Throughput == 0 {
-		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
+	if config != "" {
+		err := yaml.Unmarshal([]byte(config), &s.options)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal config: %w", err)
+		}
 	}
 
 	if s.options.MaxWallets > 0 {
@@ -85,6 +108,10 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool) error {
 		}
 	}
 
+	if s.options.TotalCount == 0 && s.options.Throughput == 0 {
+		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
+	}
+
 	if s.options.MaxPending > 0 {
 		s.pendingChan = make(chan bool, s.options.MaxPending)
 	}
@@ -92,7 +119,12 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool) error {
 	return nil
 }
 
-func (s *Scenario) Run() error {
+func (s *Scenario) Config() string {
+	yamlBytes, _ := yaml.Marshal(&s.options)
+	return string(yamlBytes)
+}
+
+func (s *Scenario) Run(ctx context.Context) error {
 	txIdxCounter := uint64(0)
 	pendingCount := atomic.Int64{}
 	txCount := atomic.Uint64{}
@@ -107,7 +139,11 @@ func (s *Scenario) Run() error {
 	limiter := rate.NewLimiter(initialRate, 1)
 
 	for {
-		if err := limiter.Wait(context.Background()); err != nil {
+		if err := limiter.Wait(ctx); err != nil {
+			if ctx.Err() != nil {
+				break
+			}
+
 			s.logger.Debugf("rate limited: %s", err.Error())
 			time.Sleep(100 * time.Millisecond)
 			continue

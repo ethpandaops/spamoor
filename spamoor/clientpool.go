@@ -80,7 +80,34 @@ func (pool *ClientPool) PrepareClients() error {
 	if len(pool.allClients) == 0 {
 		return fmt.Errorf("no useable clients")
 	}
+
+	err := pool.watchClientStatus()
+	if err != nil {
+		return err
+	}
+	// watch client status
+	go pool.watchClientStatusLoop()
+
 	return nil
+}
+
+func (pool *ClientPool) watchClientStatusLoop() {
+	sleepTime := 2 * time.Minute
+	for {
+		select {
+		case <-pool.ctx.Done():
+			return
+		case <-time.After(sleepTime):
+		}
+
+		err := pool.watchClientStatus()
+		if err != nil {
+			pool.logger.Warnf("could not check client status: %v", err)
+			sleepTime = 10 * time.Second
+		} else {
+			sleepTime = 2 * time.Minute
+		}
+	}
 }
 
 func (pool *ClientPool) watchClientStatus() error {
@@ -128,6 +155,11 @@ func (pool *ClientPool) watchClientStatus() error {
 func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int) *txbuilder.Client {
 	pool.selectionMutex.Lock()
 	defer pool.selectionMutex.Unlock()
+
+	if len(pool.goodClients) == 0 {
+		return nil
+	}
+
 	switch mode {
 	case SelectClientByIndex:
 		input = input % len(pool.goodClients)
@@ -146,5 +178,11 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int) *txbuilde
 func (pool *ClientPool) GetAllClients() []*txbuilder.Client {
 	clients := make([]*txbuilder.Client, len(pool.allClients))
 	copy(clients, pool.allClients)
+	return clients
+}
+
+func (pool *ClientPool) GetAllGoodClients() []*txbuilder.Client {
+	clients := make([]*txbuilder.Client, len(pool.goodClients))
+	copy(clients, pool.goodClients)
 	return clients
 }

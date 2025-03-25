@@ -18,6 +18,7 @@ import (
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
 
 type WalletSelectionMode uint8
@@ -29,11 +30,11 @@ var (
 )
 
 type WalletPoolConfig struct {
-	WalletCount    uint64
-	WalletPrefund  *uint256.Int
-	WalletMinfund  *uint256.Int
-	RefillInterval uint64
-	WalletSeed     string
+	WalletCount    uint64       `yaml:"wallet_count"`
+	RefillAmount   *uint256.Int `yaml:"refill_amount"`
+	RefillBalance  *uint256.Int `yaml:"refill_balance"`
+	RefillInterval uint64       `yaml:"refill_interval"`
+	WalletSeed     string       `yaml:"seed"`
 }
 
 type WalletPool struct {
@@ -76,16 +77,34 @@ func (pool *WalletPool) GetRootWallet() *txbuilder.Wallet {
 	return pool.rootWallet
 }
 
+func (pool *WalletPool) LoadConfig(configYaml string) error {
+	err := yaml.Unmarshal([]byte(configYaml), &pool.config)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (pool *WalletPool) MarshalConfig() (string, error) {
+	yamlBytes, err := yaml.Marshal(&pool.config)
+	if err != nil {
+		return "", err
+	}
+
+	return string(yamlBytes), nil
+}
+
 func (pool *WalletPool) SetWalletCount(count uint64) {
 	pool.config.WalletCount = count
 }
 
-func (pool *WalletPool) SetWalletPrefund(prefund *uint256.Int) {
-	pool.config.WalletPrefund = prefund
+func (pool *WalletPool) SetRefillAmount(amount *uint256.Int) {
+	pool.config.RefillAmount = amount
 }
 
-func (pool *WalletPool) SetWalletMinfund(minfund *uint256.Int) {
-	pool.config.WalletMinfund = minfund
+func (pool *WalletPool) SetRefillBalance(balance *uint256.Int) {
+	pool.config.RefillBalance = balance
 }
 
 func (pool *WalletPool) SetWalletSeed(seed string) {
@@ -103,6 +122,11 @@ func (pool *WalletPool) GetClient(mode ClientSelectionMode, input int) *txbuilde
 func (pool *WalletPool) GetWallet(mode WalletSelectionMode, input int) *txbuilder.Wallet {
 	pool.selectionMutex.Lock()
 	defer pool.selectionMutex.Unlock()
+
+	if len(pool.childWallets) == 0 {
+		return nil
+	}
+
 	switch mode {
 	case SelectWalletByIndex:
 		input = input % len(pool.childWallets)
@@ -136,8 +160,8 @@ func (pool *WalletPool) GetWalletCount() uint64 {
 	return uint64(len(pool.childWallets))
 }
 
-func (pool *WalletPool) PrepareWallets() error {
-	if pool.childWallets != nil {
+func (pool *WalletPool) PrepareWallets(runFundings bool) error {
+	if len(pool.childWallets) > 0 {
 		return nil
 	}
 
@@ -171,7 +195,7 @@ func (pool *WalletPool) PrepareWallets() error {
 						return
 					}
 
-					childWallet, fundingTx, err := pool.prepareChildWallet(childIdx, client, seed)
+					childWallet, fundingTx, err := pool.prepareChildWallet(childIdx, client, seed, runFundings)
 					if err != nil {
 						pool.logger.Errorf("could not prepare child wallet %v: %v", childIdx, err)
 						walletErr = err
@@ -191,30 +215,32 @@ func (pool *WalletPool) PrepareWallets() error {
 			}
 		}
 
-		fundingTxList := make([]*types.Transaction, 0, len(fundingTxs))
-		for _, tx := range fundingTxs {
-			if tx != nil {
-				fundingTxList = append(fundingTxList, tx)
+		if runFundings {
+			fundingTxList := make([]*types.Transaction, 0, len(fundingTxs))
+			for _, tx := range fundingTxs {
+				if tx != nil {
+					fundingTxList = append(fundingTxList, tx)
+				}
 			}
-		}
 
-		if len(fundingTxList) > 0 {
-			sort.Slice(fundingTxList, func(a int, b int) bool {
-				return fundingTxList[a].Nonce() < fundingTxList[b].Nonce()
-			})
+			if len(fundingTxList) > 0 {
+				sort.Slice(fundingTxList, func(a int, b int) bool {
+					return fundingTxList[a].Nonce() < fundingTxList[b].Nonce()
+				})
 
-			pool.logger.Infof("funding child wallets... (0/%v)", len(fundingTxList))
-			for txIdx := 0; txIdx < len(fundingTxList); txIdx += 200 {
-				endIdx := txIdx + 200
-				if txIdx > 0 {
-					pool.logger.Infof("funding child wallets... (%v/%v)", txIdx, len(fundingTxList))
-				}
-				if endIdx > len(fundingTxList) {
-					endIdx = len(fundingTxList)
-				}
-				err := pool.sendTxRange(fundingTxList[txIdx:endIdx], client)
-				if err != nil {
-					return err
+				pool.logger.Infof("funding child wallets... (0/%v)", len(fundingTxList))
+				for txIdx := 0; txIdx < len(fundingTxList); txIdx += 200 {
+					endIdx := txIdx + 200
+					if txIdx > 0 {
+						pool.logger.Infof("funding child wallets... (%v/%v)", txIdx, len(fundingTxList))
+					}
+					if endIdx > len(fundingTxList) {
+						endIdx = len(fundingTxList)
+					}
+					err := pool.sendTxRange(fundingTxList[txIdx:endIdx], client)
+					if err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -233,12 +259,14 @@ func (pool *WalletPool) PrepareWallets() error {
 	}
 
 	// watch wallet balances
-	go pool.watchWalletBalancesLoop()
+	if runFundings {
+		go pool.watchWalletBalancesLoop()
+	}
 
 	return nil
 }
 
-func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *txbuilder.Client, seed string) (*txbuilder.Wallet, *types.Transaction, error) {
+func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *txbuilder.Client, seed string, runFunding bool) (*txbuilder.Wallet, *types.Transaction, error) {
 	idxBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(idxBytes, childIdx)
 	if seed != "" {
@@ -256,12 +284,16 @@ func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *txbuilder.Cl
 	if err != nil {
 		return nil, nil, err
 	}
-	tx, err := pool.buildWalletFundingTx(childWallet, client)
-	if err != nil {
-		return nil, nil, err
-	}
-	if tx != nil {
-		childWallet.AddBalance(tx.Value())
+
+	var tx *types.Transaction
+	if runFunding {
+		tx, err = pool.buildWalletFundingTx(childWallet, client)
+		if err != nil {
+			return nil, nil, err
+		}
+		if tx != nil {
+			childWallet.AddBalance(tx.Value())
+		}
 	}
 	return childWallet, tx, nil
 }
@@ -418,7 +450,7 @@ func (pool *WalletPool) CheckChildWalletBalance(childWallet *txbuilder.Wallet) (
 }
 
 func (pool *WalletPool) buildWalletFundingTx(childWallet *txbuilder.Wallet, client *txbuilder.Client) (*types.Transaction, error) {
-	if childWallet.GetBalance().Cmp(pool.config.WalletMinfund.ToBig()) >= 0 {
+	if childWallet.GetBalance().Cmp(pool.config.RefillBalance.ToBig()) >= 0 {
 		// no refill needed
 		return nil, nil
 	}
@@ -443,7 +475,7 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *txbuilder.Wallet, clie
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       21000,
 		To:        &toAddr,
-		Value:     pool.config.WalletPrefund,
+		Value:     pool.config.RefillAmount,
 	})
 	if err != nil {
 		return nil, err

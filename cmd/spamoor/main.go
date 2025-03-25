@@ -61,23 +61,20 @@ func main() {
 	// load scenario
 	invalidScenario := false
 	var scenarioName string
-	var scenarioBuilder func(logger logrus.FieldLogger) scenariotypes.Scenario
+	var scenarioDescriptior *scenariotypes.ScenarioDescriptor
 	if flags.NArg() < 2 {
 		invalidScenario = true
 	} else {
 		scenarioName = flags.Args()[1]
-		scenarioBuilder = scenarios.Scenarios[scenarioName]
-		if scenarioBuilder == nil {
+		scenarioDescriptior = scenarios.GetScenario(scenarioName)
+		if scenarioDescriptior == nil {
 			invalidScenario = true
 		}
 	}
 	if invalidScenario {
 		fmt.Printf("invalid or missing scenario\n\n")
 		fmt.Printf("implemented scenarios:\n")
-		scenarioNames := []string{}
-		for sn := range scenarios.Scenarios {
-			scenarioNames = append(scenarioNames, sn)
-		}
+		scenarioNames := scenarios.GetScenarioNames()
 		sort.Slice(scenarioNames, func(a int, b int) bool {
 			return strings.Compare(scenarioNames[a], scenarioNames[b]) > 0
 		})
@@ -87,7 +84,7 @@ func main() {
 		return
 	}
 
-	scenario := scenarioBuilder(logger)
+	scenario := scenarioDescriptior.NewScenario(logger)
 	if scenario == nil {
 		panic("could not create scenario instance")
 	}
@@ -143,25 +140,25 @@ func main() {
 	// init wallet pool
 	walletPool := spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
 	walletPool.SetWalletCount(100)
-	walletPool.SetWalletPrefund(utils.EtherToWei(uint256.NewInt(cliArgs.refillAmount)))
-	walletPool.SetWalletMinfund(utils.EtherToWei(uint256.NewInt(cliArgs.refillBalance)))
+	walletPool.SetRefillAmount(utils.EtherToWei(uint256.NewInt(cliArgs.refillAmount)))
+	walletPool.SetRefillBalance(utils.EtherToWei(uint256.NewInt(cliArgs.refillBalance)))
 	walletPool.SetRefillInterval(cliArgs.refillInterval)
 	walletPool.SetWalletSeed(cliArgs.seed)
 
 	// init scenario
-	err = scenario.Init(walletPool)
+	err = scenario.Init(walletPool, "")
 	if err != nil {
 		panic(err)
 	}
 
 	// prepare wallet pool
-	err = walletPool.PrepareWallets()
+	err = walletPool.PrepareWallets(true)
 	if err != nil {
 		panic(fmt.Errorf("failed to prepare wallets: %v", err))
 	}
 
 	// start scenario
-	err = scenario.Run()
+	err = scenario.Run(ctx)
 	if err != nil {
 		panic(err)
 	}
