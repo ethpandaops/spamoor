@@ -118,6 +118,7 @@ func (d *Database) RunDBTransaction(handler func(tx *sqlx.Tx) error) error {
 }
 
 func (d *Database) ApplyEmbeddedDbSchema(version int64) error {
+	goose.SetLogger(&gooseLogger{logger: d.logger})
 	goose.SetBaseFS(embedSchema)
 	schemaDirectory := "schema"
 
@@ -140,4 +141,16 @@ func (d *Database) ApplyEmbeddedDbSchema(version int64) error {
 	}
 
 	return nil
+}
+
+type gooseLogger struct {
+	logger logrus.FieldLogger
+}
+
+func (g *gooseLogger) Fatalf(format string, v ...interface{}) {
+	g.logger.Fatalf(format, v...)
+}
+
+func (g *gooseLogger) Printf(format string, v ...interface{}) {
+	g.logger.Infof(format, v...)
 }

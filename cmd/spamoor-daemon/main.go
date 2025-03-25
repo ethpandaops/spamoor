@@ -57,6 +57,11 @@ func main() {
 
 	logger := logrus.StandardLogger()
 
+	logger.WithFields(logrus.Fields{
+		"version":   utils.GetBuildVersion(),
+		"buildtime": utils.BuildTime,
+	}).Infof("starting spamoor daemon")
+
 	// start client pool
 	rpcHosts := []string{}
 	for _, rpcHost := range strings.Split(strings.Join(cliArgs.rpchosts, ","), ",") {

@@ -58,11 +58,11 @@ func InitPageData(w http.ResponseWriter, r *http.Request, active, path, title st
 		fullTitle = fmt.Sprintf("%v - %v", frontendConfig.SiteName, time.Now().Year())
 	}
 
-	buildTime, _ := time.Parse("2006-01-02T15:04:05Z", utils.Buildtime)
+	buildTime, _ := time.Parse("2006-01-02T15:04:05Z", utils.BuildTime)
 	data := &PageData{
 		Meta: &Meta{
 			Title:       fullTitle,
-			Description: "dugtrio: beacon chain api load balancer",
+			Description: "spamoor: ethereum transaction spamming tool",
 			Domain:      r.Host,
 			Path:        path,
 			Templates:   strings.Join(mainTemplates, ","),

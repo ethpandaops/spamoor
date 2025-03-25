@@ -58,6 +58,11 @@ func main() {
 
 	logger := logrus.StandardLogger()
 
+	logger.WithFields(logrus.Fields{
+		"version":   utils.GetBuildVersion(),
+		"buildtime": utils.BuildTime,
+	}).Infof("starting spamoor")
+
 	// load scenario
 	invalidScenario := false
 	var scenarioName string
