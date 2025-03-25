@@ -47,6 +47,7 @@ func (d *Daemon) restoreSpammer(dbEntity *db.Spammer) (*Spammer, error) {
 	logger := logscope.NewLogger(&logscope.ScopeOptions{
 		Parent: d.logger.WithField("spammer_id", dbEntity.ID),
 	})
+	logger.GetLogger().SetLevel(logrus.GetLevel())
 
 	spammer := &Spammer{
 		daemon:   d,
@@ -90,6 +91,7 @@ func (d *Daemon) NewSpammer(scenarioName string, config string, name string, des
 	logger := logscope.NewLogger(&logscope.ScopeOptions{
 		Parent: d.logger.WithField("spammer_id", dbEntity.ID),
 	})
+	logger.GetLogger().SetLevel(logrus.GetLevel())
 
 	spammer := &Spammer{
 		daemon:   d,

@@ -304,7 +304,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transac
 			}()
 
 			if err != nil {
-				s.logger.WithField("client", client.GetName()).Warnf("blob tx %6d: await receipt failed: %v", txIdx+1, err)
+				s.logger.WithField("rpc", client.GetName()).Warnf("blob tx %6d: await receipt failed: %v", txIdx+1, err)
 				return
 			}
 			if receipt == nil {
@@ -327,10 +327,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transac
 			gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
 			gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
 
-			s.logger.WithField("client", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v, blob: %v)", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
+			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v, blob: %v)", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
 		},
 		LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
-			logger := s.logger.WithField("client", client.GetName())
+			logger := s.logger.WithField("rpc", client.GetName())
 			if retry > 0 {
 				logger = logger.WithField("retry", retry)
 			}

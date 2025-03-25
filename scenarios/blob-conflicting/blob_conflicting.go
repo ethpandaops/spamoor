@@ -324,7 +324,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transac
 				}()
 
 				if err != nil {
-					s.logger.WithField("client", client.GetName()).Warnf("error while awaiting tx receipt: %v", err)
+					s.logger.WithField("rpc", client.GetName()).Warnf("error while awaiting tx receipt: %v", err)
 					return
 				}
 
@@ -333,7 +333,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transac
 				}
 			},
 			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
-				logger := s.logger.WithField("client", client.GetName())
+				logger := s.logger.WithField("rpc", client.GetName())
 				if retry > 0 {
 					logger = logger.WithField("retry", retry)
 				}
@@ -348,7 +348,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transac
 			},
 		})
 		if err1 != nil {
-			s.logger.WithField("client", client.GetName()).Warnf("error while sending blob tx %v: %v", txIdx, err1)
+			s.logger.WithField("rpc", client.GetName()).Warnf("error while sending blob tx %v: %v", txIdx, err1)
 		}
 		wg.Done()
 	}()
@@ -365,7 +365,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transac
 				}()
 
 				if err != nil {
-					s.logger.WithField("client", client.GetName()).Warnf("error while awaiting tx receipt: %v", err)
+					s.logger.WithField("rpc", client.GetName()).Warnf("error while awaiting tx receipt: %v", err)
 					return
 				}
 
@@ -374,7 +374,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transac
 				}
 			},
 			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
-				logger := s.logger.WithField("client", client.GetName())
+				logger := s.logger.WithField("rpc", client.GetName())
 				if retry > 0 {
 					logger = logger.WithField("retry", retry)
 				}
@@ -389,7 +389,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transac
 			},
 		})
 		if err2 != nil {
-			s.logger.WithField("client", client2.GetName()).Warnf("error while sending dynfee tx %v: %v", txIdx, err2)
+			s.logger.WithField("rpc", client2.GetName()).Warnf("error while sending dynfee tx %v: %v", txIdx, err2)
 		}
 		wg.Done()
 	}()
@@ -432,5 +432,5 @@ func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt
 	gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
 	gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
 
-	s.logger.WithField("client", client.GetName()).Debugf(" transaction %d/%v confirmed in block #%v. total fee: %v gwei (base: %v, blob: %v)", txIdx+1, txLabel, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
+	s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d/%v confirmed in block #%v. total fee: %v gwei (base: %v, blob: %v)", txIdx+1, txLabel, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
 }

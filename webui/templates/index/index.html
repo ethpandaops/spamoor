@@ -32,34 +32,34 @@
             <td>{{ .Scenario }}</td>
             <td>
               {{ if eq .Status 0 }}
-                <span class="badge bg-warning">Paused</span>
+                <span class="badge bg-info">Paused</span>
               {{ else if eq .Status 1 }}
                 <span class="badge bg-success">Running</span>
               {{ else if eq .Status 2 }}
-                <span class="badge bg-info">Finished</span>
+                <span class="badge bg-secondary">Finished</span>
               {{ else }}
                 <span class="badge bg-danger">Failed</span>
               {{ end }}
             </td>
             <td>
               <div class="d-flex gap-2" style="flex-direction: row-reverse;">
-                <button class="btn btn-sm btn-outline-secondary" onclick="toggleLogs(this, {{ .ID }})">
+                <button class="btn btn-sm btn-outline-secondary" onclick="toggleLogs(this, {{ .ID }})" title="Toggle Logs" data-bs-toggle="tooltip" data-bs-placement="top">
                   <i class="fas fa-chevron-down"></i>
                 </button>
                 <div class="btn-group">
                   {{ if or (eq .Status 0) (eq .Status 2) (eq .Status 3) }}
-                    <button class="btn btn-sm btn-success" onclick="startSpammer({{ .ID }})">
+                    <button class="btn btn-sm btn-success" onclick="startSpammer({{ .ID }})" title="Start Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                       <i class="fas fa-play"></i>
                     </button>
                   {{ else }}
-                    <button class="btn btn-sm btn-warning" onclick="pauseSpammer({{ .ID }})">
+                    <button class="btn btn-sm btn-warning" onclick="pauseSpammer({{ .ID }})" title="Pause Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                       <i class="fas fa-pause"></i>
                     </button>
                   {{ end }}
-                  <button class="btn btn-sm btn-info" onclick="editSpammer({{ .ID }})">
+                  <button class="btn btn-sm btn-info" onclick="editSpammer({{ .ID }})" title="Edit Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                     <i class="fas fa-edit"></i>
                   </button>
-                  <button class="btn btn-sm btn-danger" onclick="deleteSpammer({{ .ID }})">
+                  <button class="btn btn-sm btn-danger" onclick="deleteSpammer({{ .ID }})" title="Delete Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                     <i class="fas fa-trash"></i>
                   </button>
                 </div>
@@ -252,6 +252,9 @@ async function submitNewSpammer() {
 }
 
 async function toggleLogs(button, id) {
+  const tooltips = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+  tooltips.forEach(el => bootstrap.Tooltip.getInstance(el)?.hide());
+
   const icon = button.querySelector('i');
   const logRow = document.querySelector(`tr.log-row[data-spammer-id="${id}"]`);
   const logsDiv = logRow.querySelector('.logs');
@@ -279,13 +282,43 @@ async function refreshLogs(id, logsDiv) {
     const lastScrollTop = container.scrollTop;
     const logs = await fetch(`/api/spammer/${id}/logs`).then(r => r.json());
     
-    const formattedLogs = logs.map(log => `
-      <div class="log-entry ${getLogLevelClass(log.level)}">
-        <span class="text-muted">${new Date(log.time).toLocaleString()}</span>
-        <span class="badge ${getLogLevelBadge(log.level)} me-1">${log.level}</span>
-        ${log.message}
-      </div>
-    `).join('');
+    const formattedLogs = logs.map(log => {
+      const fields = Object.entries(log.fields)
+        .filter(([key]) => key !== 'scenario');
+      
+      let fieldBadges = '';
+      if (fields.length > 0) {
+        const rpcField = fields.find(([key]) => key === 'rpc');
+        const otherFields = fields.filter(([key]) => key !== 'rpc');
+        
+        const visibleFields = otherFields.slice(0, 2)
+          .map(([key, value]) => `<span class="badge">${key}=${value}</span>`)
+          .join('');
+          
+        const hiddenFields = [
+          ...(rpcField ? [rpcField] : []),
+          ...otherFields.slice(2)
+        ];
+        
+        const moreButton = hiddenFields.length > 0 
+          ? `<span class="badge more-fields" data-bs-toggle="tooltip" data-bs-placement="top" 
+              title="${hiddenFields.map(([k,v]) => `${k}=${v}`).join('\n')}">...</span>`
+          : '';
+
+        fieldBadges = `<div class="log-fields">${visibleFields}${moreButton}</div>`;
+      }
+
+      return `
+        <div class="log-entry ${getLogLevelClass(log.level)}">
+          <div class="d-flex align-items-center gap-2">
+            <span class="text-muted small">${new Date(log.time).toLocaleString()}</span>
+            <span class="badge ${getLogLevelBadge(log.level)}">${log.level}</span>
+            <span class="message-text">${log.message}</span>
+            ${fieldBadges}
+          </div>
+        </div>
+      `;
+    }).join('');
     
     logsDiv.innerHTML = formattedLogs;
     
@@ -302,6 +335,9 @@ async function refreshLogs(id, logsDiv) {
     } else {
       container.scrollTop = lastScrollTop;
     }
+
+    const tooltips = logsDiv.querySelectorAll('[data-bs-toggle="tooltip"]');
+    tooltips.forEach(el => new bootstrap.Tooltip(el));
   } catch (err) {
     console.error('Failed to refresh logs:', err);
   }
@@ -376,15 +412,65 @@ document.querySelector('#editSpammerForm [name="config"]').addEventListener('key
     this.selectionStart = this.selectionEnd = start + 2;
   }
 });
+
+document.addEventListener('DOMContentLoaded', () => {
+  const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+  tooltipTriggerList.map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+});
 </script>
 {{ end }}
 
 {{ define "css" }}
 <style>
 .log-entry {
-  white-space: pre-wrap;
   word-break: break-word;
   margin-bottom: 0.25rem;
+  border-left: 3px solid transparent;
+  padding-left: 0.5rem;
+}
+
+.log-entry.text-danger {
+  border-left-color: var(--bs-danger);
+}
+
+.log-entry.text-warning {
+  border-left-color: var(--bs-warning);
+}
+
+.log-entry.text-info {
+  border-left-color: var(--bs-info);
+}
+
+.message-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.log-fields {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+  align-items: center;
+}
+
+.log-entry .badge {
+  font-size: 0.7em;
+  padding: 0.15em 0.4em;
+  font-weight: normal;
+  line-height: 1;
+  background-color: #2d3238 !important;
+  color: #adb5bd;
+  white-space: nowrap;
+}
+
+.log-entry .more-fields {
+  cursor: help;
+}
+
+.tooltip-inner {
+  text-align: left;
+  font-family: monospace;
+  white-space: pre-line;
 }
 </style>
 {{ end }}

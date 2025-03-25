@@ -64,7 +64,7 @@ func NewClient(rpchost string) (*Client, error) {
 		client:    ethclient.NewClient(rpcClient),
 		rpcClient: rpcClient,
 		rpchost:   rpchost,
-		logger:    logrus.WithField("client", rpchost),
+		logger:    logrus.WithField("rpc", rpchost),
 	}, nil
 }
 

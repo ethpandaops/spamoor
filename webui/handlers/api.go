@@ -167,17 +167,25 @@ func (fh *FrontendHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request
 
 	// Convert to a simpler format for JSON
 	type LogEntry struct {
-		Time    time.Time `json:"time"`
-		Level   string    `json:"level"`
-		Message string    `json:"message"`
+		Time    time.Time         `json:"time"`
+		Level   string            `json:"level"`
+		Message string            `json:"message"`
+		Fields  map[string]string `json:"fields"`
 	}
 
 	logs := make([]LogEntry, len(entries))
 	for i, entry := range entries {
+		// Convert fields to string map
+		fields := make(map[string]string)
+		for k, v := range entry.Data {
+			fields[k] = fmt.Sprint(v)
+		}
+
 		logs[i] = LogEntry{
 			Time:    entry.Time,
 			Level:   entry.Level.String(),
 			Message: entry.Message,
+			Fields:  fields,
 		}
 	}
 
