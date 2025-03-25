@@ -156,6 +156,12 @@ func (pool *WalletPool) GetWalletIndex(address common.Address) int {
 	return -1
 }
 
+func (pool *WalletPool) GetAllWallets() []*txbuilder.Wallet {
+	wallets := make([]*txbuilder.Wallet, len(pool.childWallets))
+	copy(wallets, pool.childWallets)
+	return wallets
+}
+
 func (pool *WalletPool) GetWalletCount() uint64 {
 	return uint64(len(pool.childWallets))
 }
@@ -428,7 +434,7 @@ func (pool *WalletPool) CheckChildWalletBalance(childWallet *txbuilder.Wallet) (
 		wg.Add(1)
 		var confirmErr error
 
-		err := pool.txpool.SendTransaction(context.Background(), childWallet, tx, &txbuilder.SendTransactionOptions{
+		err := pool.txpool.SendTransaction(pool.ctx, childWallet, tx, &txbuilder.SendTransactionOptions{
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				if err != nil {
 					confirmErr = err

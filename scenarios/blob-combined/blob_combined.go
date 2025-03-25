@@ -136,7 +136,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 	txCount := atomic.Uint64{}
 	var lastChan chan bool
 
-	s.logger.Infof("starting scenario: blob-combined")
+	s.logger.Infof("starting scenario: %s", ScenarioName)
+	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
 	initialRate := rate.Limit(float64(s.options.Throughput) / float64(utils.SecondsPerSlot))
 	if initialRate == 0 {
@@ -172,7 +173,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}()
 
 			logger := s.logger
-			tx, client, wallet, err := s.sendBlobTx(txIdx, 0, 0)
+			tx, client, wallet, err := s.sendBlobTx(ctx, txIdx, 0, 0)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -210,12 +211,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
 	s.pendingWGroup.Wait()
-	s.logger.Infof("all transactions included!")
 
 	return nil
 }
 
-func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx uint64, txNonce uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 
@@ -318,7 +318,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 
 	var awaitConfirmation bool = true
 	s.pendingWGroup.Add(1)
-	err = s.walletPool.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     rebroadcast,
 		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
@@ -387,20 +387,20 @@ func (s *Scenario) sendBlobTx(txIdx uint64, replacementIdx uint64, txNonce uint6
 	}
 
 	if s.options.Replace > 0 && replacementIdx < s.options.MaxReplacements && rand.Intn(100) < 70 {
-		go s.delayedReplace(txIdx, tx, &awaitConfirmation, replacementIdx)
+		go s.delayedReplace(ctx, txIdx, tx, &awaitConfirmation, replacementIdx)
 	}
 
 	return tx, client, wallet, nil
 }
 
-func (s *Scenario) delayedReplace(txIdx uint64, tx *types.Transaction, awaitConfirmation *bool, replacementIdx uint64) {
+func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.Transaction, awaitConfirmation *bool, replacementIdx uint64) {
 	time.Sleep(time.Duration(rand.Intn(int(s.options.Replace))+2) * time.Second)
 
 	if !*awaitConfirmation {
 		return
 	}
 
-	replaceTx, client, wallet, err := s.sendBlobTx(txIdx, replacementIdx+1, tx.Nonce())
+	replaceTx, client, wallet, err := s.sendBlobTx(ctx, txIdx, replacementIdx+1, tx.Nonce())
 	if err != nil {
 		s.logger.WithField("client", client.GetName()).Warnf("blob tx %6d.%v replacement failed: %v", txIdx+1, replacementIdx+1, err)
 		return

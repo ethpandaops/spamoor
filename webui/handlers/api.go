@@ -125,10 +125,11 @@ func (fh *FrontendHandler) GetScenarioConfig(w http.ResponseWriter, r *http.Requ
 
 func (fh *FrontendHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Scenario    string `json:"scenario"`
-		Config      string `json:"config"`
+		Name             string `json:"name"`
+		Description      string `json:"description"`
+		Scenario         string `json:"scenario"`
+		Config           string `json:"config"`
+		StartImmediately bool   `json:"startImmediately"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -136,7 +137,7 @@ func (fh *FrontendHandler) CreateSpammer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	spammer, err := fh.daemon.NewSpammer(req.Scenario, req.Config, req.Name, req.Description, true)
+	spammer, err := fh.daemon.NewSpammer(req.Scenario, req.Config, req.Name, req.Description, req.StartImmediately)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -182,4 +183,72 @@ func (fh *FrontendHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(logs)
+}
+
+func (fh *FrontendHandler) GetSpammerDetails(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid spammer ID", http.StatusBadRequest)
+		return
+	}
+
+	spammer := fh.daemon.GetSpammer(id)
+	if spammer == nil {
+		http.Error(w, "Spammer not found", http.StatusNotFound)
+		return
+	}
+
+	response := struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Scenario    string `json:"scenario"`
+		Config      string `json:"config"`
+		Status      int    `json:"status"`
+	}{
+		ID:          spammer.GetID(),
+		Name:        spammer.GetName(),
+		Description: spammer.GetDescription(),
+		Scenario:    spammer.GetScenario(),
+		Config:      spammer.GetConfig(),
+		Status:      spammer.GetStatus(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (fh *FrontendHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid spammer ID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Config      string `json:"config"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	spammer := fh.daemon.GetSpammer(id)
+	if spammer == nil {
+		http.Error(w, "Spammer not found", http.StatusNotFound)
+		return
+	}
+
+	err = fh.daemon.UpdateSpammer(id, req.Name, req.Description, req.Config)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

@@ -165,7 +165,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 	pendingCount := atomic.Int64{}
 	txCount := atomic.Uint64{}
 
-	s.logger.Infof("starting scenario: eoatx")
+	s.logger.Infof("starting scenario: %s", ScenarioName)
+	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
 	var lastChan chan bool
 
@@ -204,7 +205,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}()
 
 			logger := s.logger
-			tx, client, wallet, err := s.sendTx(txIdx)
+			tx, client, wallet, err := s.sendTx(ctx, txIdx)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -241,12 +242,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
 	s.pendingWGroup.Wait()
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
 
 	return nil
 }
 
-func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 
@@ -326,7 +326,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 	}
 
 	s.pendingWGroup.Add(1)
-	err = s.walletPool.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     rebroadcast,
 		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
@@ -377,7 +377,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 	})
 	if err != nil {
 		// reset nonce if tx was not sent
-		wallet.ResetPendingNonce(s.walletPool.GetContext(), client)
+		wallet.ResetPendingNonce(ctx, client)
 
 		return nil, client, wallet, err
 	}

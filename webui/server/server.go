@@ -27,6 +27,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	frontendHandler := handlers.NewFrontendHandler(daemon)
 	router.HandleFunc("/", frontendHandler.Index).Methods("GET")
 	router.HandleFunc("/health", frontendHandler.Health).Methods("GET")
+	router.HandleFunc("/wallets", frontendHandler.Wallets).Methods("GET")
 
 	// API routes
 	api := router.PathPrefix("/api").Subrouter()
@@ -37,6 +38,8 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	api.HandleFunc("/spammer/{id}/pause", frontendHandler.PauseSpammer).Methods("POST")
 	api.HandleFunc("/spammer/{id}", frontendHandler.DeleteSpammer).Methods("DELETE")
 	api.HandleFunc("/spammer/{id}/logs", frontendHandler.GetSpammerLogs).Methods("GET")
+	api.HandleFunc("/spammer/{id}", frontendHandler.GetSpammerDetails).Methods("GET")
+	api.HandleFunc("/spammer/{id}", frontendHandler.UpdateSpammer).Methods("PUT")
 
 	router.PathPrefix("/").Handler(frontend)
 

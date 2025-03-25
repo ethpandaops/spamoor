@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/ethpandaops/spamoor/daemon/db"
@@ -154,6 +155,14 @@ func (s *Spammer) runScenario() {
 
 	var scenarioErr error
 	defer func() {
+		if err := recover(); err != nil {
+			s.logger.Errorf("uncaught panic in spammer subroutine: %v, stack: %v", s.dbEntity.Scenario, err, string(debug.Stack()))
+			if err2, ok := err.(error); ok {
+				scenarioErr = err2
+			} else {
+				scenarioErr = fmt.Errorf("unknown panic: %v", err)
+			}
+		}
 
 		if s.daemon.ctx.Err() != nil {
 			return
@@ -241,4 +250,8 @@ func (s *Spammer) GetCreatedAt() int64 {
 
 func (s *Spammer) GetLogScope() *logscope.LogScope {
 	return s.logscope
+}
+
+func (s *Spammer) GetWalletPool() *spamoor.WalletPool {
+	return s.walletPool
 }

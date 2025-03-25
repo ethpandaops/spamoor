@@ -12,6 +12,7 @@ import (
 	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"gopkg.in/yaml.v3"
 )
 
 type Daemon struct {
@@ -108,4 +109,37 @@ func (d *Daemon) DeleteSpammer(id int64) error {
 	// Remove from map
 	delete(d.spammerMap, id)
 	return nil
+}
+
+func (d *Daemon) UpdateSpammer(id int64, name string, description string, config string) error {
+	d.spammerMapMtx.Lock()
+	defer d.spammerMapMtx.Unlock()
+
+	spammer := d.spammerMap[id]
+	if spammer == nil {
+		return fmt.Errorf("spammer not found")
+	}
+
+	// Validate config
+	if err := yaml.Unmarshal([]byte(config), &SpammerConfig{}); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+
+	// Update DB
+	spammer.dbEntity.Name = name
+	spammer.dbEntity.Description = description
+	spammer.dbEntity.Config = config
+
+	err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
+		return d.db.UpdateSpammer(tx, spammer.dbEntity)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update spammer: %w", err)
+	}
+
+	return nil
+}
+
+func (d *Daemon) GetRootWallet() *txbuilder.Wallet {
+	return d.rootWallet
 }

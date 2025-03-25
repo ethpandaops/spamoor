@@ -130,7 +130,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 	txCount := atomic.Uint64{}
 	var lastChan chan bool
 
-	s.logger.Infof("starting scenario: normal")
+	s.logger.Infof("starting scenario: %s", ScenarioName)
+	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
 	initialRate := rate.Limit(float64(s.options.Throughput) / float64(utils.SecondsPerSlot))
 	if initialRate == 0 {
@@ -166,7 +167,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}()
 
 			logger := s.logger
-			tx, client, wallet, err := s.sendBlobTx(txIdx)
+			tx, client, wallet, err := s.sendBlobTx(ctx, txIdx)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -202,12 +203,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
 	s.pendingWGroup.Wait()
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
 
 	return nil
 }
 
-func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 
@@ -290,7 +290,7 @@ func (s *Scenario) sendBlobTx(txIdx uint64) (*types.Transaction, *txbuilder.Clie
 	}
 
 	s.pendingWGroup.Add(1)
-	err = s.walletPool.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     rebroadcast,
 		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,

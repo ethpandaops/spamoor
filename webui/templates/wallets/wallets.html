@@ -1,0 +1,65 @@
+{{ define "page" }}
+<div class="container mt-2">
+  <h2 class="py-2">Wallet Overview</h2>
+  
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Address</th>
+          <th>Balance</th>
+          <th>Pending Nonce</th>
+          <th>Confirmed Nonce</th>
+          <th>Used By</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Root Wallet -->
+        <tr class="align-middle">
+          <td class="font-monospace">{{ .RootWallet.Address }}</td>
+          <td>{{ .RootWallet.Balance }} ETH</td>
+          <td>{{ .RootWallet.PendingNonce }}</td>
+          <td>{{ .RootWallet.ConfirmedNonce }}</td>
+          <td><span class="badge bg-primary">Root Wallet</span></td>
+        </tr>
+        
+        <!-- Spammer Wallets -->
+        {{ range .SpammerWallets }}
+        <tr class="align-middle">
+          <td class="font-monospace">{{ .Address }}</td>
+          <td>{{ .Balance }} ETH</td>
+          <td>{{ .PendingNonce }}</td>
+          <td>{{ .ConfirmedNonce }}</td>
+          <td class="d-flex align-items-center gap-2">
+            <a href="/" class="text-decoration-none">
+              #{{ .SpammerID }}
+              {{ if .SpammerName }}
+                <small class="text-muted">({{ .SpammerName }})</small>
+              {{ end }}
+            </a>
+            {{ if eq .SpammerStatus 0 }}
+              <span class="badge bg-warning">Paused</span>
+            {{ else if eq .SpammerStatus 1 }}
+              <span class="badge bg-success">Running</span>
+            {{ else if eq .SpammerStatus 2 }}
+              <span class="badge bg-info">Finished</span>
+            {{ else }}
+              <span class="badge bg-danger">Failed</span>
+            {{ end }}
+          </td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{ end }}
+
+{{ define "js" }}
+<script>
+setTimeout(() => window.location.reload(), 60000);
+</script>
+{{ end }} 
+
+{{ define "css" }}
+{{ end }}

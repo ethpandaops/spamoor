@@ -131,10 +131,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 	txCount := atomic.Uint64{}
 	var lastChan chan bool
 
-	s.logger.Infof("starting scenario: gasburnertx")
+	s.logger.Infof("starting scenario: %s", ScenarioName)
+	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
-	s.logger.Infof("deploying gas burner contract...")
-	receipt, _, err := s.sendDeploymentTx()
+	receipt, _, err := s.sendDeploymentTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}()
 
 			logger := s.logger
-			tx, client, wallet, err := s.sendTx(txIdx)
+			tx, client, wallet, err := s.sendTx(ctx, txIdx)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -218,7 +218,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Scenario) sendDeploymentTx() (*types.Receipt, *txbuilder.Client, error) {
+func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbuilder.Client, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
@@ -247,7 +247,7 @@ func (s *Scenario) sendDeploymentTx() (*types.Receipt, *txbuilder.Client, error)
 		tipCap = big.NewInt(1000000000)
 	}
 
-	tx, err := wallet.BuildBoundTx(&txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       2000000,
@@ -264,7 +264,7 @@ func (s *Scenario) sendDeploymentTx() (*types.Receipt, *txbuilder.Client, error)
 	txWg := sync.WaitGroup{}
 	txWg.Add(1)
 
-	err = s.walletPool.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     10,
 		RebroadcastInterval: 30 * time.Second,
@@ -288,7 +288,7 @@ func (s *Scenario) sendDeploymentTx() (*types.Receipt, *txbuilder.Client, error)
 	return txReceipt, client, nil
 }
 
-func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 
@@ -322,7 +322,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 		return nil, nil, wallet, err
 	}
 
-	tx, err := wallet.BuildBoundTx(&txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
@@ -338,7 +338,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 	}
 
 	s.pendingWGroup.Add(1)
-	err = s.walletPool.GetTxPool().SendTransaction(context.Background(), wallet, tx, &txbuilder.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     rebroadcast,
 		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
@@ -389,7 +389,7 @@ func (s *Scenario) sendTx(txIdx uint64) (*types.Transaction, *txbuilder.Client, 
 	})
 	if err != nil {
 		// reset nonce if tx was not sent
-		wallet.ResetPendingNonce(s.walletPool.GetContext(), client)
+		wallet.ResetPendingNonce(ctx, client)
 
 		return nil, client, wallet, err
 	}

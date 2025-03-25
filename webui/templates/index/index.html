@@ -53,6 +53,9 @@
                       <i class="fas fa-pause"></i>
                     </button>
                   {{ end }}
+                  <button class="btn btn-sm btn-info" onclick="editSpammer({{ .ID }})">
+                    <i class="fas fa-edit"></i>
+                  </button>
                   <button class="btn btn-sm btn-danger" onclick="deleteSpammer({{ .ID }})">
                     <i class="fas fa-trash"></i>
                   </button>
@@ -108,11 +111,64 @@
               <textarea class="form-control font-monospace" name="config" rows="16" 
                 style="tab-size: 2;" required></textarea>
             </div>
+
+            <div class="mb-3 form-check">
+              <input type="checkbox" class="form-check-input" id="startImmediately" name="startImmediately" checked>
+              <label class="form-check-label" for="startImmediately">
+                Start spammer after creation
+              </label>
+            </div>
           </form>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" class="btn btn-primary" onclick="submitNewSpammer()">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Spammer Modal -->
+  <div class="modal fade" id="editSpammerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Spammer</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div id="editWarning" class="alert alert-warning d-none mb-3">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            This spammer is currently running. Changes will only take effect after restarting the spammer.
+          </div>
+          <form id="editSpammerForm">
+            <input type="hidden" name="id">
+            <div class="mb-3">
+              <label class="form-label">Name</label>
+              <input type="text" class="form-control" name="name" required>
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Description</label>
+              <textarea class="form-control" name="description" rows="2"></textarea>
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Scenario</label>
+              <input type="text" class="form-control" name="scenario" readonly>
+              <small class="text-muted">Scenario cannot be changed after creation</small>
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Configuration</label>
+              <textarea class="form-control font-monospace" name="config" rows="16" 
+                style="tab-size: 2;" required></textarea>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="submitEditSpammer()">Save Changes</button>
         </div>
       </div>
     </div>
@@ -163,13 +219,24 @@ document.querySelector('[name="scenario"]').addEventListener('change', async (e)
   document.querySelector('[name="config"]').value = config;
 });
 
+document.querySelector('#newSpammerForm [name="config"]').addEventListener('keydown', function(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const start = this.selectionStart;
+    const end = this.selectionEnd;
+    this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = start + 2;
+  }
+});
+
 async function submitNewSpammer() {
   const form = document.getElementById('newSpammerForm');
   const data = {
     name: form.querySelector('[name="name"]').value,
     description: form.querySelector('[name="description"]').value,
     scenario: form.querySelector('[name="scenario"]').value,
-    config: form.querySelector('[name="config"]').value
+    config: form.querySelector('[name="config"]').value,
+    startImmediately: form.querySelector('[name="startImmediately"]').checked
   };
 
   try {
@@ -262,6 +329,53 @@ function getLogLevelBadge(level) {
     default: return 'bg-secondary';
   }
 }
+
+async function editSpammer(id) {
+  try {
+    const spammer = await fetch(`/api/spammer/${id}`).then(r => r.json());
+    const form = document.getElementById('editSpammerForm');
+    const warning = document.getElementById('editWarning');
+    warning.classList.toggle('d-none', spammer.status !== 1);
+    form.querySelector('[name="id"]').value = spammer.id;
+    form.querySelector('[name="name"]').value = spammer.name;
+    form.querySelector('[name="description"]').value = spammer.description;
+    form.querySelector('[name="scenario"]').value = spammer.scenario;
+    form.querySelector('[name="config"]').value = spammer.config;
+    new bootstrap.Modal(document.getElementById('editSpammerModal')).show();
+  } catch (err) {
+    alert('Failed to load spammer details: ' + err.message);
+  }
+}
+
+async function submitEditSpammer() {
+  const form = document.getElementById('editSpammerForm');
+  const id = form.querySelector('[name="id"]').value;
+  const data = {
+    name: form.querySelector('[name="name"]').value,
+    description: form.querySelector('[name="description"]').value,
+    config: form.querySelector('[name="config"]').value
+  };
+
+  try {
+    await fetch(`/api/spammer/${id}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    window.location.reload();
+  } catch (err) {
+    alert('Failed to update spammer: ' + err.message);
+  }
+}
+document.querySelector('#editSpammerForm [name="config"]').addEventListener('keydown', function(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const start = this.selectionStart;
+    const end = this.selectionEnd;
+    this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = start + 2;
+  }
+});
 </script>
 {{ end }}
 
