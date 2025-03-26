@@ -8,6 +8,8 @@ import (
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/webui"
 	"github.com/ethpandaops/spamoor/webui/handlers"
+	"github.com/ethpandaops/spamoor/webui/handlers/api"
+	"github.com/ethpandaops/spamoor/webui/handlers/docs"
 	"github.com/ethpandaops/spamoor/webui/types"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
@@ -30,17 +32,22 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	router.HandleFunc("/wallets", frontendHandler.Wallets).Methods("GET")
 
 	// API routes
-	api := router.PathPrefix("/api").Subrouter()
-	api.HandleFunc("/scenarios", frontendHandler.GetScenarios).Methods("GET")
-	api.HandleFunc("/scenarios/{name}/config", frontendHandler.GetScenarioConfig).Methods("GET")
-	api.HandleFunc("/spammer", frontendHandler.CreateSpammer).Methods("POST")
-	api.HandleFunc("/spammer/{id}/start", frontendHandler.StartSpammer).Methods("POST")
-	api.HandleFunc("/spammer/{id}/pause", frontendHandler.PauseSpammer).Methods("POST")
-	api.HandleFunc("/spammer/{id}", frontendHandler.DeleteSpammer).Methods("DELETE")
-	api.HandleFunc("/spammer/{id}/logs", frontendHandler.GetSpammerLogs).Methods("GET")
-	api.HandleFunc("/spammer/{id}", frontendHandler.GetSpammerDetails).Methods("GET")
-	api.HandleFunc("/spammer/{id}", frontendHandler.UpdateSpammer).Methods("PUT")
-	api.HandleFunc("/spammer/{id}/logs/stream", frontendHandler.StreamSpammerLogs).Methods("GET")
+	apiHandler := api.NewAPIHandler(daemon)
+	apiRouter := router.PathPrefix("/api").Subrouter()
+	apiRouter.HandleFunc("/spammers", apiHandler.GetSpammerList).Methods("GET")
+	apiRouter.HandleFunc("/scenarios", apiHandler.GetScenarios).Methods("GET")
+	apiRouter.HandleFunc("/scenarios/{name}/config", apiHandler.GetScenarioConfig).Methods("GET")
+	apiRouter.HandleFunc("/spammer", apiHandler.CreateSpammer).Methods("POST")
+	apiRouter.HandleFunc("/spammer/{id}/start", apiHandler.StartSpammer).Methods("POST")
+	apiRouter.HandleFunc("/spammer/{id}/pause", apiHandler.PauseSpammer).Methods("POST")
+	apiRouter.HandleFunc("/spammer/{id}", apiHandler.DeleteSpammer).Methods("DELETE")
+	apiRouter.HandleFunc("/spammer/{id}/logs", apiHandler.GetSpammerLogs).Methods("GET")
+	apiRouter.HandleFunc("/spammer/{id}", apiHandler.GetSpammerDetails).Methods("GET")
+	apiRouter.HandleFunc("/spammer/{id}", apiHandler.UpdateSpammer).Methods("PUT")
+	apiRouter.HandleFunc("/spammer/{id}/logs/stream", apiHandler.StreamSpammerLogs).Methods("GET")
+
+	// swagger
+	router.PathPrefix("/docs/").Handler(docs.GetSwaggerHandler(logrus.StandardLogger()))
 
 	router.PathPrefix("/").Handler(frontend)
 

@@ -28,7 +28,7 @@ func (fh *FrontendHandler) Index(w http.ResponseWriter, r *http.Request) {
 	)
 
 	var pageTemplate = webui.GetTemplate(templateFiles...)
-	data := webui.InitPageData(w, r, "index", "/", "Spamoor Dashboard", templateFiles)
+	data := webui.InitPageData(r, "index", "/", "Spamoor Dashboard", templateFiles)
 
 	var pageError error
 	data.Data, pageError = fh.getIndexPageData()

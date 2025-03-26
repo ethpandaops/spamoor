@@ -28,7 +28,7 @@ func (fh *FrontendHandler) Health(w http.ResponseWriter, r *http.Request) {
 	)
 
 	var pageTemplate = frontend.GetTemplate(templateFiles...)
-	data := frontend.InitPageData(w, r, "health", "/health", "Health", templateFiles)
+	data := frontend.InitPageData(r, "health", "/health", "Health", templateFiles)
 
 	var pageError error
 	data.Data, pageError = fh.getHealthPageData(r.Context())

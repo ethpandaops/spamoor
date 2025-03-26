@@ -29,7 +29,7 @@ func (fh *FrontendHandler) Wallets(w http.ResponseWriter, r *http.Request) {
 	)
 
 	var pageTemplate = webui.GetTemplate(templateFiles...)
-	data := webui.InitPageData(w, r, "wallets", "/wallets", "Spamoor Wallets", templateFiles)
+	data := webui.InitPageData(r, "wallets", "/wallets", "Spamoor Wallets", templateFiles)
 
 	var pageError error
 	data.Data, pageError = fh.getWalletsPageData()

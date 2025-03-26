@@ -1,0 +1,428 @@
+definitions:
+  api.CreateSpammerRequest:
+    properties:
+      config:
+        type: string
+      description:
+        type: string
+      name:
+        type: string
+      scenario:
+        type: string
+      startImmediately:
+        type: boolean
+    type: object
+  api.LogEntry:
+    properties:
+      fields:
+        additionalProperties:
+          type: string
+        type: object
+      level:
+        type: string
+      message:
+        type: string
+      time:
+        type: string
+    type: object
+  api.Response:
+    properties:
+      data: {}
+      error:
+        type: string
+    type: object
+  api.ScenarioEntries:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+    type: object
+  api.SpammerDetails:
+    properties:
+      config:
+        type: string
+      description:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      scenario:
+        type: string
+      status:
+        type: integer
+    type: object
+  api.SpammerListEntry:
+    properties:
+      created_at:
+        description: RFC3339Nano formatted timestamp
+        type: string
+      description:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      scenario:
+        type: string
+      status:
+        type: integer
+    type: object
+  api.UpdateSpammerRequest:
+    properties:
+      config:
+        type: string
+      description:
+        type: string
+      name:
+        type: string
+    type: object
+info:
+  contact: {}
+paths:
+  /api/scenarios:
+    get:
+      description: Returns a list of all scenarios
+      operationId: getScenarios
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/api.ScenarioEntries'
+                  type: array
+              type: object
+        "400":
+          description: Failure
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Get all scenarios
+      tags:
+      - Scenario
+  /api/scenarios/{name}/config:
+    get:
+      description: Returns the default configuration for a specific scenario
+      operationId: getScenarioConfig
+      parameters:
+      - description: Scenario name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: YAML configuration
+          schema:
+            type: string
+        "404":
+          description: Scenario not found
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Get scenario configuration
+      tags:
+      - Scenario
+  /api/spammer:
+    post:
+      consumes:
+      - application/json
+      description: Creates a new spammer with the given configuration
+      operationId: createSpammer
+      parameters:
+      - description: Spammer configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.CreateSpammerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Spammer ID
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.Response'
+            - properties:
+                data:
+                  type: integer
+              type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Create a new spammer
+      tags:
+      - Spammer
+  /api/spammer/{id}:
+    delete:
+      description: Deletes a spammer and stops it if running
+      operationId: deleteSpammer
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid spammer ID
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Spammer not found
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Delete a spammer
+      tags:
+      - Spammer
+    get:
+      description: Returns detailed information about a specific spammer
+      operationId: getSpammerDetails
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/api.SpammerDetails'
+              type: object
+        "400":
+          description: Invalid spammer ID
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Spammer not found
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Get spammer details
+      tags:
+      - Spammer
+    put:
+      consumes:
+      - application/json
+      description: Updates an existing spammer's configuration
+      operationId: updateSpammer
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Updated configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateSpammerRequest'
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Spammer not found
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Update a spammer
+      tags:
+      - Spammer
+  /api/spammer/{id}/logs:
+    get:
+      description: Returns the most recent logs for a specific spammer
+      operationId: getSpammerLogs
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/api.LogEntry'
+                  type: array
+              type: object
+        "400":
+          description: Invalid spammer ID
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Spammer not found
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Get spammer logs
+      tags:
+      - Spammer
+  /api/spammer/{id}/logs/stream:
+    get:
+      description: Streams logs for a specific spammer using Server-Sent Events
+      operationId: streamSpammerLogs
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Timestamp to start from (RFC3339Nano)
+        in: query
+        name: since
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of log entries
+          schema:
+            type: string
+        "400":
+          description: Invalid spammer ID
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Spammer not found
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Streaming unsupported
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Stream spammer logs
+      tags:
+      - Spammer
+  /api/spammer/{id}/pause:
+    post:
+      description: Pauses a running spammer
+      operationId: pauseSpammer
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid spammer ID
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Spammer not found
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Pause a spammer
+      tags:
+      - Spammer
+  /api/spammer/{id}/start:
+    post:
+      description: Starts a specific spammer
+      operationId: startSpammer
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid spammer ID
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Spammer not found
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Start a spammer
+      tags:
+      - Spammer
+  /api/spammers:
+    get:
+      description: Returns a list of all configured spammers
+      operationId: getSpammerList
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/api.SpammerListEntry'
+                  type: array
+              type: object
+      summary: Get all spammers
+      tags:
+      - Spammer
+swagger: "2.0"
