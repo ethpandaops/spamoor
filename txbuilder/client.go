@@ -16,10 +16,11 @@ import (
 )
 
 type Client struct {
-	Timeout time.Duration
-	rpchost string
-	client  *ethclient.Client
-	logger  *logrus.Entry
+	Timeout   time.Duration
+	rpchost   string
+	client    *ethclient.Client
+	rpcClient *rpc.Client
+	logger    *logrus.Entry
 
 	gasSuggestionMutex sync.Mutex
 	lastGasSuggestion  time.Time
@@ -29,6 +30,9 @@ type Client struct {
 	blockHeight      uint64
 	blockHeightTime  time.Time
 	blockHeightMutex sync.Mutex
+
+	clientVersion     string
+	clientVersionTime time.Time
 }
 
 func NewClient(rpchost string) (*Client, error) {
@@ -57,9 +61,10 @@ func NewClient(rpchost string) (*Client, error) {
 	}
 
 	return &Client{
-		client:  ethclient.NewClient(rpcClient),
-		rpchost: rpchost,
-		logger:  logrus.WithField("client", rpchost),
+		client:    ethclient.NewClient(rpcClient),
+		rpcClient: rpcClient,
+		rpchost:   rpchost,
+		logger:    logrus.WithField("rpc", rpchost),
 	}, nil
 }
 
@@ -203,4 +208,26 @@ func (client *Client) GetBlockHeight(ctx context.Context) (uint64, error) {
 		client.blockHeightTime = time.Now()
 	}
 	return client.blockHeight, nil
+}
+
+func (client *Client) GetLastBlockHeight() (uint64, time.Time) {
+	return client.blockHeight, client.blockHeightTime
+}
+
+func (client *Client) GetClientVersion(ctx context.Context) (string, error) {
+
+	if time.Since(client.clientVersionTime) < 30*time.Minute {
+		return client.clientVersion, nil
+	}
+
+	var result string
+	err := client.rpcClient.CallContext(ctx, &result, "web3_clientVersion")
+	if err != nil {
+		return "", err
+	}
+
+	client.clientVersion = result
+	client.clientVersionTime = time.Now()
+
+	return result, nil
 }

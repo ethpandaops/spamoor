@@ -1,0 +1,47 @@
+
+body main {
+    min-height: calc(100vh - 180px)!important;
+}
+
+.header {
+    height: 70px;
+}
+
+.footer {
+    margin-top: 30px;
+    margin-bottom: 20px;
+}
+
+header.header-bar {
+    position: fixed;
+    top: 0;
+    width: 100%;
+    z-index: 1000;
+    box-shadow: 0 0.5em 1.5em rgba(0, 0, 0, .1), 0 0.125em 0.5em rgba(0, 0, 0, .15);
+}
+
+header.header-bar .navbar-brand {
+    margin-right: 0;
+}
+
+@media (min-width: 992px) {
+    header .collapsed-info {
+        display: none;
+    }
+
+    header .navbar-collapse {
+        flex-grow: initial;
+    }
+}
+
+.colormode-icon {
+    width: 1em;
+    height: 1em;
+    fill: currentcolor
+}
+
+nav .theme-selector .theme-navicon {
+    display: inline;
+    height: 40px;
+}
+  

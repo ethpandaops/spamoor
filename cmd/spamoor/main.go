@@ -13,7 +13,8 @@ import (
 
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/scenariotypes"
-	"github.com/ethpandaops/spamoor/tester"
+	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -45,25 +46,40 @@ func main() {
 
 	flags.Parse(os.Args)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// init logger
+	if cliArgs.trace {
+		logrus.SetLevel(logrus.TraceLevel)
+	} else if cliArgs.verbose {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
+
+	logger := logrus.StandardLogger()
+
+	logger.WithFields(logrus.Fields{
+		"version":   utils.GetBuildVersion(),
+		"buildtime": utils.BuildTime,
+	}).Infof("starting spamoor")
+
+	// load scenario
 	invalidScenario := false
 	var scenarioName string
-	var scenarioBuilder func() scenariotypes.Scenario
+	var scenarioDescriptior *scenariotypes.ScenarioDescriptor
 	if flags.NArg() < 2 {
 		invalidScenario = true
 	} else {
 		scenarioName = flags.Args()[1]
-		scenarioBuilder = scenarios.Scenarios[scenarioName]
-		if scenarioBuilder == nil {
+		scenarioDescriptior = scenarios.GetScenario(scenarioName)
+		if scenarioDescriptior == nil {
 			invalidScenario = true
 		}
 	}
 	if invalidScenario {
 		fmt.Printf("invalid or missing scenario\n\n")
 		fmt.Printf("implemented scenarios:\n")
-		scenarioNames := []string{}
-		for sn := range scenarios.Scenarios {
-			scenarioNames = append(scenarioNames, sn)
-		}
+		scenarioNames := scenarios.GetScenarioNames()
 		sort.Slice(scenarioNames, func(a int, b int) bool {
 			return strings.Compare(scenarioNames[a], scenarioNames[b]) > 0
 		})
@@ -73,7 +89,7 @@ func main() {
 		return
 	}
 
-	scenario := scenarioBuilder()
+	scenario := scenarioDescriptior.NewScenario(logger)
 	if scenario == nil {
 		panic("could not create scenario instance")
 	}
@@ -83,12 +99,7 @@ func main() {
 	cliArgs.rpchosts = nil
 	flags.Parse(os.Args)
 
-	if cliArgs.trace {
-		logrus.SetLevel(logrus.TraceLevel)
-	} else if cliArgs.verbose {
-		logrus.SetLevel(logrus.DebugLevel)
-	}
-
+	// start client pool
 	rpcHosts := []string{}
 	for _, rpcHost := range strings.Split(strings.Join(cliArgs.rpchosts, ","), ",") {
 		if rpcHost != "" {
@@ -104,26 +115,55 @@ func main() {
 		rpcHosts = append(rpcHosts, fileLines...)
 	}
 
-	testerConfig := &tester.TesterConfig{
-		RpcHosts:       rpcHosts,
-		WalletPrivkey:  cliArgs.privkey,
-		WalletCount:    100,
-		WalletPrefund:  utils.EtherToWei(uint256.NewInt(cliArgs.refillAmount)),
-		WalletMinfund:  utils.EtherToWei(uint256.NewInt(cliArgs.refillBalance)),
-		RefillInterval: cliArgs.refillInterval,
-	}
-	err := scenario.Init(testerConfig)
+	clientPool := spamoor.NewClientPool(ctx, rpcHosts, logger.WithField("module", "clientpool"))
+	err := clientPool.PrepareClients()
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("failed to prepare clients: %v", err))
 	}
-	tester := tester.NewTester(context.Background(), testerConfig)
-	err = tester.Start(cliArgs.seed)
-	if err != nil {
-		panic(err)
-	}
-	defer tester.Stop()
 
-	err = scenario.Run(tester)
+	// init root wallet
+	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool.GetClient(spamoor.SelectClientRandom, 0), logger)
+	if err != nil {
+		panic(fmt.Errorf("failed to init root wallet: %v", err))
+	}
+
+	// prepare txpool
+	txpool := txbuilder.NewTxPool(&txbuilder.TxPoolOptions{
+		GetClientFn: func(index int, random bool) *txbuilder.Client {
+			mode := spamoor.SelectClientByIndex
+			if random {
+				mode = spamoor.SelectClientRandom
+			}
+
+			return clientPool.GetClient(mode, index)
+		},
+		GetClientCountFn: func() int {
+			return len(clientPool.GetAllClients())
+		},
+	})
+
+	// init wallet pool
+	walletPool := spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
+	walletPool.SetWalletCount(100)
+	walletPool.SetRefillAmount(utils.EtherToWei(uint256.NewInt(cliArgs.refillAmount)))
+	walletPool.SetRefillBalance(utils.EtherToWei(uint256.NewInt(cliArgs.refillBalance)))
+	walletPool.SetRefillInterval(cliArgs.refillInterval)
+	walletPool.SetWalletSeed(cliArgs.seed)
+
+	// init scenario
+	err = scenario.Init(walletPool, "")
+	if err != nil {
+		panic(err)
+	}
+
+	// prepare wallet pool
+	err = walletPool.PrepareWallets(true)
+	if err != nil {
+		panic(fmt.Errorf("failed to prepare wallets: %v", err))
+	}
+
+	// start scenario
+	err = scenario.Run(ctx)
 	if err != nil {
 		panic(err)
 	}

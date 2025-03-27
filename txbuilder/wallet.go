@@ -90,6 +90,10 @@ func (wallet *Wallet) GetNonce() uint64 {
 	return wallet.pendingNonce.Load()
 }
 
+func (wallet *Wallet) GetConfirmedNonce() uint64 {
+	return wallet.confirmedNonce
+}
+
 func (wallet *Wallet) GetBalance() *big.Int {
 	wallet.balanceMutex.RLock()
 	defer wallet.balanceMutex.RUnlock()
@@ -160,7 +164,7 @@ func (wallet *Wallet) BuildSetCodeTx(txData *types.SetCodeTx) (*types.Transactio
 	return wallet.signTx(txData)
 }
 
-func (wallet *Wallet) BuildBoundTx(txData *TxMetadata, buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
+func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *TxMetadata, buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
 	transactor, err := bind.NewKeyedTransactorWithChainID(wallet.privkey, wallet.chainid)
 	if err != nil {
 		return nil, err
@@ -169,7 +173,7 @@ func (wallet *Wallet) BuildBoundTx(txData *TxMetadata, buildFn func(transactOpts
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
 
-	transactor.Context = context.Background()
+	transactor.Context = ctx
 	transactor.From = wallet.address
 	nonce := wallet.pendingNonce.Add(1) - 1
 	transactor.Nonce = big.NewInt(0).SetUint64(nonce)

@@ -1,0 +1,45 @@
+{{ define "page" }}
+  <div class="container mt-2">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Sorry, there was an unexpected error when processing the page you requested.</h5>
+        <p class="card-text">
+          Please report this error <a href="https://github.com/ethpandaops/dugtrio/issues/new" target="_blank">on github</a>.
+        </p>
+      </div>
+      <div class="card-body">
+          Tech stuff for bug report: <i class="fa fa-copy text-muted p-1" role="button" data-bs-toggle="tooltip" title="Copy to clipboard" data-clipboard-target="#errormsg"></i>
+          <div class="error-message p-1">
+<pre id="errormsg" class="p-2">
+URL: {{ .CallUrl }}
+Time: {{ .CallTime }}
+Version: {{ .Version }}
+
+Error:
+{{ .ErrorMsg }}
+
+Stack Trace:
+{{ .StackTrace }}
+</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{{ end }}
+{{ define "js" }}
+{{ end }}
+{{ define "css" }}
+<style>
+  .error-message {
+    width: 100%;
+  }
+  .error-message > pre {
+    height: 200px;
+    overflow-y: auto;
+    background-color: var(--bs-tertiary-bg);
+    border: var(--bs-card-border-width) solid var(--bs-card-border-color);
+    border-radius: 5px;
+  }
+</style>
+{{ end }}

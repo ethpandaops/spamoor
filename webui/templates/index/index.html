@@ -1,0 +1,561 @@
+{{ define "page" }}
+  <div class="container mt-2">
+    <h2 class="py-2">Spamoor Dashboard</h2>
+    
+    <div class="d-flex justify-content-end mb-3">
+      <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newSpammerModal">
+        <i class="fas fa-plus"></i> New Spammer
+      </button>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width: 100px">ID</th>
+            <th>Name</th>
+            <th style="min-width: 100px; width: 10%">Scenario</th>
+            <th style="min-width: 100px; width: 10%">Status</th>
+            <th class="text-end" style="width: 180px">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range .Spammers }}
+          <tr class="align-middle">
+            <td>{{ .ID }}</td>
+            <td>
+              {{ .Name }}
+              {{ if .Description }}
+                <small class="text-muted d-block">{{ .Description }}</small>
+              {{ end }}
+            </td>
+            <td>{{ .Scenario }}</td>
+            <td>
+              {{ if eq .Status 0 }}
+                <span class="badge bg-info">Paused</span>
+              {{ else if eq .Status 1 }}
+                <span class="badge bg-success">Running</span>
+              {{ else if eq .Status 2 }}
+                <span class="badge bg-secondary">Finished</span>
+              {{ else }}
+                <span class="badge bg-danger">Failed</span>
+              {{ end }}
+            </td>
+            <td>
+              <div class="d-flex gap-2" style="flex-direction: row-reverse;">
+                <button class="btn btn-sm btn-outline-secondary" onclick="toggleLogs(this, {{ .ID }})" title="Toggle Logs" data-bs-toggle="tooltip" data-bs-placement="top">
+                  <i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="btn-group">
+                  {{ if or (eq .Status 0) (eq .Status 2) (eq .Status 3) }}
+                    <button class="btn btn-sm btn-success spammer-toggle-btn" onclick="startSpammer({{ .ID }})" title="Start Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+                      <i class="fas fa-play"></i>
+                    </button>
+                  {{ else }}
+                    <button class="btn btn-sm btn-warning spammer-toggle-btn" onclick="pauseSpammer({{ .ID }})" title="Pause Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+                      <i class="fas fa-pause"></i>
+                    </button>
+                  {{ end }}
+                  <button class="btn btn-sm btn-info" onclick="editSpammer({{ .ID }})" title="Edit Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <button class="btn btn-sm btn-danger" onclick="deleteSpammer({{ .ID }})" title="Delete Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+            </td>
+          </tr>
+          <tr class="d-none log-row" data-spammer-id="{{ .ID }}">
+            <td colspan="5" class="p-0">
+              <div class="log-container bg-dark text-light p-3" style="max-height: 400px; overflow-y: auto;">
+                <div class="logs font-monospace small"></div>
+              </div>
+            </td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- New Spammer Modal -->
+  <div class="modal fade" id="newSpammerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">New Spammer</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="newSpammerForm">
+            <div class="mb-3">
+              <label class="form-label">Name</label>
+              <input type="text" class="form-control" name="name" required>
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Description</label>
+              <textarea class="form-control" name="description" rows="2"></textarea>
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Scenario</label>
+              <select class="form-select" name="scenario" required>
+                <option value="">Select a scenario...</option>
+              </select>
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Configuration</label>
+              <textarea class="form-control font-monospace" name="config" rows="16" 
+                style="tab-size: 2;" required></textarea>
+            </div>
+
+            <div class="mb-3 form-check">
+              <input type="checkbox" class="form-check-input" id="startImmediately" name="startImmediately" checked>
+              <label class="form-check-label" for="startImmediately">
+                Start spammer after creation
+              </label>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="submitNewSpammer()">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Spammer Modal -->
+  <div class="modal fade" id="editSpammerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Spammer</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div id="editWarning" class="alert alert-warning d-none mb-3">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            This spammer is currently running. Changes will only take effect after restarting the spammer.
+          </div>
+          <form id="editSpammerForm">
+            <input type="hidden" name="id">
+            <div class="mb-3">
+              <label class="form-label">Name</label>
+              <input type="text" class="form-control" name="name" required>
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Description</label>
+              <textarea class="form-control" name="description" rows="2"></textarea>
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Scenario</label>
+              <input type="text" class="form-control" name="scenario" readonly>
+              <small class="text-muted">Scenario cannot be changed after creation</small>
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Configuration</label>
+              <textarea class="form-control font-monospace" name="config" rows="16" 
+                style="tab-size: 2;" required></textarea>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="submitEditSpammer()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{{ end }}
+
+{{ define "js" }}
+<script src="/js/yaml-0.3.0.min.js"></script>
+<script>
+const LOG_REFRESH_INTERVAL = 10000;
+const MAX_LOG_ENTRIES = 5000;
+const logRefreshTimers = new Map();
+
+async function startSpammer(id) {
+  try {
+    await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
+    
+    const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
+    const statusCell = row.querySelector('td:nth-child(4)');
+    const toggleButton = row.querySelector('.spammer-toggle-btn');
+    
+    statusCell.innerHTML = '<span class="badge bg-success">Running</span>';
+    
+    toggleButton.className = 'btn btn-sm btn-warning spammer-toggle-btn';
+    toggleButton.setAttribute('onclick', `pauseSpammer(${id})`);
+    toggleButton.setAttribute('title', 'Pause Spammer');
+    toggleButton.innerHTML = '<i class="fas fa-pause"></i>';
+
+    const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
+    if (tooltip) {
+      tooltip.dispose();
+    }
+    new bootstrap.Tooltip(toggleButton);
+  } catch (err) {
+    alert('Failed to start spammer: ' + err.message);
+  }
+}
+
+async function pauseSpammer(id) {
+  try {
+    await fetch(`/api/spammer/${id}/pause`, {method: 'POST'});
+    
+    const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
+    const statusCell = row.querySelector('td:nth-child(4)');
+    const toggleButton = row.querySelector('.spammer-toggle-btn');
+    
+    statusCell.innerHTML = '<span class="badge bg-info">Paused</span>';
+    
+    toggleButton.className = 'btn btn-sm btn-success spammer-toggle-btn';
+    toggleButton.setAttribute('onclick', `startSpammer(${id})`);
+    toggleButton.setAttribute('title', 'Start Spammer');
+    toggleButton.innerHTML = '<i class="fas fa-play"></i>';
+
+    const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
+    if (tooltip) {
+      tooltip.dispose();
+    }
+    new bootstrap.Tooltip(toggleButton);
+  } catch (err) {
+    alert('Failed to pause spammer: ' + err.message);
+  }
+}
+
+async function deleteSpammer(id) {
+  if (!confirm('Are you sure you want to delete this spammer?')) return;
+  await fetch(`/api/spammer/${id}`, {method: 'DELETE'});
+  window.location.reload();
+}
+
+document.getElementById('newSpammerModal').addEventListener('show.bs.modal', async () => {
+  const select = document.querySelector('[name="scenario"]');
+  select.querySelectorAll('option:not(:first-child)').forEach(opt => opt.remove());
+  
+  const scenarios = await fetch('/api/scenarios').then(r => r.json());
+  scenarios.forEach(scenario => {
+    const option = document.createElement('option');
+    option.value = scenario.name;
+    option.textContent = scenario.name + (scenario.description ? ' - ' + scenario.description : '');
+    select.appendChild(option);
+  });
+});
+
+document.querySelector('[name="scenario"]').addEventListener('change', async (e) => {
+  const scenario = e.target.value;
+  if (!scenario) return;
+  
+  const config = await fetch(`/api/scenarios/${scenario}/config`).then(r => r.text());
+  document.querySelector('[name="config"]').value = config;
+});
+
+document.querySelector('#newSpammerForm [name="config"]').addEventListener('keydown', function(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const start = this.selectionStart;
+    const end = this.selectionEnd;
+    this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = start + 2;
+  }
+});
+
+async function submitNewSpammer() {
+  const form = document.getElementById('newSpammerForm');
+  const data = {
+    name: form.querySelector('[name="name"]').value,
+    description: form.querySelector('[name="description"]').value,
+    scenario: form.querySelector('[name="scenario"]').value,
+    config: form.querySelector('[name="config"]').value,
+    startImmediately: form.querySelector('[name="startImmediately"]').checked
+  };
+
+  try {
+    await fetch('/api/spammer', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    window.location.reload();
+  } catch (err) {
+    alert('Failed to create spammer: ' + err.message);
+  }
+}
+
+function isAtBottom(element) {
+  const threshold = 50;
+  return element.scrollHeight - element.scrollTop - element.clientHeight < threshold;
+}
+
+function getLogLevelClass(level) {
+  switch (level.toLowerCase()) {
+    case 'error': return 'text-danger';
+    case 'warning': return 'text-warning';
+    case 'info': return 'text-info';
+    default: return '';
+  }
+}
+
+function getLogLevelBadge(level) {
+  switch (level.toLowerCase()) {
+    case 'error': return 'bg-danger';
+    case 'warning': return 'bg-warning';
+    case 'info': return 'bg-info';
+    default: return 'bg-secondary';
+  }
+}
+
+function toggleLogs(button, id) {
+  const tooltips = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+  tooltips.forEach(el => bootstrap.Tooltip.getInstance(el)?.hide());
+
+  const icon = button.querySelector('i');
+  const logRow = document.querySelector(`tr.log-row[data-spammer-id="${id}"]`);
+  const logsDiv = logRow.querySelector('.logs');
+  
+  if (logRow.classList.contains('d-none')) {
+    icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+    logRow.classList.remove('d-none');
+    startLogStream(id, logsDiv);
+  } else {
+    icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+    logRow.classList.add('d-none');
+    stopLogStream(id);
+  }
+}
+
+const logEventSources = new Map();
+
+function startLogStream(id, logsDiv) {
+  if (logEventSources.has(id)) {
+    return;
+  }
+
+  function connect() {
+    const lastEntry = logsDiv.querySelector('.log-entry:last-child');
+    const lastTime = lastEntry?.dataset.time;
+    
+    const url = new URL(`/api/spammer/${id}/logs/stream`, window.location.origin);
+    if (lastTime) {
+      url.searchParams.set('since', lastTime);
+    }
+    
+    const sse = new EventSource(url.toString());
+    
+    sse.onmessage = (event) => {
+      const logs = JSON.parse(event.data);
+      appendLogs(logs, logsDiv);
+    };
+
+    sse.onerror = (error) => {
+      console.error('Log stream error:', error);
+      sse.close();
+      logEventSources.delete(id);
+
+      const logRow = logsDiv.closest('.log-row');
+      if (!logRow.classList.contains('d-none')) {
+        console.log('Reconnecting log stream in 2 seconds...');
+        setTimeout(() => connect(), 2000);
+      }
+    };
+
+    logEventSources.set(id, sse);
+  }
+
+  connect();
+}
+
+function stopLogStream(id) {
+  const sse = logEventSources.get(id);
+  if (sse) {
+    sse.close();
+    logEventSources.delete(id);
+  }
+}
+
+function appendLogs(logs, logsDiv) {
+  const container = logsDiv.closest('.log-container');
+  const isScrolledToBottom = isAtBottom(container);
+  const lastScrollTop = container.scrollTop;
+
+  logs.forEach(log => {
+    const fields = Object.entries(log.fields)
+      .filter(([key]) => key !== 'scenario');
+    
+    let fieldBadges = '';
+    if (fields.length > 0) {
+      const rpcField = fields.find(([key]) => key === 'rpc');
+      const otherFields = fields.filter(([key]) => key !== 'rpc');
+      
+      const visibleFields = otherFields.slice(0, 2)
+        .map(([key, value]) => `<span class="badge">${key}=${value}</span>`)
+        .join('');
+        
+      const hiddenFields = [
+        ...(rpcField ? [rpcField] : []),
+        ...otherFields.slice(2)
+      ];
+      
+      const moreButton = hiddenFields.length > 0 
+        ? `<span class="badge more-fields" data-bs-toggle="tooltip" data-bs-placement="top" 
+            title="${hiddenFields.map(([k,v]) => `${k}=${v}`).join('\n')}">...</span>`
+        : '';
+
+      fieldBadges = `<div class="log-fields">${visibleFields}${moreButton}</div>`;
+    }
+
+    const logEntry = document.createElement('div');
+    logEntry.className = `log-entry ${getLogLevelClass(log.level)}`;
+    logEntry.dataset.time = log.time;
+    logEntry.innerHTML = `
+      <div class="d-flex align-items-center gap-2">
+        <span class="text-muted small">${new Date(log.time).toLocaleString()}</span>
+        <span class="badge ${getLogLevelBadge(log.level)}">${log.level}</span>
+        <span class="message-text">${log.message}</span>
+        ${fieldBadges}
+      </div>
+    `;
+
+    logsDiv.appendChild(logEntry);
+  });
+
+  const entries = logsDiv.querySelectorAll('.log-entry');
+  if (entries.length > MAX_LOG_ENTRIES) {
+    const toRemove = entries.length - MAX_LOG_ENTRIES;
+    for (let i = 0; i < toRemove; i++) {
+      entries[i].remove();
+    }
+  }
+
+  if (isScrolledToBottom) {
+    container.scrollTop = container.scrollHeight;
+  } else {
+    container.scrollTop = lastScrollTop;
+  }
+
+  const tooltips = logsDiv.querySelectorAll('[data-bs-toggle="tooltip"]');
+  tooltips.forEach(el => new bootstrap.Tooltip(el));
+}
+
+window.addEventListener('beforeunload', () => {
+  logEventSources.forEach((sse) => sse.close());
+  logEventSources.clear();
+});
+
+async function editSpammer(id) {
+  try {
+    const spammer = await fetch(`/api/spammer/${id}`).then(r => r.json());
+    const form = document.getElementById('editSpammerForm');
+    const warning = document.getElementById('editWarning');
+    warning.classList.toggle('d-none', spammer.status !== 1);
+    form.querySelector('[name="id"]').value = spammer.id;
+    form.querySelector('[name="name"]').value = spammer.name;
+    form.querySelector('[name="description"]').value = spammer.description;
+    form.querySelector('[name="scenario"]').value = spammer.scenario;
+    form.querySelector('[name="config"]').value = spammer.config;
+    new bootstrap.Modal(document.getElementById('editSpammerModal')).show();
+  } catch (err) {
+    alert('Failed to load spammer details: ' + err.message);
+  }
+}
+
+async function submitEditSpammer() {
+  const form = document.getElementById('editSpammerForm');
+  const id = form.querySelector('[name="id"]').value;
+  const data = {
+    name: form.querySelector('[name="name"]').value,
+    description: form.querySelector('[name="description"]').value,
+    config: form.querySelector('[name="config"]').value
+  };
+
+  try {
+    await fetch(`/api/spammer/${id}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    window.location.reload();
+  } catch (err) {
+    alert('Failed to update spammer: ' + err.message);
+  }
+}
+document.querySelector('#editSpammerForm [name="config"]').addEventListener('keydown', function(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const start = this.selectionStart;
+    const end = this.selectionEnd;
+    this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = start + 2;
+  }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+  tooltipTriggerList.map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+});
+</script>
+{{ end }}
+
+{{ define "css" }}
+<style>
+.log-entry {
+  word-break: break-word;
+  margin-bottom: 0.25rem;
+  border-left: 3px solid transparent;
+  padding-left: 0.5rem;
+}
+
+.log-entry.text-danger {
+  border-left-color: var(--bs-danger);
+}
+
+.log-entry.text-warning {
+  border-left-color: var(--bs-warning);
+}
+
+.log-entry.text-info {
+  border-left-color: var(--bs-info);
+}
+
+.message-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.log-fields {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+  align-items: center;
+}
+
+.log-entry .badge {
+  font-size: 0.7em;
+  padding: 0.15em 0.4em;
+  font-weight: normal;
+  line-height: 1;
+  background-color: #2d3238 !important;
+  color: #adb5bd;
+  white-space: nowrap;
+}
+
+.log-entry .more-fields {
+  cursor: help;
+}
+
+.tooltip-inner {
+  text-align: left;
+  font-family: monospace;
+  white-space: pre-line;
+}
+</style>
+{{ end }}

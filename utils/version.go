@@ -4,7 +4,7 @@ import "fmt"
 
 var BuildVersion string
 var BuildRelease string
-var Buildtime string
+var BuildTime string
 
 func GetBuildVersion() string {
 	if BuildRelease == "" {

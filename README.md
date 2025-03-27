@@ -226,3 +226,34 @@ spamoor blob-combined -p "<PRIVKEY>" -h http://rpc-host1:8545 -h http://rpc-host
 The `wallets` scenario prepares & prints the list of child wallets that are used to send blob transactions from.\
 It's more intended for debugging. The tool takes care of these wallets internally, so there is nothing to do with them ;)
 
+## Spamoor Daemon
+
+The daemon provides a web interface and API for managing multiple spammers. It allows you to create, monitor, and control spammers through a user interface or programmatically via HTTP endpoints.
+
+### Usage
+```bash
+spamoor-daemon [flags]
+```
+
+### Flags
+```
+-d, --db string         The file to store the database in (default "spamoor.db")
+    --debug             Run the tool in debug mode
+-h, --rpchost strings   The RPC host to send transactions to
+    --rpchost-file      File with a list of RPC hosts to send transactions to
+-p, --privkey string    The private key of the wallet to send funds from
+-P, --port int          The port to run the webui on (default 8080)
+-v, --verbose           Run the tool with verbose output
+    --trace             Run the tool with tracing output
+```
+
+### Web Interface
+The web interface runs on `http://localhost:8080` by default and provides:
+- Dashboard for managing spammers
+- Real-time log streaming
+- Configuration management
+- Start/pause/delete functionality
+
+### API
+The daemon exposes a REST API for programmatic control.
+See the API Documentation in the spamoor web interface for details.
