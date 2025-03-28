@@ -15,7 +15,7 @@ import (
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
-	"github.com/ethpandaops/spamoor/webui/server"
+	"github.com/ethpandaops/spamoor/webui"
 	"github.com/ethpandaops/spamoor/webui/types"
 )
 
@@ -123,7 +123,7 @@ func main() {
 	daemon := daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, rootWallet, txpool, database)
 
 	// start frontend
-	server.StartHttpServer(&types.FrontendConfig{
+	webui.StartHttpServer(&types.FrontendConfig{
 		Host:     "0.0.0.0",
 		Port:     cliArgs.port,
 		SiteName: "Spamoor",

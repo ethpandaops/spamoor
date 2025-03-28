@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"slices"
 
-	frontend "github.com/ethpandaops/spamoor/webui"
+	"github.com/ethpandaops/spamoor/webui/server"
 )
 
 type HealthPage struct {
@@ -23,21 +23,21 @@ type HealthPageClient struct {
 
 // Health will return the "health" page using a go template
 func (fh *FrontendHandler) Health(w http.ResponseWriter, r *http.Request) {
-	var templateFiles = append(frontend.LayoutTemplateFiles,
+	var templateFiles = append(server.LayoutTemplateFiles,
 		"health/health.html",
 	)
 
-	var pageTemplate = frontend.GetTemplate(templateFiles...)
-	data := frontend.InitPageData(r, "health", "/health", "Health", templateFiles)
+	var pageTemplate = server.GetTemplate(templateFiles...)
+	data := server.InitPageData(r, "health", "/health", "Health", templateFiles)
 
 	var pageError error
 	data.Data, pageError = fh.getHealthPageData(r.Context())
 	if pageError != nil {
-		frontend.HandlePageError(w, r, pageError)
+		server.HandlePageError(w, r, pageError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html")
-	if frontend.HandleTemplateError(w, r, "health.go", "Health", "", pageTemplate.ExecuteTemplate(w, "layout", data)) != nil {
+	if server.HandleTemplateError(w, r, "health.go", "Health", "", pageTemplate.ExecuteTemplate(w, "layout", data)) != nil {
 		return // an error has occurred and was processed
 	}
 }

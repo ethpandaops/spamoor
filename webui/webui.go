@@ -1,26 +1,35 @@
-package server
+package webui
 
 import (
+	"embed"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/ethpandaops/spamoor/daemon"
-	"github.com/ethpandaops/spamoor/webui"
 	"github.com/ethpandaops/spamoor/webui/handlers"
 	"github.com/ethpandaops/spamoor/webui/handlers/api"
 	"github.com/ethpandaops/spamoor/webui/handlers/docs"
+	"github.com/ethpandaops/spamoor/webui/server"
 	"github.com/ethpandaops/spamoor/webui/types"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/negroni"
 )
 
+var (
+	//go:embed static/*
+	staticEmbedFS embed.FS
+
+	//go:embed templates/*
+	templateEmbedFS embed.FS
+)
+
 func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	// init router
 	router := mux.NewRouter()
 
-	frontend, err := webui.NewFrontend(config)
+	frontend, err := server.NewFrontend(config, staticEmbedFS, templateEmbedFS)
 	if err != nil {
 		logrus.Fatalf("error initializing frontend: %v", err)
 	}

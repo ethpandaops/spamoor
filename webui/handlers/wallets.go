@@ -5,7 +5,7 @@ import (
 	"math/big"
 	"net/http"
 
-	"github.com/ethpandaops/spamoor/webui"
+	"github.com/ethpandaops/spamoor/webui/server"
 )
 
 type WalletsPage struct {
@@ -24,22 +24,22 @@ type WalletInfo struct {
 }
 
 func (fh *FrontendHandler) Wallets(w http.ResponseWriter, r *http.Request) {
-	var templateFiles = append(webui.LayoutTemplateFiles,
+	var templateFiles = append(server.LayoutTemplateFiles,
 		"wallets/wallets.html",
 	)
 
-	var pageTemplate = webui.GetTemplate(templateFiles...)
-	data := webui.InitPageData(r, "wallets", "/wallets", "Spamoor Wallets", templateFiles)
+	var pageTemplate = server.GetTemplate(templateFiles...)
+	data := server.InitPageData(r, "wallets", "/wallets", "Spamoor Wallets", templateFiles)
 
 	var pageError error
 	data.Data, pageError = fh.getWalletsPageData()
 	if pageError != nil {
-		webui.HandlePageError(w, r, pageError)
+		server.HandlePageError(w, r, pageError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	if webui.HandleTemplateError(w, r, "wallets.go", "Wallets", "", pageTemplate.ExecuteTemplate(w, "layout", data)) != nil {
+	if server.HandleTemplateError(w, r, "wallets.go", "Wallets", "", pageTemplate.ExecuteTemplate(w, "layout", data)) != nil {
 		return
 	}
 }

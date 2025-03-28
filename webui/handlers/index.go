@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ethpandaops/spamoor/webui"
+	"github.com/ethpandaops/spamoor/webui/server"
 )
 
 type IndexPage struct {
@@ -23,21 +23,21 @@ type IndexPageSpammer struct {
 
 // Index will return the "index" page using a go template
 func (fh *FrontendHandler) Index(w http.ResponseWriter, r *http.Request) {
-	var templateFiles = append(webui.LayoutTemplateFiles,
+	var templateFiles = append(server.LayoutTemplateFiles,
 		"index/index.html",
 	)
 
-	var pageTemplate = webui.GetTemplate(templateFiles...)
-	data := webui.InitPageData(r, "index", "/", "Spamoor Dashboard", templateFiles)
+	var pageTemplate = server.GetTemplate(templateFiles...)
+	data := server.InitPageData(r, "index", "/", "Spamoor Dashboard", templateFiles)
 
 	var pageError error
 	data.Data, pageError = fh.getIndexPageData()
 	if pageError != nil {
-		webui.HandlePageError(w, r, pageError)
+		server.HandlePageError(w, r, pageError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html")
-	if webui.HandleTemplateError(w, r, "index.go", "Index", "", pageTemplate.ExecuteTemplate(w, "layout", data)) != nil {
+	if server.HandleTemplateError(w, r, "index.go", "Index", "", pageTemplate.ExecuteTemplate(w, "layout", data)) != nil {
 		return
 	}
 }

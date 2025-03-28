@@ -1,4 +1,4 @@
-package webui
+package server
 
 import (
 	"embed"
@@ -15,21 +15,13 @@ import (
 var logger = logrus.New().WithField("module", "frontend")
 var frontendConfig *types.FrontendConfig
 
-var (
-	//go:embed static/*
-	staticEmbedFS embed.FS
-
-	//go:embed templates/*
-	templateEmbedFS embed.FS
-)
-
 type Frontend struct {
 	defaultHandler  http.Handler
 	rootFileSys     http.FileSystem
 	NotFoundHandler func(http.ResponseWriter, *http.Request)
 }
 
-func NewFrontend(config *types.FrontendConfig) (*Frontend, error) {
+func NewFrontend(config *types.FrontendConfig, staticEmbedFS embed.FS, templateEmbedFS embed.FS) (*Frontend, error) {
 	frontendConfig = config
 
 	subFs, err := fs.Sub(staticEmbedFS, "static")

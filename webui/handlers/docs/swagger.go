@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ethpandaops/spamoor/webui"
+	"github.com/ethpandaops/spamoor/webui/server"
 	"github.com/sirupsen/logrus"
 	httpSwagger "github.com/swaggo/http-swagger"
 )
@@ -16,7 +16,7 @@ func GetSwaggerHandler(logger logrus.FieldLogger) http.HandlerFunc {
 		c.Layout = httpSwagger.StandaloneLayout
 
 		// override swagger header bar
-		headerHTML, err := webui.BuildPageHeader()
+		headerHTML, err := server.BuildPageHeader()
 		if err != nil {
 			logger.Errorf("failed generating page header for api: %v", err)
 		} else {
