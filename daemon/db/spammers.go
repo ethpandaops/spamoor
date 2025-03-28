@@ -49,11 +49,12 @@ func (d *Database) GetSpammers() ([]*Spammer, error) {
 
 func (d *Database) InsertSpammer(tx *sqlx.Tx, spammer *Spammer) error {
 	query := `
-		INSERT INTO spammers (scenario, name, description, config, status, created_at, state)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO spammers (id, scenario, name, description, config, status, created_at, state)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id`
 
 	return tx.QueryRow(query,
+		spammer.ID,
 		spammer.Scenario,
 		spammer.Name,
 		spammer.Description,
