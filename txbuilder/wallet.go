@@ -78,6 +78,10 @@ func (wallet *Wallet) GetAddress() common.Address {
 	return wallet.address
 }
 
+func (wallet *Wallet) SetAddress(address common.Address) {
+	wallet.address = address
+}
+
 func (wallet *Wallet) GetPrivateKey() *ecdsa.PrivateKey {
 	return wallet.privkey
 }
