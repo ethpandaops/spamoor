@@ -213,7 +213,7 @@ func MarshalBlobV1Tx(tx *types.Transaction) ([]byte, error) {
 		BlobHashes: tx.BlobHashes(),
 	}
 
-	r, s, v := tx.RawSignatureValues()
+	v, r, s := tx.RawSignatureValues()
 	blobTx.R = uint256.MustFromBig(r)
 	blobTx.S = uint256.MustFromBig(s)
 	blobTx.V = uint256.MustFromBig(v)
@@ -234,38 +234,4 @@ func MarshalBlobV1Tx(tx *types.Transaction) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
-
-	/*
-		fmt.Printf("to: %v\n", blobV1Tx.BlobTx.To)
-		fmt.Printf("nonce: %v\n", blobV1Tx.BlobTx.Nonce)
-		fmt.Printf("gasTipCap: %v\n", blobV1Tx.BlobTx.GasTipCap)
-		fmt.Printf("gasFeeCap: %v\n", blobV1Tx.BlobTx.GasFeeCap)
-		fmt.Printf("blobFeeCap: %v\n", blobV1Tx.BlobTx.BlobFeeCap)
-		fmt.Printf("gas: %v\n", blobV1Tx.BlobTx.Gas)
-		fmt.Printf("value: %v\n", blobV1Tx.BlobTx.Value)
-		fmt.Printf("data: %v\n", blobV1Tx.BlobTx.Data)
-		fmt.Printf("accessList: %v\n", blobV1Tx.BlobTx.AccessList)
-
-		blobBytes := buf.Bytes()
-
-		os.WriteFile("/home/pk910/Downloads/tx_rlp/2.txt", []byte(common.Bytes2Hex(blobBytes)), 0644)
-
-		testHex, _ := os.ReadFile("/home/pk910/Downloads/tx_rlp/1.txt")
-		testBytes := common.FromHex(string(testHex))
-
-		err = rlp.DecodeBytes(testBytes[1:], &blobV1Tx)
-		fmt.Printf("test decoded: %v\n", err)
-
-		fmt.Printf("to: %v\n", blobV1Tx.BlobTx.To)
-		fmt.Printf("nonce: %v\n", blobV1Tx.BlobTx.Nonce)
-		fmt.Printf("gasTipCap: %v\n", blobV1Tx.BlobTx.GasTipCap)
-		fmt.Printf("gasFeeCap: %v\n", blobV1Tx.BlobTx.GasFeeCap)
-		fmt.Printf("blobFeeCap: %v\n", blobV1Tx.BlobTx.BlobFeeCap)
-		fmt.Printf("gas: %v\n", blobV1Tx.BlobTx.Gas)
-		fmt.Printf("value: %v\n", blobV1Tx.BlobTx.Value)
-		fmt.Printf("data: %v\n", blobV1Tx.BlobTx.Data)
-		fmt.Printf("accessList: %v\n", blobV1Tx.BlobTx.AccessList)
-
-		//return blobBytes, nil
-	*/
 }
