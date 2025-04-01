@@ -35,6 +35,7 @@ type ScenarioOptions struct {
 	BaseFee         uint64 `yaml:"base_fee"`
 	TipFee          uint64 `yaml:"tip_fee"`
 	BlobFee         uint64 `yaml:"blob_fee"`
+	BlobV1Percent   uint64 `yaml:"blob_v1_percent"`
 }
 
 type Scenario struct {
@@ -59,6 +60,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:         20,
 	TipFee:          2,
 	BlobFee:         20,
+	BlobV1Percent:   50,
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -85,6 +87,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
+	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
 	return nil
 }
 
@@ -173,7 +176,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}()
 
 			logger := s.logger
-			tx, client, wallet, err := s.sendBlobTx(ctx, txIdx, 0, 0, func() {
+			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, 0, 0, func() {
 				if s.pendingChan != nil {
 					time.Sleep(100 * time.Millisecond)
 					<-s.pendingChan
@@ -191,7 +194,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			logger.WithFields(logrus.Fields{
 				"wallet": s.walletPool.GetWalletIndex(wallet.GetAddress()),
 				"nonce":  tx.Nonce(),
-			}).Infof("blob tx %6d.0 sent:  %v (%v sidecars)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs))
+			}).Infof("blob tx %6d.0 sent:  %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
 		}(txIdx, lastChan, currentChan)
 
 		lastChan = currentChan
@@ -210,7 +213,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, uint8, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
@@ -246,7 +249,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 		var err error
 		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
 		if err != nil {
-			return nil, client, wallet, err
+			return nil, client, wallet, 0, err
 		}
 	}
 
@@ -300,22 +303,34 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 		Value:      uint256.NewInt(0),
 	}, blobRefs)
 	if err != nil {
-		return nil, client, wallet, err
+		return nil, client, wallet, 0, err
 	}
 
 	var tx *types.Transaction
+
 	if replacementIdx == 0 {
 		tx, err = wallet.BuildBlobTx(blobTx)
 	} else {
 		tx, err = wallet.ReplaceBlobTx(blobTx, txNonce)
 	}
 	if err != nil {
-		return nil, client, wallet, err
+		return nil, client, wallet, 0, err
 	}
 
 	rebroadcast := 0
 	if s.options.Rebroadcast > 0 {
 		rebroadcast = 10
+	}
+
+	var txBytes []byte
+	txVersion := uint8(0)
+	sendAsV1 := rand.Intn(100) < int(s.options.BlobV1Percent)
+	if sendAsV1 {
+		txBytes, err = txbuilder.MarshalBlobV1Tx(tx)
+		if err != nil {
+			return nil, nil, wallet, 0, err
+		}
+		txVersion = 1
 	}
 
 	var awaitConfirmation bool = true
@@ -325,6 +340,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 		Client:              client,
 		MaxRebroadcasts:     rebroadcast,
 		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
+		TransactionBytes:    txBytes,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			defer func() {
 				awaitConfirmation = false
@@ -381,14 +397,14 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 			wallet.ResetPendingNonce(s.walletPool.GetContext(), client)
 		}
 
-		return nil, client, wallet, err
+		return nil, client, wallet, 0, err
 	}
 
 	if s.options.Replace > 0 && replacementIdx < s.options.MaxReplacements && rand.Intn(100) < 70 {
 		go s.delayedReplace(ctx, txIdx, tx, &awaitConfirmation, replacementIdx)
 	}
 
-	return tx, client, wallet, nil
+	return tx, client, wallet, txVersion, nil
 }
 
 func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.Transaction, awaitConfirmation *bool, replacementIdx uint64) {
@@ -400,7 +416,7 @@ func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.T
 
 	logger := s.logger
 
-	replaceTx, client, wallet, err := s.sendBlobTx(ctx, txIdx, replacementIdx+1, tx.Nonce(), func() {})
+	replaceTx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, replacementIdx+1, tx.Nonce(), func() {})
 	if tx != nil {
 		logger = logger.WithField("nonce", tx.Nonce())
 	}
@@ -411,5 +427,5 @@ func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.T
 		logger.WithField("rpc", client.GetName()).Warnf("blob tx %6d.%v replacement failed: %v", txIdx+1, replacementIdx+1, err)
 		return
 	}
-	logger.WithField("rpc", client.GetName()).Infof("blob tx %6d.%v sent:  %v (%v sidecars)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs))
+	logger.WithField("rpc", client.GetName()).Infof("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
 }

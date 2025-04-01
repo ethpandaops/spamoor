@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -178,6 +179,10 @@ func (client *Client) SendTransactionCtx(ctx context.Context, tx *types.Transact
 	client.logger.Tracef("submitted transaction %v", tx.Hash().String())
 
 	return client.client.SendTransaction(ctx, tx)
+}
+
+func (client *Client) SendRawTransactionCtx(ctx context.Context, tx []byte) error {
+	return client.client.Client().CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(tx))
 }
 
 func (client *Client) GetTransactionReceiptCtx(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
