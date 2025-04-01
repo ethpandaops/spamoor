@@ -1,6 +1,7 @@
 package txbuilder
 
 import (
+	"bytes"
 	"crypto/rand"
 	"fmt"
 	"io"
@@ -225,5 +226,46 @@ func MarshalBlobV1Tx(tx *types.Transaction) ([]byte, error) {
 		CellProofs:  cellProofs,
 	}
 
-	return rlp.EncodeToBytes(blobV1Tx)
+	var buf bytes.Buffer
+	buf.WriteByte(tx.Type())
+	err := rlp.Encode(&buf, blobV1Tx)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+
+	/*
+		fmt.Printf("to: %v\n", blobV1Tx.BlobTx.To)
+		fmt.Printf("nonce: %v\n", blobV1Tx.BlobTx.Nonce)
+		fmt.Printf("gasTipCap: %v\n", blobV1Tx.BlobTx.GasTipCap)
+		fmt.Printf("gasFeeCap: %v\n", blobV1Tx.BlobTx.GasFeeCap)
+		fmt.Printf("blobFeeCap: %v\n", blobV1Tx.BlobTx.BlobFeeCap)
+		fmt.Printf("gas: %v\n", blobV1Tx.BlobTx.Gas)
+		fmt.Printf("value: %v\n", blobV1Tx.BlobTx.Value)
+		fmt.Printf("data: %v\n", blobV1Tx.BlobTx.Data)
+		fmt.Printf("accessList: %v\n", blobV1Tx.BlobTx.AccessList)
+
+		blobBytes := buf.Bytes()
+
+		os.WriteFile("/home/pk910/Downloads/tx_rlp/2.txt", []byte(common.Bytes2Hex(blobBytes)), 0644)
+
+		testHex, _ := os.ReadFile("/home/pk910/Downloads/tx_rlp/1.txt")
+		testBytes := common.FromHex(string(testHex))
+
+		err = rlp.DecodeBytes(testBytes[1:], &blobV1Tx)
+		fmt.Printf("test decoded: %v\n", err)
+
+		fmt.Printf("to: %v\n", blobV1Tx.BlobTx.To)
+		fmt.Printf("nonce: %v\n", blobV1Tx.BlobTx.Nonce)
+		fmt.Printf("gasTipCap: %v\n", blobV1Tx.BlobTx.GasTipCap)
+		fmt.Printf("gasFeeCap: %v\n", blobV1Tx.BlobTx.GasFeeCap)
+		fmt.Printf("blobFeeCap: %v\n", blobV1Tx.BlobTx.BlobFeeCap)
+		fmt.Printf("gas: %v\n", blobV1Tx.BlobTx.Gas)
+		fmt.Printf("value: %v\n", blobV1Tx.BlobTx.Value)
+		fmt.Printf("data: %v\n", blobV1Tx.BlobTx.Data)
+		fmt.Printf("accessList: %v\n", blobV1Tx.BlobTx.AccessList)
+
+		//return blobBytes, nil
+	*/
 }
