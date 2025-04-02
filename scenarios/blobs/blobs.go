@@ -24,16 +24,17 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount    uint64 `yaml:"total_count"`
-	Throughput    uint64 `yaml:"throughput"`
-	Sidecars      uint64 `yaml:"sidecars"`
-	MaxPending    uint64 `yaml:"max_pending"`
-	MaxWallets    uint64 `yaml:"max_wallets"`
-	Rebroadcast   uint64 `yaml:"rebroadcast"`
-	BaseFee       uint64 `yaml:"base_fee"`
-	TipFee        uint64 `yaml:"tip_fee"`
-	BlobFee       uint64 `yaml:"blob_fee"`
-	BlobV1Percent uint64 `yaml:"blob_v1_percent"`
+	TotalCount     uint64 `yaml:"total_count"`
+	Throughput     uint64 `yaml:"throughput"`
+	Sidecars       uint64 `yaml:"sidecars"`
+	MaxPending     uint64 `yaml:"max_pending"`
+	MaxWallets     uint64 `yaml:"max_wallets"`
+	Rebroadcast    uint64 `yaml:"rebroadcast"`
+	BaseFee        uint64 `yaml:"base_fee"`
+	TipFee         uint64 `yaml:"tip_fee"`
+	BlobFee        uint64 `yaml:"blob_fee"`
+	BlobV1Percent  uint64 `yaml:"blob_v1_percent"`
+	FuluActivation uint64 `yaml:"fulu_activation"`
 }
 
 type Scenario struct {
@@ -47,16 +48,17 @@ type Scenario struct {
 
 var ScenarioName = "blobs"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:    0,
-	Throughput:    0,
-	Sidecars:      1,
-	MaxPending:    0,
-	MaxWallets:    0,
-	Rebroadcast:   120,
-	BaseFee:       20,
-	TipFee:        2,
-	BlobFee:       20,
-	BlobV1Percent: 50,
+	TotalCount:     0,
+	Throughput:     0,
+	Sidecars:       1,
+	MaxPending:     0,
+	MaxWallets:     0,
+	Rebroadcast:    120,
+	BaseFee:        20,
+	TipFee:         2,
+	BlobFee:        20,
+	BlobV1Percent:  50,
+	FuluActivation: 0,
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -82,6 +84,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
+	flags.Uint64Var(&s.options.FuluActivation, "fulu-activation", ScenarioDefaultOptions.FuluActivation, "Unix timestamp of the Fulu activation")
 	return nil
 }
 
@@ -306,7 +309,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 
 	var txBytes []byte
 	txVersion := uint8(0)
-	sendAsV1 := rand.Intn(100) < int(s.options.BlobV1Percent) // 50% chance for v1
+	sendAsV1 := time.Now().Unix() < int64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent) // 50% chance for v1
 	if sendAsV1 {
 		txBytes, err = txbuilder.MarshalBlobV1Tx(tx)
 		if err != nil {
