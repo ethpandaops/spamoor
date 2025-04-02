@@ -41,6 +41,7 @@ type SendTransactionOptions struct {
 
 	MaxRebroadcasts     int
 	RebroadcastInterval time.Duration
+	TransactionBytes    []byte
 }
 
 func NewTxPool(options *TxPoolOptions) *TxPool {
@@ -327,6 +328,14 @@ func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *typ
 
 	var err error
 
+	submitTx := func(client *Client) error {
+		if options.TransactionBytes != nil {
+			return client.SendRawTransactionCtx(ctx, options.TransactionBytes)
+		}
+
+		return client.SendTransactionCtx(ctx, tx)
+	}
+
 	clientCount := pool.options.GetClientCountFn()
 	for i := 0; i < clientCount; i++ {
 		client := options.Client
@@ -337,7 +346,7 @@ func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *typ
 			continue
 		}
 
-		err = client.SendTransactionCtx(ctx, tx)
+		err = submitTx(client)
 
 		if options.LogFn != nil {
 			options.LogFn(client, i, 0, err)
@@ -372,7 +381,7 @@ func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *typ
 						continue
 					}
 
-					err = client.SendTransactionCtx(ctx, tx)
+					err = submitTx(client)
 
 					if options.LogFn != nil {
 						options.LogFn(client, j, i+1, err)
