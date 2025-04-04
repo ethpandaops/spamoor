@@ -56,8 +56,6 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	MaxPending:   0,
 	MaxWallets:   0,
 	Rebroadcast:  120,
-	BaseFee:      20,
-	TipFee:       2,
 	GasLimit:     21000,
 	Amount:       0,
 	Data:         "",
