@@ -12,6 +12,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
 	"github.com/ethpandaops/spamoor/scenarios/erctx"
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
+	"github.com/ethpandaops/spamoor/scenarios/selfeoatx"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 )
@@ -24,6 +25,7 @@ var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
 	&deploydestruct.ScenarioDescriptor,
 	&deploytx.ScenarioDescriptor,
 	&eoatx.ScenarioDescriptor,
+	&selfeoatx.ScenarioDescriptor,
 	&erctx.ScenarioDescriptor,
 	&gasburnertx.ScenarioDescriptor,
 	&setcodetx.ScenarioDescriptor,
