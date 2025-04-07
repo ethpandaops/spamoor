@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.1
 
 require (
-	github.com/ethereum/go-ethereum v1.15.6
+	github.com/ethereum/go-ethereum v1.15.7
 	github.com/glebarez/go-sqlite v1.22.0
 	github.com/gorilla/mux v1.8.1
 	github.com/holiman/uint256 v1.3.2
