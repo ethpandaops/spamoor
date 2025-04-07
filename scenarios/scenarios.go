@@ -10,9 +10,9 @@ import (
 	deploydestruct "github.com/ethpandaops/spamoor/scenarios/deploy-destruct"
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
-	"github.com/ethpandaops/spamoor/scenarios/selfeoatx"
 	"github.com/ethpandaops/spamoor/scenarios/erctx"
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
+	"github.com/ethpandaops/spamoor/scenarios/selfeoatx"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 )
