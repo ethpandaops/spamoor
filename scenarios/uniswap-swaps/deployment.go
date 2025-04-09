@@ -1,7 +1,6 @@
-package mevswaps
+package uniswapswaps
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 
@@ -9,7 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethpandaops/spamoor/scenarios/mev-swaps/contract"
+	"github.com/ethpandaops/spamoor/scenarios/uniswap-swaps/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/holiman/uint256"
@@ -40,34 +39,14 @@ type PairDeploymentInfo struct {
 	PairB     *contract.UniswapV2Pair
 }
 
-func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiquidityPerPair *uint256.Int, daiLiquidityFactor uint64) (*DeploymentInfo, *txbuilder.Client, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0)
-	deployerWallet := s.walletPool.GetWellKnownWallet("deployer")
-	ownerWallet := s.walletPool.GetWellKnownWallet("owner")
+func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
+	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0)
+	deployerWallet := u.walletPool.GetWellKnownWallet("deployer")
+	ownerWallet := u.walletPool.GetWellKnownWallet("owner")
 
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return nil, client, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
+	feeCap, tipCap, err := u.getTxFee(u.ctx, client)
+	if err != nil {
+		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
 
 	deploymentTxs := []*types.Transaction{}
@@ -75,11 +54,10 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 	deployerNonce := deployerWallet.GetNonce()
 	contractNonce := uint64(0)
 	usedNonce := uint64(0)
-	var err error
 
 	// deploy WETH9
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
 			Gas:       600000,
@@ -89,7 +67,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 			return deployTx, err
 		})
 		if err != nil {
-			return nil, client, fmt.Errorf("could not deploy WETH9: %w", err)
+			return nil, fmt.Errorf("could not deploy WETH9: %w", err)
 		}
 		deploymentTxs = append(deploymentTxs, tx)
 		usedNonce = tx.Nonce()
@@ -101,12 +79,12 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 	deploymentInfo.Weth9Addr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.Weth9, err = contract.NewWETH9(deploymentInfo.Weth9Addr, client.GetEthClient())
 	if err != nil {
-		return nil, client, fmt.Errorf("could not create instance of WETH9: %w", err)
+		return nil, fmt.Errorf("could not create instance of WETH9: %w", err)
 	}
 
 	// deploy two uniswap factories
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
 			Gas:       3100000,
@@ -116,7 +94,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 			return deployTx, err
 		})
 		if err != nil {
-			return nil, client, fmt.Errorf("could not deploy uniswap v2 factory A: %w", err)
+			return nil, fmt.Errorf("could not deploy uniswap v2 factory A: %w", err)
 		}
 		deploymentTxs = append(deploymentTxs, tx)
 		usedNonce = tx.Nonce()
@@ -128,11 +106,11 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 	deploymentInfo.UniswapFactoryAAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.UniswapFactoryA, err = contract.NewUniswapV2Factory(deploymentInfo.UniswapFactoryAAddr, client.GetEthClient())
 	if err != nil {
-		return nil, client, fmt.Errorf("could not create instance of uniswap v2 factory A: %w", err)
+		return nil, fmt.Errorf("could not create instance of uniswap v2 factory A: %w", err)
 	}
 
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
 			Gas:       3100000,
@@ -142,7 +120,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 			return deployTx, err
 		})
 		if err != nil {
-			return nil, client, fmt.Errorf("could not deploy uniswap v2 factory B: %w", err)
+			return nil, fmt.Errorf("could not deploy uniswap v2 factory B: %w", err)
 		}
 		deploymentTxs = append(deploymentTxs, tx)
 		usedNonce = tx.Nonce()
@@ -154,12 +132,12 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 	deploymentInfo.UniswapFactoryBAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.UniswapFactoryB, err = contract.NewUniswapV2Factory(deploymentInfo.UniswapFactoryBAddr, client.GetEthClient())
 	if err != nil {
-		return nil, client, fmt.Errorf("could not create instance of uniswap v2 factory B: %w", err)
+		return nil, fmt.Errorf("could not create instance of uniswap v2 factory B: %w", err)
 	}
 
 	// deploy two uniswap routers
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
 			Gas:       5000000,
@@ -169,7 +147,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 			return deployTx, err
 		})
 		if err != nil {
-			return nil, client, fmt.Errorf("could not deploy uniswap v2 router A: %w", err)
+			return nil, fmt.Errorf("could not deploy uniswap v2 router A: %w", err)
 		}
 		deploymentTxs = append(deploymentTxs, tx)
 		usedNonce = tx.Nonce()
@@ -181,11 +159,11 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 	deploymentInfo.UniswapRouterAAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.UniswapRouterA, err = contract.NewUniswapV2Router02(deploymentInfo.UniswapRouterAAddr, client.GetEthClient())
 	if err != nil {
-		return nil, client, fmt.Errorf("could not create instance of uniswap v2 router A: %w", err)
+		return nil, fmt.Errorf("could not create instance of uniswap v2 router A: %w", err)
 	}
 
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
 			Gas:       5000000,
@@ -195,7 +173,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 			return deployTx, err
 		})
 		if err != nil {
-			return nil, client, fmt.Errorf("could not deploy uniswap v2 router B: %w", err)
+			return nil, fmt.Errorf("could not deploy uniswap v2 router B: %w", err)
 		}
 		deploymentTxs = append(deploymentTxs, tx)
 		usedNonce = tx.Nonce()
@@ -207,22 +185,22 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 	deploymentInfo.UniswapRouterBAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.UniswapRouterB, err = contract.NewUniswapV2Router02(deploymentInfo.UniswapRouterBAddr, client.GetEthClient())
 	if err != nil {
-		return nil, client, fmt.Errorf("could not create instance of uniswap v2 router B: %w", err)
+		return nil, fmt.Errorf("could not create instance of uniswap v2 router B: %w", err)
 	}
 
 	// deploy pair liquidity provider
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
 			Gas:       800000,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployPairLiquidityProvider(transactOpts, client.GetEthClient(), ownerWallet.GetAddress(), s.walletPool.GetRootWallet().GetAddress(), deploymentInfo.UniswapRouterAAddr, deploymentInfo.UniswapRouterBAddr, deploymentInfo.Weth9Addr)
+			_, deployTx, _, err := contract.DeployPairLiquidityProvider(transactOpts, client.GetEthClient(), ownerWallet.GetAddress(), u.walletPool.GetRootWallet().GetAddress(), deploymentInfo.UniswapRouterAAddr, deploymentInfo.UniswapRouterBAddr, deploymentInfo.Weth9Addr)
 			return deployTx, err
 		})
 		if err != nil {
-			return nil, client, fmt.Errorf("could not deploy pair liquidity provider: %w", err)
+			return nil, fmt.Errorf("could not deploy pair liquidity provider: %w", err)
 		}
 		deploymentTxs = append(deploymentTxs, tx)
 		usedNonce = tx.Nonce()
@@ -234,7 +212,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 	deploymentInfo.LiquidityProviderAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.LiquidityProvider, err = contract.NewPairLiquidityProvider(deploymentInfo.LiquidityProviderAddr, client.GetEthClient())
 	if err != nil {
-		return nil, client, fmt.Errorf("could not create instance of pair liquidity provider: %w", err)
+		return nil, fmt.Errorf("could not create instance of pair liquidity provider: %w", err)
 	}
 
 	// deploy tokens and uniswap pairs
@@ -242,12 +220,12 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 	pairInitHash := crypto.Keccak256(pairInitCode)
 	var pairSalt [32]byte
 
-	for i := uint64(0); i < s.options.PairCount; i++ {
+	for i := uint64(0); i < u.options.DaiPairs; i++ {
 		pairInfo := &PairDeploymentInfo{}
 
 		// deploy Dai
 		if redeploy || deployerNonce <= contractNonce {
-			tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+			tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
 				Gas:       2000000,
@@ -257,7 +235,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 				return deployTx, err
 			})
 			if err != nil {
-				return nil, client, fmt.Errorf("could not deploy Dai: %w", err)
+				return nil, fmt.Errorf("could not deploy Dai: %w", err)
 			}
 			deploymentTxs = append(deploymentTxs, tx)
 			usedNonce = tx.Nonce()
@@ -269,21 +247,21 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 		pairInfo.DaiAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 		pairInfo.Dai, err = contract.NewDai(pairInfo.DaiAddr, client.GetEthClient())
 		if err != nil {
-			return nil, client, fmt.Errorf("could not create instance of Dai: %w", err)
+			return nil, fmt.Errorf("could not create instance of Dai: %w", err)
 		}
 
 		// make owner wallet a minter for the Dai
 		if redeploy || deployerNonce <= contractNonce {
-			tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+			tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
 				Gas:       200000,
 				Value:     uint256.NewInt(0),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return pairInfo.Dai.Rely(transactOpts, s.walletPool.GetRootWallet().GetAddress())
+				return pairInfo.Dai.Rely(transactOpts, u.walletPool.GetRootWallet().GetAddress())
 			})
 			if err != nil {
-				return nil, client, fmt.Errorf("could not make owner wallet a minter for the Dai: %w", err)
+				return nil, fmt.Errorf("could not make owner wallet a minter for the Dai: %w", err)
 			}
 			deploymentTxs = append(deploymentTxs, tx)
 		}
@@ -291,7 +269,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 
 		// make liquidity provider a minter for the Dai
 		if redeploy || deployerNonce <= contractNonce {
-			tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+			tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
 				Gas:       200000,
@@ -300,7 +278,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 				return pairInfo.Dai.Rely(transactOpts, deploymentInfo.LiquidityProviderAddr)
 			})
 			if err != nil {
-				return nil, client, fmt.Errorf("could not make liquidity provider a minter for the Dai: %w", err)
+				return nil, fmt.Errorf("could not make liquidity provider a minter for the Dai: %w", err)
 			}
 			deploymentTxs = append(deploymentTxs, tx)
 		}
@@ -315,7 +293,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 		pairInfo.PairAddrA = crypto.CreateAddress2(deploymentInfo.UniswapFactoryAAddr, pairSalt, pairInitHash)
 		pairInfo.PairA, err = contract.NewUniswapV2Pair(pairInfo.PairAddrA, client.GetEthClient())
 		if err != nil {
-			return nil, client, fmt.Errorf("could not create instance of uniswap v2 pair A: %w", err)
+			return nil, fmt.Errorf("could not create instance of uniswap v2 pair A: %w", err)
 		}
 
 		// get pair on factory B
@@ -327,7 +305,7 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 		pairInfo.PairAddrB = crypto.CreateAddress2(deploymentInfo.UniswapFactoryBAddr, pairSalt, pairInitHash)
 		pairInfo.PairB, err = contract.NewUniswapV2Pair(pairInfo.PairAddrB, client.GetEthClient())
 		if err != nil {
-			return nil, client, fmt.Errorf("could not create instance of uniswap v2 pair B: %w", err)
+			return nil, fmt.Errorf("could not create instance of uniswap v2 pair B: %w", err)
 		}
 
 		deploymentInfo.Pairs = append(deploymentInfo.Pairs, *pairInfo)
@@ -335,70 +313,70 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 
 	// submit & await all deployment transactions
 	if len(deploymentTxs) > 0 {
-		s.logger.Infof("deploying contracts... (0/%v)", len(deploymentTxs))
+		u.logger.Infof("deploying contracts... (0/%v)", len(deploymentTxs))
 		for txIdx := 0; txIdx < len(deploymentTxs); txIdx += 10 {
 			endIdx := txIdx + 10
 			if txIdx > 0 {
-				s.logger.Infof("deploying contracts... (%v/%v)", txIdx, len(deploymentTxs))
+				u.logger.Infof("deploying contracts... (%v/%v)", txIdx, len(deploymentTxs))
 			}
 			if endIdx > len(deploymentTxs) {
 				endIdx = len(deploymentTxs)
 			}
-			err := s.walletPool.SendTxRange(deploymentTxs[txIdx:endIdx], client, deployerWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			err := u.walletPool.SendTxRange(deploymentTxs[txIdx:endIdx], client, deployerWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				if err != nil {
-					s.logger.Warnf("could not send deployment tx %v: %v", tx.Hash().String(), err)
+					u.logger.Warnf("could not send deployment tx %v: %v", tx.Hash().String(), err)
 				}
 			})
 			if err != nil {
-				return nil, client, fmt.Errorf("could not send deployment txs: %w", err)
+				return nil, fmt.Errorf("could not send deployment txs: %w", err)
 			}
 		}
-		s.logger.Infof("contract deployment complete. (%v/%v)", len(deploymentTxs), len(deploymentTxs))
+		u.logger.Infof("contract deployment complete. (%v/%v)", len(deploymentTxs), len(deploymentTxs))
 	}
 
 	// provide liquidity to the pairs
 	liquidityTxs := []*types.Transaction{}
-	rootWallet := s.walletPool.GetRootWallet()
+	rootWallet := u.walletPool.GetRootWallet()
 
-	daiLiquidity := new(big.Int).Mul(ethLiquidityPerPair.ToBig(), big.NewInt(int64(daiLiquidityFactor)))
+	daiLiquidity := new(big.Int).Mul(u.options.EthLiquidityPerPair.ToBig(), big.NewInt(int64(u.options.DaiLiquidityFactor)))
 
 	for _, pairInfo := range deploymentInfo.Pairs {
-		tx, err := rootWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		tx, err := rootWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
 			Gas:       6000000,
-			Value:     ethLiquidityPerPair,
+			Value:     u.options.EthLiquidityPerPair,
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			return deploymentInfo.LiquidityProvider.ProvidePairLiquidity(transactOpts, pairInfo.DaiAddr, daiLiquidity)
 		})
 		if err != nil {
-			return nil, client, fmt.Errorf("could not provide liquidity for dai %v: %w", pairInfo.DaiAddr.String(), err)
+			return nil, fmt.Errorf("could not provide liquidity for dai %v: %w", pairInfo.DaiAddr.String(), err)
 		}
 		liquidityTxs = append(liquidityTxs, tx)
 	}
 
 	// submit & await all liquidity txs
 	if len(liquidityTxs) > 0 {
-		s.logger.Infof("providing liquidity... (0/%v)", len(liquidityTxs))
+		u.logger.Infof("providing liquidity... (0/%v)", len(liquidityTxs))
 		for txIdx := 0; txIdx < len(liquidityTxs); txIdx += 50 {
 			endIdx := txIdx + 50
 			if txIdx > 0 {
-				s.logger.Infof("providing liquidity... (%v/%v)", txIdx, len(liquidityTxs))
+				u.logger.Infof("providing liquidity... (%v/%v)", txIdx, len(liquidityTxs))
 			}
 			if endIdx > len(liquidityTxs) {
 				endIdx = len(liquidityTxs)
 			}
-			err := s.walletPool.SendTxRange(liquidityTxs[txIdx:endIdx], client, rootWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			err := u.walletPool.SendTxRange(liquidityTxs[txIdx:endIdx], client, rootWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				if err != nil {
-					s.logger.Warnf("could not send liquidity tx %v: %v", tx.Hash().String(), err)
+					u.logger.Warnf("could not send liquidity tx %v: %v", tx.Hash().String(), err)
 				}
 			})
 			if err != nil {
-				return nil, client, fmt.Errorf("could not send liquidity txs: %w", err)
+				return nil, fmt.Errorf("could not send liquidity txs: %w", err)
 			}
 		}
-		s.logger.Infof("liquidity provision complete. (%v/%v)", len(liquidityTxs), len(liquidityTxs))
+		u.logger.Infof("liquidity provision complete. (%v/%v)", len(liquidityTxs), len(liquidityTxs))
 	}
 
-	return deploymentInfo, client, nil
+	return deploymentInfo, nil
 }
