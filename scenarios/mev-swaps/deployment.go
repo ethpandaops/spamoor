@@ -356,21 +356,6 @@ func (s *Scenario) deployUniswapPairs(ctx context.Context, redeploy bool, ethLiq
 		s.logger.Infof("contract deployment complete. (%v/%v)", len(deploymentTxs), len(deploymentTxs))
 	}
 
-	s.logger.Infof("WETH9: %v", deploymentInfo.Weth9Addr.String())
-	s.logger.Infof("UniswapFactoryA: %v", deploymentInfo.UniswapFactoryAAddr.String())
-	s.logger.Infof("UniswapRouterA: %v", deploymentInfo.UniswapRouterAAddr.String())
-	s.logger.Infof("UniswapFactoryB: %v", deploymentInfo.UniswapFactoryBAddr.String())
-	s.logger.Infof("UniswapRouterB: %v", deploymentInfo.UniswapRouterBAddr.String())
-	s.logger.Infof("LiquidityProvider: %v", deploymentInfo.LiquidityProviderAddr.String())
-	s.logger.Infof("PairInitHash: %x", pairInitHash)
-
-	s.logger.Infof("Pairs: %v", len(deploymentInfo.Pairs))
-	for _, pairInfo := range deploymentInfo.Pairs {
-		s.logger.Infof("Dai: %v", pairInfo.DaiAddr.String())
-		s.logger.Infof("PairA: %v", pairInfo.PairAddrA.String())
-		s.logger.Infof("PairB: %v", pairInfo.PairAddrB.String())
-	}
-
 	// provide liquidity to the pairs
 	liquidityTxs := []*types.Transaction{}
 	rootWallet := s.walletPool.GetRootWallet()

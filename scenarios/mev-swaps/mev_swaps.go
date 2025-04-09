@@ -2,9 +2,9 @@ package mevswaps
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"math/big"
+	mathrand "math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,17 +27,19 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount   uint64 `yaml:"total_count"`
-	Throughput   uint64 `yaml:"throughput"`
-	MaxPending   uint64 `yaml:"max_pending"`
-	MaxWallets   uint64 `yaml:"max_wallets"`
-	Rebroadcast  uint64 `yaml:"rebroadcast"`
-	BaseFee      uint64 `yaml:"base_fee"`
-	TipFee       uint64 `yaml:"tip_fee"`
-	Amount       uint64 `yaml:"amount"`
-	RandomAmount bool   `yaml:"random_amount"`
-	RandomTarget bool   `yaml:"random_target"`
-	PairCount    uint64 `yaml:"pair_count"`
+	TotalCount    uint64 `yaml:"total_count"`
+	Throughput    uint64 `yaml:"throughput"`
+	MaxPending    uint64 `yaml:"max_pending"`
+	MaxWallets    uint64 `yaml:"max_wallets"`
+	Rebroadcast   uint64 `yaml:"rebroadcast"`
+	BaseFee       uint64 `yaml:"base_fee"`
+	TipFee        uint64 `yaml:"tip_fee"`
+	PairCount     uint64 `yaml:"pair_count"`
+	MinSwapAmount string `yaml:"min_swap_amount"`
+	MaxSwapAmount string `yaml:"max_swap_amount"`
+	BuyRatio      uint64 `yaml:"buy_ratio"`
+	Slippage      uint64 `yaml:"slippage"`
+	SellThreshold string `yaml:"sell_threshold"`
 }
 
 type Scenario struct {
@@ -49,21 +51,34 @@ type Scenario struct {
 
 	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
+
+	// Track DAI balances locally to avoid chain calls
+	// Map[walletAddress]Map[tokenAddress]balance
+	daiBalances map[common.Address]map[common.Address]*big.Int
+	daiMutex    sync.RWMutex
+
+	// Reuse contract instances
+	routerA *contract.UniswapV2Router02
+	routerB *contract.UniswapV2Router02
+	weth    *contract.WETH9
+	tokens  map[common.Address]*contract.Dai
 }
 
 var ScenarioName = "mev-swaps"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:   0,
-	Throughput:   0,
-	MaxPending:   0,
-	MaxWallets:   0,
-	Rebroadcast:  120,
-	BaseFee:      20,
-	TipFee:       2,
-	Amount:       20,
-	RandomAmount: false,
-	RandomTarget: false,
-	PairCount:    1,
+	TotalCount:    0,
+	Throughput:    0,
+	MaxPending:    0,
+	MaxWallets:    0,
+	Rebroadcast:   120,
+	BaseFee:       20,
+	TipFee:        2,
+	PairCount:     1,
+	MinSwapAmount: "1000000000000000",     // 0.001 DAI
+	MaxSwapAmount: "10000000000000000000", // 10 DAI
+	BuyRatio:      50,
+	Slippage:      50,
+	SellThreshold: "100000000000000000000", // 100 DAI
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -86,10 +101,12 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Number of seconds to wait before re-broadcasting a transaction")
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transfer transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transfer transactions (in gwei)")
-	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (in gwei)")
-	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
-	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
 	flags.Uint64Var(&s.options.PairCount, "pair-count", ScenarioDefaultOptions.PairCount, "Number of uniswap pairs to deploy")
+	flags.StringVar(&s.options.MinSwapAmount, "min-swap", ScenarioDefaultOptions.MinSwapAmount, "Minimum swap amount in wei")
+	flags.StringVar(&s.options.MaxSwapAmount, "max-swap", ScenarioDefaultOptions.MaxSwapAmount, "Maximum swap amount in wei")
+	flags.Uint64Var(&s.options.BuyRatio, "buy-ratio", ScenarioDefaultOptions.BuyRatio, "Ratio of buy vs sell swaps (0-100)")
+	flags.Uint64Var(&s.options.Slippage, "slippage", ScenarioDefaultOptions.Slippage, "Slippage tolerance in basis points")
+	flags.StringVar(&s.options.SellThreshold, "sell-threshold", ScenarioDefaultOptions.SellThreshold, "DAI balance threshold to force sell (in wei)")
 	return nil
 }
 
@@ -156,7 +173,12 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
-	deploymentInfo, _, err := s.deployUniswapPairs(ctx, false, uint256.NewInt(0).Mul(uint256.NewInt(20), uint256.NewInt(1000000000000000000)), 1000)
+	deploymentInfo, _, err := s.deployUniswapPairs(
+		ctx,
+		false,
+		uint256.NewInt(0).Mul(uint256.NewInt(2000), uint256.NewInt(1000000000000000000)),
+		10000,
+	)
 	if err != nil {
 		s.logger.Errorf("could not deploy uniswap pairs: %v", err)
 		return err
@@ -166,6 +188,19 @@ func (s *Scenario) Run(ctx context.Context) error {
 	}
 	s.deploymentInfo = deploymentInfo
 	s.logger.Infof("deployed uniswap pairs: %v", len(s.deploymentInfo.Pairs))
+
+	// Initialize contract instances and token balances
+	s.initializeContracts()
+	s.initializeTokenBalances()
+
+	// Set unlimited allowances for all wallets to both routers
+	err = s.setUnlimitedAllowances(ctx)
+	if err != nil {
+		s.logger.Errorf("could not set unlimited allowances: %v", err)
+		return err
+	}
+
+	// provide token liquidity to the child wallets
 
 	initialRate := rate.Limit(float64(s.options.Throughput) / float64(utils.SecondsPerSlot))
 	if initialRate == 0 {
@@ -246,17 +281,306 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
-	transactionSubmitted := false
+// Initialize contract instances to reuse
+func (s *Scenario) initializeContracts() {
+	// Initialize router A
+	routerA, err := contract.NewUniswapV2Router02(s.deploymentInfo.UniswapRouterAAddr, s.walletPool.GetClient(spamoor.SelectClientByIndex, 0).GetEthClient())
+	if err != nil {
+		s.logger.Errorf("could not initialize router A: %v", err)
+		return
+	}
+	s.routerA = routerA
 
-	defer func() {
-		if !transactionSubmitted {
-			onComplete()
+	// Initialize router B
+	routerB, err := contract.NewUniswapV2Router02(s.deploymentInfo.UniswapRouterBAddr, s.walletPool.GetClient(spamoor.SelectClientByIndex, 0).GetEthClient())
+	if err != nil {
+		s.logger.Errorf("could not initialize router B: %v", err)
+		return
+	}
+	s.routerB = routerB
+
+	// Initialize WETH9
+	weth, err := contract.NewWETH9(s.deploymentInfo.Weth9Addr, s.walletPool.GetClient(spamoor.SelectClientByIndex, 0).GetEthClient())
+	if err != nil {
+		s.logger.Errorf("could not initialize WETH9: %v", err)
+		return
+	}
+	s.weth = weth
+
+	// Initialize token contracts
+	s.tokens = make(map[common.Address]*contract.Dai)
+	for _, pair := range s.deploymentInfo.Pairs {
+		token, err := contract.NewDai(pair.DaiAddr, s.walletPool.GetClient(spamoor.SelectClientByIndex, 0).GetEthClient())
+		if err != nil {
+			s.logger.Errorf("could not initialize token %v: %v", pair.DaiAddr, err)
+			continue
 		}
-	}()
+		s.tokens[pair.DaiAddr] = token
+	}
+}
 
+// Initialize token balances for all wallets
+func (s *Scenario) initializeTokenBalances() {
+	// Initialize the 2D map
+	s.daiBalances = make(map[common.Address]map[common.Address]*big.Int)
+	s.daiMutex = sync.RWMutex{}
+
+	// Get all wallets
+	wallets := s.walletPool.GetAllWallets()
+
+	// Initialize balances for each wallet and token
+	for _, wallet := range wallets {
+		walletAddr := wallet.GetAddress()
+
+		// Initialize the inner map for this wallet
+		s.daiMutex.Lock()
+		s.daiBalances[walletAddr] = make(map[common.Address]*big.Int)
+		s.daiMutex.Unlock()
+
+		for _, pair := range s.deploymentInfo.Pairs {
+			token := s.tokens[pair.DaiAddr]
+			if token == nil {
+				continue
+			}
+
+			balance, err := token.BalanceOf(&bind.CallOpts{}, walletAddr)
+			if err != nil {
+				s.logger.Errorf("could not get token balance for %v: %v", walletAddr, err)
+				continue
+			}
+
+			s.daiMutex.Lock()
+			s.daiBalances[walletAddr][pair.DaiAddr] = balance
+			s.daiMutex.Unlock()
+		}
+
+		// Get WETH balance
+		wethBalance, err := s.weth.BalanceOf(&bind.CallOpts{}, walletAddr)
+		if err != nil {
+			s.logger.Errorf("could not get WETH balance for %v: %v", walletAddr, err)
+			continue
+		}
+
+		// Store WETH balance in the same map
+		s.daiMutex.Lock()
+		s.daiBalances[walletAddr][s.deploymentInfo.Weth9Addr] = wethBalance
+		s.daiMutex.Unlock()
+	}
+}
+
+// Get DAI balance from local cache
+func (s *Scenario) getDaiBalance(walletAddr common.Address, tokenAddr common.Address) *big.Int {
+	s.daiMutex.RLock()
+	defer s.daiMutex.RUnlock()
+
+	walletBalances, exists := s.daiBalances[walletAddr]
+	if !exists {
+		return big.NewInt(0)
+	}
+
+	balance, exists := walletBalances[tokenAddr]
+	if !exists {
+		return big.NewInt(0)
+	}
+	return balance
+}
+
+// Update DAI balance in local cache
+func (s *Scenario) updateDaiBalance(walletAddr common.Address, tokenAddr common.Address, newBalance *big.Int) {
+	s.daiMutex.Lock()
+	defer s.daiMutex.Unlock()
+
+	// Ensure the wallet map exists
+	if _, exists := s.daiBalances[walletAddr]; !exists {
+		s.daiBalances[walletAddr] = make(map[common.Address]*big.Int)
+	}
+
+	s.daiBalances[walletAddr][tokenAddr] = newBalance
+}
+
+// Set unlimited allowances for all wallets to both routers
+func (s *Scenario) setUnlimitedAllowances(ctx context.Context) error {
+	s.logger.Infof("Setting unlimited allowances for all wallets...")
+
+	// Get all wallets
+	wallets := s.walletPool.GetAllWallets()
+
+	// Maximum uint256 value for unlimited allowance
+	maxAllowance := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+
+	// Get a client for fee calculation
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0)
+	feeCap, tipCap, err := s.getTxFee(ctx, client)
+	if err != nil {
+		s.logger.Errorf("could not get tx fee: %v", err)
+		return err
+	}
+
+	// Track all approval transactions
+	var approvalTxs []*types.Transaction
+
+	// For each wallet and token pair
+	for _, wallet := range wallets {
+		// Set allowances for DAI tokens
+		for _, pair := range s.deploymentInfo.Pairs {
+			token := s.tokens[pair.DaiAddr]
+			if token == nil {
+				continue
+			}
+
+			// Check if allowance is already set for router A
+			allowanceA, err := token.Allowance(&bind.CallOpts{}, wallet.GetAddress(), s.deploymentInfo.UniswapRouterAAddr)
+			if err != nil {
+				s.logger.Errorf("could not check allowance for %v: %v", wallet.GetAddress(), err)
+				continue
+			}
+
+			// Check if allowance is already set for router B
+			allowanceB, err := token.Allowance(&bind.CallOpts{}, wallet.GetAddress(), s.deploymentInfo.UniswapRouterBAddr)
+			if err != nil {
+				s.logger.Errorf("could not check allowance for %v: %v", wallet.GetAddress(), err)
+				continue
+			}
+
+			// Skip if allowance is already set for both routers
+			if allowanceA.Cmp(maxAllowance) >= 0 && allowanceB.Cmp(maxAllowance) >= 0 {
+				continue
+			}
+
+			// Build approval transaction for router A if needed
+			if allowanceA.Cmp(maxAllowance) < 0 {
+				approveTx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+					GasFeeCap: uint256.MustFromBig(feeCap),
+					GasTipCap: uint256.MustFromBig(tipCap),
+					Gas:       100000,
+					Value:     uint256.NewInt(0),
+				}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+					return token.Approve(transactOpts, s.deploymentInfo.UniswapRouterAAddr, maxAllowance)
+				})
+				if err != nil {
+					s.logger.Errorf("could not build approval tx for %v: %v", wallet.GetAddress(), err)
+					continue
+				}
+
+				approvalTxs = append(approvalTxs, approveTx)
+			}
+
+			// Build approval transaction for router B if needed
+			if allowanceB.Cmp(maxAllowance) < 0 {
+				approveTx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+					GasFeeCap: uint256.MustFromBig(feeCap),
+					GasTipCap: uint256.MustFromBig(tipCap),
+					Gas:       100000,
+					Value:     uint256.NewInt(0),
+				}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+					return token.Approve(transactOpts, s.deploymentInfo.UniswapRouterBAddr, maxAllowance)
+				})
+				if err != nil {
+					s.logger.Errorf("could not build approval tx for %v: %v", wallet.GetAddress(), err)
+					continue
+				}
+
+				approvalTxs = append(approvalTxs, approveTx)
+			}
+		}
+
+		// Set allowances for WETH
+		wethAllowanceA, err := s.weth.Allowance(&bind.CallOpts{}, wallet.GetAddress(), s.deploymentInfo.UniswapRouterAAddr)
+		if err != nil {
+			s.logger.Errorf("could not check WETH allowance for %v: %v", wallet.GetAddress(), err)
+			continue
+		}
+
+		wethAllowanceB, err := s.weth.Allowance(&bind.CallOpts{}, wallet.GetAddress(), s.deploymentInfo.UniswapRouterBAddr)
+		if err != nil {
+			s.logger.Errorf("could not check WETH allowance for %v: %v", wallet.GetAddress(), err)
+			continue
+		}
+
+		// Skip if allowance is already set for both routers
+		if wethAllowanceA.Cmp(maxAllowance) >= 0 && wethAllowanceB.Cmp(maxAllowance) >= 0 {
+			continue
+		}
+
+		// Build approval transaction for router A if needed
+		if wethAllowanceA.Cmp(maxAllowance) < 0 {
+			approveTx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Gas:       100000,
+				Value:     uint256.NewInt(0),
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return s.weth.Approve(transactOpts, s.deploymentInfo.UniswapRouterAAddr, maxAllowance)
+			})
+			if err != nil {
+				s.logger.Errorf("could not build WETH approval tx for %v: %v", wallet.GetAddress(), err)
+				continue
+			}
+
+			approvalTxs = append(approvalTxs, approveTx)
+		}
+
+		// Build approval transaction for router B if needed
+		if wethAllowanceB.Cmp(maxAllowance) < 0 {
+			approveTx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Gas:       100000,
+				Value:     uint256.NewInt(0),
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return s.weth.Approve(transactOpts, s.deploymentInfo.UniswapRouterBAddr, maxAllowance)
+			})
+			if err != nil {
+				s.logger.Errorf("could not build WETH approval tx for %v: %v", wallet.GetAddress(), err)
+				continue
+			}
+
+			approvalTxs = append(approvalTxs, approveTx)
+		}
+	}
+
+	// Send all approval transactions in parallel
+	if len(approvalTxs) > 0 {
+		s.logger.Infof("Sending %d approval transactions...", len(approvalTxs))
+
+		// Create a wait group to track all transactions
+		var wg sync.WaitGroup
+
+		// Send each transaction to a different client
+		for i, tx := range approvalTxs {
+			// Get a different client for each transaction
+			txClient := s.walletPool.GetClient(spamoor.SelectClientByIndex, i)
+			wg.Add(1)
+
+			go func(tx *types.Transaction, client *txbuilder.Client) {
+				err := s.walletPool.GetTxPool().SendTransaction(ctx, s.walletPool.GetRootWallet(), tx, &txbuilder.SendTransactionOptions{
+					Client: client,
+					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+						if err != nil {
+							s.logger.Errorf("approval tx failed: %v", err)
+						}
+						wg.Done()
+					},
+					MaxRebroadcasts:     10,
+					RebroadcastInterval: 30 * time.Second,
+				})
+				if err != nil {
+					s.logger.Errorf("failed to send approval tx: %v", err)
+				}
+			}(tx, txClient)
+		}
+
+		// Wait for all transactions to be sent
+		wg.Wait()
+		s.logger.Infof("All approval transactions sent")
+	} else {
+		s.logger.Infof("No approval transactions needed (allowances already set)")
+	}
+
+	return nil
+}
+
+func (s *Scenario) getTxFee(ctx context.Context, client *txbuilder.Client) (*big.Int, *big.Int, error) {
 	var feeCap *big.Int
 	var tipCap *big.Int
 
@@ -271,7 +595,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		var err error
 		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
 		if err != nil {
-			return nil, client, wallet, err
+			return nil, nil, err
 		}
 	}
 
@@ -282,35 +606,258 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		tipCap = big.NewInt(1000000000)
 	}
 
-	amount := uint256.NewInt(s.options.Amount)
-	amount = amount.Mul(amount, uint256.NewInt(1000000000))
-	if s.options.RandomAmount {
-		n, err := rand.Int(rand.Reader, amount.ToBig())
-		if err == nil {
-			amount = uint256.MustFromBig(n)
+	return feeCap, tipCap, nil
+}
+
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+	transactionSubmitted := false
+
+	defer func() {
+		if !transactionSubmitted {
+			onComplete()
+		}
+	}()
+
+	feeCap, tipCap, err := s.getTxFee(ctx, client)
+	if err != nil {
+		return nil, client, wallet, err
+	}
+
+	// Select random pair
+	pairIdx := mathrand.Intn(len(s.deploymentInfo.Pairs))
+	pair := s.deploymentInfo.Pairs[pairIdx]
+
+	// Get token contract from cache
+	token := s.tokens[pair.DaiAddr]
+	if token == nil {
+		return nil, client, wallet, fmt.Errorf("token contract not initialized for %v", pair.DaiAddr)
+	}
+
+	// Parse min and max swap amounts
+	minAmount, ok := new(big.Int).SetString(s.options.MinSwapAmount, 10)
+	if !ok {
+		return nil, client, wallet, fmt.Errorf("invalid min swap amount: %s", s.options.MinSwapAmount)
+	}
+
+	maxAmount, ok := new(big.Int).SetString(s.options.MaxSwapAmount, 10)
+	if !ok {
+		return nil, client, wallet, fmt.Errorf("invalid max swap amount: %s", s.options.MaxSwapAmount)
+	}
+
+	// Calculate random swap amount
+	diff := new(big.Int).Sub(maxAmount, minAmount)
+	randomAmount := new(big.Int).Add(minAmount, new(big.Int).Rand(mathrand.New(mathrand.NewSource(time.Now().UnixNano())), diff))
+
+	// Get current token balance from cache
+	tokenBalance := s.getDaiBalance(wallet.GetAddress(), pair.DaiAddr)
+
+	// Get current ETH balance from wallet
+	ethBalance := wallet.GetBalance()
+
+	// Get current WETH balance
+	wethBalance := s.getDaiBalance(wallet.GetAddress(), s.deploymentInfo.Weth9Addr)
+
+	// Decide if we're buying or selling based on buy ratio and balances
+	isBuy := mathrand.Intn(100) < int(s.options.BuyRatio)
+
+	// Parse sell threshold
+	sellThreshold, ok := new(big.Int).SetString(s.options.SellThreshold, 10)
+	if !ok {
+		return nil, client, wallet, fmt.Errorf("invalid sell threshold: %s", s.options.SellThreshold)
+	}
+
+	// If we have a lot of DAI, force a sell to avoid depleting the pool
+	if tokenBalance.Cmp(sellThreshold) > 0 {
+		isBuy = false
+	}
+
+	// If we don't have enough DAI to sell, switch to buy
+	if !isBuy && tokenBalance.Cmp(randomAmount) < 0 {
+		isBuy = true
+	}
+
+	// Alternate between routers based on transaction index
+	router := s.routerA
+	if mathrand.Intn(100) < 50 {
+		router = s.routerB
+	}
+
+	var tx *types.Transaction
+
+	if isBuy {
+		// Decide whether to use ETH or WETH for buying
+		useWeth := wethBalance.Cmp(randomAmount) >= 0 && mathrand.Intn(100) < 50 // 50% chance to use WETH if available
+
+		if useWeth {
+			// Buying DAI with WETH
+			// Calculate how much WETH we need to spend to get the desired amount of DAI
+			amounts, err := router.GetAmountsIn(&bind.CallOpts{}, randomAmount, []common.Address{s.deploymentInfo.Weth9Addr, pair.DaiAddr})
+			if err != nil {
+				return nil, nil, wallet, err
+			}
+
+			wethAmount := amounts[0]
+
+			// Check if we have enough WETH
+			if wethBalance.Cmp(wethAmount) < 0 {
+				// Fall back to ETH if not enough WETH
+				useWeth = false
+			} else {
+				// Calculate minimum DAI amount to receive (with slippage)
+				minDaiAmount := new(big.Int).Mul(randomAmount, big.NewInt(10000-int64(s.options.Slippage)))
+				minDaiAmount = minDaiAmount.Div(minDaiAmount, big.NewInt(10000))
+
+				// Build buy transaction with WETH
+				tx, err = wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+					GasFeeCap: uint256.MustFromBig(feeCap),
+					GasTipCap: uint256.MustFromBig(tipCap),
+					Gas:       200000,
+					Value:     uint256.NewInt(0),
+				}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+					return router.SwapExactTokensForTokens(transactOpts, wethAmount, minDaiAmount, []common.Address{s.deploymentInfo.Weth9Addr, pair.DaiAddr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
+				})
+				if err != nil {
+					return nil, nil, wallet, err
+				}
+
+				// Update balances in local cache
+				if tx != nil {
+					// Subtract WETH amount
+					newWethBalance := new(big.Int).Sub(wethBalance, wethAmount)
+					s.updateDaiBalance(wallet.GetAddress(), s.deploymentInfo.Weth9Addr, newWethBalance)
+
+					// Add DAI amount
+					newDaiBalance := new(big.Int).Add(tokenBalance, randomAmount)
+					s.updateDaiBalance(wallet.GetAddress(), pair.DaiAddr, newDaiBalance)
+				}
+			}
+		}
+
+		// If not using WETH or not enough WETH, use ETH
+		if !useWeth {
+			// Buying DAI with ETH
+			// Calculate how much ETH we need to spend to get the desired amount of DAI
+			amounts, err := router.GetAmountsIn(&bind.CallOpts{}, randomAmount, []common.Address{s.deploymentInfo.Weth9Addr, pair.DaiAddr})
+			if err != nil {
+				return nil, nil, wallet, err
+			}
+
+			ethAmount := amounts[0]
+
+			// Check if we have enough ETH
+			if ethBalance.Cmp(ethAmount) < 0 {
+				return nil, client, wallet, fmt.Errorf("insufficient ETH balance for swap")
+			}
+
+			// Calculate minimum DAI amount to receive (with slippage)
+			minDaiAmount := new(big.Int).Mul(randomAmount, big.NewInt(10000-int64(s.options.Slippage)))
+			minDaiAmount = minDaiAmount.Div(minDaiAmount, big.NewInt(10000))
+
+			// Build buy transaction
+			tx, err = wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Gas:       200000,
+				Value:     uint256.MustFromBig(ethAmount),
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return router.SwapExactETHForTokens(transactOpts, minDaiAmount, []common.Address{s.deploymentInfo.Weth9Addr, pair.DaiAddr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
+			})
+			if err != nil {
+				return nil, nil, wallet, err
+			}
+
+			// Update balances in local cache
+			if tx != nil {
+				// Subtract ETH amount
+				wallet.SubBalance(ethAmount)
+
+				// Add DAI amount
+				newDaiBalance := new(big.Int).Add(tokenBalance, randomAmount)
+				s.updateDaiBalance(wallet.GetAddress(), pair.DaiAddr, newDaiBalance)
+			}
+		}
+	} else {
+		// Decide whether to keep WETH or convert to ETH
+		keepWeth := mathrand.Intn(100) < 30 // 30% chance to keep WETH
+
+		if keepWeth {
+			// Selling DAI for WETH
+			if tokenBalance.Cmp(randomAmount) < 0 {
+				return nil, client, wallet, fmt.Errorf("insufficient DAI balance for swap")
+			}
+
+			// Calculate minimum WETH amount to receive (with slippage)
+			amounts, err := router.GetAmountsOut(&bind.CallOpts{}, randomAmount, []common.Address{pair.DaiAddr, s.deploymentInfo.Weth9Addr})
+			if err != nil {
+				return nil, nil, wallet, err
+			}
+			minWethAmount := new(big.Int).Mul(amounts[1], big.NewInt(10000-int64(s.options.Slippage)))
+			minWethAmount = minWethAmount.Div(minWethAmount, big.NewInt(10000))
+
+			// Build sell transaction for WETH
+			tx, err = wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Gas:       200000,
+				Value:     uint256.NewInt(0),
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return router.SwapExactTokensForTokens(transactOpts, randomAmount, minWethAmount, []common.Address{pair.DaiAddr, s.deploymentInfo.Weth9Addr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
+			})
+			if err != nil {
+				return nil, nil, wallet, err
+			}
+
+			// Update balances in local cache
+			if tx != nil {
+				// Subtract DAI amount
+				newDaiBalance := new(big.Int).Sub(tokenBalance, randomAmount)
+				s.updateDaiBalance(wallet.GetAddress(), pair.DaiAddr, newDaiBalance)
+
+				// Add WETH amount
+				newWethBalance := new(big.Int).Add(wethBalance, amounts[1])
+				s.updateDaiBalance(wallet.GetAddress(), s.deploymentInfo.Weth9Addr, newWethBalance)
+			}
+		} else {
+			// Selling DAI for ETH
+			if tokenBalance.Cmp(randomAmount) < 0 {
+				return nil, client, wallet, fmt.Errorf("insufficient DAI balance for swap")
+			}
+
+			// Calculate minimum ETH amount to receive (with slippage)
+			amounts, err := router.GetAmountsOut(&bind.CallOpts{}, randomAmount, []common.Address{pair.DaiAddr, s.deploymentInfo.Weth9Addr})
+			if err != nil {
+				return nil, nil, wallet, err
+			}
+			minEthAmount := new(big.Int).Mul(amounts[1], big.NewInt(10000-int64(s.options.Slippage)))
+			minEthAmount = minEthAmount.Div(minEthAmount, big.NewInt(10000))
+
+			// Build sell transaction
+			tx, err = wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Gas:       200000,
+				Value:     uint256.NewInt(0),
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return router.SwapExactTokensForETH(transactOpts, randomAmount, minEthAmount, []common.Address{pair.DaiAddr, s.deploymentInfo.Weth9Addr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
+			})
+			if err != nil {
+				return nil, nil, wallet, err
+			}
+
+			// Update balances in local cache
+			if tx != nil {
+				// Subtract DAI amount
+				newDaiBalance := new(big.Int).Sub(tokenBalance, randomAmount)
+				s.updateDaiBalance(wallet.GetAddress(), pair.DaiAddr, newDaiBalance)
+
+				// Add ETH amount
+				wallet.AddBalance(amounts[1])
+			}
 		}
 	}
 
-	toAddr := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
-	if s.options.RandomTarget {
-		addrBytes := make([]byte, 20)
-		rand.Read(addrBytes)
-		toAddr = common.Address(addrBytes)
-	}
-
-	testToken, err := contract.NewDai(s.deploymentInfo.Pairs[0].DaiAddr, client.GetEthClient())
-	if err != nil {
-		return nil, nil, wallet, err
-	}
-
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
-		GasFeeCap: uint256.MustFromBig(feeCap),
-		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       100000,
-		Value:     uint256.NewInt(0),
-	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		return testToken.Transfer(transactOpts, toAddr, amount.ToBig())
-	})
 	if err != nil {
 		return nil, nil, wallet, err
 	}
