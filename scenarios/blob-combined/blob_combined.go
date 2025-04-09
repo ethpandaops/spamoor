@@ -24,17 +24,18 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount      uint64 `yaml:"total_count"`
-	Throughput      uint64 `yaml:"throughput"`
-	Sidecars        uint64 `yaml:"sidecars"`
-	MaxPending      uint64 `yaml:"max_pending"`
-	MaxWallets      uint64 `yaml:"max_wallets"`
-	Replace         uint64 `yaml:"replace"`
-	MaxReplacements uint64 `yaml:"max_replacements"`
-	Rebroadcast     uint64 `yaml:"rebroadcast"`
-	BaseFee         uint64 `yaml:"base_fee"`
-	TipFee          uint64 `yaml:"tip_fee"`
-	BlobFee         uint64 `yaml:"blob_fee"`
+	TotalCount                  uint64 `yaml:"total_count"`
+	Throughput                  uint64 `yaml:"throughput"`
+	Sidecars                    uint64 `yaml:"sidecars"`
+	MaxPending                  uint64 `yaml:"max_pending"`
+	MaxWallets                  uint64 `yaml:"max_wallets"`
+	Replace                     uint64 `yaml:"replace"`
+	MaxReplacements             uint64 `yaml:"max_replacements"`
+	Rebroadcast                 uint64 `yaml:"rebroadcast"`
+	BaseFee                     uint64 `yaml:"base_fee"`
+	TipFee                      uint64 `yaml:"tip_fee"`
+	BlobFee                     uint64 `yaml:"blob_fee"`
+	ThroughputIncrementInterval uint64 `yaml:"throughput_increment_interval"`
 }
 
 type Scenario struct {
@@ -48,17 +49,18 @@ type Scenario struct {
 
 var ScenarioName = "blob-combined"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:      0,
-	Throughput:      0,
-	Sidecars:        3,
-	MaxPending:      0,
-	MaxWallets:      0,
-	Replace:         30,
-	MaxReplacements: 4,
-	Rebroadcast:     30,
-	BaseFee:         20,
-	TipFee:          2,
-	BlobFee:         20,
+	TotalCount:                  0,
+	Throughput:                  0,
+	Sidecars:                    3,
+	MaxPending:                  0,
+	MaxWallets:                  0,
+	Replace:                     30,
+	MaxReplacements:             4,
+	Rebroadcast:                 30,
+	BaseFee:                     20,
+	TipFee:                      2,
+	BlobFee:                     20,
+	ThroughputIncrementInterval: 0,
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -85,6 +87,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
+	flags.Uint64Var(&s.options.ThroughputIncrementInterval, "throughput-increment-interval", ScenarioDefaultOptions.ThroughputIncrementInterval, "Increment the throughput every interval (in sec).")
 	return nil
 }
 
@@ -144,6 +147,23 @@ func (s *Scenario) Run(ctx context.Context) error {
 		initialRate = rate.Inf
 	}
 	limiter := rate.NewLimiter(initialRate, 1)
+
+	if s.options.ThroughputIncrementInterval != 0 {
+		go func() {
+			ticker := time.NewTicker(time.Duration(s.options.ThroughputIncrementInterval) * time.Second)
+			for {
+				select {
+				case <-ticker.C:
+					throughput := limiter.Limit() * 12
+					newThroughput := throughput + 1
+					s.logger.Infof("Increasing throughput from %d to %d", throughput, newThroughput)
+					limiter.SetLimit(rate.Limit(float64(newThroughput) / float64(utils.SecondsPerSlot)))
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
 
 	for {
 		if err := limiter.Wait(ctx); err != nil {
