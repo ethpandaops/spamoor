@@ -152,8 +152,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 					newThroughput := throughput + 1
 					s.logger.Infof("Increasing throughput from %d to %d", throughput, newThroughput)
 					limiter.SetLimit(rate.Limit(float64(newThroughput) / float64(utils.SecondsPerSlot)))
-				default:
-					// Do nothing
+				case <-ctx.Done():
+					return
 				}
 			}
 		}()
@@ -169,7 +169,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
-		
+
 		txIdx := txIdxCounter
 		txIdxCounter++
 
