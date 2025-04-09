@@ -189,7 +189,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 			txCount.Add(1)
 			logger.WithFields(logrus.Fields{
-				"wallet": s.walletPool.GetWalletIndex(wallet.GetAddress()),
+				"wallet": s.walletPool.GetWalletName(wallet.GetAddress()),
 				"nonce":  tx.Nonce(),
 			}).Infof("blob tx %6d.0 sent:  %v (%v sidecars)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs))
 		}(txIdx, lastChan, currentChan)
@@ -405,7 +405,7 @@ func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.T
 		logger = logger.WithField("nonce", tx.Nonce())
 	}
 	if wallet != nil {
-		logger = logger.WithField("wallet", s.walletPool.GetWalletIndex(wallet.GetAddress()))
+		logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 	}
 	if err != nil {
 		logger.WithField("rpc", client.GetName()).Warnf("blob tx %6d.%v replacement failed: %v", txIdx+1, replacementIdx+1, err)
