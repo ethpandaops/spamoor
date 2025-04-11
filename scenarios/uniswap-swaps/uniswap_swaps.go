@@ -63,11 +63,11 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:       20,
 	TipFee:        2,
 	PairCount:     1,
-	MinSwapAmount: "1000000000000000",     // 0.001 DAI
-	MaxSwapAmount: "10000000000000000000", // 10 DAI
+	MinSwapAmount: "100000000000000000",     // 0.1 DAI
+	MaxSwapAmount: "1000000000000000000000", // 1000 DAI
 	BuyRatio:      50,
 	Slippage:      50,
-	SellThreshold: "100000000000000000000", // 100 DAI
+	SellThreshold: "100000000000000000000000", // 10000 DAI
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,

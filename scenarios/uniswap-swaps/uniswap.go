@@ -220,6 +220,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 	// Track all approval transactions
 	var approvalTxs []*types.Transaction
+	var approvalWallets []*txbuilder.Wallet
 
 	// For each wallet and token pair
 	for _, wallet := range wallets {
@@ -265,6 +266,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 				}
 
 				approvalTxs = append(approvalTxs, approveTx)
+				approvalWallets = append(approvalWallets, wallet)
 			}
 
 			// Build approval transaction for router B if needed
@@ -283,6 +285,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 				}
 
 				approvalTxs = append(approvalTxs, approveTx)
+				approvalWallets = append(approvalWallets, wallet)
 			}
 		}
 
@@ -320,6 +323,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			}
 
 			approvalTxs = append(approvalTxs, approveTx)
+			approvalWallets = append(approvalWallets, wallet)
 		}
 
 		// Build approval transaction for router B if needed
@@ -338,6 +342,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			}
 
 			approvalTxs = append(approvalTxs, approveTx)
+			approvalWallets = append(approvalWallets, wallet)
 		}
 	}
 
@@ -354,8 +359,8 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			txClient := u.walletPool.GetClient(spamoor.SelectClientByIndex, i)
 			wg.Add(1)
 
-			go func(tx *types.Transaction, client *txbuilder.Client) {
-				err := u.walletPool.GetTxPool().SendTransaction(u.ctx, u.walletPool.GetRootWallet(), tx, &txbuilder.SendTransactionOptions{
+			go func(tx *types.Transaction, client *txbuilder.Client, wallet *txbuilder.Wallet) {
+				err := u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &txbuilder.SendTransactionOptions{
 					Client: client,
 					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 						if err != nil {
@@ -369,7 +374,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 				if err != nil {
 					u.logger.Errorf("failed to send approval tx: %v", err)
 				}
-			}(tx, txClient)
+			}(tx, txClient, approvalWallets[i])
 		}
 
 		// Wait for all transactions to be sent
