@@ -13,6 +13,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/erctx"
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
+	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 )
 
@@ -27,6 +28,7 @@ var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
 	&erctx.ScenarioDescriptor,
 	&gasburnertx.ScenarioDescriptor,
 	&setcodetx.ScenarioDescriptor,
+	&uniswapswaps.ScenarioDescriptor,
 	&wallets.ScenarioDescriptor,
 }
 
