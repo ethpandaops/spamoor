@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"time"
 
@@ -742,6 +743,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	}
 
 	// re-process the new parent blocks
+	slices.Reverse(newBlockParents)
 	for _, parentBlock := range newBlockParents {
 		pool.processBlockTxs(ctx, client, parentBlock.NumberU64(), parentBlock, chainId)
 	}
