@@ -20,14 +20,15 @@ import (
 )
 
 type CliArgs struct {
-	verbose      bool
-	trace        bool
-	debug        bool
-	rpchosts     []string
-	rpchostsFile string
-	privkey      string
-	port         int
-	dbFile       string
+	verbose        bool
+	trace          bool
+	debug          bool
+	rpchosts       []string
+	rpchostsFile   string
+	privkey        string
+	port           int
+	dbFile         string
+	startupSpammer string
 }
 
 func main() {
@@ -42,6 +43,7 @@ func main() {
 	flags.StringVarP(&cliArgs.privkey, "privkey", "p", "", "The private key of the wallet to send funds from.")
 	flags.IntVarP(&cliArgs.port, "port", "P", 8080, "The port to run the webui on.")
 	flags.StringVarP(&cliArgs.dbFile, "db", "d", "spamoor.db", "The file to store the database in.")
+	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file with startup spammers configuration")
 
 	flags.Parse(os.Args)
 
@@ -133,9 +135,23 @@ func main() {
 	}, daemon)
 
 	// start daemon
-	err = daemon.Run()
+	firstLaunch, err := daemon.Run()
 	if err != nil {
 		panic(err)
+	}
+
+	// load startup spammers if configured
+	if firstLaunch && cliArgs.startupSpammer != "" {
+		startupSpammers, err := daemon.LoadStartupSpammers(cliArgs.startupSpammer, logger.WithField("module", "startup"))
+		if err != nil {
+			logger.Errorf("failed to load startup spammers: %v", err)
+		} else if len(startupSpammers) > 0 {
+			logger.Infof("adding %d startup spammers", len(startupSpammers))
+			err = daemon.AddStartupSpammers(startupSpammers)
+			if err != nil {
+				logger.Errorf("failed to add startup spammers: %v", err)
+			}
+		}
 	}
 
 	// wait for ctrl+c
