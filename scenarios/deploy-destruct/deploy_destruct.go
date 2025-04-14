@@ -199,7 +199,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 				logger = logger.WithField("nonce", tx.Nonce())
 			}
 			if wallet != nil {
-				logger = logger.WithField("wallet", s.walletPool.GetWalletIndex(wallet.GetAddress()))
+				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 			}
 			if lastChan != nil {
 				<-lastChan

@@ -24,19 +24,20 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount      uint64 `yaml:"total_count"`
-	Throughput      uint64 `yaml:"throughput"`
-	Sidecars        uint64 `yaml:"sidecars"`
-	MaxPending      uint64 `yaml:"max_pending"`
-	MaxWallets      uint64 `yaml:"max_wallets"`
-	Replace         uint64 `yaml:"replace"`
-	MaxReplacements uint64 `yaml:"max_replacements"`
-	Rebroadcast     uint64 `yaml:"rebroadcast"`
-	BaseFee         uint64 `yaml:"base_fee"`
-	TipFee          uint64 `yaml:"tip_fee"`
-	BlobFee         uint64 `yaml:"blob_fee"`
-	BlobV1Percent   uint64 `yaml:"blob_v1_percent"`
-	FuluActivation  uint64 `yaml:"fulu_activation"`
+	TotalCount                  uint64 `yaml:"total_count"`
+	Throughput                  uint64 `yaml:"throughput"`
+	Sidecars                    uint64 `yaml:"sidecars"`
+	MaxPending                  uint64 `yaml:"max_pending"`
+	MaxWallets                  uint64 `yaml:"max_wallets"`
+	Replace                     uint64 `yaml:"replace"`
+	MaxReplacements             uint64 `yaml:"max_replacements"`
+	Rebroadcast                 uint64 `yaml:"rebroadcast"`
+	BaseFee                     uint64 `yaml:"base_fee"`
+	TipFee                      uint64 `yaml:"tip_fee"`
+	BlobFee                     uint64 `yaml:"blob_fee"`
+	BlobV1Percent               uint64 `yaml:"blob_v1_percent"`
+	FuluActivation              uint64 `yaml:"fulu_activation"`
+	ThroughputIncrementInterval uint64 `yaml:"throughput_increment_interval"`
 }
 
 type Scenario struct {
@@ -50,19 +51,20 @@ type Scenario struct {
 
 var ScenarioName = "blob-combined"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:      0,
-	Throughput:      0,
-	Sidecars:        3,
-	MaxPending:      0,
-	MaxWallets:      0,
-	Replace:         30,
-	MaxReplacements: 4,
-	Rebroadcast:     30,
-	BaseFee:         20,
-	TipFee:          2,
-	BlobFee:         20,
-	BlobV1Percent:   50,
-	FuluActivation:  0,
+	TotalCount:                  0,
+	Throughput:                  0,
+	Sidecars:                    3,
+	MaxPending:                  0,
+	MaxWallets:                  0,
+	Replace:                     30,
+	MaxReplacements:             4,
+	Rebroadcast:                 30,
+	BaseFee:                     20,
+	TipFee:                      2,
+	BlobFee:                     20,
+	BlobV1Percent:               50,
+	FuluActivation:              0,
+	ThroughputIncrementInterval: 0,
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -91,6 +93,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
 	flags.Uint64Var(&s.options.FuluActivation, "fulu-activation", ScenarioDefaultOptions.FuluActivation, "Unix timestamp of the Fulu activation")
+	flags.Uint64Var(&s.options.ThroughputIncrementInterval, "throughput-increment-interval", ScenarioDefaultOptions.ThroughputIncrementInterval, "Increment the throughput every interval (in sec).")
 	return nil
 }
 
@@ -151,6 +154,23 @@ func (s *Scenario) Run(ctx context.Context) error {
 	}
 	limiter := rate.NewLimiter(initialRate, 1)
 
+	if s.options.ThroughputIncrementInterval != 0 {
+		go func() {
+			ticker := time.NewTicker(time.Duration(s.options.ThroughputIncrementInterval) * time.Second)
+			for {
+				select {
+				case <-ticker.C:
+					throughput := limiter.Limit() * 12
+					newThroughput := throughput + 1
+					s.logger.Infof("Increasing throughput from %.3f to %.3f", throughput, newThroughput)
+					limiter.SetLimit(rate.Limit(float64(newThroughput) / float64(utils.SecondsPerSlot)))
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
 	for {
 		if err := limiter.Wait(ctx); err != nil {
 			if ctx.Err() != nil {
@@ -192,7 +212,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 				logger = logger.WithField("nonce", tx.Nonce())
 			}
 			if wallet != nil {
-				logger = logger.WithField("wallet", s.walletPool.GetWalletIndex(wallet.GetAddress()))
+				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 			}
 			if lastChan != nil {
 				<-lastChan
@@ -430,7 +450,7 @@ func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.T
 	}
 	s.logger.WithFields(logrus.Fields{
 		"rpc":    client.GetName(),
-		"wallet": s.walletPool.GetWalletIndex(wallet.GetAddress()),
+		"wallet": s.walletPool.GetWalletName(wallet.GetAddress()),
 		"nonce":  tx.Nonce(),
 	}).Infof("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
 }
