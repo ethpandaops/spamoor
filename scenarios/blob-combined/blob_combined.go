@@ -156,7 +156,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 				case <-ticker.C:
 					throughput := limiter.Limit() * 12
 					newThroughput := throughput + 1
-					s.logger.Infof("Increasing throughput from %d to %d", throughput, newThroughput)
+					s.logger.Infof("Increasing throughput from %.3f to %.3f", throughput, newThroughput)
 					limiter.SetLimit(rate.Limit(float64(newThroughput) / float64(utils.SecondsPerSlot)))
 				case <-ctx.Done():
 					return
