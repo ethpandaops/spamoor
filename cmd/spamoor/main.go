@@ -50,12 +50,6 @@ func main() {
 	defer cancel()
 
 	// init logger
-	if cliArgs.trace {
-		logrus.SetLevel(logrus.TraceLevel)
-	} else if cliArgs.verbose {
-		logrus.SetLevel(logrus.DebugLevel)
-	}
-
 	logger := logrus.StandardLogger()
 
 	logger.WithFields(logrus.Fields{
@@ -98,6 +92,12 @@ func main() {
 	scenario.Flags(flags)
 	cliArgs.rpchosts = nil
 	flags.Parse(os.Args)
+
+	if cliArgs.trace {
+		logrus.SetLevel(logrus.TraceLevel)
+	} else if cliArgs.verbose {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
 
 	// start client pool
 	rpcHosts := []string{}
