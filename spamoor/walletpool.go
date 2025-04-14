@@ -30,7 +30,7 @@ var (
 )
 
 type WalletPoolConfig struct {
-	WalletCount    uint64       `yaml:"wallet_count"`
+	WalletCount    uint64       `yaml:"wallet_count,omitempty"`
 	RefillAmount   *uint256.Int `yaml:"refill_amount"`
 	RefillBalance  *uint256.Int `yaml:"refill_balance"`
 	RefillInterval uint64       `yaml:"refill_interval"`
@@ -56,6 +56,16 @@ type WalletPool struct {
 	wellKnownWallets map[string]*txbuilder.Wallet
 	selectionMutex   sync.Mutex
 	rrWalletIdx      int
+}
+
+func GetDefaultWalletConfig(scenarioName string) *WalletPoolConfig {
+	return &WalletPoolConfig{
+		WalletSeed:     fmt.Sprintf("%v-%v", scenarioName, rand.Intn(1000000)),
+		WalletCount:    0,
+		RefillAmount:   uint256.NewInt(5000000000000000000),
+		RefillBalance:  uint256.NewInt(1000000000000000000),
+		RefillInterval: 600,
+	}
 }
 
 func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *txbuilder.Wallet, clientPool *ClientPool, txpool *txbuilder.TxPool) *WalletPool {
