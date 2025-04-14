@@ -635,8 +635,8 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *txbuilder.Wallet, clie
 	if feeCap.Cmp(big.NewInt(400000000000)) < 0 {
 		feeCap = big.NewInt(400000000000)
 	}
-	if tipCap.Cmp(big.NewInt(3000000000)) < 0 {
-		tipCap = big.NewInt(3000000000)
+	if tipCap.Cmp(big.NewInt(200000000000)) < 0 {
+		tipCap = big.NewInt(200000000000)
 	}
 
 	toAddr := childWallet.GetAddress()
