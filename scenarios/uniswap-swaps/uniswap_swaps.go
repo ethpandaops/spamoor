@@ -39,6 +39,7 @@ type ScenarioOptions struct {
 	BuyRatio      uint64 `yaml:"buy_ratio"`
 	Slippage      uint64 `yaml:"slippage"`
 	SellThreshold string `yaml:"sell_threshold"`
+	ClientGroup   string `yaml:"client_group"`
 }
 
 type Scenario struct {
@@ -68,6 +69,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BuyRatio:      50,
 	Slippage:      50,
 	SellThreshold: "100000000000000000000000", // 10000 DAI
+	ClientGroup:   "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -96,6 +98,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BuyRatio, "buy-ratio", ScenarioDefaultOptions.BuyRatio, "Ratio of buy vs sell swaps (0-100)")
 	flags.Uint64Var(&s.options.Slippage, "slippage", ScenarioDefaultOptions.Slippage, "Slippage tolerance in basis points")
 	flags.StringVar(&s.options.SellThreshold, "sell-threshold", ScenarioDefaultOptions.SellThreshold, "DAI balance threshold to force sell (in wei)")
+	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
 
@@ -168,6 +171,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 		DaiPairs:            s.options.PairCount,
 		EthLiquidityPerPair: uint256.NewInt(0).Mul(uint256.NewInt(2000), uint256.NewInt(1000000000000000000)),
 		DaiLiquidityFactor:  10000,
+		ClientGroup:         s.options.ClientGroup,
 	})
 
 	deploymentInfo, err := s.uniswap.DeployUniswapPairs(false)
@@ -299,7 +303,7 @@ func (s *Scenario) getTxFee(ctx context.Context, client *txbuilder.Client) (*big
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 

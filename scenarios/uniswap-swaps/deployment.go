@@ -40,7 +40,7 @@ type PairDeploymentInfo struct {
 }
 
 func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
-	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0)
+	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup)
 	deployerWallet := u.walletPool.GetWellKnownWallet("deployer")
 	ownerWallet := u.walletPool.GetWellKnownWallet("owner")
 

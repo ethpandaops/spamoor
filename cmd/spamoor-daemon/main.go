@@ -87,7 +87,7 @@ func main() {
 	}
 
 	// init root wallet
-	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool.GetClient(spamoor.SelectClientRandom, 0), logger)
+	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool.GetClient(spamoor.SelectClientRandom, 0, ""), logger)
 	if err != nil {
 		panic(fmt.Errorf("failed to init root wallet: %v", err))
 	}
@@ -114,7 +114,7 @@ func main() {
 				mode = spamoor.SelectClientRandom
 			}
 
-			return clientPool.GetClient(mode, index)
+			return clientPool.GetClient(mode, index, "")
 		},
 		GetClientCountFn: func() int {
 			return len(clientPool.GetAllClients())

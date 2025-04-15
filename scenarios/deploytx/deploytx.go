@@ -37,6 +37,7 @@ type ScenarioOptions struct {
 	TipFee        uint64 `yaml:"tip_fee"`
 	Bytecodes     string `yaml:"bytecodes"`
 	BytecodesFile string `yaml:"bytecodes_file"`
+	ClientGroup   string `yaml:"client_group"`
 }
 
 type Scenario struct {
@@ -62,6 +63,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TipFee:        2,
 	Bytecodes:     "",
 	BytecodesFile: "",
+	ClientGroup:   "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -87,7 +89,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in deployment transactions (in gwei)")
 	flags.StringVar(&s.options.Bytecodes, "bytecodes", ScenarioDefaultOptions.Bytecodes, "Bytecodes to deploy (, separated list of hex bytecodes)")
 	flags.StringVar(&s.options.BytecodesFile, "bytecodes-file", ScenarioDefaultOptions.BytecodesFile, "File with bytecodes to deploy (list with hex bytecodes)")
-
+	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
 
@@ -240,7 +242,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 

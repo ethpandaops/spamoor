@@ -152,7 +152,7 @@ func (pool *ClientPool) watchClientStatus() error {
 	return nil
 }
 
-func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int) *txbuilder.Client {
+func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group string) *txbuilder.Client {
 	pool.selectionMutex.Lock()
 	defer pool.selectionMutex.Unlock()
 
@@ -160,19 +160,37 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int) *txbuilde
 		return nil
 	}
 
+	clientCandidates := make([]*txbuilder.Client, 0)
+
+	if group == "" {
+		for _, client := range pool.goodClients {
+			if client.GetClientGroup() == "default" {
+				clientCandidates = append(clientCandidates, client)
+			}
+		}
+	}
+
+	if len(clientCandidates) == 0 {
+		for _, client := range pool.goodClients {
+			if group == "" || client.GetClientGroup() == group {
+				clientCandidates = append(clientCandidates, client)
+			}
+		}
+	}
+
 	switch mode {
 	case SelectClientByIndex:
-		input = input % len(pool.goodClients)
+		input = input % len(clientCandidates)
 	case SelectClientRandom:
-		input = rand.Intn(len(pool.goodClients))
+		input = rand.Intn(len(clientCandidates))
 	case SelectClientRoundRobin:
 		input = pool.rrClientIdx
 		pool.rrClientIdx++
-		if pool.rrClientIdx >= len(pool.goodClients) {
+		if pool.rrClientIdx >= len(clientCandidates) {
 			pool.rrClientIdx = 0
 		}
 	}
-	return pool.goodClients[input]
+	return clientCandidates[input]
 }
 
 func (pool *ClientPool) GetAllClients() []*txbuilder.Client {

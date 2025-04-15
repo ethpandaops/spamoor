@@ -36,6 +36,7 @@ type ScenarioOptions struct {
 	TipFee                      uint64 `yaml:"tip_fee"`
 	BlobFee                     uint64 `yaml:"blob_fee"`
 	ThroughputIncrementInterval uint64 `yaml:"throughput_increment_interval"`
+	ClientGroup                 string `yaml:"client_group"`
 }
 
 type Scenario struct {
@@ -61,6 +62,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TipFee:                      2,
 	BlobFee:                     20,
 	ThroughputIncrementInterval: 0,
+	ClientGroup:                 "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -88,6 +90,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.ThroughputIncrementInterval, "throughput-increment-interval", ScenarioDefaultOptions.ThroughputIncrementInterval, "Increment the throughput every interval (in sec).")
+	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
 
@@ -231,7 +234,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 
@@ -244,7 +247,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 	if rand.Intn(100) < 50 {
 		// 50% chance to send transaction via another client
 		// will cause some replacement txs being sent via different clients than the original tx
-		client = s.walletPool.GetClient(spamoor.SelectClientRandom, 0)
+		client = s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
 	}
 
 	var feeCap *big.Int

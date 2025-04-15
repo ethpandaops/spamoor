@@ -9,6 +9,7 @@
               <tr>
                 <th>#</th>
                 <th>Name</th>
+                <th>Group</th>
                 <th>Status</th>
                 <th>Block Height</th>
                 <th>Version</th>
@@ -19,6 +20,7 @@
                   <tr>
                     <td>{{ $client.Index }}</td>
                     <td>{{ $client.Name }}</td>
+                    <td>{{ $client.Group }}</td>
                     <td>
                       {{ if $client.IsReady }}
                         <span class="badge rounded-pill text-bg-success">Online</span>

@@ -73,7 +73,7 @@ func (s *Scenario) Config() string {
 func (s *Scenario) Run(ctx context.Context) error {
 	wallet := s.walletPool.GetRootWallet()
 	s.logger.Infof("Root Wallet  %v  nonce: %6d  balance: %v ETH", wallet.GetAddress().String(), wallet.GetNonce(), utils.WeiToEther(uint256.MustFromBig(wallet.GetBalance())))
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0)
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
 
 	for i := 0; i < int(s.walletPool.GetWalletCount()); i++ {
 		wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, i)

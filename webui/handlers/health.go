@@ -16,6 +16,7 @@ type HealthPage struct {
 type HealthPageClient struct {
 	Index       int    `json:"index"`
 	Name        string `json:"name"`
+	Group       string `json:"group"`
 	Version     string `json:"version"`
 	BlockHeight uint64 `json:"block_height"`
 	IsReady     bool   `json:"ready"`
@@ -61,6 +62,7 @@ func (fh *FrontendHandler) getHealthPageData(ctx context.Context) (*HealthPage, 
 		clientData := &HealthPageClient{
 			Index:       idx,
 			Name:        client.GetName(),
+			Group:       client.GetClientGroup(),
 			Version:     version,
 			BlockHeight: blockHeight,
 			IsReady:     slices.Contains(goodClients, client),

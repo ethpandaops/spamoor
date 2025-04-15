@@ -22,6 +22,8 @@ type Client struct {
 	rpcClient *rpc.Client
 	logger    *logrus.Entry
 
+	clientGroup string
+
 	gasSuggestionMutex sync.Mutex
 	lastGasSuggestion  time.Time
 	lastGasCap         *big.Int
@@ -37,16 +39,26 @@ type Client struct {
 
 func NewClient(rpchost string) (*Client, error) {
 	headers := map[string]string{}
+	clientGroup := "default"
 
-	if strings.HasPrefix(rpchost, "headers(") {
+	for {
+		if strings.HasPrefix(rpchost, "headers(") {
 
-		headersEnd := strings.Index(rpchost, ")")
-		headersStr := rpchost[8:headersEnd]
-		rpchost = rpchost[headersEnd+1:]
+			headersEnd := strings.Index(rpchost, ")")
+			headersStr := rpchost[8:headersEnd]
+			rpchost = rpchost[headersEnd+1:]
 
-		for _, headerStr := range strings.Split(headersStr, "|") {
-			headerParts := strings.Split(headerStr, ":")
-			headers[strings.Trim(headerParts[0], " ")] = strings.Trim(headerParts[1], " ")
+			for _, headerStr := range strings.Split(headersStr, "|") {
+				headerParts := strings.Split(headerStr, ":")
+				headers[strings.Trim(headerParts[0], " ")] = strings.Trim(headerParts[1], " ")
+			}
+		} else if strings.HasPrefix(rpchost, "group(") {
+			groupEnd := strings.Index(rpchost, ")")
+			groupStr := rpchost[6:groupEnd]
+			rpchost = rpchost[groupEnd+1:]
+			clientGroup = groupStr
+		} else {
+			break
 		}
 	}
 
@@ -61,10 +73,11 @@ func NewClient(rpchost string) (*Client, error) {
 	}
 
 	return &Client{
-		client:    ethclient.NewClient(rpcClient),
-		rpcClient: rpcClient,
-		rpchost:   rpchost,
-		logger:    logrus.WithField("rpc", rpchost),
+		client:      ethclient.NewClient(rpcClient),
+		rpcClient:   rpcClient,
+		rpchost:     rpchost,
+		logger:      logrus.WithField("rpc", rpchost),
+		clientGroup: clientGroup,
 	}, nil
 }
 
@@ -72,6 +85,10 @@ func (client *Client) GetName() string {
 	url, _ := url.Parse(client.rpchost)
 	name := strings.TrimSuffix(url.Host, ".ethpandaops.io")
 	return name
+}
+
+func (client *Client) GetClientGroup() string {
+	return client.clientGroup
 }
 
 func (client *Client) GetEthClient() *ethclient.Client {
