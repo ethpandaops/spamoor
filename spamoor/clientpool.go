@@ -168,6 +168,8 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 				clientCandidates = append(clientCandidates, client)
 			}
 		}
+	} else if group == "*" {
+		clientCandidates = pool.goodClients
 	}
 
 	if len(clientCandidates) == 0 {
