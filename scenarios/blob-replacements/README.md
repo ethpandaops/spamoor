@@ -23,20 +23,21 @@ spamoor blob-replacements [flags]
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--blobfee` - Max blob fee in gwei (default: 20)
+- `--max-replace` - Maximum number of replacement transactions (default: 4)
+- `--replace` - Seconds to wait before replacing a transaction (default: 30)
+- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 30)
 
 ### Blob Configuration
 - `-b, --sidecars` - Maximum number of blob sidecars per transaction (default: 3)
-- `--max-replace` - Maximum number of replacement transactions (default: 4)
-
-### Replacement Settings
-- `--replace` - Seconds to wait before replacing a transaction (default: 30)
-- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 30)
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
 - `--refill-amount` - ETH amount to fund each child wallet (default: 5)
 - `--refill-balance` - Minimum ETH balance before refilling (default: 2)
 - `--refill-interval` - Seconds between balance checks (default: 300)
+
+### Client Settings
+- `--client-group` - Client group to use for sending transactions
 
 ### Debug Options
 - `-v, --verbose` - Enable verbose output

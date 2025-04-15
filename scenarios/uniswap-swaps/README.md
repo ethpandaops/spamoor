@@ -19,12 +19,13 @@ spamoor uniswap-swaps [flags]
 - `-t, --throughput` - Transactions to send per slot
 - `--max-pending` - Maximum number of pending transactions
 
-#### Transaction Settings
+### Transaction Settings
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--gaslimit` - Gas limit for each transaction in gwei (default: 200000)
+- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
 
-#### Swap Settings
+### Swap Settings
 - `--pair-count` - Number of uniswap pairs to deploy (default: 1)
 - `--min-swap` - Minimum swap amount in wei (default: 100000000000000000)
 - `--max-swap` - Maximum swap amount in wei (default: 1000000000000000000000)
@@ -32,17 +33,18 @@ spamoor uniswap-swaps [flags]
 - `--slippage` - Slippage tolerance in basis points (default: 50)
 - `--sell-threshold` - DAI balance threshold to force sell in wei (default: 100000000000000000000000)
 
-#### Wallet Management
+### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
 - `--refill-amount` - ETH amount to fund each child wallet (default: 5)
 - `--refill-balance` - Minimum ETH balance before refilling (default: 2)
 - `--refill-interval` - Seconds between balance checks (default: 300)
 
-#### Transaction Behavior
-- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
-
-#### Client Settings
+### Client Settings
 - `--client-group` - Client group to use for sending transactions
+
+### Debug Options
+- `-v, --verbose` - Enable verbose output
+- `--trace` - Enable tracing output
 
 ## Example
 

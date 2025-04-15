@@ -26,8 +26,6 @@ spamoor blob-conflicting [flags]
 
 ### Blob Configuration
 - `-b, --sidecars` - Maximum number of blob sidecars per transaction (default: 3)
-
-### Conflict Settings
 - `--conflict-delay` - Milliseconds to wait before sending conflicting transaction (default: 0)
 
 ### Wallet Management
@@ -35,6 +33,9 @@ spamoor blob-conflicting [flags]
 - `--refill-amount` - ETH amount to fund each child wallet (default: 5)
 - `--refill-balance` - Minimum ETH balance before refilling (default: 2)
 - `--refill-interval` - Seconds between balance checks (default: 300)
+
+### Client Settings
+- `--client-group` - Client group to use for sending transactions
 
 ### Debug Options
 - `-v, --verbose` - Enable verbose output

@@ -24,8 +24,12 @@ spamoor setcodetx [flags]
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--gaslimit` - Gas limit for each transaction in gwei (default: 200000)
 - `--amount` - Amount to send with each transaction in gwei (default: 20)
+- `--random-amount` - Use random amounts for transactions (with --amount as limit)
+- `--random-target` - Use random to addresses for transactions
 - `--data` - Transaction call data to send
 - `--code-addr` - Code delegation target address to use for transactions
+- `--random-code-addr` - Use random delegation target for transactions
+- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
@@ -33,14 +37,12 @@ spamoor setcodetx [flags]
 - `--max-authorizations` - Maximum number of authorizations to send per transaction (default: 10)
 - `--max-delegators` - Maximum number of random delegators to use (0 = no delegator gets reused)
 
-### Transaction Behavior
-- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
-- `--random-amount` - Use random amounts for transactions (with --amount as limit)
-- `--random-target` - Use random to addresses for transactions
-- `--random-code-addr` - Use random delegation target for transactions
-
 ### Client Settings
 - `--client-group` - Client group to use for sending transactions
+
+### Debug Options
+- `-v, --verbose` - Enable verbose output
+- `--trace` - Enable tracing output
 
 ## Example
 

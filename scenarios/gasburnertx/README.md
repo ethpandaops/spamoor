@@ -23,11 +23,7 @@ spamoor gasburnertx [flags]
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--gas-units-to-burn` - Number of gas units for each transaction to cost (default: 2000000)
-
-### Volume Control
-- `-c, --count` - Total number of transactions to send
-- `-t, --throughput` - Transactions to send per slot
-- `--max-pending` - Maximum number of pending transactions
+- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
@@ -35,8 +31,8 @@ spamoor gasburnertx [flags]
 - `--refill-balance` - Minimum ETH balance before refilling (default: 2)
 - `--refill-interval` - Seconds between balance checks (default: 300)
 
-### Transaction Behavior
-- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
+### Client Settings
+- `--client-group` - Client group to use for sending transactions
 
 ### Debug Options
 - `-v, --verbose` - Enable verbose output

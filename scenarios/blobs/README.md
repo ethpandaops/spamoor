@@ -23,6 +23,7 @@ spamoor blobs [flags]
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--blobfee` - Max blob fee in gwei (default: 20)
+- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 30)
 
 ### Blob Configuration
 - `-b, --sidecars` - Maximum number of blob sidecars per transaction (default: 3)
@@ -33,8 +34,8 @@ spamoor blobs [flags]
 - `--refill-balance` - Minimum ETH balance before refilling (default: 2)
 - `--refill-interval` - Seconds between balance checks (default: 300)
 
-### Transaction Behavior
-- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 30)
+### Client Settings
+- `--client-group` - Client group to use for sending transactions
 
 ### Debug Options
 - `-v, --verbose` - Enable verbose output

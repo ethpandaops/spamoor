@@ -20,11 +20,14 @@ spamoor eoatx [flags]
 - `--max-pending` - Maximum number of pending transactions
 
 ### Transaction Settings
-- `--amount` - Transfer amount per transaction in gwei (default: 20)
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--gaslimit` - Gas limit per transaction (default: 21000)
+- `--amount` - Transfer amount per transaction in gwei (default: 20)
+- `--random-amount` - Use random amounts (with --amount as limit)
+- `--random-target` - Use random destination addresses
 - `--data` - Custom transaction call data to send
+- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
@@ -32,10 +35,8 @@ spamoor eoatx [flags]
 - `--refill-balance` - Minimum ETH balance before refilling (default: 2)
 - `--refill-interval` - Seconds between balance checks (default: 300)
 
-### Transaction Behavior
-- `--random-amount` - Use random amounts (with --amount as limit)
-- `--random-target` - Use random destination addresses
-- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
+### Client Settings
+- `--client-group` - Client group to use for sending transactions
 
 ### Debug Options
 - `-v, --verbose` - Enable verbose output

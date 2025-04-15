@@ -23,6 +23,7 @@ spamoor deploytx [flags]
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--gaslimit` - Gas limit per deployment in gwei (default: 1000000)
+- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
 
 ### Bytecode Configuration
 - `--bytecodes` - Comma-separated list of hex bytecodes to deploy
@@ -34,8 +35,8 @@ spamoor deploytx [flags]
 - `--refill-balance` - Minimum ETH balance before refilling (default: 2)
 - `--refill-interval` - Seconds between balance checks (default: 300)
 
-### Transaction Behavior
-- `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
+### Client Settings
+- `--client-group` - Client group to use for sending transactions
 
 ### Debug Options
 - `-v, --verbose` - Enable verbose output
