@@ -110,6 +110,49 @@ amount: 20
 data: "repeat:0x00:25000"
 random_amount: false
 random_target: false
+', 0, 0, '{}'),
+
+-- Gas Burner Spammer
+(5, 'gasburnertx', 'Gas Burner Spammer', '20 gas-burner transactions per slot, burning 2M gas each, gas limit 20 gwei, up to 40M gas usage', '# wallet settings
+seed: gasburnertx-5 # seed for the wallet
+refill_amount: 5000000000000000000 # refill 5 ETH when
+refill_balance: 1000000000000000000 # balance drops below 1 ETH
+refill_interval: 600 # check every 10 minutes
+
+# scenario: gasburnertx
+total_count: 0
+throughput: 20
+max_pending: 20
+max_wallets: 40
+rebroadcast: 120
+base_fee: 20
+tip_fee: 2
+gas_units_to_burn: 2000000
+client_group: ""
+', 0, 0, '{}'),
+
+-- Uniswap V2 Swap Spammer
+(6, 'uniswap-swaps', 'Uniswap V2 Swap Spammer', '200 type-2 swap transactions with uniswap v2 pools, gas limit 20 gwei, ~15M gas usage', '# wallet settings
+seed: uniswap-swaps-6 # seed for the wallet
+refill_amount: 5000000000000000000 # refill 5 ETH when
+refill_balance: 1000000000000000000 # balance drops below 1 ETH
+refill_interval: 600 # check every 10 minutes
+
+# scenario: uniswap-swaps
+total_count: 0
+throughput: 200
+max_pending: 200
+max_wallets: 200
+rebroadcast: 120
+base_fee: 20
+tip_fee: 2
+pair_count: 1
+min_swap_amount: "100000000000000000"
+max_swap_amount: "1000000000000000000000"
+buy_ratio: 50
+slippage: 50
+sell_threshold: "100000000000000000000000"
+client_group: ""
 ', 0, 0, '{}');
 
 
