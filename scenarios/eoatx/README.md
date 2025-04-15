@@ -26,6 +26,7 @@ spamoor eoatx [flags]
 - `--amount` - Transfer amount per transaction in gwei (default: 20)
 - `--random-amount` - Use random amounts (with --amount as limit)
 - `--random-target` - Use random destination addresses
+- `--self-tx-only` - Use sender wallet as destination address
 - `--data` - Custom transaction call data to send
 - `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
 

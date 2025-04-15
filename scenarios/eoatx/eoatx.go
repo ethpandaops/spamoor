@@ -38,6 +38,7 @@ type ScenarioOptions struct {
 	Data         string `yaml:"data"`
 	RandomAmount bool   `yaml:"random_amount"`
 	RandomTarget bool   `yaml:"random_target"`
+	SelfTxOnly   bool   `yaml:"self_tx_only"`
 	ClientGroup  string `yaml:"client_group"`
 }
 
@@ -64,6 +65,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Data:         "",
 	RandomAmount: false,
 	RandomTarget: false,
+	SelfTxOnly:   false,
 	ClientGroup:  "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -92,6 +94,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.Data, "data", ScenarioDefaultOptions.Data, "Transaction call data to send")
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
+	flags.BoolVar(&s.options.SelfTxOnly, "self-tx-only", ScenarioDefaultOptions.SelfTxOnly, "Only send transactions to self")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
@@ -280,6 +283,10 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		addrBytes := make([]byte, 20)
 		rand.Read(addrBytes)
 		toAddr = common.Address(addrBytes)
+	}
+
+	if s.options.SelfTxOnly {
+		toAddr = wallet.GetAddress()
 	}
 
 	txCallData := []byte{}
