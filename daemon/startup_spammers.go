@@ -12,9 +12,10 @@ import (
 
 // StartupSpammerConfig represents a single spammer configuration in the startup config file
 type StartupSpammerConfig struct {
-	Scenario string                 `yaml:"scenario"`
-	Name     string                 `yaml:"name"`
-	Config   map[string]interface{} `yaml:"config"`
+	Scenario    string                 `yaml:"scenario"`
+	Name        string                 `yaml:"name"`
+	Description string                 `yaml:"description"`
+	Config      map[string]interface{} `yaml:"config"`
 }
 
 // LoadStartupSpammers loads the startup spammers configuration from a file
@@ -75,16 +76,19 @@ func (d *Daemon) AddStartupSpammers(spammers []StartupSpammerConfig) error {
 			mergedConfig[k] = v
 		}
 
-		// Convert config to YAML string
 		configYAML, err := yaml.Marshal(mergedConfig)
 		if err != nil {
 			return fmt.Errorf("failed to marshal spammer config: %w", err)
 		}
 
-		// Create a name if not provided
 		name := spammerConfig.Name
 		if name == "" {
 			name = fmt.Sprintf("Startup %s", spammerConfig.Scenario)
+		}
+
+		description := spammerConfig.Description
+		if description == "" {
+			description = "Created from startup configuration"
 		}
 
 		// Create the spammer
@@ -92,7 +96,7 @@ func (d *Daemon) AddStartupSpammers(spammers []StartupSpammerConfig) error {
 			spammerConfig.Scenario,
 			string(configYAML),
 			name,
-			"Created from startup configuration",
+			description,
 			true,
 		)
 		if err != nil {
