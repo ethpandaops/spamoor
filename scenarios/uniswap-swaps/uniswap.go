@@ -22,6 +22,7 @@ type UniswapOptions struct {
 	DaiPairs            uint64
 	EthLiquidityPerPair *uint256.Int
 	DaiLiquidityFactor  uint64
+	ClientGroup         string
 }
 
 type Uniswap struct {
@@ -57,7 +58,7 @@ func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) {
 	u.deploymentInfo = deploymentInfo
 
 	// Initialize router A
-	routerA, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterAAddr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0).GetEthClient())
+	routerA, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterAAddr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup).GetEthClient())
 	if err != nil {
 		u.logger.Errorf("could not initialize router A: %v", err)
 		return
@@ -65,7 +66,7 @@ func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) {
 	u.RouterA = routerA
 
 	// Initialize router B
-	routerB, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterBAddr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0).GetEthClient())
+	routerB, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterBAddr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup).GetEthClient())
 	if err != nil {
 		u.logger.Errorf("could not initialize router B: %v", err)
 		return
@@ -73,7 +74,7 @@ func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) {
 	u.RouterB = routerB
 
 	// Initialize WETH9
-	weth, err := contract.NewWETH9(u.deploymentInfo.Weth9Addr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0).GetEthClient())
+	weth, err := contract.NewWETH9(u.deploymentInfo.Weth9Addr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup).GetEthClient())
 	if err != nil {
 		u.logger.Errorf("could not initialize WETH9: %v", err)
 		return
@@ -83,7 +84,7 @@ func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) {
 	// Initialize token contracts
 	u.Tokens = make(map[common.Address]*contract.Dai)
 	for _, pair := range u.deploymentInfo.Pairs {
-		token, err := contract.NewDai(pair.DaiAddr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0).GetEthClient())
+		token, err := contract.NewDai(pair.DaiAddr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup).GetEthClient())
 		if err != nil {
 			u.logger.Errorf("could not initialize token %v: %v", pair.DaiAddr, err)
 			continue
@@ -211,7 +212,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 	maxAllowance := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 
 	// Get a client for fee calculation
-	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0)
+	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup)
 	feeCap, tipCap, err := u.getTxFee(u.ctx, client)
 	if err != nil {
 		u.logger.Errorf("could not get tx fee: %v", err)
@@ -356,7 +357,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 		// Send each transaction to a different client
 		for i, tx := range approvalTxs {
 			// Get a different client for each transaction
-			txClient := u.walletPool.GetClient(spamoor.SelectClientByIndex, i)
+			txClient := u.walletPool.GetClient(spamoor.SelectClientByIndex, i, u.options.ClientGroup)
 			wg.Add(1)
 
 			go func(tx *types.Transaction, client *txbuilder.Client, wallet *txbuilder.Wallet) {

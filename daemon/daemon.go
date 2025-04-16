@@ -51,11 +51,8 @@ func (d *Daemon) GetClientPool() *spamoor.ClientPool {
 
 func (d *Daemon) Run() (bool, error) {
 	// check if this is the first launch
-	var firstLaunch bool
-	_, err := d.db.GetSpamoorState("first_launch", &firstLaunch)
-	if err != nil {
-		firstLaunch = true
-	}
+	var notFirstLaunch bool
+	d.db.GetSpamoorState("first_launch", &notFirstLaunch)
 
 	// restore all spammer from db
 	spammerList, err := d.db.GetSpammers()
@@ -71,14 +68,14 @@ func (d *Daemon) Run() (bool, error) {
 	}
 
 	// Mark that we've launched
-	if firstLaunch {
+	if !notFirstLaunch {
 		err = d.db.SetSpamoorState(nil, "first_launch", true)
 		if err != nil {
 			return false, fmt.Errorf("failed to mark first launch: %w", err)
 		}
 	}
 
-	return firstLaunch, nil
+	return !notFirstLaunch, nil
 }
 
 func (d *Daemon) GetSpammer(id int64) *Spammer {

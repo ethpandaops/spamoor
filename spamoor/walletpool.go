@@ -138,8 +138,8 @@ func (pool *WalletPool) SetRefillInterval(interval uint64) {
 	pool.config.RefillInterval = interval
 }
 
-func (pool *WalletPool) GetClient(mode ClientSelectionMode, input int) *txbuilder.Client {
-	return pool.clientPool.GetClient(mode, input)
+func (pool *WalletPool) GetClient(mode ClientSelectionMode, input int, group string) *txbuilder.Client {
+	return pool.clientPool.GetClient(mode, input, group)
 }
 
 func (pool *WalletPool) GetWallet(mode WalletSelectionMode, input int) *txbuilder.Wallet {
@@ -217,7 +217,7 @@ func (pool *WalletPool) PrepareWallets(runFundings bool) error {
 		var fundingTxs []*types.Transaction
 
 		for i := 0; i < 3; i++ {
-			client = pool.clientPool.GetClient(SelectClientRandom, 0) // send all preparation transactions via this client to avoid rejections due to nonces
+			client = pool.clientPool.GetClient(SelectClientRandom, 0, "") // send all preparation transactions via this client to avoid rejections due to nonces
 			pool.childWallets = make([]*txbuilder.Wallet, 0, pool.config.WalletCount)
 			fundingTxs = make([]*types.Transaction, 0, pool.config.WalletCount)
 
@@ -420,7 +420,7 @@ func (pool *WalletPool) watchWalletBalancesLoop() {
 }
 
 func (pool *WalletPool) resupplyChildWallets() error {
-	client := pool.clientPool.GetClient(SelectClientRandom, 0)
+	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
 
 	err := client.UpdateWallet(pool.ctx, pool.rootWallet)
 	if err != nil {
@@ -566,7 +566,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 }
 
 func (pool *WalletPool) CheckChildWalletBalance(childWallet *txbuilder.Wallet) (*types.Transaction, error) {
-	client := pool.clientPool.GetClient(SelectClientRandom, 0)
+	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
 	balance, err := client.GetBalanceAt(pool.ctx, childWallet.GetAddress())
 	if err != nil {
 		return nil, err
@@ -626,7 +626,7 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *txbuilder.Wallet, clie
 	}
 
 	if client == nil {
-		client = pool.clientPool.GetClient(SelectClientByIndex, 0)
+		client = pool.clientPool.GetClient(SelectClientByIndex, 0, "")
 	}
 	feeCap, tipCap, err := client.GetSuggestedFee(pool.ctx)
 	if err != nil {
@@ -635,8 +635,8 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *txbuilder.Wallet, clie
 	if feeCap.Cmp(big.NewInt(400000000000)) < 0 {
 		feeCap = big.NewInt(400000000000)
 	}
-	if tipCap.Cmp(big.NewInt(3000000000)) < 0 {
-		tipCap = big.NewInt(3000000000)
+	if tipCap.Cmp(big.NewInt(200000000000)) < 0 {
+		tipCap = big.NewInt(200000000000)
 	}
 
 	toAddr := childWallet.GetAddress()

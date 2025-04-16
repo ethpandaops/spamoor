@@ -33,6 +33,7 @@ type ScenarioOptions struct {
 	BaseFee        uint64 `yaml:"base_fee"`
 	TipFee         uint64 `yaml:"tip_fee"`
 	GasUnitsToBurn uint64 `yaml:"gas_units_to_burn"`
+	ClientGroup    string `yaml:"client_group"`
 }
 
 type Scenario struct {
@@ -56,6 +57,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:        20,
 	TipFee:         2,
 	GasUnitsToBurn: 2000000,
+	ClientGroup:    "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -79,7 +81,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasUnitsToBurn, "gas-units-to-burn", ScenarioDefaultOptions.GasUnitsToBurn, "The number of gas units for each tx to cost")
-
+	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
 
@@ -223,7 +225,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbuilder.Client, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0)
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
 	var feeCap *big.Int
@@ -293,7 +295,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbui
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 
@@ -407,6 +409,6 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 }
 
 func (s *Scenario) GetGasBurner() (*GasBurner, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0)
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	return NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
 }

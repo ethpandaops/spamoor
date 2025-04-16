@@ -37,6 +37,7 @@ type ScenarioOptions struct {
 	Amount       uint64 `yaml:"amount"`
 	RandomAmount bool   `yaml:"random_amount"`
 	RandomTarget bool   `yaml:"random_target"`
+	ClientGroup  string `yaml:"client_group"`
 }
 
 type Scenario struct {
@@ -62,6 +63,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Amount:       20,
 	RandomAmount: false,
 	RandomTarget: false,
+	ClientGroup:  "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -87,6 +89,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (in gwei)")
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
+	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
 
@@ -232,7 +235,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbuilder.Client, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0)
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
 	var feeCap *big.Int
@@ -304,7 +307,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbui
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 

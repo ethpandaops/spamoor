@@ -38,6 +38,7 @@ type ScenarioOptions struct {
 	BlobV1Percent               uint64 `yaml:"blob_v1_percent"`
 	FuluActivation              uint64 `yaml:"fulu_activation"`
 	ThroughputIncrementInterval uint64 `yaml:"throughput_increment_interval"`
+	ClientGroup                 string `yaml:"client_group"`
 }
 
 type Scenario struct {
@@ -65,6 +66,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BlobV1Percent:               50,
 	FuluActivation:              0,
 	ThroughputIncrementInterval: 0,
+	ClientGroup:                 "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -94,6 +96,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
 	flags.Uint64Var(&s.options.FuluActivation, "fulu-activation", ScenarioDefaultOptions.FuluActivation, "Unix timestamp of the Fulu activation")
 	flags.Uint64Var(&s.options.ThroughputIncrementInterval, "throughput-increment-interval", ScenarioDefaultOptions.ThroughputIncrementInterval, "Increment the throughput every interval (in sec).")
+	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
 
@@ -244,7 +247,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, uint8, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx))
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 
@@ -257,7 +260,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 	if rand.Intn(100) < 20 {
 		// 20% chance to send transaction via another client
 		// will cause some replacement txs being sent via different clients than the original tx
-		client = s.walletPool.GetClient(spamoor.SelectClientRandom, 0)
+		client = s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
 	}
 
 	var feeCap *big.Int
