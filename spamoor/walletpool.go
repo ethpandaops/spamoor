@@ -218,6 +218,10 @@ func (pool *WalletPool) PrepareWallets(runFundings bool) error {
 
 		for i := 0; i < 3; i++ {
 			client = pool.clientPool.GetClient(SelectClientRandom, 0, "") // send all preparation transactions via this client to avoid rejections due to nonces
+			if client == nil {
+				return fmt.Errorf("no client available")
+			}
+
 			pool.childWallets = make([]*txbuilder.Wallet, 0, pool.config.WalletCount)
 			fundingTxs = make([]*types.Transaction, 0, pool.config.WalletCount)
 
@@ -421,6 +425,9 @@ func (pool *WalletPool) watchWalletBalancesLoop() {
 
 func (pool *WalletPool) resupplyChildWallets() error {
 	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
+	if client == nil {
+		return fmt.Errorf("no client available")
+	}
 
 	err := client.UpdateWallet(pool.ctx, pool.rootWallet)
 	if err != nil {
@@ -567,6 +574,10 @@ func (pool *WalletPool) resupplyChildWallets() error {
 
 func (pool *WalletPool) CheckChildWalletBalance(childWallet *txbuilder.Wallet) (*types.Transaction, error) {
 	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
+	if client == nil {
+		return nil, fmt.Errorf("no client available")
+	}
+
 	balance, err := client.GetBalanceAt(pool.ctx, childWallet.GetAddress())
 	if err != nil {
 		return nil, err
@@ -627,6 +638,9 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *txbuilder.Wallet, clie
 
 	if client == nil {
 		client = pool.clientPool.GetClient(SelectClientByIndex, 0, "")
+		if client == nil {
+			return nil, fmt.Errorf("no client available")
+		}
 	}
 	feeCap, tipCap, err := client.GetSuggestedFee(pool.ctx)
 	if err != nil {

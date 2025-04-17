@@ -241,6 +241,10 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbui
 	var feeCap *big.Int
 	var tipCap *big.Int
 
+	if client == nil {
+		return nil, client, fmt.Errorf("no client available")
+	}
+
 	if s.options.BaseFee > 0 {
 		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
 	}
@@ -316,6 +320,10 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			onComplete()
 		}
 	}()
+
+	if client == nil {
+		return nil, client, wallet, fmt.Errorf("no client available")
+	}
 
 	var feeCap *big.Int
 	var tipCap *big.Int
