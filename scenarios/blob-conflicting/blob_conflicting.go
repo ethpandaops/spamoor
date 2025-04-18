@@ -24,17 +24,19 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount                  uint64 `yaml:"total_count"`
-	Throughput                  uint64 `yaml:"throughput"`
-	Sidecars                    uint64 `yaml:"sidecars"`
-	MaxPending                  uint64 `yaml:"max_pending"`
-	MaxWallets                  uint64 `yaml:"max_wallets"`
-	Rebroadcast                 uint64 `yaml:"rebroadcast"`
-	BaseFee                     uint64 `yaml:"base_fee"`
-	TipFee                      uint64 `yaml:"tip_fee"`
-	BlobFee                     uint64 `yaml:"blob_fee"`
-	ThroughputIncrementInterval uint64 `yaml:"throughput_increment_interval"`
-	ClientGroup                 string `yaml:"client_group"`
+	TotalCount                  uint64                   `yaml:"total_count"`
+	Throughput                  uint64                   `yaml:"throughput"`
+	Sidecars                    uint64                   `yaml:"sidecars"`
+	MaxPending                  uint64                   `yaml:"max_pending"`
+	MaxWallets                  uint64                   `yaml:"max_wallets"`
+	Rebroadcast                 uint64                   `yaml:"rebroadcast"`
+	BaseFee                     uint64                   `yaml:"base_fee"`
+	TipFee                      uint64                   `yaml:"tip_fee"`
+	BlobFee                     uint64                   `yaml:"blob_fee"`
+	BlobV1Percent               uint64                   `yaml:"blob_v1_percent"`
+	FuluActivation              utils.FlexibleJsonUInt64 `yaml:"fulu_activation"`
+	ThroughputIncrementInterval uint64                   `yaml:"throughput_increment_interval"`
+	ClientGroup                 string                   `yaml:"client_group"`
 }
 
 type Scenario struct {
@@ -57,6 +59,8 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:                     20,
 	TipFee:                      2,
 	BlobFee:                     20,
+	BlobV1Percent:               50,
+	FuluActivation:              0,
 	ThroughputIncrementInterval: 0,
 	ClientGroup:                 "",
 }
@@ -83,6 +87,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
+	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
+	flags.Uint64Var((*uint64)(&s.options.FuluActivation), "fulu-activation", uint64(ScenarioDefaultOptions.FuluActivation), "Unix timestamp of the Fulu activation")
 	flags.Uint64Var(&s.options.ThroughputIncrementInterval, "throughput-increment-interval", ScenarioDefaultOptions.ThroughputIncrementInterval, "Increment the throughput every interval (in sec).")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
@@ -190,7 +196,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}()
 
 			logger := s.logger
-			tx, client, wallet, err := s.sendBlobTx(ctx, txIdx, func() {
+			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, func() {
 				if s.pendingChan != nil {
 					time.Sleep(100 * time.Millisecond)
 					<-s.pendingChan
@@ -215,7 +221,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}
 
 			txCount.Add(1)
-			logger.Infof("sent blob tx #%6d: %v (%v sidecars)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs))
+			logger.Infof("sent blob tx #%6d: %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
 		}(txIdx, lastChan, currentChan)
 
 		lastChan = currentChan
@@ -234,7 +240,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, uint8, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	client2 := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
@@ -247,7 +253,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	}()
 
 	if client == nil || client2 == nil {
-		return nil, client, wallet, fmt.Errorf("no client available")
+		return nil, client, wallet, 0, fmt.Errorf("no client available")
 	}
 
 	var feeCap *big.Int
@@ -268,7 +274,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		var err error
 		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
 		if err != nil {
-			return nil, client, wallet, err
+			return nil, client, wallet, 0, err
 		}
 	}
 
@@ -315,7 +321,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		Value:      uint256.NewInt(0),
 	}, blobRefs)
 	if err != nil {
-		return nil, nil, wallet, err
+		return nil, nil, wallet, 0, err
 	}
 	normalTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
@@ -325,21 +331,33 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		Value:     uint256.NewInt(0),
 	})
 	if err != nil {
-		return nil, nil, wallet, err
+		return nil, nil, wallet, 0, err
 	}
 
 	tx1, err := wallet.BuildBlobTx(blobTx)
 	if err != nil {
-		return nil, nil, wallet, err
+		return nil, nil, wallet, 0, err
 	}
 	tx2, err := wallet.ReplaceDynamicFeeTx(normalTx, tx1.Nonce())
 	if err != nil {
-		return nil, nil, wallet, err
+		return nil, nil, wallet, 0, err
 	}
 
 	rebroadcast := 0
 	if s.options.Rebroadcast > 0 {
 		rebroadcast = 10
+	}
+
+	var txBytes []byte
+	txVersion := uint8(0)
+	sendAsV1 := time.Now().Unix() > int64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
+	if sendAsV1 {
+		txBytes, err = txbuilder.MarshalBlobV1Tx(tx1)
+		if err != nil {
+			s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
+		} else {
+			txVersion = 1
+		}
 	}
 
 	// send both tx at exactly the same time
@@ -382,6 +400,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 					logger.Debugf("successfully sent blob tx %6d.0", txIdx+1)
 				}
 			},
+			TransactionBytes: txBytes,
 		})
 		if err1 != nil {
 			s.logger.WithField("rpc", client.GetName()).Warnf("error while sending blob tx %v: %v", txIdx, err1)
@@ -443,10 +462,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		wallet.ResetPendingNonce(s.walletPool.GetContext(), client)
 	}
 	if errCount == 0 {
-		return nil, nil, wallet, err1
+		return nil, nil, wallet, 0, err1
 	}
 
-	return tx1, client, wallet, nil
+	return tx1, client, wallet, txVersion, nil
 }
 
 func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *txbuilder.Client, wallet *txbuilder.Wallet, txLabel string) {

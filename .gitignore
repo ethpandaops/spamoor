@@ -3,3 +3,5 @@
 tmp-*
 bin
 spamoor.db*
+go.lib.mod
+go.lib.sum

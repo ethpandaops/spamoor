@@ -59,3 +59,9 @@ jobs:
 
     - name: Run tests
       run: go test -race -vet=off ./...
+
+    - name: Build spamoor
+      run: make build
+
+    - name: Build spamoor as import from another project
+      run: make build-lib

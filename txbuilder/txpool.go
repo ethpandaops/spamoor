@@ -71,6 +71,7 @@ type SendTransactionOptions struct {
 
 	MaxRebroadcasts     int
 	RebroadcastInterval time.Duration
+	TransactionBytes    []byte
 }
 
 func NewTxPool(options *TxPoolOptions) *TxPool {
@@ -382,35 +383,10 @@ func (pool *TxPool) getWallet(address common.Address) *Wallet {
 }
 
 func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions) error {
-	return pool.addPendingTransaction(ctx, wallet, tx, options, func() error {
-		var err error
-
-		clientCount := pool.options.GetClientCountFn()
-		for i := 0; i < clientCount; i++ {
-			client := options.Client
-			if client == nil || i > 0 {
-				client = pool.options.GetClientFn(i+options.ClientsStartOffset, false)
-			}
-			if client == nil {
-				continue
-			}
-
-			err = client.SendTransactionCtx(ctx, tx)
-
-			if options.LogFn != nil {
-				options.LogFn(client, i, 0, err)
-			}
-
-			if err == nil {
-				break
-			}
-		}
-
-		return err
-	})
+	return pool.addPendingTransaction(ctx, wallet, tx, options, true)
 }
 
-func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, submitCb func() error) error {
+func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, submitNow bool) error {
 	confirmCtx, confirmCancel := context.WithCancel(ctx)
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
@@ -449,8 +425,35 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 
 	var err error
 
-	if submitCb != nil {
-		err = submitCb()
+	submitTx := func(client *Client) error {
+		if options.TransactionBytes != nil {
+			return client.SendRawTransactionCtx(ctx, options.TransactionBytes)
+		}
+
+		return client.SendTransactionCtx(ctx, tx)
+	}
+
+	if submitNow {
+		clientCount := pool.options.GetClientCountFn()
+		for i := 0; i < clientCount; i++ {
+			client := options.Client
+			if client == nil || i > 0 {
+				client = pool.options.GetClientFn(i+options.ClientsStartOffset, false)
+			}
+			if client == nil {
+				continue
+			}
+
+			err = submitTx(client)
+
+			if options.LogFn != nil {
+				options.LogFn(client, i, 0, err)
+			}
+
+			if err == nil {
+				break
+			}
+		}
 	}
 
 	if err != nil {
@@ -477,7 +480,7 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 						continue
 					}
 
-					err = client.SendTransactionCtx(ctx, tx)
+					err = submitTx(client)
 
 					if options.LogFn != nil {
 						options.LogFn(client, j, i+1, err)
@@ -738,7 +741,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 				txOptions.LogFn = tx.Options.LogFn
 			}
 
-			err := pool.addPendingTransaction(ctx, tx.FromWallet, tx.Tx, txOptions, nil)
+			err := pool.addPendingTransaction(ctx, tx.FromWallet, tx.Tx, txOptions, false)
 			if err != nil {
 				logrus.WithError(err).Errorf("error adding pending transaction for reorged out tx %v", tx.Tx.Hash())
 			}
