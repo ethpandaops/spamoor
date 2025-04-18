@@ -257,7 +257,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 	}
 
 	if client == nil {
-		return nil, client, wallet, fmt.Errorf("no client available")
+		return nil, client, wallet, 0, fmt.Errorf("no client available")
 	}
 
 	var feeCap *big.Int
