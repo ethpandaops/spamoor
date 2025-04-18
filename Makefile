@@ -16,6 +16,12 @@ build:
 	@echo version: $(VERSION)
 	env CGO_ENABLED=1 go build -v -tags=with_blob_v1 -o bin/ -ldflags="-s -w $(GOLDFLAGS)" ./cmd/*
 
+build-lib:
+	@echo version: $(VERSION)
+	cat go.mod | sed -E "s/^replace/\/\/replace/" > go.lib.mod
+	go mod tidy -modfile=go.lib.mod
+	env CGO_ENABLED=1 go build -modfile=go.lib.mod -v -o bin/ -ldflags="-s -w $(GOLDFLAGS)" ./cmd/*
+
 docs:
 	go install github.com/swaggo/swag/cmd/swag@v1.16.3 && swag init -g handler.go -d webui/handlers/api --parseDependency -o webui/handlers/docs
 
