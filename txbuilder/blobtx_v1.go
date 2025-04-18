@@ -16,6 +16,14 @@ func init() {
 	blobV1Marshaller = marshalBlobV1Tx
 }
 
+type blobV1TxWithBlobs struct {
+	BlobTx      *types.BlobTx
+	Version     uint8
+	Blobs       []kzg4844.Blob
+	Commitments []kzg4844.Commitment
+	CellProofs  []kzg4844.Proof
+}
+
 func marshalBlobV1Tx(tx *types.Transaction) ([]byte, error) {
 	blobTxSidecar := tx.BlobTxSidecar()
 	if tx.Type() != types.BlobTxType || len(blobTxSidecar.Blobs) == 0 {

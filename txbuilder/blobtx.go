@@ -171,14 +171,6 @@ func randomBlobData(size int) ([]byte, error) {
 	return data, nil
 }
 
-type blobV1TxWithBlobs struct {
-	BlobTx      *types.BlobTx
-	Version     uint8
-	Blobs       []kzg4844.Blob
-	Commitments []kzg4844.Commitment
-	CellProofs  []kzg4844.Proof
-}
-
 var blobV1Marshaller func(tx *types.Transaction) ([]byte, error)
 
 func MarshalBlobV1Tx(tx *types.Transaction) ([]byte, error) {
