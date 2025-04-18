@@ -180,6 +180,10 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 		}
 	}
 
+	if len(clientCandidates) == 0 {
+		return nil
+	}
+
 	switch mode {
 	case SelectClientByIndex:
 		input = input % len(clientCandidates)

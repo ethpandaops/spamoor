@@ -2,6 +2,7 @@ package uniswapswaps
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 	"time"
@@ -54,43 +55,46 @@ func NewUniswap(ctx context.Context, walletPool *spamoor.WalletPool, logger *log
 }
 
 // Initialize contract instances to reuse
-func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) {
+func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) error {
 	u.deploymentInfo = deploymentInfo
 
+	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup)
+	if client == nil {
+		return fmt.Errorf("no client available")
+	}
+
 	// Initialize router A
-	routerA, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterAAddr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup).GetEthClient())
+	routerA, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterAAddr, client.GetEthClient())
 	if err != nil {
-		u.logger.Errorf("could not initialize router A: %v", err)
-		return
+		return fmt.Errorf("could not initialize router A: %w", err)
 	}
 	u.RouterA = routerA
 
 	// Initialize router B
-	routerB, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterBAddr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup).GetEthClient())
+	routerB, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterBAddr, client.GetEthClient())
 	if err != nil {
-		u.logger.Errorf("could not initialize router B: %v", err)
-		return
+		return fmt.Errorf("could not initialize router B: %w", err)
 	}
 	u.RouterB = routerB
 
 	// Initialize WETH9
-	weth, err := contract.NewWETH9(u.deploymentInfo.Weth9Addr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup).GetEthClient())
+	weth, err := contract.NewWETH9(u.deploymentInfo.Weth9Addr, client.GetEthClient())
 	if err != nil {
-		u.logger.Errorf("could not initialize WETH9: %v", err)
-		return
+		return fmt.Errorf("could not initialize WETH9: %w", err)
 	}
 	u.Weth = weth
 
 	// Initialize token contracts
 	u.Tokens = make(map[common.Address]*contract.Dai)
 	for _, pair := range u.deploymentInfo.Pairs {
-		token, err := contract.NewDai(pair.DaiAddr, u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup).GetEthClient())
+		token, err := contract.NewDai(pair.DaiAddr, client.GetEthClient())
 		if err != nil {
-			u.logger.Errorf("could not initialize token %v: %v", pair.DaiAddr, err)
-			continue
+			return fmt.Errorf("could not initialize token %v: %w", pair.DaiAddr, err)
 		}
 		u.Tokens[pair.DaiAddr] = token
 	}
+
+	return nil
 }
 
 // Initialize token balances for all wallets
@@ -213,10 +217,13 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 	// Get a client for fee calculation
 	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup)
+	if client == nil {
+		return fmt.Errorf("no client available")
+	}
+
 	feeCap, tipCap, err := u.getTxFee(u.ctx, client)
 	if err != nil {
-		u.logger.Errorf("could not get tx fee: %v", err)
-		return err
+		return fmt.Errorf("could not get tx fee: %v", err)
 	}
 
 	// Track all approval transactions
@@ -358,6 +365,10 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 		for i, tx := range approvalTxs {
 			// Get a different client for each transaction
 			txClient := u.walletPool.GetClient(spamoor.SelectClientByIndex, i, u.options.ClientGroup)
+			if txClient == nil {
+				txClient = client
+			}
+
 			wg.Add(1)
 
 			go func(tx *types.Transaction, client *txbuilder.Client, wallet *txbuilder.Wallet) {

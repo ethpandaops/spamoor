@@ -184,7 +184,12 @@ func (s *Scenario) Run(ctx context.Context) error {
 	}
 	s.deploymentInfo = deploymentInfo
 
-	s.uniswap.InitializeContracts(deploymentInfo)
+	err = s.uniswap.InitializeContracts(deploymentInfo)
+	if err != nil {
+		s.logger.Errorf("could not initialize uniswap contracts: %v", err)
+		return err
+	}
+
 	s.uniswap.InitializeTokenBalances()
 
 	// Set unlimited allowances for all wallets to both routers
@@ -312,6 +317,10 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			onComplete()
 		}
 	}()
+
+	if client == nil {
+		return nil, client, wallet, fmt.Errorf("no client available")
+	}
 
 	feeCap, tipCap, err := s.getTxFee(ctx, client)
 	if err != nil {

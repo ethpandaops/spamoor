@@ -228,6 +228,10 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbui
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
+	if client == nil {
+		return nil, client, fmt.Errorf("no client available")
+	}
+
 	var feeCap *big.Int
 	var tipCap *big.Int
 
@@ -305,6 +309,10 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		}
 	}()
 
+	if client == nil {
+		return nil, client, wallet, fmt.Errorf("no client available")
+	}
+
 	var feeCap *big.Int
 	var tipCap *big.Int
 
@@ -330,7 +338,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		tipCap = big.NewInt(1000000000)
 	}
 
-	gasBurnerContract, err := s.GetGasBurner()
+	gasBurnerContract, err := s.GetGasBurner(client)
 	if err != nil {
 		return nil, nil, wallet, err
 	}
@@ -408,7 +416,6 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	return tx, client, wallet, nil
 }
 
-func (s *Scenario) GetGasBurner() (*GasBurner, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+func (s *Scenario) GetGasBurner(client *txbuilder.Client) (*GasBurner, error) {
 	return NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
 }

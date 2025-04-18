@@ -263,6 +263,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 		client = s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
 	}
 
+	if client == nil {
+		return nil, client, wallet, fmt.Errorf("no client available")
+	}
+
 	var feeCap *big.Int
 	var tipCap *big.Int
 	var blobFee *big.Int

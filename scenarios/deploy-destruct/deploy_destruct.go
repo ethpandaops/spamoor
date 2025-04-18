@@ -238,6 +238,10 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbui
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
+	if client == nil {
+		return nil, nil, fmt.Errorf("no client available")
+	}
+
 	var feeCap *big.Int
 	var tipCap *big.Int
 
@@ -316,6 +320,10 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			onComplete()
 		}
 	}()
+
+	if client == nil {
+		return nil, client, wallet, fmt.Errorf("no client available")
+	}
 
 	var feeCap *big.Int
 	var tipCap *big.Int

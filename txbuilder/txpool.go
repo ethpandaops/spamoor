@@ -571,7 +571,12 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 		var lastNonce uint64
 		var err error
 		for retry := 0; retry < 3; retry++ {
-			lastNonce, err = pool.options.GetClientFn(retry, true).GetNonceAt(pool.options.Context, wallet.address, big.NewInt(int64(blockNumber)))
+			client := pool.options.GetClientFn(retry, true)
+			if client == nil {
+				continue
+			}
+
+			lastNonce, err = client.GetNonceAt(pool.options.Context, wallet.address, big.NewInt(int64(blockNumber)))
 			if err == nil {
 				break
 			}
@@ -607,6 +612,9 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 
 	for {
 		client := pool.options.GetClientFn(int(retryCount), true)
+		if client == nil {
+			return nil
+		}
 
 		reqCtx, reqCtxCancel := context.WithTimeout(ctx, 5*time.Second)
 
