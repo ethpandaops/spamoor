@@ -358,9 +358,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 	if sendAsV1 {
 		txBytes, err = txbuilder.MarshalBlobV1Tx(tx)
 		if err != nil {
-			return nil, nil, wallet, 0, err
+			s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
+		} else {
+			txVersion = 1
 		}
-		txVersion = 1
 	}
 
 	var awaitConfirmation bool = true
