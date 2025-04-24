@@ -231,7 +231,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesEas string) (*types.Receipt, *txbuilder.Client, error) {
+func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*types.Receipt, *txbuilder.Client, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
@@ -265,26 +265,95 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesEas string) (*ty
 	}
 
 	// build the worker code
-	workerCode := "600b380380600b5f395ff36005565b005b6127105a1060035761133750600556" // base code (`geas contract/BurnerWorker.ctor.eas`)
-	placeholder := "61133750"
+	initcodeGeas := `
+	;; Init code
+	push @.start
+	codesize
+	sub
+	dup1
+	push @.start
+	push0
+	codecopy
+	push0
+	return
+	
+	.start:
+	`
+	defaultOpcodesGeas := `
+    push 0x1337
+	pop
+    `
+	contractGeasTpl := `
+	push 0                ;; [custom]
+	push 0                ;; [loop_counter, custom]
+	jump @loop
 
-	if len(opcodesEas) > 0 {
-		compiler := geas.NewCompiler(nil)
-		opcodes := compiler.CompileString(opcodesEas)
-		if opcodes == nil {
-			return nil, client, fmt.Errorf("failed to compile opcodes")
+	exit:
+		push 0            ;; [0, loop_counter, custom]
+        mstore            ;; [custom]
+        push 32           ;; [32, custom]
+        push 0            ;; [0, 32, custom]
+        return            ;; [custom]
+
+	loop:
+		push 10000        ;; [10000, loop_counter, custom]
+		gas               ;; [gas, 10000, loop_counter, custom]
+		lt                ;; [gas < 10000, loop_counter, custom]
+		jumpi @exit       ;; [loop_counter, custom]
+
+		;; increase loop_counter
+		push 1            ;; [1, loop_counter, custom]
+		add               ;; [loop_counter+1, custom]
+
+		;; dummy opcodes to burn gas
+		%s
+
+		jump @loop
+	`
+
+	compiler := geas.NewCompiler(nil)
+
+	initcode := compiler.CompileString(initcodeGeas)
+	if initcode == nil {
+		return nil, client, fmt.Errorf("failed to compile initcode")
+	}
+
+	var workerCodeBytes []byte
+
+	if len(opcodesGeas) > 0 && strings.HasPrefix(opcodesGeas, "0x") {
+		// opcodes in bytecode format
+		contractCode := compiler.CompileString(fmt.Sprintf(contractGeasTpl, defaultOpcodesGeas))
+		if contractCode == nil {
+			return nil, client, fmt.Errorf("failed to compile template contract code")
 		}
 
-		opcodesHex := hex.EncodeToString(opcodes)
-		s.logger.Infof("compiled opcodes: %s", opcodesHex)
+		defaultOpcodes := compiler.CompileString(defaultOpcodesGeas)
+		if defaultOpcodes == nil {
+			return nil, client, fmt.Errorf("failed to compile default opcodes")
+		}
 
-		workerCode = strings.Replace(workerCode, placeholder, opcodesHex, 1)
+		// replace default opcodes with provided opcodes
+		contractCodeHex := strings.Replace(hex.EncodeToString(contractCode), hex.EncodeToString(defaultOpcodes), strings.ReplaceAll(opcodesGeas, "0x", ""), 1)
+		contractCodeBytes, err := hex.DecodeString(contractCodeHex)
+		if err != nil {
+			return nil, client, fmt.Errorf("failed to decode contract code: %w", err)
+		}
+
+		workerCodeBytes = contractCodeBytes
+	} else if len(opcodesGeas) > 0 {
+		// opcodes in geas format
+		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, opcodesGeas))
+		if workerCodeBytes == nil {
+			return nil, client, fmt.Errorf("failed to compile template contract code")
+		}
+	} else {
+		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, defaultOpcodesGeas))
+		if workerCodeBytes == nil {
+			return nil, client, fmt.Errorf("failed to compile default contract code")
+		}
 	}
 
-	workerCodeBytes, err := hex.DecodeString(workerCode)
-	if err != nil {
-		return nil, client, fmt.Errorf("failed to decode worker code: %w", err)
-	}
+	workerCodeBytes = append(initcode, workerCodeBytes...)
 
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),

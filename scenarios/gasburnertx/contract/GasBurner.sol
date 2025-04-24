@@ -5,6 +5,8 @@ contract GasBurner {
     address public worker;
     uint256 burnerRuns;
 
+    event BurnedGas(uint gas, uint loops);
+
     constructor(bytes memory workerCode) {
         worker = create(workerCode);
     }
@@ -23,8 +25,9 @@ contract GasBurner {
     }
 
     function wasteEther(uint256 amount) internal {
-        (bool success, ) = worker.call{gas: amount - 39100}("");
+        (bool success, bytes memory result) = worker.call{gas: amount - 39100}("");
         require(success, "worker call failed");
+        emit BurnedGas(amount, uint256(bytes32(result)));
     }
 
     function burn2000k() public {
