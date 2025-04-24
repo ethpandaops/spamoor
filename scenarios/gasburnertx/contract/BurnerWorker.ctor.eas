@@ -1,0 +1,13 @@
+;; Init code
+push @.start
+codesize
+sub
+dup1
+push @.start
+push0
+codecopy
+push0
+return
+
+.start:
+#assemble "./BurnerWorker.eas"

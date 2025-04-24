@@ -2,15 +2,19 @@ package gasburnertx
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	geas "github.com/fjl/geas/asm"
 	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
+	"github.com/ethpandaops/spamoor/scenarios/gasburnertx/contract"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
@@ -33,6 +37,7 @@ type ScenarioOptions struct {
 	BaseFee        uint64 `yaml:"base_fee"`
 	TipFee         uint64 `yaml:"tip_fee"`
 	GasUnitsToBurn uint64 `yaml:"gas_units_to_burn"`
+	OpcodesEas     string `yaml:"opcodes"`
 	ClientGroup    string `yaml:"client_group"`
 }
 
@@ -57,6 +62,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:        20,
 	TipFee:         2,
 	GasUnitsToBurn: 2000000,
+	OpcodesEas:     "",
 	ClientGroup:    "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -81,6 +87,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasUnitsToBurn, "gas-units-to-burn", ScenarioDefaultOptions.GasUnitsToBurn, "The number of gas units for each tx to cost")
+	flags.StringVar(&s.options.OpcodesEas, "opcodes", "", "EAS opcodes to use for burning gas in the gasburner contract")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
@@ -136,7 +143,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
-	receipt, _, err := s.sendDeploymentTx(ctx)
+	receipt, _, err := s.sendDeploymentTx(ctx, strings.ReplaceAll(s.options.OpcodesEas, ";", "\n"))
 	if err != nil {
 		return err
 	}
@@ -224,7 +231,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbuilder.Client, error) {
+func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesEas string) (*types.Receipt, *txbuilder.Client, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
@@ -257,12 +264,34 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbui
 		tipCap = big.NewInt(1000000000)
 	}
 
+	// build the worker code
+	workerCode := "600b380380600b5f395ff360203603600a576010565b5f5ffd5b005b5f355a5b815a820311600e5761133750601456" // base code (`geas contract/BurnerWorker.ctor.eas`)
+	placeholder := "61133750"
+
+	if len(opcodesEas) > 0 {
+		compiler := geas.NewCompiler(nil)
+		opcodes := compiler.CompileString(opcodesEas)
+		if opcodes == nil {
+			return nil, client, fmt.Errorf("failed to compile opcodes")
+		}
+
+		opcodesHex := hex.EncodeToString(opcodes)
+		s.logger.Infof("compiled opcodes: %s", opcodesHex)
+
+		workerCode = strings.Replace(workerCode, placeholder, opcodesHex, 1)
+	}
+
+	workerCodeBytes, err := hex.DecodeString(workerCode)
+	if err != nil {
+		return nil, client, fmt.Errorf("failed to decode worker code: %w", err)
+	}
+
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       2000000,
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		_, deployTx, _, err := DeployGasBurner(transactOpts, client.GetEthClient())
+		_, deployTx, _, err := contract.DeployGasBurner(transactOpts, client.GetEthClient(), workerCodeBytes)
 		return deployTx, err
 	})
 	if err != nil {
@@ -346,6 +375,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
+		Gas:       s.options.GasUnitsToBurn + 50000,
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return gasBurnerContract.BurnGasUnits(transactOpts, big.NewInt(int64(s.options.GasUnitsToBurn)))
 	})
@@ -416,6 +446,6 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	return tx, client, wallet, nil
 }
 
-func (s *Scenario) GetGasBurner(client *txbuilder.Client) (*GasBurner, error) {
-	return NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
+func (s *Scenario) GetGasBurner(client *txbuilder.Client) (*contract.GasBurner, error) {
+	return contract.NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
 }

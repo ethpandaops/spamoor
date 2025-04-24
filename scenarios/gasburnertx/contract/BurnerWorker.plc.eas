@@ -1,0 +1,4 @@
+
+;; default opcodes for gas burner
+push 0x1337
+pop

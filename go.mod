@@ -19,6 +19,7 @@ require (
 	github.com/urfave/negroni v1.0.0
 	golang.org/x/time v0.11.0
 	gopkg.in/yaml.v3 v3.0.1
+	github.com/fjl/geas v0.2.2
 )
 
 require (
