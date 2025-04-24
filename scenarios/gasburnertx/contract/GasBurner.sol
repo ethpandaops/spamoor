@@ -3,9 +3,8 @@ pragma solidity  ^0.8.22;
 
 contract GasBurner {
     address public worker;
-    uint256 burnerRuns;
 
-    event BurnedGas(uint gas, uint loops);
+    event BurnedGas(uint256 indexed gas, uint256 loops);
 
     constructor(bytes memory workerCode) {
         worker = create(workerCode);
@@ -25,39 +24,33 @@ contract GasBurner {
     }
 
     function wasteEther(uint256 amount) internal {
-        (bool success, bytes memory result) = worker.call{gas: amount - 39100}("");
+        (bool success, bytes memory result) = worker.call{gas: amount - 18800}("");
         require(success, "worker call failed");
         emit BurnedGas(amount, uint256(bytes32(result)));
     }
 
     function burn2000k() public {
         wasteEther(2000000);
-        burnerRuns++;
     }
 
     function burn1500k() public {
         wasteEther(1500000);
-        burnerRuns++;
     }
 
     function burn1000k() public {
         wasteEther(1000000);
-        burnerRuns++;
     }
 
     function burn500k() public {
         wasteEther(500000);
-        burnerRuns++;
     }
 
     function burn100k() public {
         wasteEther(100000);
-        burnerRuns++;
     }
 
     function burnGasUnits(uint256 amount) public {
         wasteEther(amount);
-        burnerRuns++;
     }
 }
 
