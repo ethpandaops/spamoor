@@ -265,7 +265,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesEas string) (*ty
 	}
 
 	// build the worker code
-	workerCode := "600b380380600b5f395ff360203603600a576010565b5f5ffd5b005b5f355a5b815a820311600e5761133750601456" // base code (`geas contract/BurnerWorker.ctor.eas`)
+	workerCode := "600b380380600b5f395ff36005565b005b6127105a1060035761133750600556" // base code (`geas contract/BurnerWorker.ctor.eas`)
 	placeholder := "61133750"
 
 	if len(opcodesEas) > 0 {

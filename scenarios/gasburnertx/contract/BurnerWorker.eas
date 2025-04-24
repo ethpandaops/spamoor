@@ -1,35 +1,16 @@
-;; Verify input is 32 bytes long.
-push 32           ;; [32]
-calldatasize      ;; [calldatasize, 32]
-sub               ;; [calldatasize - 32]
-jumpi @throw      ;; []
 jump @loop
-
-throw:
-  ;; Reverts current execution with no return data.
-  push 0            ;; [0]
-  push 0            ;; [0, 0]
-  revert            ;; []
 
 exit:
   stop
 
 loop:
-  push 0            ;; [0]
-  calldataload      ;; [input]
-
-  gas               ;; [base_gas, input]
-
-loop_inner:
-  dup2              ;; [input, base_gas, input]
-  gas               ;; [gas, input, base_gas, input]
-  dup3              ;; [base_gas, gas, input, base_gas, input]
-  sub               ;; [base_gas-gas, input, base_gas, input]
-  gt                ;; [base_gas-gas > input, base_gas, input]
-  jumpi @exit       ;; [base_gas, input]
+  push 10000        ;; [10000]
+  gas               ;; [gas, 10000]
+  lt                ;; [gas < 10000]
+  jumpi @exit       ;; []
 
   ;; dummy opcodes to burn gas
   #assemble "./BurnerWorker.plc.eas"
 
-  jump @loop_inner
+  jump @loop
 

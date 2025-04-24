@@ -23,7 +23,7 @@ contract GasBurner {
     }
 
     function wasteEther(uint256 amount) internal {
-        (bool success, ) = worker.call(abi.encode(amount - 49650));
+        (bool success, ) = worker.call{gas: amount - 39100}("");
         require(success, "worker call failed");
     }
 
