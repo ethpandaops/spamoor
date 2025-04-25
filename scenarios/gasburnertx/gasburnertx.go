@@ -38,6 +38,7 @@ type ScenarioOptions struct {
 	TipFee         uint64 `yaml:"tip_fee"`
 	GasUnitsToBurn uint64 `yaml:"gas_units_to_burn"`
 	OpcodesEas     string `yaml:"opcodes"`
+	InitOpcodesEas string `yaml:"init_opcodes"`
 	ClientGroup    string `yaml:"client_group"`
 }
 
@@ -63,6 +64,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TipFee:         2,
 	GasUnitsToBurn: 2000000,
 	OpcodesEas:     "",
+	InitOpcodesEas: "",
 	ClientGroup:    "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -88,6 +90,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasUnitsToBurn, "gas-units-to-burn", ScenarioDefaultOptions.GasUnitsToBurn, "The number of gas units for each tx to cost")
 	flags.StringVar(&s.options.OpcodesEas, "opcodes", "", "EAS opcodes to use for burning gas in the gasburner contract")
+	flags.StringVar(&s.options.InitOpcodesEas, "init-opcodes", "", "EAS opcodes to use for the init code of the gasburner contract")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
@@ -143,7 +146,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
-	receipt, _, err := s.sendDeploymentTx(ctx, strings.ReplaceAll(s.options.OpcodesEas, ";", "\n"))
+	receipt, _, err := s.sendDeploymentTx(ctx, s.trimGeasOpcodes(s.options.OpcodesEas))
 	if err != nil {
 		return err
 	}
@@ -231,6 +234,15 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return nil
 }
 
+func (s *Scenario) trimGeasOpcodes(opcodesGeas string) string {
+	if strings.Contains(opcodesGeas, "\n") {
+		return opcodesGeas
+	}
+
+	opcodesGeas = strings.ReplaceAll(opcodesGeas, ";", "\n")
+	return opcodesGeas
+}
+
 func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*types.Receipt, *txbuilder.Client, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
@@ -283,8 +295,11 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
     push 0x1337
 	pop
     `
-	contractGeasTpl := `
+	contractInitOpcodesGeas := `
 	push 0                ;; [custom]
+	`
+	contractGeasTpl := `
+	%s
 	push 0                ;; [loop_counter, custom]
 	jump @loop
 
@@ -311,6 +326,10 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 		jump @loop
 	`
 
+	if s.options.InitOpcodesEas != "" {
+		contractInitOpcodesGeas = s.trimGeasOpcodes(s.options.InitOpcodesEas)
+	}
+
 	compiler := geas.NewCompiler(nil)
 
 	initcode := compiler.CompileString(initcodeGeas)
@@ -322,7 +341,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 
 	if len(opcodesGeas) > 0 && strings.HasPrefix(opcodesGeas, "0x") {
 		// opcodes in bytecode format
-		contractCode := compiler.CompileString(fmt.Sprintf(contractGeasTpl, defaultOpcodesGeas))
+		contractCode := compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, defaultOpcodesGeas))
 		if contractCode == nil {
 			return nil, client, fmt.Errorf("failed to compile template contract code")
 		}
@@ -342,12 +361,12 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 		workerCodeBytes = contractCodeBytes
 	} else if len(opcodesGeas) > 0 {
 		// opcodes in geas format
-		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, opcodesGeas))
+		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, opcodesGeas))
 		if workerCodeBytes == nil {
 			return nil, client, fmt.Errorf("failed to compile template contract code")
 		}
 	} else {
-		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, defaultOpcodesGeas))
+		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, defaultOpcodesGeas))
 		if workerCodeBytes == nil {
 			return nil, client, fmt.Errorf("failed to compile default contract code")
 		}
