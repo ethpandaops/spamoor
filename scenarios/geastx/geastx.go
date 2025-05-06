@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"math/big"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -154,15 +156,28 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	geasCode := s.options.GeasCode
 	if geasCode == "" && s.options.GeasFile != "" {
-		_, err := os.Stat(s.options.GeasFile)
-		if err != nil {
-			return fmt.Errorf("failed to check if geas file exists: %w", err)
+		if strings.HasPrefix(s.options.GeasFile, "https://") || strings.HasPrefix(s.options.GeasFile, "http://") {
+			resp, err := http.Get(s.options.GeasFile)
+			if err != nil {
+				return fmt.Errorf("failed to download geas file: %w", err)
+			}
+			defer resp.Body.Close()
+			geasBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("failed to read geas file response: %w", err)
+			}
+			geasCode = string(geasBytes)
+		} else {
+			_, err := os.Stat(s.options.GeasFile)
+			if err != nil {
+				return fmt.Errorf("failed to check if geas file exists: %w", err)
+			}
+			geasBytes, err := os.ReadFile(s.options.GeasFile)
+			if err != nil {
+				return fmt.Errorf("failed to read geas file: %w", err)
+			}
+			geasCode = string(geasBytes)
 		}
-		geasBytes, err := os.ReadFile(s.options.GeasFile)
-		if err != nil {
-			return fmt.Errorf("failed to read geas file: %w", err)
-		}
-		geasCode = string(geasBytes)
 	}
 
 	if geasCode == "" {
