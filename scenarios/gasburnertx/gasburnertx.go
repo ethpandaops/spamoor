@@ -2,15 +2,19 @@ package gasburnertx
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	geas "github.com/fjl/geas/asm"
 	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
+	"github.com/ethpandaops/spamoor/scenarios/gasburnertx/contract"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
@@ -33,6 +37,8 @@ type ScenarioOptions struct {
 	BaseFee        uint64 `yaml:"base_fee"`
 	TipFee         uint64 `yaml:"tip_fee"`
 	GasUnitsToBurn uint64 `yaml:"gas_units_to_burn"`
+	OpcodesEas     string `yaml:"opcodes"`
+	InitOpcodesEas string `yaml:"init_opcodes"`
 	ClientGroup    string `yaml:"client_group"`
 }
 
@@ -57,6 +63,8 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:        20,
 	TipFee:         2,
 	GasUnitsToBurn: 2000000,
+	OpcodesEas:     "",
+	InitOpcodesEas: "",
 	ClientGroup:    "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -81,6 +89,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasUnitsToBurn, "gas-units-to-burn", ScenarioDefaultOptions.GasUnitsToBurn, "The number of gas units for each tx to cost")
+	flags.StringVar(&s.options.OpcodesEas, "opcodes", "", "EAS opcodes to use for burning gas in the gasburner contract")
+	flags.StringVar(&s.options.InitOpcodesEas, "init-opcodes", "", "EAS opcodes to use for the init code of the gasburner contract")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
@@ -136,7 +146,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
-	receipt, _, err := s.sendDeploymentTx(ctx)
+	receipt, _, err := s.sendDeploymentTx(ctx, s.trimGeasOpcodes(s.options.OpcodesEas))
 	if err != nil {
 		return err
 	}
@@ -224,7 +234,16 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbuilder.Client, error) {
+func (s *Scenario) trimGeasOpcodes(opcodesGeas string) string {
+	if strings.Contains(opcodesGeas, "\n") {
+		return opcodesGeas
+	}
+
+	opcodesGeas = strings.ReplaceAll(opcodesGeas, ";", "\n")
+	return opcodesGeas
+}
+
+func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*types.Receipt, *txbuilder.Client, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
@@ -257,12 +276,110 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *txbui
 		tipCap = big.NewInt(1000000000)
 	}
 
+	// build the worker code
+	initcodeGeas := `
+	;; Init code
+	push @.start
+	codesize
+	sub
+	dup1
+	push @.start
+	push0
+	codecopy
+	push0
+	return
+	
+	.start:
+	`
+	defaultOpcodesGeas := `
+    push 0x1337
+	pop
+    `
+	contractInitOpcodesGeas := `
+	push 0                ;; [custom]
+	`
+	contractGeasTpl := `
+	%s
+	push 0                ;; [loop_counter, custom]
+	jump @loop
+
+	exit:
+		push 0            ;; [0, loop_counter, custom]
+        mstore            ;; [custom]
+        push 32           ;; [32, custom]
+        push 0            ;; [0, 32, custom]
+        return            ;; [custom]
+
+	loop:
+		push 10000        ;; [10000, loop_counter, custom]
+		gas               ;; [gas, 10000, loop_counter, custom]
+		lt                ;; [gas < 10000, loop_counter, custom]
+		jumpi @exit       ;; [loop_counter, custom]
+
+		;; increase loop_counter
+		push 1            ;; [1, loop_counter, custom]
+		add               ;; [loop_counter+1, custom]
+
+		;; dummy opcodes to burn gas
+		%s
+
+		jump @loop
+	`
+
+	if s.options.InitOpcodesEas != "" {
+		contractInitOpcodesGeas = s.trimGeasOpcodes(s.options.InitOpcodesEas)
+	}
+
+	compiler := geas.NewCompiler(nil)
+
+	initcode := compiler.CompileString(initcodeGeas)
+	if initcode == nil {
+		return nil, client, fmt.Errorf("failed to compile initcode")
+	}
+
+	var workerCodeBytes []byte
+
+	if len(opcodesGeas) > 0 && strings.HasPrefix(opcodesGeas, "0x") {
+		// opcodes in bytecode format
+		contractCode := compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, defaultOpcodesGeas))
+		if contractCode == nil {
+			return nil, client, fmt.Errorf("failed to compile template contract code")
+		}
+
+		defaultOpcodes := compiler.CompileString(defaultOpcodesGeas)
+		if defaultOpcodes == nil {
+			return nil, client, fmt.Errorf("failed to compile default opcodes")
+		}
+
+		// replace default opcodes with provided opcodes
+		contractCodeHex := strings.Replace(hex.EncodeToString(contractCode), hex.EncodeToString(defaultOpcodes), strings.ReplaceAll(opcodesGeas, "0x", ""), 1)
+		contractCodeBytes, err := hex.DecodeString(contractCodeHex)
+		if err != nil {
+			return nil, client, fmt.Errorf("failed to decode contract code: %w", err)
+		}
+
+		workerCodeBytes = contractCodeBytes
+	} else if len(opcodesGeas) > 0 {
+		// opcodes in geas format
+		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, opcodesGeas))
+		if workerCodeBytes == nil {
+			return nil, client, fmt.Errorf("failed to compile template contract code")
+		}
+	} else {
+		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, defaultOpcodesGeas))
+		if workerCodeBytes == nil {
+			return nil, client, fmt.Errorf("failed to compile default contract code")
+		}
+	}
+
+	workerCodeBytes = append(initcode, workerCodeBytes...)
+
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       2000000,
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		_, deployTx, _, err := DeployGasBurner(transactOpts, client.GetEthClient())
+		_, deployTx, _, err := contract.DeployGasBurner(transactOpts, client.GetEthClient(), workerCodeBytes)
 		return deployTx, err
 	})
 	if err != nil {
@@ -346,6 +463,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
+		Gas:       s.options.GasUnitsToBurn + 50000,
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return gasBurnerContract.BurnGasUnits(transactOpts, big.NewInt(int64(s.options.GasUnitsToBurn)))
 	})
@@ -416,6 +534,6 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	return tx, client, wallet, nil
 }
 
-func (s *Scenario) GetGasBurner(client *txbuilder.Client) (*GasBurner, error) {
-	return NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
+func (s *Scenario) GetGasBurner(client *txbuilder.Client) (*contract.GasBurner, error) {
+	return contract.NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
 }
