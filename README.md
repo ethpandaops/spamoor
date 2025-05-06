@@ -42,6 +42,7 @@ Spamoor provides multiple scenarios for different transaction types:
 | [`blob-conflicting`](./scenarios/blob-conflicting/README.md) | **Conflicting Blobs**<br>Send conflicting blob and normal transactions |
 | [`blob-combined`](./scenarios/blob-combined/README.md) | **Combined Blob Testing**<br>Randomized combination of all blob scenarios |
 | [`gasburnertx`](./scenarios/gasburnertx/README.md) | **Gas Burner**<br>Send transactions that burn specific amounts of gas |
+| [`geastx`](./scenarios/geastx/README.md) | **Geas Transactions**<br>Send transactions that execute custom geas bytecode |
 
 ## Daemon Mode
 
