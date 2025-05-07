@@ -25,6 +25,11 @@ import (
 	"github.com/ethpandaops/spamoor/utils"
 )
 
+const (
+	// GAS_PER_CONTRACT is the estimated gas cost for deploying one StateBloatToken contract
+	GAS_PER_CONTRACT = 4970000 // ~4.97M gas per contract
+)
+
 type ScenarioOptions struct {
 	MaxPending     uint64 `yaml:"max_pending"`
 	MaxWallets     uint64 `yaml:"max_wallets"`
@@ -131,17 +136,15 @@ func (s *Scenario) Run(ctx context.Context) error {
 	// Calculate throughput based on gas per block or contracts per tx
 	throughput := s.options.ContractsPerTx
 	if s.options.GasPerBlock > 0 {
-		// Each deployment costs ~4.967M gas
-		throughput = s.options.GasPerBlock / 4967200
+		// Each deployment costs ~4.97M gas
+		throughput = s.options.GasPerBlock / GAS_PER_CONTRACT
 		if throughput == 0 {
 			throughput = 1
 		}
 		s.logger.Infof("calculated throughput: %d contracts per block (target gas: %d)", throughput, s.options.GasPerBlock)
 	} else {
 		// Calculate gas needed for the specified number of contracts
-		// TODO: This should be a constant value, not a variable. We should change it everywhere.
-		gasPerContract := uint64(4967200) // ~4.967M gas per contract
-		totalGas := gasPerContract * s.options.ContractsPerTx
+		totalGas := GAS_PER_CONTRACT * s.options.ContractsPerTx
 		s.logger.Infof("calculated gas: %d per tx for %d contracts", totalGas, throughput)
 	}
 
