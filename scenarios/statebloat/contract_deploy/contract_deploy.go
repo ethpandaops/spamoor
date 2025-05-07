@@ -96,6 +96,10 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 		}
 	}
 
+	if s.options.GasPerBlock == 0 && s.options.ContractsPerTx == 0 {
+		return fmt.Errorf("neither gas per block limit nor contracts per tx set, must define at least one of them (see --help for list of all flags)")
+	}
+
 	if s.options.MaxWallets > 0 {
 		walletPool.SetWalletCount(s.options.MaxWallets)
 	} else {
@@ -104,12 +108,6 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 		} else {
 			walletPool.SetWalletCount(1000)
 		}
-	}
-
-	// TODO: We need to check that we don't exceed block gas limit with the number of contracts we're deploying.
-	// Otherwise fail with an error message that explains that we're exceeding the block gas limit.
-	if s.options.GasPerBlock == 0 && s.options.ContractsPerTx == 0 {
-		return fmt.Errorf("neither gas per block limit nor contracts per tx set, must define at least one of them (see --help for list of all flags)")
 	}
 
 	if s.options.MaxPending > 0 {
@@ -132,6 +130,26 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
+
+	// Get block gas limit and validate contract deployment gas
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	if client == nil {
+		return fmt.Errorf("no client available")
+	}
+	block, err := client.GetEthClient().BlockByNumber(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get latest block: %w", err)
+	}
+	blockGasLimit := block.GasLimit()
+
+	// Validate gas usage against block limit
+	if s.options.GasPerBlock > blockGasLimit {
+		return fmt.Errorf("gas per block (%d) exceeds block gas limit (%d)", s.options.GasPerBlock, blockGasLimit)
+	}
+	if s.options.ContractsPerTx*GAS_PER_CONTRACT > blockGasLimit {
+		return fmt.Errorf("contracts per tx (%d) requires %d gas, exceeding block gas limit (%d)",
+			s.options.ContractsPerTx, s.options.ContractsPerTx*GAS_PER_CONTRACT, blockGasLimit)
+	}
 
 	// Calculate throughput based on gas per block or contracts per tx
 	throughput := s.options.ContractsPerTx
