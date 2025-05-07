@@ -25,15 +25,14 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount  uint64 `yaml:"total_count"`
-	Throughput  uint64 `yaml:"throughput"`
-	MaxPending  uint64 `yaml:"max_pending"`
-	MaxWallets  uint64 `yaml:"max_wallets"`
-	Rebroadcast uint64 `yaml:"rebroadcast"`
-	BaseFee     uint64 `yaml:"base_fee"`
-	TipFee      uint64 `yaml:"tip_fee"`
-	GasPerBlock uint64 `yaml:"gas_per_block"`
-	ClientGroup string `yaml:"client_group"`
+	MaxPending     uint64 `yaml:"max_pending"`
+	MaxWallets     uint64 `yaml:"max_wallets"`
+	Rebroadcast    uint64 `yaml:"rebroadcast"`
+	BaseFee        uint64 `yaml:"base_fee"`
+	TipFee         uint64 `yaml:"tip_fee"`
+	GasPerBlock    uint64 `yaml:"gas_per_block"`
+	ClientGroup    string `yaml:"client_group"`
+	ContractsPerTx uint64 `yaml:"contracts_per_tx"`
 }
 
 type Scenario struct {
@@ -47,15 +46,14 @@ type Scenario struct {
 
 var ScenarioName = "contract-deploy"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:  0,
-	Throughput:  0,
-	MaxPending:  0,
-	MaxWallets:  0,
-	Rebroadcast: 30,
-	BaseFee:     20,
-	TipFee:      2,
-	GasPerBlock: 0,
-	ClientGroup: "",
+	MaxPending:     0,
+	MaxWallets:     0,
+	Rebroadcast:    30,
+	BaseFee:        20,
+	TipFee:         2,
+	GasPerBlock:    0,
+	ClientGroup:    "default",
+	ContractsPerTx: 1,
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -71,8 +69,6 @@ func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
 }
 
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
-	flags.Uint64VarP(&s.options.TotalCount, "count", "c", ScenarioDefaultOptions.TotalCount, "Total number of contracts to deploy")
-	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", ScenarioDefaultOptions.Throughput, "Number of contracts to deploy per slot")
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Number of seconds to wait before re-broadcasting a transaction")
@@ -80,6 +76,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasPerBlock, "gas-per-block", ScenarioDefaultOptions.GasPerBlock, "Target gas to use per block (will calculate number of contracts to deploy)")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.Uint64Var(&s.options.ContractsPerTx, "contracts-per-tx", ScenarioDefaultOptions.ContractsPerTx, "Number of contracts to deploy in a single transaction")
 	return nil
 }
 
@@ -95,22 +92,18 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 
 	if s.options.MaxWallets > 0 {
 		walletPool.SetWalletCount(s.options.MaxWallets)
-	} else if s.options.TotalCount > 0 {
-		if s.options.TotalCount < 1000 {
-			walletPool.SetWalletCount(s.options.TotalCount)
-		} else {
-			walletPool.SetWalletCount(1000)
-		}
 	} else {
-		if s.options.Throughput*10 < 1000 {
-			walletPool.SetWalletCount(s.options.Throughput * 10)
+		if s.options.ContractsPerTx*10 < 1000 {
+			walletPool.SetWalletCount(s.options.ContractsPerTx * 10)
 		} else {
 			walletPool.SetWalletCount(1000)
 		}
 	}
 
-	if s.options.TotalCount == 0 && s.options.Throughput == 0 && s.options.GasPerBlock == 0 {
-		return fmt.Errorf("neither total count, throughput, nor gas per block limit set, must define at least one of them (see --help for list of all flags)")
+	// TODO: We need to check that we don't exceed block gas limit with the number of contracts we're deploying.
+	// Otherwise fail with an error message that explains that we're exceeding the block gas limit.
+	if s.options.GasPerBlock == 0 && s.options.ContractsPerTx == 0 {
+		return fmt.Errorf("neither gas per block limit nor contracts per tx set, must define at least one of them (see --help for list of all flags)")
 	}
 
 	if s.options.MaxPending > 0 {
@@ -134,8 +127,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
-	// Calculate throughput based on gas per block if specified
-	throughput := s.options.Throughput
+	// Calculate throughput based on gas per block or contracts per tx
+	throughput := s.options.ContractsPerTx
 	if s.options.GasPerBlock > 0 {
 		// Each deployment costs ~4.967M gas
 		throughput = s.options.GasPerBlock / 4967200
@@ -143,6 +136,12 @@ func (s *Scenario) Run(ctx context.Context) error {
 			throughput = 1
 		}
 		s.logger.Infof("calculated throughput: %d contracts per block (target gas: %d)", throughput, s.options.GasPerBlock)
+	} else {
+		// Calculate gas needed for the specified number of contracts
+		// TODO: This should be a constant value, not a variable. We should change it everywhere.
+		gasPerContract := uint64(4967200) // ~4.967M gas per contract
+		totalGas := gasPerContract * s.options.ContractsPerTx
+		s.logger.Infof("calculated gas: %d per tx for %d contracts", totalGas, throughput)
 	}
 
 	initialRate := rate.Limit(float64(throughput) / float64(utils.SecondsPerSlot))
@@ -212,11 +211,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}(txIdx, lastChan, currentChan)
 
 		lastChan = currentChan
-
-		count := txCount.Load() + uint64(pendingCount.Load())
-		if s.options.TotalCount > 0 && count >= s.options.TotalCount {
-			break
-		}
 	}
 	s.pendingWGroup.Wait()
 	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
