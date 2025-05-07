@@ -17,7 +17,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/ethpandaops/spamoor/scenarios/statebloat/contract-deploy/contract"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy/contract"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
@@ -263,13 +264,16 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	auth.GasTipCap = tipCap
 
 	// Get contract bytecode
-	bytecode, err := contract.StateBloatTokenMetaData.GetDeployedBytecode("StateBloatToken")
+	bytecode := common.FromHex(contract.ContractBin)
+
+	// Get ABI
+	parsed, err := contract.ContractMetaData.GetAbi()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to get bytecode: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to get ABI: %w", err)
 	}
 
 	// Pack constructor arguments
-	packedArgs, err := contract.StateBloatTokenMetaData.Abi.Pack("", saltInt)
+	packedArgs, err := parsed.Pack("", saltInt)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to pack constructor args: %w", err)
 	}
