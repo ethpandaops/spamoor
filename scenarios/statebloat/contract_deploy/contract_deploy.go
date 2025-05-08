@@ -217,7 +217,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}
 			if lastChan != nil {
 				<-lastChan
-				close(lastChan)
 			}
 			if err != nil {
 				logger.Warnf("could not send transaction: %v", err)
@@ -225,10 +224,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}
 
 			txCount.Add(1)
-			if lastChan != nil {
-				<-lastChan
-				close(lastChan)
-			}
 			logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
 		}(txIdx, lastChan, currentChan)
 
