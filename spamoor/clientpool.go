@@ -41,45 +41,40 @@ func NewClientPool(ctx context.Context, rpcHosts []string, logger logrus.FieldLo
 
 func (pool *ClientPool) PrepareClients() error {
 	pool.allClients = make([]*txbuilder.Client, 0)
-	wg := &sync.WaitGroup{}
-	mtx := sync.Mutex{}
 
 	var chainId *big.Int
 	for _, rpcHost := range pool.rpcHosts {
-		wg.Add(1)
+		client, err := txbuilder.NewClient(rpcHost)
+		if err != nil {
+			pool.logger.Errorf("failed creating client for '%v': %v", client.GetRPCHost(), err.Error())
+			continue
+		}
 
-		go func(rpcHost string) {
-			defer wg.Done()
+		pool.allClients = append(pool.allClients, client)
 
-			client, err := txbuilder.NewClient(rpcHost)
-			if err != nil {
-				pool.logger.Errorf("failed creating client for '%v': %v", client.GetRPCHost(), err.Error())
-				return
-			}
+		if chainId == nil {
 			client.Timeout = 10 * time.Second
 			cliChainId, err := client.GetChainId(pool.ctx)
 			if err != nil {
 				pool.logger.Errorf("failed getting chainid from '%v': %v", client.GetRPCHost(), err.Error())
-				return
+				continue
 			}
-			if chainId == nil {
-				chainId = cliChainId
-			} else if cliChainId.Cmp(chainId) != 0 {
-				pool.logger.Errorf("chainid missmatch from %v (chain ids: %v, %v)", client.GetRPCHost(), cliChainId, chainId)
-				return
-			}
-			client.Timeout = 30 * time.Second
-			mtx.Lock()
-			pool.allClients = append(pool.allClients, client)
-			mtx.Unlock()
-		}(rpcHost)
+			chainId = cliChainId
+		}
+		client.Timeout = 30 * time.Second
 	}
 
-	wg.Wait()
-	pool.chainId = chainId
 	if len(pool.allClients) == 0 {
+		return fmt.Errorf("no rpc hosts provided")
+	}
+
+	if chainId == nil {
 		return fmt.Errorf("no useable clients")
 	}
+
+	pool.chainId = chainId
+
+	pool.logger.Infof("initialized client pool with %v clients (chain id: %v)", len(pool.allClients), pool.chainId)
 
 	err := pool.watchClientStatus()
 	if err != nil {
