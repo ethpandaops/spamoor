@@ -161,11 +161,21 @@ func (s *Scenario) Run(ctx context.Context) error {
 		if throughput == 0 {
 			throughput = 1
 		}
-		s.logger.Infof("calculated throughput: %d contracts per block (target gas: %d)", throughput, s.options.GasPerBlock)
+		s.logger.WithFields(logrus.Fields{
+			"test":             "contract-deploy",
+			"throughput":       throughput,
+			"target_gas":       s.options.GasPerBlock,
+			"gas_per_contract": GAS_PER_CONTRACT,
+		}).Info("calculated throughput")
 	} else {
 		// Calculate gas needed for the specified number of contracts
 		totalGas := GAS_PER_CONTRACT * s.options.ContractsPerBlock
-		s.logger.Infof("calculated gas: %d per block for %d contracts", totalGas, throughput)
+		s.logger.WithFields(logrus.Fields{
+			"test":             "contract-deploy",
+			"total_gas":        totalGas,
+			"contracts":        s.options.ContractsPerBlock,
+			"gas_per_contract": GAS_PER_CONTRACT,
+		}).Info("calculated gas")
 	}
 
 	initialRate := rate.Limit(float64(throughput) / float64(utils.SecondsPerSlot))
@@ -232,13 +242,16 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}
 
 			txCount.Add(1)
-			logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
 		}(txIdx, lastChan, currentChan)
 
 		lastChan = currentChan
 	}
 	s.pendingWGroup.Wait()
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
+	s.logger.WithFields(logrus.Fields{
+		"test":        "contract-deploy",
+		"total_txs":   txCount.Load(),
+		"pending_txs": pendingCount.Load(),
+	}).Info("finished sending transactions, awaiting block inclusion...")
 
 	return nil
 }
@@ -301,6 +314,18 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	// Update nonce
 	wallet.SetNonce(wallet.GetNonce() + 1)
 
-	s.logger.Infof("deployed contract at address: %s", address.Hex())
+	// Calculate bytes written and gas/byte ratio
+	txBytes := len(tx.Data())
+	gasPerByte := float64(GAS_PER_CONTRACT) / float64(txBytes)
+
+	s.logger.WithFields(logrus.Fields{
+		"test":             "contract-deploy",
+		"tx_hash":          tx.Hash().Hex(),
+		"contract_address": address.Hex(),
+		"bytes_written":    txBytes,
+		"gas_per_byte":     fmt.Sprintf("%.2f", gasPerByte),
+		"contracts":        1,
+	}).Info("deployed contract")
+
 	return tx, client, wallet, nil
 }
