@@ -15,9 +15,15 @@ type ScenarioDescriptor struct {
 	NewScenario    func(logger logrus.FieldLogger) Scenario
 }
 
+type ScenarioOptions struct {
+	WalletPool *spamoor.WalletPool
+	Config     string
+	GlobalCfg  map[string]interface{}
+}
+
 type Scenario interface {
 	Flags(flags *pflag.FlagSet) error
-	Init(walletPool *spamoor.WalletPool, config string) error
+	Init(options *ScenarioOptions) error
 	Config() string
 	Run(ctx context.Context) error
 }

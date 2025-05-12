@@ -175,7 +175,7 @@ var blobV1Marshaller func(tx *types.Transaction) ([]byte, error)
 
 func MarshalBlobV1Tx(tx *types.Transaction) ([]byte, error) {
 	if blobV1Marshaller == nil {
-		return nil, fmt.Errorf("blob-v1 not supported when using assertoor as library")
+		return nil, fmt.Errorf("blob-v1 not supported when using spamoor as library")
 	}
 
 	return blobV1Marshaller(tx)
