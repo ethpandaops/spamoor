@@ -65,6 +65,10 @@ func TestContractDeploy(t *testing.T) {
 	walletPool.SetRefillBalance(utils.EtherToWei(uint256.NewInt(1))) // 1 ETH
 	walletPool.SetRefillInterval(60)
 
+	// Initialize wallet pool
+	err = walletPool.PrepareWallets(true)
+	require.NoError(t, err)
+
 	// Create scenario instance
 	scenario := newScenario(logger)
 

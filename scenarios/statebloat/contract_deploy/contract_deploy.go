@@ -241,24 +241,9 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	if client == nil {
 		return nil, nil, nil, fmt.Errorf("no client available")
 	}
-
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
+	if wallet == nil {
+		return nil, nil, nil, fmt.Errorf("no wallet available")
 	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
-
-	// Generate random salt for unique contract
-	salt := make([]byte, 32)
-	_, err := rand.Read(salt)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to generate salt: %w", err)
-	}
-	saltInt := new(big.Int).SetBytes(salt)
 
 	// Get chain ID
 	chainId, err := client.GetChainId(ctx)
@@ -275,11 +260,31 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	auth.Nonce = big.NewInt(int64(wallet.GetNonce()))
 	auth.Value = big.NewInt(0)
 	auth.GasLimit = GAS_PER_CONTRACT // Gas for single contract deployment
-	auth.GasPrice = feeCap
-	auth.GasTipCap = tipCap
+
+	// Set EIP-1559 fee parameters
+	if s.options.BaseFee > 0 {
+		auth.GasFeeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
+	}
+	if s.options.TipFee > 0 {
+		auth.GasTipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
+	}
+
+	// Generate random salt for unique contract
+	salt := make([]byte, 32)
+	_, err = rand.Read(salt)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to generate salt: %w", err)
+	}
+	saltInt := new(big.Int).SetBytes(salt)
+
+	// Ensure we have a valid client
+	ethClient := client.GetEthClient()
+	if ethClient == nil {
+		return nil, nil, nil, fmt.Errorf("failed to get eth client")
+	}
 
 	// Deploy the StateBloatToken contract
-	address, tx, _, err := contract.DeployContract(auth, client.GetEthClient(), saltInt)
+	address, tx, _, err := contract.DeployContract(auth, ethClient, saltInt)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to deploy contract: %w", err)
 	}
@@ -287,7 +292,6 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	// Update nonce
 	wallet.SetNonce(wallet.GetNonce() + 1)
 
-	// TODO: This should mention: Gas spent and bytes written. Also should give contract code hash for each contract.
 	s.logger.Infof("deployed contract at address: %s", address.Hex())
 	return tx, client, wallet, nil
 }
