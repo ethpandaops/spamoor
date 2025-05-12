@@ -29,6 +29,8 @@ type Daemon struct {
 	spammerMap    map[int64]*Spammer
 	spammerMapMtx sync.RWMutex
 	spammerWg     sync.WaitGroup
+
+	globalCfg map[string]interface{}
 }
 
 func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool *spamoor.ClientPool, rootWallet *txbuilder.Wallet, txpool *txbuilder.TxPool, db *db.Database) *Daemon {
@@ -42,7 +44,16 @@ func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool 
 		txpool:     txpool,
 		db:         db,
 		spammerMap: make(map[int64]*Spammer),
+		globalCfg:  make(map[string]interface{}),
 	}
+}
+
+func (d *Daemon) SetGlobalCfg(name string, value interface{}) {
+	d.globalCfg[name] = value
+}
+
+func (d *Daemon) GetGlobalCfg() map[string]interface{} {
+	return d.globalCfg
 }
 
 func (d *Daemon) GetClientPool() *spamoor.ClientPool {

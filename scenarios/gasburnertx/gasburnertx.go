@@ -76,7 +76,8 @@ var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 
 func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
 	return &Scenario{
-		logger: logger.WithField("scenario", ScenarioName),
+		options: ScenarioDefaultOptions,
+		logger:  logger.WithField("scenario", ScenarioName),
 	}
 }
 
@@ -95,11 +96,11 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	return nil
 }
 
-func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
-	s.walletPool = walletPool
+func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
+	s.walletPool = options.WalletPool
 
-	if config != "" {
-		err := yaml.Unmarshal([]byte(config), &s.options)
+	if options.Config != "" {
+		err := yaml.Unmarshal([]byte(options.Config), &s.options)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal config: %w", err)
 		}

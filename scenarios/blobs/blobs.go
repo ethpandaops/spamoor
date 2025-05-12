@@ -60,7 +60,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TipFee:                      2,
 	BlobFee:                     20,
 	ThroughputIncrementInterval: 0,
-	BlobV1Percent:               50,
+	BlobV1Percent:               100,
 	FuluActivation:              0,
 	ClientGroup:                 "",
 }
@@ -73,7 +73,8 @@ var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 
 func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
 	return &Scenario{
-		logger: logger.WithField("scenario", ScenarioName),
+		options: ScenarioDefaultOptions,
+		logger:  logger.WithField("scenario", ScenarioName),
 	}
 }
 
@@ -94,29 +95,35 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	return nil
 }
 
-func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
-	s.walletPool = walletPool
+func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
+	s.walletPool = options.WalletPool
 
-	if config != "" {
-		err := yaml.Unmarshal([]byte(config), &s.options)
+	if options.Config != "" {
+		err := yaml.Unmarshal([]byte(options.Config), &s.options)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal config: %w", err)
 		}
 	}
 
+	if options.GlobalCfg != nil {
+		if v, ok := options.GlobalCfg["fulu_activation"]; ok && s.options.FuluActivation == 0 {
+			s.options.FuluActivation = utils.FlexibleJsonUInt64(v.(uint64))
+		}
+	}
+
 	if s.options.MaxWallets > 0 {
-		walletPool.SetWalletCount(s.options.MaxWallets)
+		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.TotalCount > 0 {
 		if s.options.TotalCount < 1000 {
-			walletPool.SetWalletCount(s.options.TotalCount)
+			s.walletPool.SetWalletCount(s.options.TotalCount)
 		} else {
-			walletPool.SetWalletCount(1000)
+			s.walletPool.SetWalletCount(1000)
 		}
 	} else {
 		if s.options.Throughput*10 < 1000 {
-			walletPool.SetWalletCount(s.options.Throughput * 10)
+			s.walletPool.SetWalletCount(s.options.Throughput * 10)
 		} else {
-			walletPool.SetWalletCount(1000)
+			s.walletPool.SetWalletCount(1000)
 		}
 	}
 

@@ -29,6 +29,7 @@ type CliArgs struct {
 	port           int
 	dbFile         string
 	startupSpammer string
+	fuluActivation uint64
 }
 
 func main() {
@@ -44,7 +45,7 @@ func main() {
 	flags.IntVarP(&cliArgs.port, "port", "P", 8080, "The port to run the webui on.")
 	flags.StringVarP(&cliArgs.dbFile, "db", "d", "spamoor.db", "The file to store the database in.")
 	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file with startup spammers configuration")
-
+	flags.Uint64Var(&cliArgs.fuluActivation, "fulu-activation", 0, "The unix timestamp of the Fulu activation (if activated)")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -128,6 +129,9 @@ func main() {
 
 	// init daemon
 	daemon := daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, rootWallet, txpool, database)
+	if cliArgs.fuluActivation > 0 {
+		daemon.SetGlobalCfg("fulu_activation", cliArgs.fuluActivation)
+	}
 
 	// start frontend
 	webui.StartHttpServer(&types.FrontendConfig{

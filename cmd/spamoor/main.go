@@ -156,7 +156,9 @@ func main() {
 	walletPool.SetWalletSeed(cliArgs.seed)
 
 	// init scenario
-	err = scenario.Init(walletPool, "")
+	err = scenario.Init(&scenariotypes.ScenarioOptions{
+		WalletPool: walletPool,
+	})
 	if err != nil {
 		panic(err)
 	}
