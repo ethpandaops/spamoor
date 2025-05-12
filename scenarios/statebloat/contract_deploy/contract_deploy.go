@@ -38,6 +38,7 @@ type ScenarioOptions struct {
 	GasPerBlock       uint64 `yaml:"gas_per_block"`
 	ClientGroup       string `yaml:"client_group"`
 	ContractsPerBlock uint64 `yaml:"contracts_per_block"`
+	MaxTransactions   uint64 `yaml:"max_transactions"` // Maximum number of transactions to send (0 for unlimited)
 }
 
 type Scenario struct {
@@ -53,12 +54,13 @@ var ScenarioName = "contract-deploy"
 var ScenarioDefaultOptions = ScenarioOptions{
 	MaxPending:        0,
 	MaxWallets:        0,
-	Rebroadcast:       30,
+	Rebroadcast:       1,
 	BaseFee:           20,
 	TipFee:            2,
 	GasPerBlock:       0,
 	ClientGroup:       "default",
 	ContractsPerBlock: 1,
+	MaxTransactions:   0, // Default to unlimited
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -82,6 +84,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.GasPerBlock, "gas-per-block", ScenarioDefaultOptions.GasPerBlock, "Target gas to use per block (will calculate number of contracts to deploy)")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.Uint64Var(&s.options.ContractsPerBlock, "contracts-per-block", ScenarioDefaultOptions.ContractsPerBlock, "Number of contracts to deploy per block")
+	flags.Uint64Var(&s.options.MaxTransactions, "max-transactions", ScenarioDefaultOptions.MaxTransactions, "Maximum number of transactions to send (0 for unlimited)")
 	return nil
 }
 
@@ -172,6 +175,12 @@ func (s *Scenario) Run(ctx context.Context) error {
 	limiter := rate.NewLimiter(initialRate, 1)
 
 	for {
+		// Check if we've reached the maximum number of transactions
+		if s.options.MaxTransactions > 0 && txIdxCounter >= s.options.MaxTransactions {
+			s.logger.Infof("reached maximum number of transactions (%d)", s.options.MaxTransactions)
+			break
+		}
+
 		if err := limiter.Wait(ctx); err != nil {
 			if ctx.Err() != nil {
 				break
