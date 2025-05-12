@@ -17,7 +17,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy/contract"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -31,14 +30,14 @@ const (
 )
 
 type ScenarioOptions struct {
-	MaxPending     uint64 `yaml:"max_pending"`
-	MaxWallets     uint64 `yaml:"max_wallets"`
-	Rebroadcast    uint64 `yaml:"rebroadcast"`
-	BaseFee        uint64 `yaml:"base_fee"`
-	TipFee         uint64 `yaml:"tip_fee"`
-	GasPerBlock    uint64 `yaml:"gas_per_block"`
-	ClientGroup    string `yaml:"client_group"`
-	ContractsPerTx uint64 `yaml:"contracts_per_tx"`
+	MaxPending        uint64 `yaml:"max_pending"`
+	MaxWallets        uint64 `yaml:"max_wallets"`
+	Rebroadcast       uint64 `yaml:"rebroadcast"`
+	BaseFee           uint64 `yaml:"base_fee"`
+	TipFee            uint64 `yaml:"tip_fee"`
+	GasPerBlock       uint64 `yaml:"gas_per_block"`
+	ClientGroup       string `yaml:"client_group"`
+	ContractsPerBlock uint64 `yaml:"contracts_per_block"`
 }
 
 type Scenario struct {
@@ -52,14 +51,14 @@ type Scenario struct {
 
 var ScenarioName = "contract-deploy"
 var ScenarioDefaultOptions = ScenarioOptions{
-	MaxPending:     0,
-	MaxWallets:     0,
-	Rebroadcast:    30,
-	BaseFee:        20,
-	TipFee:         2,
-	GasPerBlock:    0,
-	ClientGroup:    "default",
-	ContractsPerTx: 1,
+	MaxPending:        0,
+	MaxWallets:        0,
+	Rebroadcast:       30,
+	BaseFee:           20,
+	TipFee:            2,
+	GasPerBlock:       0,
+	ClientGroup:       "default",
+	ContractsPerBlock: 1,
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -82,7 +81,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasPerBlock, "gas-per-block", ScenarioDefaultOptions.GasPerBlock, "Target gas to use per block (will calculate number of contracts to deploy)")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
-	flags.Uint64Var(&s.options.ContractsPerTx, "contracts-per-tx", ScenarioDefaultOptions.ContractsPerTx, "Number of contracts to deploy in a single transaction")
+	flags.Uint64Var(&s.options.ContractsPerBlock, "contracts-per-block", ScenarioDefaultOptions.ContractsPerBlock, "Number of contracts to deploy per block")
 	return nil
 }
 
@@ -96,15 +95,15 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 		}
 	}
 
-	if s.options.GasPerBlock == 0 && s.options.ContractsPerTx == 0 {
-		return fmt.Errorf("neither gas per block limit nor contracts per tx set, must define at least one of them (see --help for list of all flags)")
+	if s.options.GasPerBlock == 0 && s.options.ContractsPerBlock == 0 {
+		return fmt.Errorf("neither gas per block limit nor contracts per block set, must define at least one of them (see --help for list of all flags)")
 	}
 
 	if s.options.MaxWallets > 0 {
 		walletPool.SetWalletCount(s.options.MaxWallets)
 	} else {
-		if s.options.ContractsPerTx*10 < 1000 {
-			walletPool.SetWalletCount(s.options.ContractsPerTx * 10)
+		if s.options.ContractsPerBlock*10 < 1000 {
+			walletPool.SetWalletCount(s.options.ContractsPerBlock * 10)
 		} else {
 			walletPool.SetWalletCount(1000)
 		}
@@ -146,13 +145,13 @@ func (s *Scenario) Run(ctx context.Context) error {
 	if s.options.GasPerBlock > blockGasLimit {
 		return fmt.Errorf("gas per block (%d) exceeds block gas limit (%d)", s.options.GasPerBlock, blockGasLimit)
 	}
-	if s.options.ContractsPerTx*GAS_PER_CONTRACT > blockGasLimit {
-		return fmt.Errorf("contracts per tx (%d) requires %d gas, exceeding block gas limit (%d)",
-			s.options.ContractsPerTx, s.options.ContractsPerTx*GAS_PER_CONTRACT, blockGasLimit)
+	if s.options.ContractsPerBlock*GAS_PER_CONTRACT > blockGasLimit {
+		return fmt.Errorf("contracts per block (%d) requires %d gas, exceeding block gas limit (%d)",
+			s.options.ContractsPerBlock, s.options.ContractsPerBlock*GAS_PER_CONTRACT, blockGasLimit)
 	}
 
-	// Calculate throughput based on gas per block or contracts per tx
-	throughput := s.options.ContractsPerTx
+	// Calculate throughput based on gas per block or contracts per block
+	throughput := s.options.ContractsPerBlock
 	if s.options.GasPerBlock > 0 {
 		// Each deployment costs ~4.97M gas
 		throughput = s.options.GasPerBlock / GAS_PER_CONTRACT
@@ -162,8 +161,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 		s.logger.Infof("calculated throughput: %d contracts per block (target gas: %d)", throughput, s.options.GasPerBlock)
 	} else {
 		// Calculate gas needed for the specified number of contracts
-		totalGas := GAS_PER_CONTRACT * s.options.ContractsPerTx
-		s.logger.Infof("calculated gas: %d per tx for %d contracts", totalGas, throughput)
+		totalGas := GAS_PER_CONTRACT * s.options.ContractsPerBlock
+		s.logger.Infof("calculated gas: %d per block for %d contracts", totalGas, throughput)
 	}
 
 	initialRate := rate.Limit(float64(throughput) / float64(utils.SecondsPerSlot))
@@ -275,45 +274,20 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 	auth.Nonce = big.NewInt(int64(wallet.GetNonce()))
 	auth.Value = big.NewInt(0)
-	auth.GasLimit = 5000000 // Enough for 24kB contract
+	auth.GasLimit = GAS_PER_CONTRACT // Gas for single contract deployment
 	auth.GasPrice = feeCap
 	auth.GasTipCap = tipCap
 
-	// Get contract bytecode
-	bytecode := common.FromHex(contract.ContractBin)
-
-	// Get ABI
-	parsed, err := contract.ContractMetaData.GetAbi()
+	// Deploy the StateBloatToken contract
+	address, tx, _, err := contract.DeployContract(auth, client.GetEthClient(), saltInt)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to get ABI: %w", err)
-	}
-
-	// Pack constructor arguments
-	packedArgs, err := parsed.Pack("", saltInt)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to pack constructor args: %w", err)
-	}
-
-	// Combine bytecode and constructor args
-	fullBytecode := append(bytecode, packedArgs...)
-
-	// Create transaction
-	tx := types.NewContractCreation(auth.Nonce.Uint64(), auth.Value, auth.GasLimit, auth.GasPrice, fullBytecode)
-
-	// Sign transaction
-	signedTx, err := auth.Signer(auth.From, tx)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to sign transaction: %w", err)
-	}
-
-	// Send transaction
-	err = client.SendTransactionCtx(ctx, signedTx)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to send transaction: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to deploy contract: %w", err)
 	}
 
 	// Update nonce
 	wallet.SetNonce(wallet.GetNonce() + 1)
 
-	return signedTx, client, wallet, nil
+	// TODO: This should mention: Gas spent and bytes written. Also should give contract code hash for each contract.
+	s.logger.Infof("deployed contract at address: %s", address.Hex())
+	return tx, client, wallet, nil
 }
