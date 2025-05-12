@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
@@ -112,17 +113,49 @@ func (f *testFixture) verifyContractDeployment(runCtx context.Context) {
 	require.NoError(f.t, err)
 	assert.Greater(f.t, len(block.Transactions()), 0)
 
-	// Check the first transaction
-	tx, _, err := f.client.TransactionByHash(runCtx, block.Transactions()[0].Hash())
-	require.NoError(f.t, err)
-	receipt, err := f.client.TransactionReceipt(runCtx, tx.Hash())
-	require.NoError(f.t, err)
-	assert.Equal(f.t, uint64(1), receipt.Status)
+	// Get the expected number of contracts based on scenario config
+	expectedContracts := f.scenario.options.ContractsPerBlock
+	if f.scenario.options.GasPerBlock > 0 {
+		expectedContracts = f.scenario.options.GasPerBlock / GAS_PER_CONTRACT
+		if expectedContracts == 0 {
+			expectedContracts = 1
+		}
+	}
 
-	// Verify contract was created
-	code, err := f.client.CodeAt(runCtx, receipt.ContractAddress, nil)
-	require.NoError(f.t, err)
-	assert.Greater(f.t, len(code), 0)
+	// Track deployed contracts
+	deployedContracts := 0
+	contractAddresses := make([]common.Address, 0)
+
+	// Check all transactions in the block
+	for _, tx := range block.Transactions() {
+		receipt, err := f.client.TransactionReceipt(runCtx, tx.Hash())
+		require.NoError(f.t, err)
+		assert.Equal(f.t, uint64(1), receipt.Status)
+
+		// If this is a contract creation transaction
+		if receipt.ContractAddress != (common.Address{}) {
+			deployedContracts++
+			contractAddresses = append(contractAddresses, receipt.ContractAddress)
+		}
+	}
+
+	// Verify the number of contracts deployed matches the expected count
+	assert.Equal(f.t, expectedContracts, deployedContracts, "Number of deployed contracts should match the scenario configuration")
+
+	// Verify each contract's size
+	for _, addr := range contractAddresses {
+		code, err := f.client.CodeAt(runCtx, addr, nil)
+		require.NoError(f.t, err)
+
+		// EIP-170 limit is 24,576 bytes (0x6000)
+		assert.Equal(f.t, 24576, len(code), "Contract code size should be exactly 24,576 bytes (EIP-170 limit)")
+	}
+
+	f.logger.WithFields(logrus.Fields{
+		"expected_contracts": expectedContracts,
+		"deployed_contracts": deployedContracts,
+		"contract_addresses": contractAddresses,
+	}).Info("Verified contract deployments")
 }
 
 func TestContractDeployWithContractsPerBlock(t *testing.T) {
