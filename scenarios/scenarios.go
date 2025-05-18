@@ -14,6 +14,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/geastx"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
+	"github.com/ethpandaops/spamoor/scenarios/storagespam"
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 )
@@ -30,6 +31,7 @@ var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
 	&gasburnertx.ScenarioDescriptor,
 	&geastx.ScenarioDescriptor,
 	&setcodetx.ScenarioDescriptor,
+	&storagespam.ScenarioDescriptor,
 	&uniswapswaps.ScenarioDescriptor,
 	&wallets.ScenarioDescriptor,
 }
