@@ -1,11 +1,11 @@
-# Gas Burner
+# Storage Spam
 
-Send transactions that burn a specific amount of gas units. Note that the estimated gas units may not be 100% accurate.
+Send transactions that create storage entries and burn a specified amount of gas units.
 
 ## Usage
 
 ```bash
-spamoor gasburnertx [flags]
+spamoor storagespam [flags]
 ```
 
 ## Configuration
@@ -40,12 +40,12 @@ spamoor gasburnertx [flags]
 
 ## Example
 
-Send 100 transactions burning 5M gas each:
+Send 100 storage spam transactions burning 5M gas each:
 ```bash
-spamoor gasburnertx -p "<PRIVKEY>" -h http://rpc-host:8545 -c 100 --gas-units-to-burn 5000000
+spamoor storagespam -p "<PRIVKEY>" -h http://rpc-host:8545 -c 100 --gas-units-to-burn 5000000
 ```
 
-Send 2 transactions per slot burning 1M gas each:
+Send 2 storage spam transactions per slot burning 1M gas each:
 ```bash
-spamoor gasburnertx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 2 --gas-units-to-burn 1000000
+spamoor storagespam -p "<PRIVKEY>" -h http://rpc-host:8545 -t 2 --gas-units-to-burn 1000000
 ``` 
