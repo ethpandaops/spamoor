@@ -15,6 +15,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/negroni"
+
+	_ "net/http/pprof"
 )
 
 var (
@@ -58,12 +60,12 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	// swagger
 	router.PathPrefix("/docs/").Handler(docs.GetSwaggerHandler(logrus.StandardLogger()))
 
-	router.PathPrefix("/").Handler(frontend)
-
 	if config.Pprof {
 		// add pprof handler
 		router.PathPrefix("/debug/pprof/").Handler(http.DefaultServeMux)
 	}
+
+	router.PathPrefix("/").Handler(frontend)
 
 	n := negroni.New()
 	n.Use(negroni.NewRecovery())

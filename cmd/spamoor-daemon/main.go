@@ -139,7 +139,7 @@ func main() {
 		Port:     cliArgs.port,
 		SiteName: "Spamoor",
 		Debug:    cliArgs.debug,
-		Pprof:    cliArgs.debug,
+		Pprof:    true,
 		Minify:   true,
 	}, daemon)
 
