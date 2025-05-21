@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,13 +62,15 @@ type TxPoolOptions struct {
 
 type TxConfirmFn func(tx *types.Transaction, receipt *types.Receipt, err error)
 type TxLogFn func(client *Client, retry int, rebroadcast int, err error)
+type TxRebroadcastFn func(tx *types.Transaction, options *SendTransactionOptions, client *Client)
 
 type SendTransactionOptions struct {
 	Client             *Client
 	ClientsStartOffset int
 
-	OnConfirm TxConfirmFn
-	LogFn     TxLogFn
+	OnConfirm     TxConfirmFn
+	LogFn         TxLogFn
+	OnRebroadcast TxRebroadcastFn
 
 	MaxRebroadcasts     int
 	RebroadcastInterval time.Duration
@@ -480,13 +483,17 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 						continue
 					}
 
+					if options.OnRebroadcast != nil {
+						options.OnRebroadcast(tx, options, client)
+					}
+
 					err = submitTx(client)
 
 					if options.LogFn != nil {
 						options.LogFn(client, j, i+1, err)
 					}
 
-					if err == nil {
+					if err == nil || strings.Contains(err.Error(), "already known") {
 						break
 					}
 				}

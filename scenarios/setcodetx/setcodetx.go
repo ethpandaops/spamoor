@@ -145,8 +145,20 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if s.options.MaxPending > 0 {
-		s.pendingChan = make(chan bool, s.options.MaxPending)
+	maxPending := s.options.MaxPending
+	if maxPending == 0 {
+		maxPending = s.options.Throughput * 200
+		if maxPending == 0 {
+			maxPending = 4000
+		}
+
+		if maxPending > s.walletPool.GetConfiguredWalletCount()*10 {
+			maxPending = s.walletPool.GetConfiguredWalletCount() * 10
+		}
+	}
+
+	if maxPending > 0 {
+		s.pendingChan = make(chan bool, maxPending)
 	}
 
 	s.delegatorSeed = make([]byte, 32)
@@ -204,6 +216,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 		go func(txIdx uint64, lastChan, currentChan chan bool) {
 			defer func() {
+				utils.RecoverPanic(s.logger, "setcodetx.sendTx")
 				pendingCount.Add(-1)
 				currentChan <- true
 			}()
@@ -211,7 +224,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			logger := s.logger
 			tx, client, wallet, err := s.sendTx(ctx, txIdx, func() {
 				if s.pendingChan != nil {
-					time.Sleep(100 * time.Millisecond)
+					time.Sleep(10 * time.Millisecond)
 					<-s.pendingChan
 				}
 			})

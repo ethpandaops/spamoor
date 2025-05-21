@@ -14,7 +14,7 @@ test:
 
 build:
 	@echo version: $(VERSION)
-	env CGO_ENABLED=1 go build -v -tags=with_blob_v1 -o bin/ -ldflags="-s -w $(GOLDFLAGS)" ./cmd/*
+	env CGO_ENABLED=1 go build -v -tags=with_blob_v1,ckzg -o bin/ -ldflags="-s -w $(GOLDFLAGS)" ./cmd/*
 
 build-lib:
 	@echo version: $(VERSION)

@@ -14,6 +14,7 @@ import (
 
 func init() {
 	blobV1Marshaller = marshalBlobV1Tx
+	blobV1GenerateCellProof = generateCellProofs
 }
 
 type blobV1TxWithBlobs struct {
@@ -24,20 +25,22 @@ type blobV1TxWithBlobs struct {
 	CellProofs  []kzg4844.Proof
 }
 
-func marshalBlobV1Tx(tx *types.Transaction) ([]byte, error) {
-	blobTxSidecar := tx.BlobTxSidecar()
-	if tx.Type() != types.BlobTxType || len(blobTxSidecar.Blobs) == 0 {
-		return tx.MarshalBinary()
-	}
-
-	// compute the cell proof
-	cellProofs := make([]kzg4844.Proof, 0, len(blobTxSidecar.Blobs)*gokzg4844.CellsPerExtBlob)
-	for _, blobs := range blobTxSidecar.Blobs {
+func generateCellProofs(sidecar *types.BlobTxSidecar) ([]kzg4844.Proof, error) {
+	cellProofs := make([]kzg4844.Proof, 0, len(sidecar.Blobs)*gokzg4844.CellsPerExtBlob)
+	for _, blobs := range sidecar.Blobs {
 		cellProof, err := kzg4844.ComputeCells(&blobs)
 		if err != nil {
 			return nil, err
 		}
 		cellProofs = append(cellProofs, cellProof...)
+	}
+	return cellProofs, nil
+}
+
+func marshalBlobV1Tx(tx *types.Transaction, cellProofs []kzg4844.Proof) ([]byte, error) {
+	blobTxSidecar := tx.BlobTxSidecar()
+	if tx.Type() != types.BlobTxType || len(blobTxSidecar.Blobs) == 0 {
+		return tx.MarshalBinary()
 	}
 
 	blobTx := &types.BlobTx{

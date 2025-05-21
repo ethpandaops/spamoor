@@ -11,6 +11,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/holiman/uint256"
 	"github.com/jmoiron/sqlx"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -38,11 +39,11 @@ type Spammer struct {
 }
 
 type SpammerConfig struct {
-	Seed           string `yaml:"seed"`
-	RefillAmount   uint64 `yaml:"refill_amount"`
-	RefillBalance  uint64 `yaml:"refill_balance"`
-	RefillInterval uint64 `yaml:"refill_interval"`
-	WalletCount    int    `yaml:"wallet_count"`
+	Seed           string       `yaml:"seed"`
+	RefillAmount   *uint256.Int `yaml:"refill_amount"`
+	RefillBalance  *uint256.Int `yaml:"refill_balance"`
+	RefillInterval uint64       `yaml:"refill_interval"`
+	WalletCount    int          `yaml:"wallet_count"`
 }
 
 func (d *Daemon) restoreSpammer(dbEntity *db.Spammer) (*Spammer, error) {
