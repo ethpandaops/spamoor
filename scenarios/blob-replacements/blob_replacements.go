@@ -3,6 +3,7 @@ package blobreplacements
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 	"math/rand"
 	"sync"
@@ -62,7 +63,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TipFee:                      2,
 	BlobFee:                     20,
 	BlobV1Percent:               100,
-	FuluActivation:              0,
+	FuluActivation:              math.MaxInt64,
 	ThroughputIncrementInterval: 0,
 	ClientGroup:                 "",
 }
@@ -110,7 +111,7 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 	}
 
 	if options.GlobalCfg != nil {
-		if v, ok := options.GlobalCfg["fulu_activation"]; ok && s.options.FuluActivation == 0 {
+		if v, ok := options.GlobalCfg["fulu_activation"]; ok && s.options.FuluActivation == ScenarioDefaultOptions.FuluActivation {
 			s.options.FuluActivation = utils.FlexibleJsonUInt64(v.(uint64))
 		}
 	}
@@ -321,7 +322,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 	getTxBytes := func() ([]byte, uint8) {
 		var txBytes []byte
 		txVersion := uint8(0)
-		sendAsV1 := s.options.FuluActivation > 0 && time.Now().Unix() > int64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
+		sendAsV1 := time.Now().Unix() > int64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
 		if sendAsV1 {
 			txBytes, err = txbuilder.MarshalBlobV1Tx(tx, blobCellProofs)
 			if err != nil {
