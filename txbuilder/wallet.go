@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -48,19 +49,20 @@ func NewWallet(privkey string) (*Wallet, error) {
 }
 
 func (wallet *Wallet) loadPrivateKey(privkey string) error {
-	var privateKey *ecdsa.PrivateKey
+	var (
+		privateKey *ecdsa.PrivateKey
+		err        error
+	)
 	if privkey == "" {
-		var err error
 		privateKey, err = crypto.GenerateKey()
-		if err != nil {
-			return err
-		}
 	} else {
-		var err error
-		privateKey, err = crypto.HexToECDSA(privkey)
-		if err != nil {
-			return err
+		if strings.HasPrefix(strings.ToLower(privkey), "0x") {
+			privkey = privkey[2:]
 		}
+		privateKey, err = crypto.HexToECDSA(privkey)
+	}
+	if err != nil {
+		return err
 	}
 
 	publicKey := privateKey.Public()
