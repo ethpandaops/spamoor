@@ -64,8 +64,15 @@ jobs:
         release_name: "v${{ inputs.version }}"
         tag_name: "v${{ inputs.version }}"
         body: |
-          ### Changes
+          ### Major Changes
+          * ...
+
+          <details>
+            <summary>Full changelog</summary>
+
+            ### Full changelog
           ${{ steps.changelog.outputs.changelog }}
+          </details>
 
           ### Release Artifacts
           Please read through the [wiki](https://github.com/ethpandaops/spamoor/wiki) for setup & configuration instructions.
