@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/scenarios"
+	"github.com/ethpandaops/spamoor/scenarios/wallets"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
@@ -164,7 +165,7 @@ func main() {
 	}
 
 	// prepare wallet pool
-	err = walletPool.PrepareWallets(true)
+	err = walletPool.PrepareWallets(scenarioName != wallets.ScenarioName)
 	if err != nil {
 		panic(fmt.Errorf("failed to prepare wallets: %v", err))
 	}
