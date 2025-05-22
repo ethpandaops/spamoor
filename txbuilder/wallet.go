@@ -30,6 +30,8 @@ type Wallet struct {
 	txNonceChans     map[uint64]*nonceStatus
 	txNonceMutex     sync.Mutex
 	lastConfirmation uint64
+
+	walletLock sync.Mutex
 }
 
 type nonceStatus struct {
@@ -254,4 +256,17 @@ func (wallet *Wallet) getTxNonceChan(targetNonce uint64) (*nonceStatus, bool) {
 	wallet.txNonceChans[targetNonce] = nonceChan
 
 	return nonceChan, len(wallet.txNonceChans) == 1
+}
+
+func (wallet *Wallet) WithWalletLock(lockedLogFn func(), lockedFn func() error) error {
+	if !wallet.walletLock.TryLock() {
+		if lockedLogFn != nil {
+			lockedLogFn()
+		}
+		wallet.walletLock.Lock()
+	}
+
+	defer wallet.walletLock.Unlock()
+
+	return lockedFn()
 }

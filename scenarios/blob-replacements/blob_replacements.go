@@ -6,10 +6,8 @@ import (
 	"math/big"
 	"math/rand"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
 	"github.com/ethereum/go-ethereum/core/types"
@@ -47,7 +45,6 @@ type Scenario struct {
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
 
-	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
 }
 
@@ -138,6 +135,18 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
+	return nil
+}
+
+func (s *Scenario) Config() string {
+	yamlBytes, _ := yaml.Marshal(&s.options)
+	return string(yamlBytes)
+}
+
+func (s *Scenario) Run(ctx context.Context) error {
+	s.logger.Infof("starting scenario: %s", ScenarioName)
+	defer s.logger.Infof("scenario %s finished.", ScenarioName)
+
 	maxPending := s.options.MaxPending
 	if maxPending == 0 {
 		maxPending = s.options.Throughput * 3
@@ -150,114 +159,40 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 		}
 	}
 
-	if maxPending > 0 {
-		s.pendingChan = make(chan bool, maxPending)
-	}
+	err := utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
+		TotalCount:                  s.options.TotalCount,
+		Throughput:                  s.options.Throughput,
+		MaxPending:                  maxPending,
+		ThroughputIncrementInterval: s.options.ThroughputIncrementInterval,
 
-	return nil
-}
-
-func (s *Scenario) Config() string {
-	yamlBytes, _ := yaml.Marshal(&s.options)
-	return string(yamlBytes)
-}
-
-func (s *Scenario) Run(ctx context.Context) error {
-	txIdxCounter := uint64(0)
-	pendingCount := atomic.Int64{}
-	txCount := atomic.Uint64{}
-	var lastChan chan bool
-
-	s.logger.Infof("starting scenario: %s", ScenarioName)
-	defer s.logger.Infof("scenario %s finished.", ScenarioName)
-
-	initialRate := rate.Limit(float64(s.options.Throughput) / float64(utils.SecondsPerSlot))
-	if initialRate == 0 {
-		initialRate = rate.Inf
-	}
-	limiter := rate.NewLimiter(initialRate, 1)
-
-	if s.options.ThroughputIncrementInterval != 0 {
-		go func() {
-			ticker := time.NewTicker(time.Duration(s.options.ThroughputIncrementInterval) * time.Second)
-			for {
-				select {
-				case <-ticker.C:
-					throughput := limiter.Limit() * 12
-					newThroughput := throughput + 1
-					s.logger.Infof("Increasing throughput from %.3f to %.3f", throughput, newThroughput)
-					limiter.SetLimit(rate.Limit(float64(newThroughput) / float64(utils.SecondsPerSlot)))
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-
-	for {
-		if err := limiter.Wait(ctx); err != nil {
-			if ctx.Err() != nil {
-				break
-			}
-
-			s.logger.Debugf("rate limited: %s", err.Error())
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-
-		txIdx := txIdxCounter
-		txIdxCounter++
-
-		if s.pendingChan != nil {
-			// await pending transactions
-			s.pendingChan <- true
-		}
-		pendingCount.Add(1)
-		currentChan := make(chan bool, 1)
-
-		go func(txIdx uint64, lastChan, currentChan chan bool) {
-			defer func() {
-				utils.RecoverPanic(s.logger, "blob-replacements.sendBlobTx")
-				pendingCount.Add(-1)
-				currentChan <- true
-			}()
-
+		Logger: s.logger,
+		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
 			logger := s.logger
-			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, 0, 0, func() {
-				if s.pendingChan != nil {
-					time.Sleep(10 * time.Millisecond)
-					<-s.pendingChan
-				}
-			})
+			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, 0, 0, onComplete)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
-			if err != nil {
-				logger.Warnf("blob tx %6d.0 failed: %v", txIdx+1, err)
-				return
+			if tx != nil {
+				logger = logger.WithField("nonce", tx.Nonce())
+			}
+			if wallet != nil {
+				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 			}
 
-			txCount.Add(1)
-			logger.WithFields(logrus.Fields{
-				"wallet": s.walletPool.GetWalletName(wallet.GetAddress()),
-				"nonce":  tx.Nonce(),
-			}).Infof("blob tx %6d.0 sent:  %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
-		}(txIdx, lastChan, currentChan)
-
-		lastChan = currentChan
-
-		count := txCount.Load() + uint64(pendingCount.Load())
-		if s.options.TotalCount > 0 && count >= s.options.TotalCount {
-			break
-		}
-	}
-	<-lastChan
-	close(lastChan)
+			return func() {
+				if err != nil {
+					logger.Warnf("blob tx %6d.0 failed: %v", txIdx+1, err)
+				} else {
+					logger.Infof("blob tx %6d.0 sent:  %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+				}
+			}, err
+		},
+	})
 
 	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
 	s.pendingWGroup.Wait()
 
-	return nil
+	return err
 }
 
 func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, uint8, error) {

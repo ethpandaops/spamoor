@@ -7,10 +7,8 @@ import (
 	"math/big"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -47,7 +45,6 @@ type Scenario struct {
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
 
-	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
 }
 
@@ -130,6 +127,18 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
+	return nil
+}
+
+func (s *Scenario) Config() string {
+	yamlBytes, _ := yaml.Marshal(&s.options)
+	return string(yamlBytes)
+}
+
+func (s *Scenario) Run(ctx context.Context) error {
+	s.logger.Infof("starting scenario: %s", ScenarioName)
+	defer s.logger.Infof("scenario %s finished.", ScenarioName)
+
 	maxPending := s.options.MaxPending
 	if maxPending == 0 {
 		maxPending = s.options.Throughput * 10
@@ -142,70 +151,16 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 		}
 	}
 
-	if maxPending > 0 {
-		s.pendingChan = make(chan bool, maxPending)
-	}
+	err := utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
+		TotalCount:                  s.options.TotalCount,
+		Throughput:                  s.options.Throughput,
+		MaxPending:                  maxPending,
+		ThroughputIncrementInterval: 0,
 
-	return nil
-}
-
-func (s *Scenario) Config() string {
-	yamlBytes, _ := yaml.Marshal(&s.options)
-	return string(yamlBytes)
-}
-
-func (s *Scenario) Run(ctx context.Context) error {
-	txIdxCounter := uint64(0)
-	pendingCount := atomic.Int64{}
-	txCount := atomic.Uint64{}
-
-	s.logger.Infof("starting scenario: %s", ScenarioName)
-	defer s.logger.Infof("scenario %s finished.", ScenarioName)
-
-	var lastChan chan bool
-
-	initialRate := rate.Limit(float64(s.options.Throughput) / float64(utils.SecondsPerSlot))
-	if initialRate == 0 {
-		initialRate = rate.Inf
-	}
-	limiter := rate.NewLimiter(initialRate, 1)
-
-	for {
-		if err := limiter.Wait(ctx); err != nil {
-			if ctx.Err() != nil {
-				break
-			}
-
-			s.logger.Debugf("rate limited: %s", err.Error())
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-
-		txIdx := txIdxCounter
-		txIdxCounter++
-
-		if s.pendingChan != nil {
-			// await pending transactions
-			s.pendingChan <- true
-		}
-		pendingCount.Add(1)
-
-		currentChan := make(chan bool, 1)
-
-		go func(txIdx uint64, lastChan, currentChan chan bool) {
-			defer func() {
-				utils.RecoverPanic(s.logger, "eoatx.sendTx")
-				pendingCount.Add(-1)
-				currentChan <- true
-			}()
-
+		Logger: s.logger,
+		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
 			logger := s.logger
-			tx, client, wallet, err := s.sendTx(ctx, txIdx, func() {
-				if s.pendingChan != nil {
-					time.Sleep(10 * time.Millisecond)
-					<-s.pendingChan
-				}
-			})
+			tx, client, wallet, err := s.sendTx(ctx, txIdx, onComplete)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -215,36 +170,21 @@ func (s *Scenario) Run(ctx context.Context) error {
 			if wallet != nil {
 				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 			}
-			if lastChan != nil {
-				<-lastChan
-				close(lastChan)
-			}
-			if err != nil {
-				logger.Warnf("could not send transaction: %v", err)
-				return
-			}
 
-			txCount.Add(1)
-			logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
-		}(txIdx, lastChan, currentChan)
-
-		lastChan = currentChan
-
-		count := txCount.Load() + uint64(pendingCount.Load())
-		if s.options.TotalCount > 0 && count >= s.options.TotalCount {
-			break
-		}
-	}
-
-	if lastChan != nil {
-		<-lastChan
-		close(lastChan)
-	}
+			return func() {
+				if err != nil {
+					logger.Warnf("could not send transaction: %v", err)
+				} else {
+					logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+				}
+			}, err
+		},
+	})
 
 	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
 	s.pendingWGroup.Wait()
 
-	return nil
+	return err
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
