@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/sirupsen/logrus"
 )
 
@@ -24,8 +23,8 @@ type ClientPool struct {
 	ctx            context.Context
 	rpcHosts       []string
 	logger         logrus.FieldLogger
-	allClients     []*txbuilder.Client
-	goodClients    []*txbuilder.Client
+	allClients     []*Client
+	goodClients    []*Client
 	chainId        *big.Int
 	selectionMutex sync.Mutex
 	rrClientIdx    int
@@ -40,11 +39,11 @@ func NewClientPool(ctx context.Context, rpcHosts []string, logger logrus.FieldLo
 }
 
 func (pool *ClientPool) PrepareClients() error {
-	pool.allClients = make([]*txbuilder.Client, 0)
+	pool.allClients = make([]*Client, 0)
 
 	var chainId *big.Int
 	for _, rpcHost := range pool.rpcHosts {
-		client, err := txbuilder.NewClient(rpcHost)
+		client, err := NewClient(rpcHost)
 		if err != nil {
 			pool.logger.Errorf("failed creating client for '%v': %v", client.GetRPCHost(), err.Error())
 			continue
@@ -113,7 +112,7 @@ func (pool *ClientPool) watchClientStatus() error {
 
 	for idx, client := range pool.allClients {
 		wg.Add(1)
-		go func(idx int, client *txbuilder.Client) {
+		go func(idx int, client *Client) {
 			defer wg.Done()
 
 			blockHeight, err := client.GetBlockHeight(pool.ctx)
@@ -131,7 +130,7 @@ func (pool *ClientPool) watchClientStatus() error {
 	}
 	wg.Wait()
 
-	goodClients := make([]*txbuilder.Client, 0)
+	goodClients := make([]*Client, 0)
 	goodHead := highestHead
 	if goodHead > 2 {
 		goodHead -= 2
@@ -147,7 +146,7 @@ func (pool *ClientPool) watchClientStatus() error {
 	return nil
 }
 
-func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group string) *txbuilder.Client {
+func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group string) *Client {
 	pool.selectionMutex.Lock()
 	defer pool.selectionMutex.Unlock()
 
@@ -155,7 +154,7 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 		return nil
 	}
 
-	clientCandidates := make([]*txbuilder.Client, 0)
+	clientCandidates := make([]*Client, 0)
 
 	if group == "" {
 		for _, client := range pool.goodClients {
@@ -194,14 +193,14 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 	return clientCandidates[input]
 }
 
-func (pool *ClientPool) GetAllClients() []*txbuilder.Client {
-	clients := make([]*txbuilder.Client, len(pool.allClients))
+func (pool *ClientPool) GetAllClients() []*Client {
+	clients := make([]*Client, len(pool.allClients))
 	copy(clients, pool.allClients)
 	return clients
 }
 
-func (pool *ClientPool) GetAllGoodClients() []*txbuilder.Client {
-	clients := make([]*txbuilder.Client, len(pool.goodClients))
+func (pool *ClientPool) GetAllGoodClients() []*Client {
+	clients := make([]*Client, len(pool.goodClients))
 	copy(clients, pool.goodClients)
 	return clients
 }

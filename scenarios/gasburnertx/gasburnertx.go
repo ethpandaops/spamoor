@@ -203,7 +203,7 @@ func (s *Scenario) trimGeasOpcodes(opcodesGeas string) string {
 	return opcodesGeas
 }
 
-func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*types.Receipt, *txbuilder.Client, error) {
+func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*types.Receipt, *spamoor.Client, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
@@ -351,7 +351,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 	txWg := sync.WaitGroup{}
 	txWg.Add(1)
 
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     10,
 		RebroadcastInterval: 30 * time.Second,
@@ -375,7 +375,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 	return txReceipt, client, nil
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
@@ -415,7 +415,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		tipCap = big.NewInt(1000000000)
 	}
 
-	gasBurnerContract, err := s.GetGasBurner(client)
+	gasBurnerContract, err := contract.NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
 	if err != nil {
 		return nil, nil, wallet, err
 	}
@@ -438,7 +438,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:              client,
 		MaxRebroadcasts:     rebroadcast,
 		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
@@ -469,7 +469,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, len(receipt.Logs))
 		},
-		LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
+		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName())
 			if retry > 0 {
 				logger = logger.WithField("retry", retry)
@@ -492,8 +492,4 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	}
 
 	return tx, client, wallet, nil
-}
-
-func (s *Scenario) GetGasBurner(client *txbuilder.Client) (*contract.GasBurner, error) {
-	return contract.NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
 }

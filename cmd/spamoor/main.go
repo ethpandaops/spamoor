@@ -14,7 +14,6 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -133,22 +132,18 @@ func main() {
 	}
 
 	// prepare txpool
-	txpool := txbuilder.NewTxPool(&txbuilder.TxPoolOptions{
-		GetClientFn: func(index int, random bool) *txbuilder.Client {
-			mode := spamoor.SelectClientByIndex
-			if random {
-				mode = spamoor.SelectClientRandom
-			}
+	var walletPool *spamoor.WalletPool
 
-			return clientPool.GetClient(mode, index, "")
-		},
-		GetClientCountFn: func() int {
-			return len(clientPool.GetAllClients())
+	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		GetActiveWalletPools: func() []*spamoor.WalletPool {
+			return []*spamoor.WalletPool{walletPool}
 		},
 	})
 
 	// init wallet pool
-	walletPool := spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
+	walletPool = spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
 	walletPool.SetWalletCount(100)
 	walletPool.SetRefillAmount(utils.EtherToWei(uint256.NewInt(cliArgs.refillAmount)))
 	walletPool.SetRefillBalance(utils.EtherToWei(uint256.NewInt(cliArgs.refillBalance)))

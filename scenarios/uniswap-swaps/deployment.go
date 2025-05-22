@@ -200,7 +200,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			Gas:       800000,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployPairLiquidityProvider(transactOpts, client.GetEthClient(), ownerWallet.GetAddress(), u.walletPool.GetRootWallet().GetAddress(), deploymentInfo.UniswapRouterAAddr, deploymentInfo.UniswapRouterBAddr, deploymentInfo.Weth9Addr)
+			_, deployTx, _, err := contract.DeployPairLiquidityProvider(transactOpts, client.GetEthClient(), ownerWallet.GetAddress(), u.walletPool.GetRootWallet().GetWallet().GetAddress(), deploymentInfo.UniswapRouterAAddr, deploymentInfo.UniswapRouterBAddr, deploymentInfo.Weth9Addr)
 			return deployTx, err
 		})
 		if err != nil {
@@ -262,7 +262,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 				Gas:       200000,
 				Value:     uint256.NewInt(0),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return pairInfo.Dai.Rely(transactOpts, u.walletPool.GetRootWallet().GetAddress())
+				return pairInfo.Dai.Rely(transactOpts, u.walletPool.GetRootWallet().GetWallet().GetAddress())
 			})
 			if err != nil {
 				return nil, fmt.Errorf("could not make owner wallet a minter for the Dai: %w", err)
@@ -326,10 +326,13 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			if endIdx > len(deploymentTxs) {
 				endIdx = len(deploymentTxs)
 			}
-			err := u.walletPool.SendTxRange(deploymentTxs[txIdx:endIdx], client, deployerWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				if err != nil {
-					u.logger.Warnf("could not send deployment tx %v: %v", tx.Hash().String(), err)
-				}
+			err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, deployerWallet, deploymentTxs[txIdx:endIdx], &spamoor.SendTransactionOptions{
+				Client: client,
+				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+					if err != nil {
+						u.logger.Warnf("could not send deployment tx %v: %v", tx.Hash().String(), err)
+					}
+				},
 			})
 			if err != nil {
 				return nil, fmt.Errorf("could not send deployment txs: %w", err)
@@ -340,14 +343,14 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	// provide liquidity to the pairs
 	rootWallet := u.walletPool.GetRootWallet()
-	err = rootWallet.WithWalletLock(func() {
+	err = rootWallet.WithWalletLock(u.ctx, len(deploymentInfo.Pairs), func() {
 		u.logger.Infof("root wallet is locked, waiting for other funding txs to finish...")
 	}, func() error {
 		liquidityTxs := []*types.Transaction{}
 		daiLiquidity := new(big.Int).Mul(u.options.EthLiquidityPerPair.ToBig(), big.NewInt(int64(u.options.DaiLiquidityFactor)))
 
 		for _, pairInfo := range deploymentInfo.Pairs {
-			tx, err := rootWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+			tx, err := rootWallet.GetWallet().BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
 				Gas:       6000000,
@@ -372,10 +375,13 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 				if endIdx > len(liquidityTxs) {
 					endIdx = len(liquidityTxs)
 				}
-				err := u.walletPool.SendTxRange(liquidityTxs[txIdx:endIdx], client, rootWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
-					if err != nil {
-						u.logger.Warnf("could not send liquidity tx %v: %v", tx.Hash().String(), err)
-					}
+				err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, rootWallet.GetWallet(), liquidityTxs[txIdx:endIdx], &spamoor.SendTransactionOptions{
+					Client: client,
+					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+						if err != nil {
+							u.logger.Warnf("could not send liquidity tx %v: %v", tx.Hash().String(), err)
+						}
+					},
 				})
 				if err != nil {
 					return fmt.Errorf("could not send liquidity txs: %w", err)
