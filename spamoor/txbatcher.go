@@ -51,9 +51,12 @@ loop:
 	CALLDATALOAD      ;; [calldata, 0, 0, 0, 0, offset]
 
 	;; get amount
-	DUP1              ;; [calldata, calldata, 0, 0, 0, 0, offset]
-	PUSH 0xFFFFFFFFFFFFFFFFFFFFFFFF  ;; [0xFFFFFFFFFFFFFFFFFFFFFFFF, calldata, calldata, 0, 0, 0, 0, offset]
-	AND               ;; [amount, calldata, 0, 0, 0, 0, offset]
+	PUSH 160          ;; [160, calldata, 0, 0, 0, 0, offset]
+	DUP2              ;; [calldata, 160, calldata, 0, 0, 0, 0, offset]
+	DUP2              ;; [160, calldata, 160, calldata, 0, 0, 0, 0, offset]
+	SHL               ;; [calldata<<160, 160, calldata, 0, 0, 0, 0, offset]
+	SWAP1             ;; [160, calldata<<160, calldata, 0, 0, 0, 0, offset]
+	SHR               ;; [amount, calldata, 0, 0, 0, 0, offset]
 	
 	;; get address
 	SWAP1             ;; [calldata, amount, 0, 0, 0, 0, offset]
@@ -61,9 +64,9 @@ loop:
 	SHR               ;; [address, amount, 0, 0, 0, 0, offset]
 	
 	;; forward funds
-	PUSH 30000         ;; [30000, address, amount, 0, 0, 0, 0, offset]
-	CALL               ;; [success, offset]
-	POP                ;; [offset]
+	PUSH 30000        ;; [30000, address, amount, 0, 0, 0, 0, offset]
+	CALL              ;; [success, offset]
+	POP               ;; [offset]
 
 	;; increase offset
 	PUSH 32           ;; [32, offset]
@@ -72,6 +75,22 @@ loop:
 	jump @loop
 
 exit:
+	SELFBALANCE       ;; [selfbalance]
+	DUP1              ;; [selfbalance, selfbalance]
+	ISZERO            ;; [selfbalance == 0, selfbalance]
+	JUMPI @exit2      ;; [selfbalance]
+
+	;; return leftover funds
+	PUSH 0            ;; [0, selfbalance]
+	PUSH 0            ;; [0, 0, selfbalance]
+	PUSH 0            ;; [0, 0, 0, selfbalance]
+	PUSH 0            ;; [0, 0, 0, 0, selfbalance]
+	SWAP4             ;; [selfbalance, 0, 0, 0, 0]
+	CALLER            ;; [caller, selfbalance, 0, 0, 0, 0]
+	GAS               ;; [gas, caller, selfbalance, 0, 0, 0, 0]
+	CALL              ;; [success]
+
+exit2:
 	STOP
 `
 
