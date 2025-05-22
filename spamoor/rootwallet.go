@@ -2,16 +2,21 @@ package spamoor
 
 import (
 	"context"
+	"sync"
 
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
-func InitRootWallet(ctx context.Context, privkey string, client *txbuilder.Client, logger logrus.FieldLogger) (*txbuilder.Wallet, error) {
-	rootWallet, err := txbuilder.NewWallet(privkey)
+type RootWallet struct {
+	wallet     *Wallet
+	walletLock sync.Mutex
+}
+
+func InitRootWallet(ctx context.Context, privkey string, client *Client, logger logrus.FieldLogger) (*RootWallet, error) {
+	rootWallet, err := NewWallet(privkey)
 	if err != nil {
 		return nil, err
 	}
@@ -30,5 +35,24 @@ func InitRootWallet(ctx context.Context, privkey string, client *txbuilder.Clien
 		)
 	}
 
-	return rootWallet, nil
+	return &RootWallet{
+		wallet: rootWallet,
+	}, nil
+}
+
+func (wallet *RootWallet) GetWallet() *Wallet {
+	return wallet.wallet
+}
+
+func (wallet *RootWallet) WithWalletLock(lockedLogFn func(), lockedFn func() error) error {
+	if !wallet.walletLock.TryLock() {
+		if lockedLogFn != nil {
+			lockedLogFn()
+		}
+		wallet.walletLock.Lock()
+	}
+
+	defer wallet.walletLock.Unlock()
+
+	return lockedFn()
 }

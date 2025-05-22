@@ -1,4 +1,4 @@
-package txbuilder
+package spamoor
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 )
@@ -30,8 +31,6 @@ type Wallet struct {
 	txNonceChans     map[uint64]*nonceStatus
 	txNonceMutex     sync.Mutex
 	lastConfirmation uint64
-
-	walletLock sync.Mutex
 }
 
 type nonceStatus struct {
@@ -172,7 +171,7 @@ func (wallet *Wallet) BuildSetCodeTx(txData *types.SetCodeTx) (*types.Transactio
 	return wallet.signTx(txData)
 }
 
-func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *TxMetadata, buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
+func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMetadata, buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
 	transactor, err := bind.NewKeyedTransactorWithChainID(wallet.privkey, wallet.chainid)
 	if err != nil {
 		return nil, err
@@ -256,17 +255,4 @@ func (wallet *Wallet) getTxNonceChan(targetNonce uint64) (*nonceStatus, bool) {
 	wallet.txNonceChans[targetNonce] = nonceChan
 
 	return nonceChan, len(wallet.txNonceChans) == 1
-}
-
-func (wallet *Wallet) WithWalletLock(lockedLogFn func(), lockedFn func() error) error {
-	if !wallet.walletLock.TryLock() {
-		if lockedLogFn != nil {
-			lockedLogFn()
-		}
-		wallet.walletLock.Lock()
-	}
-
-	defer wallet.walletLock.Unlock()
-
-	return lockedFn()
 }

@@ -1,4 +1,4 @@
-package txbuilder
+package spamoor
 
 import (
 	"bytes"
@@ -38,8 +38,6 @@ type TxInfo struct {
 
 type TxPool struct {
 	options          *TxPoolOptions
-	wallets          map[common.Address]*Wallet
-	walletsMutex     sync.RWMutex
 	processStaleChan chan uint64
 	lastBlockNumber  uint64
 
@@ -54,10 +52,10 @@ type TxPool struct {
 }
 
 type TxPoolOptions struct {
-	Context          context.Context
-	GetClientFn      func(index int, random bool) *Client
-	GetClientCountFn func() int
-	ReorgDepth       int // Number of blocks to keep in memory for reorg tracking
+	Context              context.Context
+	ClientPool           *ClientPool
+	ReorgDepth           int // Number of blocks to keep in memory for reorg tracking
+	GetActiveWalletPools func() []*WalletPool
 }
 
 type TxConfirmFn func(tx *types.Transaction, receipt *types.Receipt, err error)
@@ -66,6 +64,7 @@ type TxRebroadcastFn func(tx *types.Transaction, options *SendTransactionOptions
 
 type SendTransactionOptions struct {
 	Client             *Client
+	ClientGroup        string
 	ClientsStartOffset int
 
 	OnConfirm     TxConfirmFn
@@ -80,7 +79,6 @@ type SendTransactionOptions struct {
 func NewTxPool(options *TxPoolOptions) *TxPool {
 	pool := &TxPool{
 		options:          options,
-		wallets:          map[common.Address]*Wallet{},
 		processStaleChan: make(chan uint64, 1),
 		blocks:           map[uint64]*BlockInfo{},
 		confirmedTxs:     map[uint64][]*TxInfo{},
@@ -156,38 +154,38 @@ func (pool *TxPool) processStaleTransactionsLoop() {
 		case <-pool.options.Context.Done():
 			return
 		case blockNumber := <-pool.processStaleChan:
-			pool.walletsMutex.RLock()
-			wallets := make([]*Wallet, 0, len(pool.wallets))
-			for _, wallet := range pool.wallets {
-				wallets = append(wallets, wallet)
-			}
-			pool.walletsMutex.RUnlock()
-
-			for _, wallet := range wallets {
+			for _, wallet := range pool.getWalletMap() {
 				pool.processStaleConfirmations(blockNumber, wallet)
 			}
 		}
 	}
 }
 
+func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
+	walletMap := map[common.Address]*Wallet{}
+	walletPools := pool.options.GetActiveWalletPools()
+	for _, walletPool := range walletPools {
+		walletPool.collectPoolWallets(walletMap)
+	}
+	return walletMap
+}
+
 func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumber uint64) error {
 	pool.lastBlockNumber = blockNumber
 
-	pool.walletsMutex.RLock()
-	walletsLen := len(pool.wallets)
-	var chainId *big.Int
-	if walletsLen > 0 {
-		for _, wallet := range pool.wallets {
-			if wallet.chainid == nil {
-				continue
-			}
-			chainId = wallet.chainid
-			break
-		}
-	}
-	pool.walletsMutex.RUnlock()
+	walletPools := pool.options.GetActiveWalletPools()
+	walletMap := map[common.Address]*Wallet{}
 
-	if walletsLen == 0 {
+	var chainId *big.Int
+	for _, walletPool := range walletPools {
+		if walletPool.GetChainId() == nil {
+			continue
+		}
+		chainId = walletPool.GetChainId()
+		walletPool.collectPoolWallets(walletMap)
+	}
+
+	if len(walletMap) == 0 {
 		return nil
 	}
 
@@ -206,7 +204,7 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 			blockNumber, lastBlock.Hash.Hex(), blockBody.ParentHash().Hex())
 
 		// Handle reorg
-		pool.handleReorg(ctx, client, blockNumber, blockBody, chainId)
+		pool.handleReorg(ctx, client, blockNumber, blockBody, chainId, walletMap)
 	}
 
 	// Store block info
@@ -224,10 +222,10 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 	pool.blocksMutex.Unlock()
 
-	return pool.processBlockTxs(ctx, client, blockNumber, blockBody, chainId)
+	return pool.processBlockTxs(ctx, client, blockNumber, blockBody, chainId, walletMap)
 }
 
-func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockBody *types.Block, chainId *big.Int) error {
+func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockBody *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
 	t1 := time.Now()
 	txCount := len(blockBody.Transactions())
 	receipts, err := pool.getBlockReceipts(ctx, client, blockNumber, txCount)
@@ -240,7 +238,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 
 	signer := types.LatestSignerForChainID(chainId)
 	confirmCount := 0
-	walletMap := map[common.Address]bool{}
+	affectedWalletMap := map[common.Address]bool{}
 
 	for idx, tx := range blockBody.Transactions() {
 		receipt := receipts[idx]
@@ -256,11 +254,11 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		}
 
 		txHash := tx.Hash()
-		fromWallet := pool.getWallet(txFrom)
+		fromWallet := walletMap[txFrom]
 		toAddr := tx.To()
 		toWallet := (*Wallet)(nil)
 		if toAddr != nil {
-			toWallet = pool.getWallet(*toAddr)
+			toWallet = walletMap[*toAddr]
 		}
 
 		if fromWallet != nil || toWallet != nil {
@@ -278,7 +276,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 
 		if fromWallet != nil {
 			confirmCount++
-			walletMap[txFrom] = true
+			affectedWalletMap[txFrom] = true
 			pool.processTransactionInclusion(blockNumber, fromWallet, tx, receipt)
 		}
 
@@ -299,13 +297,13 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		pool.txsMutex.Unlock()
 	}
 
-	logrus.Infof("processed block %v:  %v total tx, %v tx confirmed from %v wallets (%v, %v)", blockNumber, txCount, confirmCount, len(walletMap), loadingTime, time.Since(t1))
+	logrus.Infof("processed block %v:  %v total tx, %v tx confirmed from %v wallets (%v, %v)", blockNumber, txCount, confirmCount, len(affectedWalletMap), loadingTime, time.Since(t1))
 
 	return nil
 }
 
 func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
-	clientCount := pool.options.GetClientCountFn()
+	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 	wg := &sync.WaitGroup{}
 
 	highestBlockNumber := uint64(0)
@@ -316,7 +314,7 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 	highestBlockNumberClients := []*Client{}
 
 	for i := 0; i < clientCount; i++ {
-		client := pool.options.GetClientFn(i, false)
+		client := pool.options.ClientPool.GetClient(SelectClientByIndex, i, "")
 		if client == nil {
 			continue
 		}
@@ -379,12 +377,6 @@ func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockN
 	return nil, receiptErr
 }
 
-func (pool *TxPool) getWallet(address common.Address) *Wallet {
-	pool.walletsMutex.RLock()
-	defer pool.walletsMutex.RUnlock()
-	return pool.wallets[address]
-}
-
 func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions) error {
 	return pool.addPendingTransaction(ctx, wallet, tx, options, true)
 }
@@ -437,11 +429,11 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 	}
 
 	if submitNow {
-		clientCount := pool.options.GetClientCountFn()
+		clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 		for i := 0; i < clientCount; i++ {
 			client := options.Client
 			if client == nil || i > 0 {
-				client = pool.options.GetClientFn(i+options.ClientsStartOffset, false)
+				client = pool.options.ClientPool.GetClient(SelectClientByIndex, i+options.ClientsStartOffset, options.ClientGroup)
 			}
 			if client == nil {
 				continue
@@ -476,9 +468,9 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 				case <-time.After(options.RebroadcastInterval):
 				}
 
-				clientCount := pool.options.GetClientCountFn()
+				clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 				for j := 0; j < clientCount; j++ {
-					client := pool.options.GetClientFn(i+j+options.ClientsStartOffset+1, false)
+					client := pool.options.ClientPool.GetClient(SelectClientByIndex, i+j+options.ClientsStartOffset+1, options.ClientGroup)
 					if client == nil {
 						continue
 					}
@@ -509,10 +501,6 @@ func (pool *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *ty
 }
 
 func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, wg *sync.WaitGroup) (*types.Receipt, error) {
-	pool.walletsMutex.Lock()
-	pool.wallets[wallet.address] = wallet
-	pool.walletsMutex.Unlock()
-
 	txHash := tx.Hash()
 	nonceChan, isFirstPendingTx := wallet.getTxNonceChan(tx.Nonce())
 
@@ -578,7 +566,7 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 		var lastNonce uint64
 		var err error
 		for retry := 0; retry < 3; retry++ {
-			client := pool.options.GetClientFn(retry, true)
+			client := pool.options.ClientPool.GetClient(SelectClientRandom, retry, "")
 			if client == nil {
 				continue
 			}
@@ -618,7 +606,7 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 	retryCount := uint64(0)
 
 	for {
-		client := pool.options.GetClientFn(int(retryCount), true)
+		client := pool.options.ClientPool.GetClient(SelectClientRandom, int(retryCount), "")
 		if client == nil {
 			return nil
 		}
@@ -655,7 +643,7 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 }
 
 // handleReorg handles a chain reorganization
-func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlock *types.Block, chainId *big.Int) error {
+func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlock *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
 	newBlockParents := []*types.Block{}
 
 	// let's assume a reorg of 2 blocks:
@@ -763,7 +751,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	// re-process the new parent blocks
 	slices.Reverse(newBlockParents)
 	for _, parentBlock := range newBlockParents {
-		pool.processBlockTxs(ctx, client, parentBlock.NumberU64(), parentBlock, chainId)
+		pool.processBlockTxs(ctx, client, parentBlock.NumberU64(), parentBlock, chainId, walletMap)
 	}
 
 	return nil

@@ -13,7 +13,6 @@ import (
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/ethpandaops/spamoor/webui"
 	"github.com/ethpandaops/spamoor/webui/types"
@@ -113,18 +112,9 @@ func main() {
 	}
 
 	// prepare txpool
-	txpool := txbuilder.NewTxPool(&txbuilder.TxPoolOptions{
-		GetClientFn: func(index int, random bool) *txbuilder.Client {
-			mode := spamoor.SelectClientByIndex
-			if random {
-				mode = spamoor.SelectClientRandom
-			}
-
-			return clientPool.GetClient(mode, index, "")
-		},
-		GetClientCountFn: func() int {
-			return len(clientPool.GetAllClients())
-		},
+	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
 	})
 
 	// init daemon

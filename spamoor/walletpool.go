@@ -47,15 +47,20 @@ type WalletPool struct {
 	ctx        context.Context
 	config     WalletPoolConfig
 	logger     logrus.FieldLogger
-	rootWallet *txbuilder.Wallet
+	rootWallet *RootWallet
 	clientPool *ClientPool
-	txpool     *txbuilder.TxPool
+	txpool     *TxPool
 
-	childWallets     []*txbuilder.Wallet
+	childWallets     []*Wallet
 	wellKnownNames   []*WellKnownWalletConfig
-	wellKnownWallets map[string]*txbuilder.Wallet
+	wellKnownWallets map[string]*Wallet
 	selectionMutex   sync.Mutex
 	rrWalletIdx      int
+}
+
+type FundingRequest struct {
+	Wallet *Wallet
+	Amount *uint256.Int
 }
 
 func GetDefaultWalletConfig(scenarioName string) *WalletPoolConfig {
@@ -68,15 +73,15 @@ func GetDefaultWalletConfig(scenarioName string) *WalletPoolConfig {
 	}
 }
 
-func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *txbuilder.Wallet, clientPool *ClientPool, txpool *txbuilder.TxPool) *WalletPool {
+func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *RootWallet, clientPool *ClientPool, txpool *TxPool) *WalletPool {
 	return &WalletPool{
 		ctx:              ctx,
 		logger:           logger,
 		rootWallet:       rootWallet,
 		clientPool:       clientPool,
 		txpool:           txpool,
-		childWallets:     make([]*txbuilder.Wallet, 0),
-		wellKnownWallets: make(map[string]*txbuilder.Wallet),
+		childWallets:     make([]*Wallet, 0),
+		wellKnownWallets: make(map[string]*Wallet),
 	}
 }
 
@@ -84,7 +89,7 @@ func (pool *WalletPool) GetContext() context.Context {
 	return pool.ctx
 }
 
-func (pool *WalletPool) GetTxPool() *txbuilder.TxPool {
+func (pool *WalletPool) GetTxPool() *TxPool {
 	return pool.txpool
 }
 
@@ -92,8 +97,12 @@ func (pool *WalletPool) GetClientPool() *ClientPool {
 	return pool.clientPool
 }
 
-func (pool *WalletPool) GetRootWallet() *txbuilder.Wallet {
+func (pool *WalletPool) GetRootWallet() *RootWallet {
 	return pool.rootWallet
+}
+
+func (pool *WalletPool) GetChainId() *big.Int {
+	return pool.rootWallet.wallet.GetChainId()
 }
 
 func (pool *WalletPool) LoadConfig(configYaml string) error {
@@ -138,11 +147,11 @@ func (pool *WalletPool) SetRefillInterval(interval uint64) {
 	pool.config.RefillInterval = interval
 }
 
-func (pool *WalletPool) GetClient(mode ClientSelectionMode, input int, group string) *txbuilder.Client {
+func (pool *WalletPool) GetClient(mode ClientSelectionMode, input int, group string) *Client {
 	return pool.clientPool.GetClient(mode, input, group)
 }
 
-func (pool *WalletPool) GetWallet(mode WalletSelectionMode, input int) *txbuilder.Wallet {
+func (pool *WalletPool) GetWallet(mode WalletSelectionMode, input int) *Wallet {
 	pool.selectionMutex.Lock()
 	defer pool.selectionMutex.Unlock()
 
@@ -165,12 +174,12 @@ func (pool *WalletPool) GetWallet(mode WalletSelectionMode, input int) *txbuilde
 	return pool.childWallets[input]
 }
 
-func (pool *WalletPool) GetWellKnownWallet(name string) *txbuilder.Wallet {
+func (pool *WalletPool) GetWellKnownWallet(name string) *Wallet {
 	return pool.wellKnownWallets[name]
 }
 
 func (pool *WalletPool) GetWalletName(address common.Address) string {
-	if pool.rootWallet.GetAddress() == address {
+	if pool.rootWallet.wallet.GetAddress() == address {
 		return "root"
 	}
 
@@ -190,8 +199,8 @@ func (pool *WalletPool) GetWalletName(address common.Address) string {
 	return "unknown"
 }
 
-func (pool *WalletPool) GetAllWallets() []*txbuilder.Wallet {
-	wallets := make([]*txbuilder.Wallet, len(pool.childWallets)+len(pool.wellKnownWallets))
+func (pool *WalletPool) GetAllWallets() []*Wallet {
+	wallets := make([]*Wallet, len(pool.childWallets)+len(pool.wellKnownWallets))
 	for i, config := range pool.wellKnownNames {
 		wallets[i] = pool.wellKnownWallets[config.Name]
 	}
@@ -227,9 +236,9 @@ func (pool *WalletPool) prepareWalletsLocked(runFundings bool) error {
 	seed := pool.config.WalletSeed
 
 	if pool.config.WalletCount == 0 && len(pool.wellKnownWallets) == 0 {
-		pool.childWallets = make([]*txbuilder.Wallet, 0)
+		pool.childWallets = make([]*Wallet, 0)
 	} else {
-		var client *txbuilder.Client
+		var client *Client
 		var fundingTxs []*types.Transaction
 
 		for i := 0; i < 3; i++ {
@@ -238,7 +247,7 @@ func (pool *WalletPool) prepareWalletsLocked(runFundings bool) error {
 				return fmt.Errorf("no client available")
 			}
 
-			pool.childWallets = make([]*txbuilder.Wallet, 0, pool.config.WalletCount)
+			pool.childWallets = make([]*Wallet, 0, pool.config.WalletCount)
 			fundingTxs = make([]*types.Transaction, 0, pool.config.WalletCount)
 
 			var walletErr error
@@ -328,7 +337,7 @@ func (pool *WalletPool) prepareWalletsLocked(runFundings bool) error {
 					if endIdx > len(fundingTxList) {
 						endIdx = len(fundingTxList)
 					}
-					err := pool.SendTxRange(fundingTxList[txIdx:endIdx], client, pool.rootWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
+					err := pool.SendTxRange(fundingTxList[txIdx:endIdx], client, pool.rootWallet.wallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
 						if err != nil {
 							pool.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
 						}
@@ -361,27 +370,27 @@ func (pool *WalletPool) prepareWalletsLocked(runFundings bool) error {
 	return nil
 }
 
-func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *txbuilder.Client, seed string, runFunding bool) (*txbuilder.Wallet, *types.Transaction, error) {
+func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *Client, seed string, runFunding bool) (*Wallet, *types.Transaction, error) {
 	idxBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(idxBytes, childIdx)
 	if seed != "" {
 		seedBytes := []byte(seed)
 		idxBytes = append(idxBytes, seedBytes...)
 	}
-	parentKey := crypto.FromECDSA(pool.rootWallet.GetPrivateKey())
+	parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
 	childKey := sha256.Sum256(append(parentKey, idxBytes...))
 
 	return pool.prepareWallet(fmt.Sprintf("%x", childKey), client, runFunding, pool.config.RefillAmount, pool.config.RefillBalance)
 }
 
-func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, client *txbuilder.Client, seed string, runFunding bool) (*txbuilder.Wallet, *types.Transaction, error) {
+func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, client *Client, seed string, runFunding bool) (*Wallet, *types.Transaction, error) {
 	idxBytes := make([]byte, len(config.Name))
 	copy(idxBytes, config.Name)
 	if seed != "" {
 		seedBytes := []byte(seed)
 		idxBytes = append(idxBytes, seedBytes...)
 	}
-	parentKey := crypto.FromECDSA(pool.rootWallet.GetPrivateKey())
+	parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
 	childKey := sha256.Sum256(append(parentKey, idxBytes...))
 
 	refillAmount := pool.config.RefillAmount
@@ -397,8 +406,8 @@ func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, cl
 	return pool.prepareWallet(fmt.Sprintf("%x", childKey), client, runFunding, refillAmount, refillBalance)
 }
 
-func (pool *WalletPool) prepareWallet(privkey string, client *txbuilder.Client, runFunding bool, refillAmount *uint256.Int, refillBalance *uint256.Int) (*txbuilder.Wallet, *types.Transaction, error) {
-	childWallet, err := txbuilder.NewWallet(privkey)
+func (pool *WalletPool) prepareWallet(privkey string, client *Client, runFunding bool, refillAmount *uint256.Int, refillBalance *uint256.Int) (*Wallet, *types.Transaction, error) {
+	childWallet, err := NewWallet(privkey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -446,8 +455,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 	}
 
 	return pool.rootWallet.WithWalletLock(nil, func() error {
-
-		err := client.UpdateWallet(pool.ctx, pool.rootWallet)
+		err := client.UpdateWallet(pool.ctx, pool.rootWallet.wallet)
 		if err != nil {
 			return err
 		}
@@ -467,7 +475,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 
 			wg.Add(1)
 			wl <- true
-			go func(idx int, childWallet *txbuilder.Wallet, config *WellKnownWalletConfig) {
+			go func(idx int, childWallet *Wallet, config *WellKnownWalletConfig) {
 				defer func() {
 					<-wl
 					wg.Done()
@@ -573,7 +581,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 				if endIdx > len(fundingTxList) {
 					endIdx = len(fundingTxList)
 				}
-				err := pool.SendTxRange(fundingTxList[txIdx:endIdx], client, pool.rootWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				err := pool.SendTxRange(fundingTxList[txIdx:endIdx], client, pool.rootWallet.wallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
 					if err != nil {
 						pool.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
 					}
@@ -591,7 +599,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 	})
 }
 
-func (pool *WalletPool) CheckChildWalletBalance(childWallet *txbuilder.Wallet) (*types.Transaction, error) {
+func (pool *WalletPool) CheckChildWalletBalance(childWallet *Wallet) (*types.Transaction, error) {
 	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
 	if client == nil {
 		return nil, fmt.Errorf("no client available")
@@ -628,7 +636,7 @@ func (pool *WalletPool) CheckChildWalletBalance(childWallet *txbuilder.Wallet) (
 		wg.Add(1)
 		var confirmErr error
 
-		err := pool.txpool.SendTransaction(pool.ctx, childWallet, tx, &txbuilder.SendTransactionOptions{
+		err := pool.txpool.SendTransaction(pool.ctx, childWallet, tx, &SendTransactionOptions{
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				if err != nil {
 					confirmErr = err
@@ -649,7 +657,7 @@ func (pool *WalletPool) CheckChildWalletBalance(childWallet *txbuilder.Wallet) (
 	return tx, nil
 }
 
-func (pool *WalletPool) buildWalletFundingTx(childWallet *txbuilder.Wallet, client *txbuilder.Client, refillAmount *uint256.Int, refillBalance *uint256.Int) (*types.Transaction, error) {
+func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client, refillAmount *uint256.Int, refillBalance *uint256.Int) (*types.Transaction, error) {
 	if childWallet.GetBalance().Cmp(refillBalance.ToBig()) >= 0 {
 		// no refill needed
 		return nil, nil
@@ -683,21 +691,21 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *txbuilder.Wallet, clie
 	if err != nil {
 		return nil, err
 	}
-	tx, err := pool.rootWallet.BuildDynamicFeeTx(refillTx)
+	tx, err := pool.rootWallet.wallet.BuildDynamicFeeTx(refillTx)
 	if err != nil {
 		return nil, err
 	}
 	return tx, nil
 }
 
-func (pool *WalletPool) SendTxRange(txList []*types.Transaction, client *txbuilder.Client, wallet *txbuilder.Wallet, confirmCb func(tx *types.Transaction, receipt *types.Receipt, err error)) error {
+func (pool *WalletPool) SendTxRange(txList []*types.Transaction, client *Client, wallet *Wallet, confirmCb func(tx *types.Transaction, receipt *types.Receipt, err error)) error {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	for idx := range txList {
 		err := func(idx int) error {
 			tx := txList[idx]
 
-			return pool.txpool.SendTransaction(pool.ctx, wallet, tx, &txbuilder.SendTransactionOptions{
+			return pool.txpool.SendTransaction(pool.ctx, wallet, tx, &SendTransactionOptions{
 				Client: client,
 				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 					defer wg.Done()
@@ -742,4 +750,13 @@ func (pool *WalletPool) SendTxRange(txList []*types.Transaction, client *txbuild
 	wg.Done()
 	wg.Wait()
 	return nil
+}
+
+func (pool *WalletPool) collectPoolWallets(walletMap map[common.Address]*Wallet) {
+	for _, wallet := range pool.childWallets {
+		walletMap[wallet.GetAddress()] = wallet
+	}
+	for _, wallet := range pool.wellKnownWallets {
+		walletMap[wallet.GetAddress()] = wallet
+	}
 }

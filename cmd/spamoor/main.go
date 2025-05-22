@@ -14,7 +14,6 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -133,18 +132,9 @@ func main() {
 	}
 
 	// prepare txpool
-	txpool := txbuilder.NewTxPool(&txbuilder.TxPoolOptions{
-		GetClientFn: func(index int, random bool) *txbuilder.Client {
-			mode := spamoor.SelectClientByIndex
-			if random {
-				mode = spamoor.SelectClientRandom
-			}
-
-			return clientPool.GetClient(mode, index, "")
-		},
-		GetClientCountFn: func() int {
-			return len(clientPool.GetAllClients())
-		},
+	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
 	})
 
 	// init wallet pool

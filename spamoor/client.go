@@ -1,4 +1,4 @@
-package txbuilder
+package spamoor
 
 import (
 	"context"

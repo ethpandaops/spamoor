@@ -12,7 +12,6 @@ import (
 
 	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"gopkg.in/yaml.v3"
 )
 
@@ -21,8 +20,8 @@ type Daemon struct {
 	cancel     context.CancelFunc
 	logger     logrus.FieldLogger
 	clientPool *spamoor.ClientPool
-	rootWallet *txbuilder.Wallet
-	txpool     *txbuilder.TxPool
+	rootWallet *spamoor.RootWallet
+	txpool     *spamoor.TxPool
 	db         *db.Database
 
 	spammerIdMtx  sync.Mutex
@@ -33,7 +32,7 @@ type Daemon struct {
 	globalCfg map[string]interface{}
 }
 
-func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool *spamoor.ClientPool, rootWallet *txbuilder.Wallet, txpool *txbuilder.TxPool, db *db.Database) *Daemon {
+func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool *spamoor.ClientPool, rootWallet *spamoor.RootWallet, txpool *spamoor.TxPool, db *db.Database) *Daemon {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &Daemon{
 		ctx:        ctx,
@@ -168,7 +167,7 @@ func (d *Daemon) UpdateSpammer(id int64, name string, description string, config
 	return nil
 }
 
-func (d *Daemon) GetRootWallet() *txbuilder.Wallet {
+func (d *Daemon) GetRootWallet() *spamoor.RootWallet {
 	return d.rootWallet
 }
 
