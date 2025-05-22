@@ -442,8 +442,6 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		},
 	})
 	if err != nil {
-		s.logger.Warnf("failed to send2 blob tx %6d: %v", txIdx+1, err)
-
 		// reset nonce if tx was not sent
 		wallet.ResetPendingNonce(s.walletPool.GetContext(), client)
 
