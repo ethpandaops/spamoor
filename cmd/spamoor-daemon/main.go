@@ -114,14 +114,14 @@ func main() {
 	}
 
 	// prepare txpool
-	var spamorDaemon *daemon.Daemon
+	var spamoorDaemon *daemon.Daemon
 
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
 		Context:    ctx,
 		ClientPool: clientPool,
 		GetActiveWalletPools: func() []*spamoor.WalletPool {
 			walletPools := make([]*spamoor.WalletPool, 0)
-			for _, sp := range spamorDaemon.GetAllSpammers() {
+			for _, sp := range spamoorDaemon.GetAllSpammers() {
 				walletPool := sp.GetWalletPool()
 				if walletPool != nil {
 					walletPools = append(walletPools, walletPool)
@@ -136,9 +136,9 @@ func main() {
 	}
 
 	// init daemon
-	spamorDaemon = daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, rootWallet, txpool, database)
+	spamoorDaemon = daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, rootWallet, txpool, database)
 	if cliArgs.fuluActivation > 0 {
-		spamorDaemon.SetGlobalCfg("fulu_activation", cliArgs.fuluActivation)
+		spamoorDaemon.SetGlobalCfg("fulu_activation", cliArgs.fuluActivation)
 	}
 
 	// start frontend
@@ -149,22 +149,22 @@ func main() {
 		Debug:    cliArgs.debug,
 		Pprof:    true,
 		Minify:   true,
-	}, spamorDaemon)
+	}, spamoorDaemon)
 
 	// start daemon
-	firstLaunch, err := spamorDaemon.Run()
+	firstLaunch, err := spamoorDaemon.Run()
 	if err != nil {
 		panic(err)
 	}
 
 	// load startup spammers if configured
 	if firstLaunch && cliArgs.startupSpammer != "" {
-		startupSpammers, err := spamorDaemon.LoadStartupSpammers(cliArgs.startupSpammer, logger.WithField("module", "startup"))
+		startupSpammers, err := spamoorDaemon.LoadStartupSpammers(cliArgs.startupSpammer, logger.WithField("module", "startup"))
 		if err != nil {
 			logger.Errorf("failed to load startup spammers: %v", err)
 		} else if len(startupSpammers) > 0 {
 			logger.Infof("adding %d startup spammers", len(startupSpammers))
-			err = spamorDaemon.AddStartupSpammers(startupSpammers)
+			err = spamoorDaemon.AddStartupSpammers(startupSpammers)
 			if err != nil {
 				logger.Errorf("failed to add startup spammers: %v", err)
 			}
@@ -176,5 +176,5 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	<-c
 
-	spamorDaemon.Shutdown()
+	spamoorDaemon.Shutdown()
 }
