@@ -2,7 +2,6 @@ package spamoor
 
 import (
 	"context"
-	"sync"
 
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
@@ -11,9 +10,9 @@ import (
 )
 
 type RootWallet struct {
-	wallet     *Wallet
-	walletLock sync.Mutex
-	txbatcher  *TxBatcher
+	wallet      *Wallet
+	txbatcher   *TxBatcher
+	txSemaphore chan struct{}
 }
 
 func InitRootWallet(ctx context.Context, privkey string, client *Client, logger logrus.FieldLogger) (*RootWallet, error) {
@@ -37,7 +36,8 @@ func InitRootWallet(ctx context.Context, privkey string, client *Client, logger 
 	}
 
 	return &RootWallet{
-		wallet: rootWallet,
+		wallet:      rootWallet,
+		txSemaphore: make(chan struct{}, 200),
 	}, nil
 }
 
@@ -45,15 +45,32 @@ func (wallet *RootWallet) GetWallet() *Wallet {
 	return wallet.wallet
 }
 
-func (wallet *RootWallet) WithWalletLock(txCount int, lockedLogFn func(), lockedFn func() error) error {
-	if !wallet.walletLock.TryLock() {
+func (wallet *RootWallet) WithWalletLock(ctx context.Context, txCount int, lockedLogFn func(), lockedFn func() error) error {
+	for i := 0; i < txCount; i++ {
 		if lockedLogFn != nil {
-			lockedLogFn()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case wallet.txSemaphore <- struct{}{}:
+				continue
+			default:
+				lockedLogFn()
+				lockedLogFn = nil
+			}
 		}
-		wallet.walletLock.Lock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case wallet.txSemaphore <- struct{}{}:
+			continue
+		}
 	}
 
-	defer wallet.walletLock.Unlock()
+	defer func() {
+		for i := 0; i < txCount; i++ {
+			<-wallet.txSemaphore
+		}
+	}()
 
 	return lockedFn()
 }

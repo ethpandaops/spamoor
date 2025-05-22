@@ -577,7 +577,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		}
 	}
 
-	return pool.rootWallet.WithWalletLock(batchTxCount, func() {
+	return pool.rootWallet.WithWalletLock(pool.ctx, batchTxCount, func() {
 		pool.logger.Infof("root wallet is locked, waiting for other funding txs to finish...")
 	}, func() error {
 		txList := make([]*types.Transaction, 0, batchTxCount)

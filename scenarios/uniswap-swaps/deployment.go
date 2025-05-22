@@ -343,7 +343,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	// provide liquidity to the pairs
 	rootWallet := u.walletPool.GetRootWallet()
-	err = rootWallet.WithWalletLock(len(deploymentInfo.Pairs), func() {
+	err = rootWallet.WithWalletLock(u.ctx, len(deploymentInfo.Pairs), func() {
 		u.logger.Infof("root wallet is locked, waiting for other funding txs to finish...")
 	}, func() error {
 		liquidityTxs := []*types.Transaction{}
