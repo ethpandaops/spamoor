@@ -171,12 +171,20 @@ func randomBlobData(size int) ([]byte, error) {
 	return data, nil
 }
 
-var blobV1Marshaller func(tx *types.Transaction) ([]byte, error)
+var blobV1GenerateCellProof func(tx *types.BlobTxSidecar) ([]kzg4844.Proof, error)
+var blobV1Marshaller func(tx *types.Transaction, cellProofs []kzg4844.Proof) ([]byte, error)
 
-func MarshalBlobV1Tx(tx *types.Transaction) ([]byte, error) {
+func GenerateCellProofs(sidecar *types.BlobTxSidecar) ([]kzg4844.Proof, error) {
+	if blobV1GenerateCellProof == nil {
+		return nil, fmt.Errorf("blob-v1 not supported when using spamoor as library")
+	}
+	return blobV1GenerateCellProof(sidecar)
+}
+
+func MarshalBlobV1Tx(tx *types.Transaction, cellProofs []kzg4844.Proof) ([]byte, error) {
 	if blobV1Marshaller == nil {
 		return nil, fmt.Errorf("blob-v1 not supported when using spamoor as library")
 	}
 
-	return blobV1Marshaller(tx)
+	return blobV1Marshaller(tx, cellProofs)
 }

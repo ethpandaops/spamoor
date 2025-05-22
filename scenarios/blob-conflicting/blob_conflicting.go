@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -131,8 +132,20 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if s.options.MaxPending > 0 {
-		s.pendingChan = make(chan bool, s.options.MaxPending)
+	maxPending := s.options.MaxPending
+	if maxPending == 0 {
+		maxPending = s.options.Throughput * 3
+		if maxPending == 0 {
+			maxPending = 1000
+		}
+
+		if maxPending > s.walletPool.GetConfiguredWalletCount()*2 {
+			maxPending = s.walletPool.GetConfiguredWalletCount() * 2
+		}
+	}
+
+	if maxPending > 0 {
+		s.pendingChan = make(chan bool, maxPending)
 	}
 
 	return nil
@@ -198,6 +211,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 		go func(txIdx uint64, lastChan, currentChan chan bool) {
 			defer func() {
+				utils.RecoverPanic(s.logger, "blob-conflicting.sendBlobTx")
 				pendingCount.Add(-1)
 				currentChan <- true
 			}()
@@ -205,7 +219,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			logger := s.logger
 			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, func() {
 				if s.pendingChan != nil {
-					time.Sleep(100 * time.Millisecond)
+					time.Sleep(10 * time.Millisecond)
 					<-s.pendingChan
 				}
 			})
@@ -355,17 +369,32 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		rebroadcast = 10
 	}
 
-	var txBytes []byte
-	txVersion := uint8(0)
-	sendAsV1 := time.Now().Unix() > int64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
-	if sendAsV1 {
-		txBytes, err = txbuilder.MarshalBlobV1Tx(tx1)
+	var blobCellProofs []kzg4844.Proof
+
+	if s.options.BlobV1Percent > 0 {
+		// generate cell proofs here to avoid heavy recomputation on each submission
+		blobCellProofs, err = txbuilder.GenerateCellProofs(tx1.BlobTxSidecar())
 		if err != nil {
-			s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
-		} else {
-			txVersion = 1
+			s.logger.Warnf("failed to generate cell proofs: %v", err)
 		}
 	}
+
+	getTxBytes := func() ([]byte, uint8) {
+		var txBytes []byte
+		txVersion := uint8(0)
+		sendAsV1 := time.Now().Unix() > int64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent) // 50% chance for v1
+		if sendAsV1 {
+			txBytes, err = txbuilder.MarshalBlobV1Tx(tx1, blobCellProofs)
+			if err != nil {
+				s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
+			} else {
+				txVersion = 1
+			}
+		}
+		return txBytes, txVersion
+	}
+
+	txBytes, txVersion := getTxBytes()
 
 	// send both tx at exactly the same time
 	wg := sync.WaitGroup{}
@@ -406,6 +435,11 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 				} else if retry > 0 || rebroadcast > 0 {
 					logger.Debugf("successfully sent blob tx %6d.0", txIdx+1)
 				}
+			},
+			OnRebroadcast: func(tx *types.Transaction, options *txbuilder.SendTransactionOptions, client *txbuilder.Client) {
+				// we might need to switch to v1 after fulu activation
+				txBytes, _ := getTxBytes()
+				options.TransactionBytes = txBytes
 			},
 			TransactionBytes: txBytes,
 		})

@@ -199,6 +199,10 @@ func (pool *WalletPool) GetAllWallets() []*txbuilder.Wallet {
 	return wallets
 }
 
+func (pool *WalletPool) GetConfiguredWalletCount() uint64 {
+	return pool.config.WalletCount
+}
+
 func (pool *WalletPool) GetWalletCount() uint64 {
 	return uint64(len(pool.childWallets))
 }

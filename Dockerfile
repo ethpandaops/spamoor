@@ -11,7 +11,7 @@ RUN <<EOR
   VERSION=$(git rev-parse --short HEAD)
   BUILDTIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
   RELEASE=$release
-  CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags=with_blob_v1 -o /app/ -ldflags="-s -w -X 'github.com/ethpandaops/spamoor/utils.BuildVersion=${VERSION}' -X 'github.com/ethpandaops/spamoor/utils.BuildRelease=${RELEASE}' -X 'github.com/ethpandaops/spamoor/utils.Buildtime=${BUILDTIME}'" ./cmd/*
+  CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags=with_blob_v1,ckzg -o /app/ -ldflags="-s -w -X 'github.com/ethpandaops/spamoor/utils.BuildVersion=${VERSION}' -X 'github.com/ethpandaops/spamoor/utils.BuildRelease=${RELEASE}' -X 'github.com/ethpandaops/spamoor/utils.Buildtime=${BUILDTIME}'" ./cmd/*
 EOR
 
 # final stage
