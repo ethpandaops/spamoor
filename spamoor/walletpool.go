@@ -615,8 +615,6 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 					if err != nil {
 						pool.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
 					}
-
-					pool.logger.Infof("funding tx %v confirmed", tx.Hash().String())
 				},
 			})
 			if err != nil {
