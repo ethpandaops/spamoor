@@ -13,6 +13,7 @@ import (
 type RootWallet struct {
 	wallet     *Wallet
 	walletLock sync.Mutex
+	txbatcher  *TxBatcher
 }
 
 func InitRootWallet(ctx context.Context, privkey string, client *Client, logger logrus.FieldLogger) (*RootWallet, error) {
@@ -44,7 +45,7 @@ func (wallet *RootWallet) GetWallet() *Wallet {
 	return wallet.wallet
 }
 
-func (wallet *RootWallet) WithWalletLock(lockedLogFn func(), lockedFn func() error) error {
+func (wallet *RootWallet) WithWalletLock(txCount int, lockedLogFn func(), lockedFn func() error) error {
 	if !wallet.walletLock.TryLock() {
 		if lockedLogFn != nil {
 			lockedLogFn()
@@ -55,4 +56,12 @@ func (wallet *RootWallet) WithWalletLock(lockedLogFn func(), lockedFn func() err
 	defer wallet.walletLock.Unlock()
 
 	return lockedFn()
+}
+
+func (wallet *RootWallet) GetTxBatcher() *TxBatcher {
+	return wallet.txbatcher
+}
+
+func (wallet *RootWallet) InitTxBatcher(ctx context.Context, txpool *TxPool) {
+	wallet.txbatcher = NewTxBatcher(txpool)
 }

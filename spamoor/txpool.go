@@ -532,6 +532,58 @@ func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *ty
 	return pool.loadTransactionReceipt(ctx, tx), nil
 }
 
+func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet *Wallet, txs []*types.Transaction, options *SendTransactionOptions) error {
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	for idx := range txs {
+		err := func(idx int) error {
+			tx := txs[idx]
+
+			return pool.SendTransaction(ctx, wallet, tx, &SendTransactionOptions{
+				Client: options.Client,
+				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+					defer wg.Done()
+
+					if err != nil {
+						if options.OnConfirm != nil {
+							options.OnConfirm(tx, receipt, err)
+						}
+						return
+					}
+
+					feeAmount := big.NewInt(0)
+					if receipt != nil {
+						effectiveGasPrice := receipt.EffectiveGasPrice
+						if effectiveGasPrice == nil {
+							effectiveGasPrice = big.NewInt(0)
+						}
+						feeAmount = feeAmount.Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+					}
+
+					totalAmount := big.NewInt(0).Add(tx.Value(), feeAmount)
+					wallet.SubBalance(totalAmount)
+
+					if options.OnConfirm != nil {
+						options.OnConfirm(tx, receipt, nil)
+					}
+				},
+
+				MaxRebroadcasts:     10,
+				RebroadcastInterval: 30 * time.Second,
+			})
+		}(idx)
+
+		if err != nil {
+			return err
+		}
+		wg.Add(1)
+	}
+
+	wg.Done()
+	wg.Wait()
+	return nil
+}
+
 func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wallet, tx *types.Transaction, receipt *types.Receipt) {
 	nonce := tx.Nonce()
 

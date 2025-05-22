@@ -29,6 +29,7 @@ type CliArgs struct {
 	dbFile         string
 	startupSpammer string
 	fuluActivation uint64
+	withoutBatcher bool
 }
 
 func main() {
@@ -45,6 +46,7 @@ func main() {
 	flags.StringVarP(&cliArgs.dbFile, "db", "d", "spamoor.db", "The file to store the database in.")
 	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file with startup spammers configuration")
 	flags.Uint64Var(&cliArgs.fuluActivation, "fulu-activation", 0, "The unix timestamp of the Fulu activation (if activated)")
+	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -112,15 +114,31 @@ func main() {
 	}
 
 	// prepare txpool
+	var spamorDaemon *daemon.Daemon
+
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
 		Context:    ctx,
 		ClientPool: clientPool,
+		GetActiveWalletPools: func() []*spamoor.WalletPool {
+			walletPools := make([]*spamoor.WalletPool, 0)
+			for _, sp := range spamorDaemon.GetAllSpammers() {
+				walletPool := sp.GetWalletPool()
+				if walletPool != nil {
+					walletPools = append(walletPools, walletPool)
+				}
+			}
+			return walletPools
+		},
 	})
 
+	if !cliArgs.withoutBatcher {
+		rootWallet.InitTxBatcher(ctx, txpool)
+	}
+
 	// init daemon
-	daemon := daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, rootWallet, txpool, database)
+	spamorDaemon = daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, rootWallet, txpool, database)
 	if cliArgs.fuluActivation > 0 {
-		daemon.SetGlobalCfg("fulu_activation", cliArgs.fuluActivation)
+		spamorDaemon.SetGlobalCfg("fulu_activation", cliArgs.fuluActivation)
 	}
 
 	// start frontend
@@ -131,22 +149,22 @@ func main() {
 		Debug:    cliArgs.debug,
 		Pprof:    true,
 		Minify:   true,
-	}, daemon)
+	}, spamorDaemon)
 
 	// start daemon
-	firstLaunch, err := daemon.Run()
+	firstLaunch, err := spamorDaemon.Run()
 	if err != nil {
 		panic(err)
 	}
 
 	// load startup spammers if configured
 	if firstLaunch && cliArgs.startupSpammer != "" {
-		startupSpammers, err := daemon.LoadStartupSpammers(cliArgs.startupSpammer, logger.WithField("module", "startup"))
+		startupSpammers, err := spamorDaemon.LoadStartupSpammers(cliArgs.startupSpammer, logger.WithField("module", "startup"))
 		if err != nil {
 			logger.Errorf("failed to load startup spammers: %v", err)
 		} else if len(startupSpammers) > 0 {
 			logger.Infof("adding %d startup spammers", len(startupSpammers))
-			err = daemon.AddStartupSpammers(startupSpammers)
+			err = spamorDaemon.AddStartupSpammers(startupSpammers)
 			if err != nil {
 				logger.Errorf("failed to add startup spammers: %v", err)
 			}
@@ -158,5 +176,5 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	<-c
 
-	daemon.Shutdown()
+	spamorDaemon.Shutdown()
 }

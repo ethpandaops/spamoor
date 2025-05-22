@@ -326,10 +326,13 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			if endIdx > len(deploymentTxs) {
 				endIdx = len(deploymentTxs)
 			}
-			err := u.walletPool.SendTxRange(deploymentTxs[txIdx:endIdx], client, deployerWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				if err != nil {
-					u.logger.Warnf("could not send deployment tx %v: %v", tx.Hash().String(), err)
-				}
+			err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, deployerWallet, deploymentTxs[txIdx:endIdx], &spamoor.SendTransactionOptions{
+				Client: client,
+				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+					if err != nil {
+						u.logger.Warnf("could not send deployment tx %v: %v", tx.Hash().String(), err)
+					}
+				},
 			})
 			if err != nil {
 				return nil, fmt.Errorf("could not send deployment txs: %w", err)
@@ -340,7 +343,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	// provide liquidity to the pairs
 	rootWallet := u.walletPool.GetRootWallet()
-	err = rootWallet.WithWalletLock(func() {
+	err = rootWallet.WithWalletLock(len(deploymentInfo.Pairs), func() {
 		u.logger.Infof("root wallet is locked, waiting for other funding txs to finish...")
 	}, func() error {
 		liquidityTxs := []*types.Transaction{}
@@ -372,10 +375,13 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 				if endIdx > len(liquidityTxs) {
 					endIdx = len(liquidityTxs)
 				}
-				err := u.walletPool.SendTxRange(liquidityTxs[txIdx:endIdx], client, rootWallet.GetWallet(), func(tx *types.Transaction, receipt *types.Receipt, err error) {
-					if err != nil {
-						u.logger.Warnf("could not send liquidity tx %v: %v", tx.Hash().String(), err)
-					}
+				err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, rootWallet.GetWallet(), liquidityTxs[txIdx:endIdx], &spamoor.SendTransactionOptions{
+					Client: client,
+					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+						if err != nil {
+							u.logger.Warnf("could not send liquidity tx %v: %v", tx.Hash().String(), err)
+						}
+					},
 				})
 				if err != nil {
 					return fmt.Errorf("could not send liquidity txs: %w", err)

@@ -132,13 +132,18 @@ func main() {
 	}
 
 	// prepare txpool
+	var walletPool *spamoor.WalletPool
+
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
 		Context:    ctx,
 		ClientPool: clientPool,
+		GetActiveWalletPools: func() []*spamoor.WalletPool {
+			return []*spamoor.WalletPool{walletPool}
+		},
 	})
 
 	// init wallet pool
-	walletPool := spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
+	walletPool = spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
 	walletPool.SetWalletCount(100)
 	walletPool.SetRefillAmount(utils.EtherToWei(uint256.NewInt(cliArgs.refillAmount)))
 	walletPool.SetRefillBalance(utils.EtherToWei(uint256.NewInt(cliArgs.refillBalance)))
