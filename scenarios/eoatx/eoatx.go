@@ -132,7 +132,7 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 
 	maxPending := s.options.MaxPending
 	if maxPending == 0 {
-		maxPending = s.options.Throughput * 200
+		maxPending = s.options.Throughput * 10
 		if maxPending == 0 {
 			maxPending = 4000
 		}
