@@ -295,36 +295,45 @@ func (pool *WalletPool) PrepareWallets(runFundings bool) error {
 		}
 
 		if runFundings {
-			fundingTxList := make([]*types.Transaction, 0, len(fundingTxs))
-			for _, tx := range fundingTxs {
-				if tx != nil {
-					fundingTxList = append(fundingTxList, tx)
+			err := pool.rootWallet.WithWalletLock(func() {
+				pool.logger.Infof("root wallet is locked, waiting for other funding txs to finish...")
+			}, func() error {
+				fundingTxList := make([]*types.Transaction, 0, len(fundingTxs))
+				for _, tx := range fundingTxs {
+					if tx != nil {
+						fundingTxList = append(fundingTxList, tx)
+					}
 				}
-			}
 
-			if len(fundingTxList) > 0 {
-				sort.Slice(fundingTxList, func(a int, b int) bool {
-					return fundingTxList[a].Nonce() < fundingTxList[b].Nonce()
-				})
-
-				pool.logger.Infof("funding child wallets... (0/%v)", len(fundingTxList))
-				for txIdx := 0; txIdx < len(fundingTxList); txIdx += 200 {
-					endIdx := txIdx + 200
-					if txIdx > 0 {
-						pool.logger.Infof("funding child wallets... (%v/%v)", txIdx, len(fundingTxList))
-					}
-					if endIdx > len(fundingTxList) {
-						endIdx = len(fundingTxList)
-					}
-					err := pool.SendTxRange(fundingTxList[txIdx:endIdx], client, pool.rootWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
-						if err != nil {
-							pool.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
-						}
+				if len(fundingTxList) > 0 {
+					sort.Slice(fundingTxList, func(a int, b int) bool {
+						return fundingTxList[a].Nonce() < fundingTxList[b].Nonce()
 					})
-					if err != nil {
-						return err
+
+					pool.logger.Infof("funding child wallets... (0/%v)", len(fundingTxList))
+					for txIdx := 0; txIdx < len(fundingTxList); txIdx += 200 {
+						endIdx := txIdx + 200
+						if txIdx > 0 {
+							pool.logger.Infof("funding child wallets... (%v/%v)", txIdx, len(fundingTxList))
+						}
+						if endIdx > len(fundingTxList) {
+							endIdx = len(fundingTxList)
+						}
+						err := pool.SendTxRange(fundingTxList[txIdx:endIdx], client, pool.rootWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
+							if err != nil {
+								pool.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
+							}
+						})
+						if err != nil {
+							return err
+						}
 					}
 				}
+
+				return nil
+			})
+			if err != nil {
+				return err
 			}
 		}
 

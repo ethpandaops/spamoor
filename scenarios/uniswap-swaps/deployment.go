@@ -339,47 +339,55 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	}
 
 	// provide liquidity to the pairs
-	liquidityTxs := []*types.Transaction{}
 	rootWallet := u.walletPool.GetRootWallet()
+	err = rootWallet.WithWalletLock(func() {
+		u.logger.Infof("root wallet is locked, waiting for other funding txs to finish...")
+	}, func() error {
+		liquidityTxs := []*types.Transaction{}
+		daiLiquidity := new(big.Int).Mul(u.options.EthLiquidityPerPair.ToBig(), big.NewInt(int64(u.options.DaiLiquidityFactor)))
 
-	daiLiquidity := new(big.Int).Mul(u.options.EthLiquidityPerPair.ToBig(), big.NewInt(int64(u.options.DaiLiquidityFactor)))
-
-	for _, pairInfo := range deploymentInfo.Pairs {
-		tx, err := rootWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       6000000,
-			Value:     u.options.EthLiquidityPerPair,
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			return deploymentInfo.LiquidityProvider.ProvidePairLiquidity(transactOpts, pairInfo.DaiAddr, daiLiquidity)
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not provide liquidity for dai %v: %w", pairInfo.DaiAddr.String(), err)
-		}
-		liquidityTxs = append(liquidityTxs, tx)
-	}
-
-	// submit & await all liquidity txs
-	if len(liquidityTxs) > 0 {
-		u.logger.Infof("providing liquidity... (0/%v)", len(liquidityTxs))
-		for txIdx := 0; txIdx < len(liquidityTxs); txIdx += 50 {
-			endIdx := txIdx + 50
-			if txIdx > 0 {
-				u.logger.Infof("providing liquidity... (%v/%v)", txIdx, len(liquidityTxs))
-			}
-			if endIdx > len(liquidityTxs) {
-				endIdx = len(liquidityTxs)
-			}
-			err := u.walletPool.SendTxRange(liquidityTxs[txIdx:endIdx], client, rootWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				if err != nil {
-					u.logger.Warnf("could not send liquidity tx %v: %v", tx.Hash().String(), err)
-				}
+		for _, pairInfo := range deploymentInfo.Pairs {
+			tx, err := rootWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Gas:       6000000,
+				Value:     u.options.EthLiquidityPerPair,
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return deploymentInfo.LiquidityProvider.ProvidePairLiquidity(transactOpts, pairInfo.DaiAddr, daiLiquidity)
 			})
 			if err != nil {
-				return nil, fmt.Errorf("could not send liquidity txs: %w", err)
+				return fmt.Errorf("could not provide liquidity for dai %v: %w", pairInfo.DaiAddr.String(), err)
 			}
+			liquidityTxs = append(liquidityTxs, tx)
 		}
-		u.logger.Infof("liquidity provision complete. (%v/%v)", len(liquidityTxs), len(liquidityTxs))
+
+		// submit & await all liquidity txs
+		if len(liquidityTxs) > 0 {
+			u.logger.Infof("providing liquidity... (0/%v)", len(liquidityTxs))
+			for txIdx := 0; txIdx < len(liquidityTxs); txIdx += 50 {
+				endIdx := txIdx + 50
+				if txIdx > 0 {
+					u.logger.Infof("providing liquidity... (%v/%v)", txIdx, len(liquidityTxs))
+				}
+				if endIdx > len(liquidityTxs) {
+					endIdx = len(liquidityTxs)
+				}
+				err := u.walletPool.SendTxRange(liquidityTxs[txIdx:endIdx], client, rootWallet, func(tx *types.Transaction, receipt *types.Receipt, err error) {
+					if err != nil {
+						u.logger.Warnf("could not send liquidity tx %v: %v", tx.Hash().String(), err)
+					}
+				})
+				if err != nil {
+					return fmt.Errorf("could not send liquidity txs: %w", err)
+				}
+			}
+			u.logger.Infof("liquidity provision complete. (%v/%v)", len(liquidityTxs), len(liquidityTxs))
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("could not provide liquidity: %w", err)
 	}
 
 	return deploymentInfo, nil
