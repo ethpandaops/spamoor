@@ -3,16 +3,18 @@ package contractdeploy
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -21,7 +23,6 @@ import (
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
-	"github.com/ethpandaops/spamoor/utils"
 )
 
 const (
@@ -30,15 +31,13 @@ const (
 )
 
 type ScenarioOptions struct {
-	MaxPending        uint64 `yaml:"max_pending"`
-	MaxWallets        uint64 `yaml:"max_wallets"`
-	Rebroadcast       uint64 `yaml:"rebroadcast"`
-	BaseFee           uint64 `yaml:"base_fee"`
-	TipFee            uint64 `yaml:"tip_fee"`
-	GasPerBlock       uint64 `yaml:"gas_per_block"`
-	ClientGroup       string `yaml:"client_group"`
-	ContractsPerBlock uint64 `yaml:"contracts_per_block"`
-	MaxTransactions   uint64 `yaml:"max_transactions"` // Maximum number of transactions to send (0 for unlimited)
+	MaxPending      uint64 `yaml:"max_pending"`
+	MaxWallets      uint64 `yaml:"max_wallets"`
+	Rebroadcast     uint64 `yaml:"rebroadcast"`
+	BaseFee         uint64 `yaml:"base_fee"`
+	TipFee          uint64 `yaml:"tip_fee"`
+	ClientGroup     string `yaml:"client_group"`
+	MaxTransactions uint64 `yaml:"max_transactions"` // Maximum number of transactions to send (0 for unlimited)
 }
 
 type Scenario struct {
@@ -48,19 +47,20 @@ type Scenario struct {
 
 	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
+
+	deployedAddresses []string
+	addressesMutex    sync.Mutex
 }
 
 var ScenarioName = "contract-deploy"
 var ScenarioDefaultOptions = ScenarioOptions{
-	MaxPending:        0,
-	MaxWallets:        0,
-	Rebroadcast:       1,
-	BaseFee:           20,
-	TipFee:            2,
-	GasPerBlock:       0,
-	ClientGroup:       "default",
-	ContractsPerBlock: 1,
-	MaxTransactions:   0, // Default to unlimited
+	MaxPending:      0,
+	MaxWallets:      0,
+	Rebroadcast:     1,
+	BaseFee:         20,
+	TipFee:          2,
+	ClientGroup:     "default",
+	MaxTransactions: 0, // Default to unlimited
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -81,9 +81,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Number of seconds to wait before re-broadcasting a transaction")
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
-	flags.Uint64Var(&s.options.GasPerBlock, "gas-per-block", ScenarioDefaultOptions.GasPerBlock, "Target gas to use per block (will calculate number of contracts to deploy)")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
-	flags.Uint64Var(&s.options.ContractsPerBlock, "contracts-per-block", ScenarioDefaultOptions.ContractsPerBlock, "Number of contracts to deploy per block")
 	flags.Uint64Var(&s.options.MaxTransactions, "max-transactions", ScenarioDefaultOptions.MaxTransactions, "Maximum number of transactions to send (0 for unlimited)")
 	return nil
 }
@@ -98,18 +96,10 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 		}
 	}
 
-	if s.options.GasPerBlock == 0 && s.options.ContractsPerBlock == 0 {
-		return fmt.Errorf("neither gas per block limit nor contracts per block set, must define at least one of them (see --help for list of all flags)")
-	}
-
 	if s.options.MaxWallets > 0 {
 		walletPool.SetWalletCount(s.options.MaxWallets)
 	} else {
-		if s.options.ContractsPerBlock*10 < 1000 {
-			walletPool.SetWalletCount(s.options.ContractsPerBlock * 10)
-		} else {
-			walletPool.SetWalletCount(1000)
-		}
+		walletPool.SetWalletCount(1000)
 	}
 
 	if s.options.MaxPending > 0 {
@@ -133,72 +123,18 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
-	// Get block gas limit and validate contract deployment gas
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
-	block, err := client.GetEthClient().BlockByNumber(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to get latest block: %w", err)
-	}
-	blockGasLimit := block.GasLimit()
 
-	// Validate gas usage against block limit
-	if s.options.GasPerBlock > blockGasLimit {
-		return fmt.Errorf("gas per block (%d) exceeds block gas limit (%d)", s.options.GasPerBlock, blockGasLimit)
-	}
-	if s.options.ContractsPerBlock*GAS_PER_CONTRACT > blockGasLimit {
-		return fmt.Errorf("contracts per block (%d) requires %d gas, exceeding block gas limit (%d)",
-			s.options.ContractsPerBlock, s.options.ContractsPerBlock*GAS_PER_CONTRACT, blockGasLimit)
-	}
-
-	// Calculate throughput based on gas per block or contracts per block
-	throughput := s.options.ContractsPerBlock
-	if s.options.GasPerBlock > 0 {
-		// Each deployment costs ~4.97M gas
-		throughput = s.options.GasPerBlock / GAS_PER_CONTRACT
-		if throughput == 0 {
-			throughput = 1
-		}
-		s.logger.WithFields(logrus.Fields{
-			"test":             "contract-deploy",
-			"throughput":       throughput,
-			"target_gas":       s.options.GasPerBlock,
-			"gas_per_contract": GAS_PER_CONTRACT,
-		}).Info("calculated throughput")
-	} else {
-		// Calculate gas needed for the specified number of contracts
-		totalGas := GAS_PER_CONTRACT * s.options.ContractsPerBlock
-		s.logger.WithFields(logrus.Fields{
-			"test":             "contract-deploy",
-			"total_gas":        totalGas,
-			"contracts":        s.options.ContractsPerBlock,
-			"gas_per_contract": GAS_PER_CONTRACT,
-		}).Info("calculated gas")
-	}
-
-	initialRate := rate.Limit(float64(throughput) / float64(utils.SecondsPerSlot))
-	if initialRate == 0 {
-		initialRate = rate.Inf
-	}
-	limiter := rate.NewLimiter(initialRate, 1)
+	var deployTxHashesMu sync.Mutex
+	var deployTxHashes []common.Hash
 
 	for {
-		// Check if we've reached the maximum number of transactions
 		if s.options.MaxTransactions > 0 && txIdxCounter >= s.options.MaxTransactions {
 			s.logger.Infof("reached maximum number of transactions (%d)", s.options.MaxTransactions)
 			break
-		}
-
-		if err := limiter.Wait(ctx); err != nil {
-			if ctx.Err() != nil {
-				break
-			}
-
-			s.logger.Debugf("rate limited: %s", err.Error())
-			time.Sleep(100 * time.Millisecond)
-			continue
 		}
 
 		txIdx := txIdxCounter
@@ -241,17 +177,73 @@ func (s *Scenario) Run(ctx context.Context) error {
 				return
 			}
 
+			// Collect tx hash for later receipt lookup
+			deployTxHashesMu.Lock()
+			deployTxHashes = append(deployTxHashes, tx.Hash())
+			deployTxHashesMu.Unlock()
+
 			txCount.Add(1)
 		}(txIdx, lastChan, currentChan)
 
 		lastChan = currentChan
 	}
 	s.pendingWGroup.Wait()
+
 	s.logger.WithFields(logrus.Fields{
 		"test":        "contract-deploy",
 		"total_txs":   txCount.Load(),
 		"pending_txs": pendingCount.Load(),
 	}).Info("finished sending transactions, awaiting block inclusion...")
+
+	// Wait for a new block to be mined
+	ethClient := client.GetEthClient()
+	startBlock, err := ethClient.BlockByNumber(ctx, nil)
+	if err != nil {
+		s.logger.Warnf("Failed to get current block: %v", err)
+		return err
+	}
+	startBlockNum := startBlock.NumberU64()
+	var latestBlockNum uint64
+	for {
+		block, err := ethClient.BlockByNumber(ctx, nil)
+		if err != nil {
+			s.logger.Warnf("Failed to get block: %v", err)
+			return err
+		}
+		latestBlockNum = block.NumberU64()
+		if latestBlockNum > startBlockNum {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	// For each deployment tx, get the receipt and log contract address and gas used
+	var deployedAddresses []string
+	for _, txHash := range deployTxHashes {
+		receipt, err := ethClient.TransactionReceipt(ctx, txHash)
+		if err != nil {
+			s.logger.Warnf("Failed to get receipt for tx %s: %v", txHash.Hex(), err)
+			continue
+		}
+		if receipt.ContractAddress != (common.Address{}) {
+			addr := receipt.ContractAddress.Hex()
+			deployedAddresses = append(deployedAddresses, addr)
+			s.logger.Infof("Deployed contract at address: %s (gas used: %d)", addr, receipt.GasUsed)
+		}
+	}
+
+	// Write deployed addresses to JSON file and log them
+	if len(deployedAddresses) > 0 {
+		file, err := os.Create("deployed_contracts.json")
+		if err == nil {
+			_ = json.NewEncoder(file).Encode(deployedAddresses)
+			file.Close()
+			s.logger.Infof("Wrote %d deployed contract addresses to deployed_contracts.json", len(deployedAddresses))
+		} else {
+			s.logger.Warnf("Failed to write deployed_contracts.json: %v", err)
+		}
+		s.logger.Infof("Deployed contract addresses: %v", deployedAddresses)
+	}
 
 	return nil
 }
@@ -281,7 +273,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 	auth.Nonce = big.NewInt(int64(wallet.GetNonce()))
 	auth.Value = big.NewInt(0)
-	auth.GasLimit = GAS_PER_CONTRACT // Gas for single contract deployment
+	auth.GasLimit = GAS_PER_CONTRACT + GAS_PER_CONTRACT*5/100 // Gas for single contract deployment
 
 	// Set EIP-1559 fee parameters
 	if s.options.BaseFee > 0 {

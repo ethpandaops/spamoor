@@ -29,19 +29,19 @@ All scenarios require:
 
 Spamoor provides multiple scenarios for different transaction types:
 
-| Scenario | Description |
-|----------|-------------|
-| [`eoatx`](./scenarios/eoatx/README.md) | **EOA Transactions**<br>Send standard EOA transactions with configurable amounts and targets |
-| [`erctx`](./scenarios/erctx/README.md) | **ERC20 Transactions**<br>Deploy a ERC20 contract and transfer tokens |
-| [`deploytx`](./scenarios/deploytx/README.md) | **Contract Deployments**<br>Deploy contracts with custom bytecode |
-| [`deploy-destruct`](./scenarios/deploy-destruct/README.md) | **Self-Destruct Deployments**<br>Deploy contracts that self-destruct |
-| [`setcodetx`](./scenarios/setcodetx/README.md) | **Set Code Transactions**<br>Send EIP-7702 setcode-transactions with various settings |
-| [`uniswap-swaps`](./scenarios/uniswap-swaps/README.md) | **Uniswap Swaps**<br>Deploy and perform token swaps on Uniswap V2 pools |
-| [`blobs`](./scenarios/blobs/README.md) | **Blob Transactions**<br>Send blob transactions with random data |
-| [`blob-replacements`](./scenarios/blob-replacements/README.md) | **Blob Replacements**<br>Send and replace blob transactions |
-| [`blob-conflicting`](./scenarios/blob-conflicting/README.md) | **Conflicting Blobs**<br>Send conflicting blob and normal transactions |
-| [`blob-combined`](./scenarios/blob-combined/README.md) | **Combined Blob Testing**<br>Randomized combination of all blob scenarios |
-| [`gasburnertx`](./scenarios/gasburnertx/README.md) | **Gas Burner**<br>Send transactions that burn specific amounts of gas |
+| Scenario                                                       | Description                                                                                  |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| [`eoatx`](./scenarios/eoatx/README.md)                         | **EOA Transactions**<br>Send standard EOA transactions with configurable amounts and targets |
+| [`erctx`](./scenarios/erctx/README.md)                         | **ERC20 Transactions**<br>Deploy a ERC20 contract and transfer tokens                        |
+| [`deploytx`](./scenarios/deploytx/README.md)                   | **Contract Deployments**<br>Deploy contracts with custom bytecode                            |
+| [`deploy-destruct`](./scenarios/deploy-destruct/README.md)     | **Self-Destruct Deployments**<br>Deploy contracts that self-destruct                         |
+| [`setcodetx`](./scenarios/setcodetx/README.md)                 | **Set Code Transactions**<br>Send EIP-7702 setcode-transactions with various settings        |
+| [`uniswap-swaps`](./scenarios/uniswap-swaps/README.md)         | **Uniswap Swaps**<br>Deploy and perform token swaps on Uniswap V2 pools                      |
+| [`blobs`](./scenarios/blobs/README.md)                         | **Blob Transactions**<br>Send blob transactions with random data                             |
+| [`blob-replacements`](./scenarios/blob-replacements/README.md) | **Blob Replacements**<br>Send and replace blob transactions                                  |
+| [`blob-conflicting`](./scenarios/blob-conflicting/README.md)   | **Conflicting Blobs**<br>Send conflicting blob and normal transactions                       |
+| [`blob-combined`](./scenarios/blob-combined/README.md)         | **Combined Blob Testing**<br>Randomized combination of all blob scenarios                    |
+| [`gasburnertx`](./scenarios/gasburnertx/README.md)             | **Gas Burner**<br>Send transactions that burn specific amounts of gas                        |
 
 ## Daemon Mode
 

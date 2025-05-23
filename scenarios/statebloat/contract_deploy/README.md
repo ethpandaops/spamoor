@@ -58,23 +58,43 @@ Deploy 1 contract per slot:
 spamoor statebloat/contract-deploy -p "<PRIVKEY>" -h http://localhost:8545 -t 1
 ```
 
-## Testing with Anvil
+## Running Against a Local Anvil Node (without Go tests)
 
-1. Start Anvil:
+You can run this scenario directly against your own Anvil node using the Spamoor CLI, without running Go tests.
+
+### 1. Start Anvil
+
 ```bash
-anvil
+anvil --hardfork pectra
 ```
 
-2. Run the scenario:
+You can add other flags as needed (e.g., `--no-mining` if you want to control mining manually).
+
+### 2. Build Spamoor (if not already built)
+
 ```bash
-spamoor statebloat/contract-deploy -p "<PRIVKEY>" -h http://localhost:8545 -c 1
+go build -o spamoor ./cmd/spamoor
 ```
 
-3. Verify state growth:
+### 3. Run the Scenario
+
 ```bash
-# Get the contract address from the deployment receipt
-# Then check the code size
-cast code <CONTRACT_ADDRESS> --rpc-url http://localhost:8545
+./spamoor statebloat/contract-deploy \
+  --privkey <YOUR_PRIVATE_KEY> \
+  --rpchost http://localhost:8545 \
+  --contracts-per-block 1
 ```
 
-The code size should be exactly 24,576 bytes. 
+- Replace `<YOUR_PRIVATE_KEY>` with the private key of a funded account in your Anvil instance (Anvil prints these on startup).
+- Adjust other flags as needed (`--contracts-per-block`, `--max-wallets`, etc.).
+
+### 4. Mining Notes
+
+- If you started Anvil with `--no-mining`, you will need to manually mine blocks (e.g., by calling `evm_mine` via RPC or using Anvil's console) to include the transactions.
+- If you use Anvil's default mining mode, blocks will be mined automatically as transactions are sent.
+
+### 5. See All Flags
+
+```bash
+./spamoor statebloat/contract-deploy --help
+``` 
