@@ -63,6 +63,9 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 		s.walletPool.SetWalletCount(1000)
 	}
 
+	// skip funding for this scenario
+	s.walletPool.SetRunFundings(false)
+
 	return nil
 }
 

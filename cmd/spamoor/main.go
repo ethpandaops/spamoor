@@ -159,7 +159,7 @@ func main() {
 	}
 
 	// prepare wallet pool
-	err = walletPool.PrepareWallets(true)
+	err = walletPool.PrepareWallets()
 	if err != nil {
 		panic(fmt.Errorf("failed to prepare wallets: %v", err))
 	}
