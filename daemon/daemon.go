@@ -167,6 +167,19 @@ func (d *Daemon) UpdateSpammer(id int64, name string, description string, config
 	return nil
 }
 
+func (d *Daemon) ReclaimSpammer(id int64) error {
+	spammer := d.GetSpammer(id)
+	if spammer == nil {
+		return fmt.Errorf("spammer not found")
+	}
+
+	if spammer.walletPool == nil {
+		return nil
+	}
+
+	return spammer.walletPool.ReclaimFunds(d.ctx, nil)
+}
+
 func (d *Daemon) GetRootWallet() *spamoor.RootWallet {
 	return d.rootWallet
 }

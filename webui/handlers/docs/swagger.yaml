@@ -374,6 +374,36 @@ paths:
       summary: Pause a spammer
       tags:
       - Spammer
+  /api/spammer/{id}/reclaim:
+    post:
+      description: Reclaims funds from a spammer's wallet pool back to the root wallet
+      operationId: reclaimFunds
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid spammer ID
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Spammer not found
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Reclaim funds from a spammer
+      tags:
+      - Spammer
   /api/spammer/{id}/start:
     post:
       description: Starts a specific spammer
