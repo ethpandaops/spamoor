@@ -329,6 +329,34 @@ func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ReclaimFunds godoc
+// @Id reclaimFunds
+// @Summary Reclaim funds from a spammer
+// @Tags Spammer
+// @Description Reclaims funds from a spammer's wallet pool back to the root wallet
+// @Param id path int true "Spammer ID"
+// @Success 200 {object} Response "Success"
+// @Failure 400 {object} Response "Invalid spammer ID"
+// @Failure 404 {object} Response "Spammer not found"
+// @Failure 500 {object} Response "Server Error"
+// @Router /api/spammer/{id}/reclaim [post]
+func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid spammer ID", http.StatusBadRequest)
+		return
+	}
+
+	err = ah.daemon.ReclaimSpammer(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // GetSpammerDetails godoc
 // @Id getSpammerDetails
 // @Summary Get spammer details

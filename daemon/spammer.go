@@ -239,7 +239,7 @@ func (s *Spammer) runScenario() {
 		}
 	}
 
-	err = s.walletPool.PrepareWallets(true)
+	err = s.walletPool.PrepareWallets()
 	if err != nil {
 		scenarioErr = fmt.Errorf("failed to prepare wallets: %w", err)
 		return

@@ -56,8 +56,11 @@
                       <i class="fas fa-pause"></i>
                     </button>
                   {{ end }}
-                  <button class="btn btn-sm btn-info" onclick="editSpammer({{ .ID }})" title="Edit Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+                  <button class="btn btn-sm btn-primary" onclick="editSpammer({{ .ID }})" title="Edit Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                     <i class="fas fa-edit"></i>
+                  </button>
+                  <button class="btn btn-sm btn-info spammer-reclaim-btn" {{ if eq .Status 1 }}diabled="disabled"{{ end }} onclick="reclaimFunds({{ .ID }})" title="Reclaim Funds" data-bs-toggle="tooltip" data-bs-placement="top">
+                    <i class="fas fa-money-bill-wave"></i>
                   </button>
                   <button class="btn btn-sm btn-danger" onclick="deleteSpammer({{ .ID }})" title="Delete Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                     <i class="fas fa-trash"></i>
@@ -189,6 +192,7 @@ async function startSpammer(id) {
     const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
     const statusCell = row.querySelector('td:nth-child(4)');
     const toggleButton = row.querySelector('.spammer-toggle-btn');
+    const reclaimButton = row.querySelector('.spammer-reclaim-btn');
     
     statusCell.innerHTML = '<span class="badge bg-success">Running</span>';
     
@@ -196,6 +200,7 @@ async function startSpammer(id) {
     toggleButton.setAttribute('onclick', `pauseSpammer(${id})`);
     toggleButton.setAttribute('title', 'Pause Spammer');
     toggleButton.innerHTML = '<i class="fas fa-pause"></i>';
+    reclaimButton.disabled = true;
 
     const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
     if (tooltip) {
@@ -214,6 +219,7 @@ async function pauseSpammer(id) {
     const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
     const statusCell = row.querySelector('td:nth-child(4)');
     const toggleButton = row.querySelector('.spammer-toggle-btn');
+    const reclaimButton = row.querySelector('.spammer-reclaim-btn');
     
     statusCell.innerHTML = '<span class="badge bg-info">Paused</span>';
     
@@ -221,6 +227,7 @@ async function pauseSpammer(id) {
     toggleButton.setAttribute('onclick', `startSpammer(${id})`);
     toggleButton.setAttribute('title', 'Start Spammer');
     toggleButton.innerHTML = '<i class="fas fa-play"></i>';
+    reclaimButton.disabled = false;
 
     const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
     if (tooltip) {
@@ -236,6 +243,17 @@ async function deleteSpammer(id) {
   if (!confirm('Are you sure you want to delete this spammer?')) return;
   await fetch(`/api/spammer/${id}`, {method: 'DELETE'});
   window.location.reload();
+}
+
+async function reclaimFunds(id) {
+  if (!confirm('Are you sure you want to reclaim funds from this spammer? This will return any remaining funds from the spammer\'s wallet pool back to the root wallet.')) return;
+  
+  try {
+    await fetch(`/api/spammer/${id}/reclaim`, {method: 'POST'});
+    alert('Funds reclaimed successfully');
+  } catch (err) {
+    alert('Failed to reclaim funds: ' + err.message);
+  }
 }
 
 document.getElementById('newSpammerModal').addEventListener('show.bs.modal', async () => {

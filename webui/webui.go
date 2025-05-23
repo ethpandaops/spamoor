@@ -51,6 +51,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/spammer", apiHandler.CreateSpammer).Methods("POST")
 	apiRouter.HandleFunc("/spammer/{id}/start", apiHandler.StartSpammer).Methods("POST")
 	apiRouter.HandleFunc("/spammer/{id}/pause", apiHandler.PauseSpammer).Methods("POST")
+	apiRouter.HandleFunc("/spammer/{id}/reclaim", apiHandler.ReclaimFunds).Methods("POST")
 	apiRouter.HandleFunc("/spammer/{id}", apiHandler.DeleteSpammer).Methods("DELETE")
 	apiRouter.HandleFunc("/spammer/{id}/logs", apiHandler.GetSpammerLogs).Methods("GET")
 	apiRouter.HandleFunc("/spammer/{id}", apiHandler.GetSpammerDetails).Methods("GET")

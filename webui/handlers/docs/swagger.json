@@ -461,6 +461,51 @@
                 }
             }
         },
+        "/api/spammer/{id}/reclaim": {
+            "post": {
+                "description": "Reclaims funds from a spammer's wallet pool back to the root wallet",
+                "tags": [
+                    "Spammer"
+                ],
+                "summary": "Reclaim funds from a spammer",
+                "operationId": "reclaimFunds",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Spammer ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid spammer ID",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Spammer not found",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/spammer/{id}/start": {
             "post": {
                 "description": "Starts a specific spammer",
