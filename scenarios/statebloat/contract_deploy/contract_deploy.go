@@ -309,6 +309,47 @@ func (s *Scenario) recordDeployedContract(receipt *types.Receipt, pendingTx *Pen
 		"gas_per_byte":     deployment.GasPerByte,
 		"total_contracts":  len(s.deployedContracts),
 	}).Info("Contract successfully deployed and recorded")
+
+	// Save the deployments.json file each time a contract is confirmed
+	if err := s.saveDeploymentsMapping(); err != nil {
+		s.logger.Warnf("Failed to save deployments.json: %v", err)
+	}
+}
+
+// saveDeploymentsMapping creates/updates deployments.json with private key to contract address mapping
+func (s *Scenario) saveDeploymentsMapping() error {
+	// Create a map from private key to array of contract addresses
+	deploymentMap := make(map[string][]string)
+
+	for _, contract := range s.deployedContracts {
+		privateKey := contract.PrivateKey
+		contractAddr := contract.ContractAddress
+
+		deploymentMap[privateKey] = append(deploymentMap[privateKey], contractAddr)
+	}
+
+	// Create or overwrite the deployments.json file
+	deploymentsFile, err := os.Create("deployments.json")
+	if err != nil {
+		return fmt.Errorf("failed to create deployments.json file: %w", err)
+	}
+	defer deploymentsFile.Close()
+
+	// Write the mapping as JSON with pretty formatting
+	encoder := json.NewEncoder(deploymentsFile)
+	encoder.SetIndent("", "  ")
+	err = encoder.Encode(deploymentMap)
+	if err != nil {
+		return fmt.Errorf("failed to write deployments.json: %w", err)
+	}
+
+	s.logger.WithFields(logrus.Fields{
+		"total_deployers": len(deploymentMap),
+		"total_contracts": len(s.deployedContracts),
+		"file":            "deployments.json",
+	}).Info("Updated deployments mapping file")
+
+	return nil
 }
 
 func (s *Scenario) Run(ctx context.Context) error {
@@ -403,7 +444,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 		"total_contracts": totalContracts,
 	}).Info("All transactions completed")
 
-	return s.saveDeployedContracts()
+	// Log final summary
+	return s.logFinalSummary()
 }
 
 // sendTransaction sends a single contract deployment transaction with retry logic
@@ -535,8 +577,8 @@ func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, gasMult
 	return nil
 }
 
-// saveDeployedContracts saves the deployed contracts to JSON files
-func (s *Scenario) saveDeployedContracts() error {
+// logFinalSummary logs the final summary of the scenario
+func (s *Scenario) logFinalSummary() error {
 	s.contractsMutex.Lock()
 	defer s.contractsMutex.Unlock()
 
@@ -545,60 +587,7 @@ func (s *Scenario) saveDeployedContracts() error {
 		return nil
 	}
 
-	// Save detailed contract info with private keys
-	contractsFile, err := os.Create("deployed_contracts_detailed.json")
-	if err != nil {
-		return fmt.Errorf("failed to create detailed contracts file: %w", err)
-	}
-	defer contractsFile.Close()
-
-	err = json.NewEncoder(contractsFile).Encode(s.deployedContracts)
-	if err != nil {
-		return fmt.Errorf("failed to write detailed contracts: %w", err)
-	}
-
-	// Save simple addresses list for compatibility
-	var addresses []string
-	for _, contract := range s.deployedContracts {
-		addresses = append(addresses, contract.ContractAddress)
-	}
-
-	addressFile, err := os.Create("deployed_contracts.json")
-	if err != nil {
-		return fmt.Errorf("failed to create addresses file: %w", err)
-	}
-	defer addressFile.Close()
-
-	err = json.NewEncoder(addressFile).Encode(addresses)
-	if err != nil {
-		return fmt.Errorf("failed to write addresses: %w", err)
-	}
-
-	// Create contract-to-private-key mapping
-	contractKeyMap := make(map[string]string)
-	for _, contract := range s.deployedContracts {
-		contractKeyMap[contract.ContractAddress] = contract.PrivateKey
-	}
-
-	keyMapFile, err := os.Create("contract_private_key_mapping.json")
-	if err != nil {
-		return fmt.Errorf("failed to create key mapping file: %w", err)
-	}
-	defer keyMapFile.Close()
-
-	err = json.NewEncoder(keyMapFile).Encode(contractKeyMap)
-	if err != nil {
-		return fmt.Errorf("failed to write key mapping: %w", err)
-	}
-
-	s.logger.WithFields(logrus.Fields{
-		"contracts_deployed": len(s.deployedContracts),
-		"detailed_file":      "deployed_contracts_detailed.json",
-		"addresses_file":     "deployed_contracts.json",
-		"key_mapping_file":   "contract_private_key_mapping.json",
-	}).Info("Successfully saved deployed contract information to JSON files")
-
-	// Log summary of deployed contracts
+	// Log final summary
 	var totalGasUsed uint64
 	for _, contract := range s.deployedContracts {
 		totalGasUsed += contract.GasUsed
@@ -608,7 +597,8 @@ func (s *Scenario) saveDeployedContracts() error {
 		"total_contracts":      len(s.deployedContracts),
 		"total_gas_used":       totalGasUsed,
 		"avg_gas_per_contract": totalGasUsed / uint64(len(s.deployedContracts)),
-	}).Info("Deployment summary")
+		"deployments_file":     "deployments.json",
+	}).Info("Final deployment summary - only deployments.json file created")
 
 	return nil
 }
