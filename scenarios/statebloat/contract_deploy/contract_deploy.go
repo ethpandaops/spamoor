@@ -2,11 +2,13 @@ package contractdeploy
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
@@ -28,6 +31,8 @@ import (
 const (
 	// GAS_PER_CONTRACT is the estimated gas cost for deploying one StateBloatToken contract
 	GAS_PER_CONTRACT = 4970000 // ~4.97M gas per contract
+	// BLOCK_GAS_LIMIT is the typical block gas limit for Ethereum mainnet
+	BLOCK_GAS_LIMIT = 30000000 // 30M gas
 )
 
 type ScenarioOptions struct {
@@ -38,6 +43,27 @@ type ScenarioOptions struct {
 	TipFee          uint64 `yaml:"tip_fee"`
 	ClientGroup     string `yaml:"client_group"`
 	MaxTransactions uint64 `yaml:"max_transactions"` // Maximum number of transactions to send (0 for unlimited)
+	BlockGasLimit   uint64 `yaml:"block_gas_limit"`  // Block gas limit for batching (0 = use default)
+}
+
+// ContractDeployment tracks a deployed contract with its deployer info
+type ContractDeployment struct {
+	ContractAddress string `json:"contract_address"`
+	PrivateKey      string `json:"private_key"`
+	TxHash          string `json:"tx_hash"`
+	GasUsed         uint64 `json:"gas_used"`
+	BlockNumber     uint64 `json:"block_number"`
+	BytecodeSize    int    `json:"bytecode_size"`
+	GasPerByte      string `json:"gas_per_byte"`
+}
+
+// PendingTransaction tracks a transaction until it's mined
+type PendingTransaction struct {
+	TxHash     common.Hash
+	Wallet     *txbuilder.Wallet
+	TxIndex    uint64
+	SentAt     time.Time
+	PrivateKey *ecdsa.PrivateKey
 }
 
 type Scenario struct {
@@ -45,22 +71,35 @@ type Scenario struct {
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
 
-	pendingChan   chan bool
-	pendingWGroup sync.WaitGroup
+	// Cached chain ID to avoid repeated RPC calls
+	chainID      *big.Int
+	chainIDOnce  sync.Once
+	chainIDError error
 
-	deployedAddresses []string
-	addressesMutex    sync.Mutex
+	// Transaction tracking
+	pendingTxs      map[common.Hash]*PendingTransaction
+	pendingTxsMutex sync.RWMutex
+	maxConcurrent   int
+
+	// Results tracking
+	deployedContracts []ContractDeployment
+	contractsMutex    sync.Mutex
+
+	// Nonce management per wallet
+	walletNonces map[common.Address]uint64
+	nonceMutex   sync.RWMutex
 }
 
 var ScenarioName = "contract-deploy"
 var ScenarioDefaultOptions = ScenarioOptions{
-	MaxPending:      0,
+	MaxPending:      10, // Limit concurrent transactions
 	MaxWallets:      0,
 	Rebroadcast:     1,
 	BaseFee:         20,
 	TipFee:          2,
 	ClientGroup:     "default",
 	MaxTransactions: 0, // Default to unlimited
+	BlockGasLimit:   0, // Use default BLOCK_GAS_LIMIT
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -71,7 +110,10 @@ var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 
 func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
 	return &Scenario{
-		logger: logger.WithField("scenario", ScenarioName),
+		logger:        logger.WithField("scenario", ScenarioName),
+		pendingTxs:    make(map[common.Hash]*PendingTransaction),
+		walletNonces:  make(map[common.Address]uint64),
+		maxConcurrent: 5, // Conservative default
 	}
 }
 
@@ -83,6 +125,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.Uint64Var(&s.options.MaxTransactions, "max-transactions", ScenarioDefaultOptions.MaxTransactions, "Maximum number of transactions to send (0 for unlimited)")
+	flags.Uint64Var(&s.options.BlockGasLimit, "block-gas-limit", ScenarioDefaultOptions.BlockGasLimit, "Block gas limit for batching (0 = use default)")
 	return nil
 }
 
@@ -102,8 +145,9 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 		walletPool.SetWalletCount(1000)
 	}
 
+	// Set concurrent transaction limit
 	if s.options.MaxPending > 0 {
-		s.pendingChan = make(chan bool, s.options.MaxPending)
+		s.maxConcurrent = int(s.options.MaxPending)
 	}
 
 	return nil
@@ -114,210 +158,464 @@ func (s *Scenario) Config() string {
 	return string(yamlBytes)
 }
 
-func (s *Scenario) Run(ctx context.Context) error {
-	txIdxCounter := uint64(0)
-	pendingCount := atomic.Int64{}
-	txCount := atomic.Uint64{}
-	var lastChan chan bool
+// getChainID caches the chain ID to avoid repeated RPC calls
+func (s *Scenario) getChainID(ctx context.Context) (*big.Int, error) {
+	s.chainIDOnce.Do(func() {
+		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+		if client == nil {
+			s.chainIDError = fmt.Errorf("no client available for chain ID")
+			return
+		}
+		s.chainID, s.chainIDError = client.GetChainId(ctx)
+		if s.chainIDError == nil {
+			s.logger.Infof("Cached chain ID: %s", s.chainID.String())
+		}
+	})
+	return s.chainID, s.chainIDError
+}
 
-	s.logger.Infof("starting scenario: %s", ScenarioName)
-	defer s.logger.Infof("scenario %s finished.", ScenarioName)
+// getWalletNonce gets the current nonce for a wallet (without incrementing)
+func (s *Scenario) getWalletNonce(ctx context.Context, wallet *txbuilder.Wallet, client *txbuilder.Client) (uint64, error) {
+	s.nonceMutex.Lock()
+	defer s.nonceMutex.Unlock()
+
+	addr := crypto.PubkeyToAddress(wallet.GetPrivateKey().PublicKey)
+
+	// Always refresh nonce from network to avoid gaps
+	nonce, err := client.GetEthClient().PendingNonceAt(ctx, addr)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get nonce for %s: %w", addr.Hex(), err)
+	}
+
+	// Store the current network nonce
+	s.walletNonces[addr] = nonce
+	s.logger.Debugf("Current nonce for wallet %s: %d", addr.Hex(), nonce)
+
+	return nonce, nil
+}
+
+// incrementWalletNonce increments the local nonce counter after successful tx send
+func (s *Scenario) incrementWalletNonce(wallet *txbuilder.Wallet) {
+	s.nonceMutex.Lock()
+	defer s.nonceMutex.Unlock()
+
+	addr := crypto.PubkeyToAddress(wallet.GetPrivateKey().PublicKey)
+	s.walletNonces[addr]++
+	s.logger.Debugf("Incremented nonce for wallet %s to: %d", addr.Hex(), s.walletNonces[addr])
+}
+
+// waitForPendingTxSlot waits until we have capacity for another transaction
+func (s *Scenario) waitForPendingTxSlot(ctx context.Context) {
+	for {
+		s.pendingTxsMutex.RLock()
+		count := len(s.pendingTxs)
+		s.pendingTxsMutex.RUnlock()
+
+		if count < s.maxConcurrent {
+			return
+		}
+
+		// Check and clean up confirmed transactions
+		s.processPendingTransactions(ctx)
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// processPendingTransactions checks for transaction confirmations and updates state
+func (s *Scenario) processPendingTransactions(ctx context.Context) {
+	s.pendingTxsMutex.Lock()
+	defer s.pendingTxsMutex.Unlock()
 
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	if client == nil {
-		return fmt.Errorf("no client available")
+		return
 	}
 
-	var deployTxHashesMu sync.Mutex
-	var deployTxHashes []common.Hash
+	ethClient := client.GetEthClient()
+	var confirmedTxs []common.Hash
+
+	for txHash, pendingTx := range s.pendingTxs {
+		receipt, err := ethClient.TransactionReceipt(ctx, txHash)
+		if err != nil {
+			// Transaction still pending or error retrieving receipt
+			continue
+		}
+
+		confirmedTxs = append(confirmedTxs, txHash)
+
+		// Process successful deployment
+		if receipt.Status == 1 && receipt.ContractAddress != (common.Address{}) {
+			s.recordDeployedContract(receipt, pendingTx)
+		} else if receipt.Status != 1 {
+			s.logger.Warnf("Transaction failed: %s (gas used: %d)", txHash.Hex(), receipt.GasUsed)
+		}
+	}
+
+	// Remove confirmed transactions from pending map
+	for _, txHash := range confirmedTxs {
+		delete(s.pendingTxs, txHash)
+	}
+
+	if len(confirmedTxs) > 0 {
+		s.logger.Debugf("Processed %d confirmed transactions, %d still pending",
+			len(confirmedTxs), len(s.pendingTxs))
+	}
+}
+
+// recordDeployedContract records a successfully deployed contract
+func (s *Scenario) recordDeployedContract(receipt *types.Receipt, pendingTx *PendingTransaction) {
+	s.contractsMutex.Lock()
+	defer s.contractsMutex.Unlock()
+
+	// Get the actual transaction to calculate real bytecode size
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	var txBytes int
+	var gasPerByte float64
+
+	if client != nil {
+		tx, _, err := client.GetEthClient().TransactionByHash(context.Background(), receipt.TxHash)
+		if err == nil {
+			txBytes = len(tx.Data())
+			gasPerByte = float64(receipt.GasUsed) / float64(max(txBytes, 1))
+		} else {
+			// Fallback to estimated size
+			txBytes = 24564 // Approximate StateBloatToken bytecode size
+			gasPerByte = float64(receipt.GasUsed) / float64(txBytes)
+		}
+	} else {
+		// Fallback values
+		txBytes = 24564
+		gasPerByte = float64(receipt.GasUsed) / float64(txBytes)
+	}
+
+	deployment := ContractDeployment{
+		ContractAddress: receipt.ContractAddress.Hex(),
+		PrivateKey:      fmt.Sprintf("0x%x", crypto.FromECDSA(pendingTx.PrivateKey)),
+		TxHash:          receipt.TxHash.Hex(),
+		GasUsed:         receipt.GasUsed,
+		BlockNumber:     receipt.BlockNumber.Uint64(),
+		BytecodeSize:    txBytes,
+		GasPerByte:      fmt.Sprintf("%.2f", gasPerByte),
+	}
+
+	s.deployedContracts = append(s.deployedContracts, deployment)
+
+	s.logger.WithFields(logrus.Fields{
+		"contract_address": deployment.ContractAddress,
+		"tx_hash":          deployment.TxHash,
+		"gas_used":         deployment.GasUsed,
+		"block_number":     deployment.BlockNumber,
+		"bytecode_size":    deployment.BytecodeSize,
+		"gas_per_byte":     deployment.GasPerByte,
+		"total_contracts":  len(s.deployedContracts),
+	}).Info("Contract successfully deployed and recorded")
+}
+
+func (s *Scenario) Run(ctx context.Context) error {
+	s.logger.Infof("starting scenario: %s", ScenarioName)
+	defer s.logger.Infof("scenario %s finished.", ScenarioName)
+
+	// Cache chain ID at startup
+	chainID, err := s.getChainID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get chain ID: %w", err)
+	}
+
+	// Determine block gas limit to use
+	blockGasLimit := s.options.BlockGasLimit
+	if blockGasLimit == 0 {
+		blockGasLimit = BLOCK_GAS_LIMIT
+	}
+
+	// Calculate how many contracts can fit in one block
+	contractsPerBlock := int(blockGasLimit / GAS_PER_CONTRACT)
+	if contractsPerBlock == 0 {
+		contractsPerBlock = 1
+	}
+
+	s.logger.Infof("Chain ID: %s, Block gas limit: %d, Gas per contract: %d, Contracts per block: %d, Max concurrent: %d",
+		chainID.String(), blockGasLimit, GAS_PER_CONTRACT, contractsPerBlock, s.maxConcurrent)
+
+	txIdxCounter := uint64(0)
+	totalTxCount := atomic.Uint64{}
 
 	for {
+		// Check if we've reached max transactions
 		if s.options.MaxTransactions > 0 && txIdxCounter >= s.options.MaxTransactions {
 			s.logger.Infof("reached maximum number of transactions (%d)", s.options.MaxTransactions)
 			break
 		}
 
-		txIdx := txIdxCounter
-		txIdxCounter++
+		// Wait for available slot
+		s.waitForPendingTxSlot(ctx)
 
-		if s.pendingChan != nil {
-			// await pending transactions
-			s.pendingChan <- true
-		}
-		pendingCount.Add(1)
-		currentChan := make(chan bool, 1)
-
-		go func(txIdx uint64, lastChan, currentChan chan bool) {
-			defer func() {
-				pendingCount.Add(-1)
-				currentChan <- true
-			}()
-
-			logger := s.logger
-			tx, client, wallet, err := s.sendTx(ctx, txIdx, func() {
-				if s.pendingChan != nil {
-					time.Sleep(100 * time.Millisecond)
-					<-s.pendingChan
-				}
-			})
-			if client != nil {
-				logger = logger.WithField("rpc", client.GetName())
-			}
-			if tx != nil {
-				logger = logger.WithField("nonce", tx.Nonce())
-			}
-			if wallet != nil {
-				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
-			}
-			if lastChan != nil {
-				<-lastChan
-			}
-			if err != nil {
-				logger.Warnf("could not send transaction: %v", err)
-				return
-			}
-
-			// Collect tx hash for later receipt lookup
-			deployTxHashesMu.Lock()
-			deployTxHashes = append(deployTxHashes, tx.Hash())
-			deployTxHashesMu.Unlock()
-
-			txCount.Add(1)
-		}(txIdx, lastChan, currentChan)
-
-		lastChan = currentChan
-	}
-	s.pendingWGroup.Wait()
-
-	s.logger.WithFields(logrus.Fields{
-		"test":        "contract-deploy",
-		"total_txs":   txCount.Load(),
-		"pending_txs": pendingCount.Load(),
-	}).Info("finished sending transactions, awaiting block inclusion...")
-
-	// Wait for a new block to be mined
-	ethClient := client.GetEthClient()
-	startBlock, err := ethClient.BlockByNumber(ctx, nil)
-	if err != nil {
-		s.logger.Warnf("Failed to get current block: %v", err)
-		return err
-	}
-	startBlockNum := startBlock.NumberU64()
-	var latestBlockNum uint64
-	for {
-		block, err := ethClient.BlockByNumber(ctx, nil)
+		// Send a single transaction
+		err := s.sendTransaction(ctx, txIdxCounter)
 		if err != nil {
-			s.logger.Warnf("Failed to get block: %v", err)
-			return err
+			s.logger.Warnf("failed to send transaction %d: %v", txIdxCounter, err)
+			time.Sleep(1 * time.Second)
+			continue
 		}
-		latestBlockNum = block.NumberU64()
-		if latestBlockNum > startBlockNum {
+
+		txIdxCounter++
+		totalTxCount.Add(1)
+
+		// Process pending transactions periodically
+		if txIdxCounter%10 == 0 {
+			s.processPendingTransactions(ctx)
+
+			s.contractsMutex.Lock()
+			contractCount := len(s.deployedContracts)
+			s.contractsMutex.Unlock()
+
+			s.logger.Infof("Progress: sent %d txs, deployed %d contracts", txIdxCounter, contractCount)
+		}
+
+		// Small delay to prevent overwhelming the RPC
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Wait for all pending transactions to complete
+	s.logger.Info("Waiting for remaining transactions to complete...")
+	for {
+		s.processPendingTransactions(ctx)
+
+		s.pendingTxsMutex.RLock()
+		pendingCount := len(s.pendingTxs)
+		s.pendingTxsMutex.RUnlock()
+
+		if pendingCount == 0 {
 			break
 		}
+
+		s.logger.Infof("Waiting for %d pending transactions...", pendingCount)
 		time.Sleep(2 * time.Second)
 	}
 
-	// For each deployment tx, get the receipt and log contract address and gas used
-	var deployedAddresses []string
-	for _, txHash := range deployTxHashes {
-		receipt, err := ethClient.TransactionReceipt(ctx, txHash)
-		if err != nil {
-			s.logger.Warnf("Failed to get receipt for tx %s: %v", txHash.Hex(), err)
-			continue
-		}
-		if receipt.ContractAddress != (common.Address{}) {
-			addr := receipt.ContractAddress.Hex()
-			deployedAddresses = append(deployedAddresses, addr)
-			s.logger.Infof("Deployed contract at address: %s (gas used: %d)", addr, receipt.GasUsed)
-		}
-	}
+	// Save results to JSON
+	s.contractsMutex.Lock()
+	totalContracts := len(s.deployedContracts)
+	s.contractsMutex.Unlock()
 
-	// Write deployed addresses to JSON file and log them
-	if len(deployedAddresses) > 0 {
-		file, err := os.Create("deployed_contracts.json")
-		if err == nil {
-			_ = json.NewEncoder(file).Encode(deployedAddresses)
-			file.Close()
-			s.logger.Infof("Wrote %d deployed contract addresses to deployed_contracts.json", len(deployedAddresses))
-		} else {
-			s.logger.Warnf("Failed to write deployed_contracts.json: %v", err)
-		}
-		s.logger.Infof("Deployed contract addresses: %v", deployedAddresses)
-	}
+	s.logger.WithFields(logrus.Fields{
+		"test":            "contract-deploy",
+		"total_txs":       totalTxCount.Load(),
+		"total_contracts": totalContracts,
+	}).Info("All transactions completed")
 
-	return nil
+	return s.saveDeployedContracts()
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+// sendTransaction sends a single contract deployment transaction with retry logic
+func (s *Scenario) sendTransaction(ctx context.Context, txIdx uint64) error {
+	maxRetries := 3
+	baseGasMultiplier := 1.0
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := s.attemptTransaction(ctx, txIdx, baseGasMultiplier)
+		if err == nil {
+			return nil
+		}
+
+		// Check if it's an underpriced error
+		if strings.Contains(err.Error(), "replacement transaction underpriced") ||
+			strings.Contains(err.Error(), "transaction underpriced") {
+			baseGasMultiplier += 0.2 // Increase gas by 20% each retry
+			s.logger.Warnf("Transaction %d underpriced, retrying with %.1fx gas (attempt %d/%d)",
+				txIdx, baseGasMultiplier, attempt+1, maxRetries)
+			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond) // Exponential backoff
+			continue
+		}
+
+		// For other errors, return immediately
+		return err
+	}
+
+	return fmt.Errorf("failed to send transaction after %d attempts", maxRetries)
+}
+
+// attemptTransaction makes a single attempt to send a transaction
+func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, gasMultiplier float64) error {
+	// Get client and wallet
+	client := s.walletPool.GetClient(spamoor.SelectClientRoundRobin, 0, s.options.ClientGroup)
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletRoundRobin, 0)
 
 	if client == nil {
-		return nil, nil, nil, fmt.Errorf("no client available")
+		return fmt.Errorf("no client available")
 	}
 	if wallet == nil {
-		return nil, nil, nil, fmt.Errorf("no wallet available")
+		return fmt.Errorf("no wallet available")
 	}
 
-	// Get chain ID
-	chainId, err := client.GetChainId(ctx)
+	// Get cached chain ID
+	chainID, err := s.getChainID(ctx)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to get chain ID: %w", err)
+		return fmt.Errorf("failed to get chain ID: %w", err)
 	}
 
-	// Deploy contract
-	auth, err := bind.NewKeyedTransactorWithChainID(wallet.GetPrivateKey(), chainId)
+	// Get current nonce for this wallet
+	nonce, err := s.getWalletNonce(ctx, wallet, client)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create auth: %w", err)
+		return fmt.Errorf("failed to get nonce: %w", err)
 	}
 
-	auth.Nonce = big.NewInt(int64(wallet.GetNonce()))
+	// Create transaction auth
+	auth, err := bind.NewKeyedTransactorWithChainID(wallet.GetPrivateKey(), chainID)
+	if err != nil {
+		return fmt.Errorf("failed to create auth: %w", err)
+	}
+
+	auth.Nonce = big.NewInt(int64(nonce))
 	auth.Value = big.NewInt(0)
-	auth.GasLimit = GAS_PER_CONTRACT + GAS_PER_CONTRACT*5/100 // Gas for single contract deployment
+	auth.GasLimit = GAS_PER_CONTRACT + GAS_PER_CONTRACT*5/100
 
-	// Set EIP-1559 fee parameters
-	if s.options.BaseFee > 0 {
-		auth.GasFeeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
+	// Set EIP-1559 fee parameters with dynamic adjustment
+	baseFee := s.options.BaseFee
+	tipFee := s.options.TipFee
+
+	if gasMultiplier > 1.0 {
+		baseFee = uint64(float64(baseFee) * gasMultiplier)
+		tipFee = uint64(float64(tipFee) * gasMultiplier)
 	}
-	if s.options.TipFee > 0 {
-		auth.GasTipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
+
+	if baseFee > 0 {
+		auth.GasFeeCap = new(big.Int).Mul(big.NewInt(int64(baseFee)), big.NewInt(1000000000))
+	}
+	if tipFee > 0 {
+		auth.GasTipCap = new(big.Int).Mul(big.NewInt(int64(tipFee)), big.NewInt(1000000000))
 	}
 
 	// Generate random salt for unique contract
 	salt := make([]byte, 32)
 	_, err = rand.Read(salt)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to generate salt: %w", err)
+		return fmt.Errorf("failed to generate salt: %w", err)
 	}
 	saltInt := new(big.Int).SetBytes(salt)
 
-	// Ensure we have a valid client
+	// Deploy the contract
 	ethClient := client.GetEthClient()
 	if ethClient == nil {
-		return nil, nil, nil, fmt.Errorf("failed to get eth client")
+		return fmt.Errorf("failed to get eth client")
 	}
 
-	// Deploy the StateBloatToken contract
 	address, tx, _, err := contract.DeployContract(auth, ethClient, saltInt)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to deploy contract: %w", err)
+		return fmt.Errorf("failed to deploy contract: %w", err)
 	}
 
-	// Update nonce
-	wallet.SetNonce(wallet.GetNonce() + 1)
+	// Track pending transaction
+	pendingTx := &PendingTransaction{
+		TxHash:     tx.Hash(),
+		Wallet:     wallet,
+		TxIndex:    txIdx,
+		SentAt:     time.Now(),
+		PrivateKey: wallet.GetPrivateKey(),
+	}
 
-	// Calculate bytes written and gas/byte ratio
-	txBytes := len(tx.Data())
-	gasPerByte := float64(GAS_PER_CONTRACT) / float64(txBytes)
+	s.pendingTxsMutex.Lock()
+	s.pendingTxs[tx.Hash()] = pendingTx
+	s.pendingTxsMutex.Unlock()
 
 	s.logger.WithFields(logrus.Fields{
-		"test":             "contract-deploy",
+		"tx_index":         txIdx,
 		"tx_hash":          tx.Hash().Hex(),
-		"contract_address": address.Hex(),
-		"bytes_written":    txBytes,
-		"gas_per_byte":     fmt.Sprintf("%.2f", gasPerByte),
-		"contracts":        1,
-	}).Info("deployed contract")
+		"expected_address": address.Hex(),
+		"nonce":            nonce,
+		"wallet":           crypto.PubkeyToAddress(wallet.GetPrivateKey().PublicKey).Hex(),
+		"gas_limit":        auth.GasLimit,
+		"base_fee_gwei":    baseFee,
+		"tip_fee_gwei":     tipFee,
+		"gas_multiplier":   fmt.Sprintf("%.1fx", gasMultiplier),
+	}).Info("Transaction sent successfully")
 
-	return tx, client, wallet, nil
+	// Only increment nonce after successful send
+	s.incrementWalletNonce(wallet)
+
+	return nil
+}
+
+// saveDeployedContracts saves the deployed contracts to JSON files
+func (s *Scenario) saveDeployedContracts() error {
+	s.contractsMutex.Lock()
+	defer s.contractsMutex.Unlock()
+
+	if len(s.deployedContracts) == 0 {
+		s.logger.Info("No contracts were deployed")
+		return nil
+	}
+
+	// Save detailed contract info with private keys
+	contractsFile, err := os.Create("deployed_contracts_detailed.json")
+	if err != nil {
+		return fmt.Errorf("failed to create detailed contracts file: %w", err)
+	}
+	defer contractsFile.Close()
+
+	err = json.NewEncoder(contractsFile).Encode(s.deployedContracts)
+	if err != nil {
+		return fmt.Errorf("failed to write detailed contracts: %w", err)
+	}
+
+	// Save simple addresses list for compatibility
+	var addresses []string
+	for _, contract := range s.deployedContracts {
+		addresses = append(addresses, contract.ContractAddress)
+	}
+
+	addressFile, err := os.Create("deployed_contracts.json")
+	if err != nil {
+		return fmt.Errorf("failed to create addresses file: %w", err)
+	}
+	defer addressFile.Close()
+
+	err = json.NewEncoder(addressFile).Encode(addresses)
+	if err != nil {
+		return fmt.Errorf("failed to write addresses: %w", err)
+	}
+
+	// Create contract-to-private-key mapping
+	contractKeyMap := make(map[string]string)
+	for _, contract := range s.deployedContracts {
+		contractKeyMap[contract.ContractAddress] = contract.PrivateKey
+	}
+
+	keyMapFile, err := os.Create("contract_private_key_mapping.json")
+	if err != nil {
+		return fmt.Errorf("failed to create key mapping file: %w", err)
+	}
+	defer keyMapFile.Close()
+
+	err = json.NewEncoder(keyMapFile).Encode(contractKeyMap)
+	if err != nil {
+		return fmt.Errorf("failed to write key mapping: %w", err)
+	}
+
+	s.logger.WithFields(logrus.Fields{
+		"contracts_deployed": len(s.deployedContracts),
+		"detailed_file":      "deployed_contracts_detailed.json",
+		"addresses_file":     "deployed_contracts.json",
+		"key_mapping_file":   "contract_private_key_mapping.json",
+	}).Info("Successfully saved deployed contract information to JSON files")
+
+	// Log summary of deployed contracts
+	var totalGasUsed uint64
+	for _, contract := range s.deployedContracts {
+		totalGasUsed += contract.GasUsed
+	}
+
+	s.logger.WithFields(logrus.Fields{
+		"total_contracts":      len(s.deployedContracts),
+		"total_gas_used":       totalGasUsed,
+		"avg_gas_per_contract": totalGasUsed / uint64(len(s.deployedContracts)),
+	}).Info("Deployment summary")
+
+	return nil
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
