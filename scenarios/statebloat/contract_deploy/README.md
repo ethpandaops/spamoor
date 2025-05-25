@@ -5,7 +5,7 @@ This scenario deploys contracts that are exactly 24kB in size (EIP-170 limit) to
 ## How it Works
 
 1. Generates a contract with exactly 24,576 bytes of runtime code
-2. Deploys the contract using CREATE
+2. Deploys the contract using CREATE with a salt that makes the bytecode unique.
 3. Uses batch-based deployment:
    - Calculates how many contracts fit in one block based on gas limits
    - Sends a batch of transactions that fit within the block gas limit
@@ -82,7 +82,7 @@ spamoor statebloat/contract-deploy \
 ### 1. Start Anvil
 
 ```bash
-anvil --hardfork pectra
+anvil --hardfork latest --block-time 12
 ```
 
 You can add other flags as needed (e.g., `--no-mining` if you want to control mining manually).
