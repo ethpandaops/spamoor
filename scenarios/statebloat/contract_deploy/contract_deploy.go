@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy/contract"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -167,6 +169,8 @@ func (s *Scenario) processPendingTransactions(ctx context.Context) {
 	var successfulDeployments []struct {
 		ContractAddress common.Address
 		PrivateKey      *ecdsa.PrivateKey
+		Receipt         *types.Receipt
+		TxHash          common.Hash
 	}
 
 	for txHash, pendingTx := range s.pendingTxs {
@@ -183,9 +187,13 @@ func (s *Scenario) processPendingTransactions(ctx context.Context) {
 			successfulDeployments = append(successfulDeployments, struct {
 				ContractAddress common.Address
 				PrivateKey      *ecdsa.PrivateKey
+				Receipt         *types.Receipt
+				TxHash          common.Hash
 			}{
 				ContractAddress: receipt.ContractAddress,
 				PrivateKey:      pendingTx.PrivateKey,
+				Receipt:         receipt,
+				TxHash:          txHash,
 			})
 		}
 	}
@@ -199,15 +207,16 @@ func (s *Scenario) processPendingTransactions(ctx context.Context) {
 
 	// Process successful deployments after releasing the lock
 	for _, deployment := range successfulDeployments {
-		s.recordDeployedContract(deployment.ContractAddress, deployment.PrivateKey)
+		s.recordDeployedContract(deployment.ContractAddress, deployment.PrivateKey, deployment.Receipt, deployment.TxHash)
 	}
 }
 
 // recordDeployedContract records a successfully deployed contract
-func (s *Scenario) recordDeployedContract(contractAddress common.Address, privateKey *ecdsa.PrivateKey) {
+func (s *Scenario) recordDeployedContract(contractAddress common.Address, privateKey *ecdsa.PrivateKey, receipt *types.Receipt, txHash common.Hash) {
 	s.contractsMutex.Lock()
 	defer s.contractsMutex.Unlock()
 
+	// Keep the JSON structure simple - only contract address and private key
 	deployment := ContractDeployment{
 		ContractAddress: contractAddress.Hex(),
 		PrivateKey:      fmt.Sprintf("0x%x", crypto.FromECDSA(privateKey)),
@@ -215,15 +224,48 @@ func (s *Scenario) recordDeployedContract(contractAddress common.Address, privat
 
 	s.deployedContracts = append(s.deployedContracts, deployment)
 
+	// Calculate detailed information for logging
+	walletAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
+
+	// Get the actual transaction to calculate real bytecode size
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	var bytecodeSize int = 24564 // Default fallback
+	var gasPerByte float64
+
+	if client != nil {
+		tx, _, err := client.GetEthClient().TransactionByHash(context.Background(), txHash)
+		if err == nil {
+			bytecodeSize = len(tx.Data())
+		}
+	}
+
+	// Calculate gas per byte
+	gasPerByte = float64(receipt.GasUsed) / float64(max(bytecodeSize, 1))
+
+	// Log with detailed information
 	s.logger.WithFields(logrus.Fields{
+		"block_number":     receipt.BlockNumber.Uint64(),
+		"bytecode_size":    bytecodeSize,
 		"contract_address": deployment.ContractAddress,
+		"gas_per_byte":     fmt.Sprintf("%.2f", gasPerByte),
+		"gas_used":         receipt.GasUsed,
 		"total_contracts":  len(s.deployedContracts),
-	}).Info("Contract deployed")
+		"tx_hash":          txHash.Hex(),
+		"wallet_address":   walletAddress.Hex(),
+	}).Info("Contract successfully deployed and recorded")
 
 	// Save the deployments.json file each time a contract is confirmed
 	if err := s.saveDeploymentsMapping(); err != nil {
 		s.logger.Warnf("Failed to save deployments.json: %v", err)
 	}
+}
+
+// Helper function for max calculation
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // saveDeploymentsMapping creates/updates deployments.json with private key to contract address mapping
@@ -338,6 +380,82 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 // sendTransaction sends a single contract deployment transaction
 func (s *Scenario) sendTransaction(ctx context.Context, txIdx uint64) error {
+	maxRetries := 3
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := s.attemptTransaction(ctx, txIdx, attempt)
+		if err == nil {
+			return nil
+		}
+
+		// Check if it's a base fee error
+		if strings.Contains(err.Error(), "max fee per gas less than block base fee") {
+			s.logger.Warnf("Transaction %d base fee too low, adjusting fees and retrying (attempt %d/%d)",
+				txIdx, attempt+1, maxRetries)
+
+			// Update fees based on current network conditions
+			if updateErr := s.updateDynamicFees(ctx); updateErr != nil {
+				s.logger.Warnf("Failed to update dynamic fees: %v", updateErr)
+			}
+
+			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond) // Exponential backoff
+			continue
+		}
+
+		// For other errors, return immediately
+		return err
+	}
+
+	return fmt.Errorf("failed to send transaction after %d attempts", maxRetries)
+}
+
+// updateDynamicFees queries the network and updates base fee and tip fee
+func (s *Scenario) updateDynamicFees(ctx context.Context) error {
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	if client == nil {
+		return fmt.Errorf("no client available")
+	}
+
+	ethClient := client.GetEthClient()
+
+	// Get the latest block to check current base fee
+	latestBlock, err := ethClient.BlockByNumber(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get latest block: %w", err)
+	}
+
+	if latestBlock.BaseFee() != nil {
+		// Convert base fee from wei to gwei
+		currentBaseFeeGwei := new(big.Int).Div(latestBlock.BaseFee(), big.NewInt(1000000000))
+
+		// Set new base fee to current base fee + 20% buffer
+		newBaseFeeGwei := new(big.Int).Mul(currentBaseFeeGwei, big.NewInt(120))
+		newBaseFeeGwei = new(big.Int).Div(newBaseFeeGwei, big.NewInt(100))
+
+		// Ensure minimum increase of 5 gwei
+		minIncrease := big.NewInt(5)
+		if newBaseFeeGwei.Cmp(new(big.Int).Add(big.NewInt(int64(s.options.BaseFee)), minIncrease)) < 0 {
+			newBaseFeeGwei = new(big.Int).Add(big.NewInt(int64(s.options.BaseFee)), minIncrease)
+		}
+
+		s.options.BaseFee = newBaseFeeGwei.Uint64()
+
+		// Also increase tip fee slightly to ensure competitive priority
+		if s.options.TipFee+1 > 3 {
+			s.options.TipFee = s.options.TipFee + 1
+		} else {
+			s.options.TipFee = 3 // Minimum 3 gwei tip
+		}
+
+		s.logger.Infof("Updated dynamic fees - Base fee: %d gwei, Tip fee: %d gwei (network base fee: %s gwei)",
+			s.options.BaseFee, s.options.TipFee, currentBaseFeeGwei.String())
+	}
+
+	return nil
+}
+
+// attemptTransaction makes a single attempt to send a transaction
+func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt int) error {
 	// Get client and wallet
 	client := s.walletPool.GetClient(spamoor.SelectClientRoundRobin, 0, s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletRoundRobin, 0)
@@ -410,8 +528,11 @@ func (s *Scenario) sendTransaction(ctx context.Context, txIdx uint64) error {
 	s.pendingTxsMutex.Unlock()
 
 	s.logger.WithFields(logrus.Fields{
-		"tx_hash": tx.Hash().Hex(),
-		"nonce":   nonce,
+		"tx_hash":       tx.Hash().Hex(),
+		"nonce":         nonce,
+		"base_fee_gwei": s.options.BaseFee,
+		"tip_fee_gwei":  s.options.TipFee,
+		"attempt":       attempt + 1,
 	}).Info("Transaction sent")
 
 	return nil
