@@ -131,8 +131,8 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.MaxBloating {
-		// In max-bloating mode, if maxWallets is not set, use 0 wallets
-		s.walletPool.SetWalletCount(0)
+		// In max-bloating mode, if maxWallets is not set, use 1 wallet (the root wallet)
+		s.walletPool.SetWalletCount(1)
 	} else if s.options.TotalCount > 0 {
 		if s.options.TotalCount < 1000 {
 			s.walletPool.SetWalletCount(s.options.TotalCount)
