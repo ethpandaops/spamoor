@@ -492,8 +492,6 @@ func (s *Scenario) prepareDelegator(delegatorIndex uint64) (*txbuilder.Wallet, e
 func (s *Scenario) buildMaxBloatingAuthorizations(targetCount int, iteration int) []types.SetCodeAuthorization {
 	authorizations := make([]types.SetCodeAuthorization, 0, targetCount)
 
-	s.logger.Infof("building %d unique EOA authorizations for maximum state bloat (iteration %d)", targetCount, iteration)
-
 	// Use a fixed delegate contract address for maximum efficiency
 	// In max bloating mode, we want all EOAs to delegate to the same existing contract
 	// to benefit from reduced gas costs (PER_AUTH_BASE_COST vs PER_EMPTY_ACCOUNT_COST)
@@ -501,7 +499,6 @@ func (s *Scenario) buildMaxBloatingAuthorizations(targetCount int, iteration int
 	var codeAddr common.Address
 	if s.options.CodeAddr != "" {
 		codeAddr = common.HexToAddress(s.options.CodeAddr)
-		s.logger.Infof("using configured delegate address: %s", codeAddr.Hex())
 	} else {
 		// Default to using the ecrecover precompile (0x1) as delegate target
 		// This is perfect for max-bloating mode as it's guaranteed to exist with code
@@ -538,14 +535,8 @@ func (s *Scenario) buildMaxBloatingAuthorizations(targetCount int, iteration int
 		}
 
 		authorizations = append(authorizations, signedAuth)
-
-		// Log progress every 100 authorizations
-		if (i+1)%100 == 0 {
-			s.logger.Debugf("generated %d/%d authorizations", i+1, targetCount)
-		}
 	}
 
-	s.logger.Infof("successfully generated %d authorizations (target: %d)", len(authorizations), targetCount)
 	return authorizations
 }
 
@@ -569,7 +560,6 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 		}
 
 		blockCounter++
-		s.logger.Infof("=== Starting Max Bloating Iteration #%d ===", blockCounter)
 
 		// Fund delegator accounts first
 		err := s.fundMaxBloatingDelegators(ctx, targetAuthorizations, blockCounter)
@@ -579,7 +569,7 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 			continue
 		}
 
-		// Send the max bloating transaction
+		// Send the max bloating transaction and wait for confirmation
 		err = s.sendMaxBloatingTransaction(ctx, targetAuthorizations, targetGasLimit, blockCounter)
 		if err != nil {
 			s.logger.Errorf("failed to send max bloating transaction for iteration %d: %v", blockCounter, err)
@@ -587,16 +577,12 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 			continue
 		}
 
-		s.logger.Infof("=== Completed Max Bloating Iteration #%d ===", blockCounter)
-
-		// Small delay between iterations to allow for block inclusion
+		// Transaction confirmed - small delay before next iteration
 		time.Sleep(2 * time.Second)
 	}
 }
 
 func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount int, iteration int) error {
-	s.logger.Infof("funding %d unique delegator accounts with 1 wei each (iteration %d)", targetCount, iteration)
-
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	if client == nil {
 		return fmt.Errorf("no client available for funding delegators")
@@ -634,15 +620,34 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 	// Fund with 1 wei as requested by user
 	fundingAmount := uint256.NewInt(1)
 
-	successCount := 0
+	var confirmedCount int64
+	sentCount := 0
+	delegatorIndex := uint64(iteration * 1000000) // Large offset per iteration to avoid conflicts
 
-	// Fund delegators sequentially to avoid nonce conflicts
-	for i := 0; i < targetCount; i++ {
-		// Generate unique delegator address for this iteration
-		delegatorIndex := uint64(iteration*targetCount + i)
+	// Calculate approximate transactions per block based on gas limit
+	// Standard transfer = 21000 gas, typical block = ~30M gas = ~1400 txs per block
+	const maxTxsPerBlock = 1400
+	const blockTimeSeconds = 10 // Adjust based on your network
+
+	for {
+		// Check if we have enough confirmed transactions
+		confirmed := atomic.LoadInt64(&confirmedCount)
+		if confirmed >= int64(targetCount) {
+			// We have minimum required, but let's check if we should fill the current block
+			// If we've sent transactions recently, wait a bit to see if block gets filled
+			if sentCount > 0 && (sentCount%100) > 50 {
+				// Continue to fill the block
+			} else {
+				s.logger.Infof("funding target reached: %d confirmed transactions", confirmed)
+				break
+			}
+		}
+
+		// Generate unique delegator address
 		delegator, err := s.prepareDelegator(delegatorIndex)
 		if err != nil {
 			s.logger.Errorf("could not prepare delegator %v for funding: %v", delegatorIndex, err)
+			delegatorIndex++
 			continue
 		}
 
@@ -657,13 +662,15 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 			Data:      []byte{},
 		})
 		if err != nil {
-			s.logger.Errorf("failed to build funding tx for delegator %d: %v", i, err)
+			s.logger.Errorf("failed to build funding tx for delegator %d: %v", delegatorIndex, err)
+			delegatorIndex++
 			continue
 		}
 
 		tx, err := wallet.BuildDynamicFeeTx(txData)
 		if err != nil {
-			s.logger.Errorf("failed to build funding transaction for delegator %d: %v", i, err)
+			s.logger.Errorf("failed to build funding transaction for delegator %d: %v", delegatorIndex, err)
+			delegatorIndex++
 			continue
 		}
 
@@ -673,51 +680,70 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 			MaxRebroadcasts: 0, // No retries to avoid duplicates
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				if err != nil {
-					s.logger.Debugf("funding tx failed for delegator %d: %v", i, err)
-					return
+					return // Don't log individual failures
 				}
 				if receipt != nil && receipt.Status == 1 {
-					successCount++
+					atomic.AddInt64(&confirmedCount, 1)
+					// No progress logging - only log when target is reached
 				}
 			},
 			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
-				// Only log actual failures
+				// Only log actual send failures, not confirmation failures
 				if err != nil {
-					s.logger.Debugf("funding tx failed for delegator %d: %v", i, err)
+					s.logger.Debugf("funding tx send failed: %v", err)
 				}
 			},
 		})
 
 		if err != nil {
-			s.logger.Debugf("failed to send funding transaction for delegator %d: %v", i, err)
+			s.logger.Debugf("failed to send funding transaction for delegator %d: %v", delegatorIndex, err)
+			delegatorIndex++
 			continue
 		}
 
-		// Log progress every 100 transactions
-		if (i+1)%100 == 0 {
-			s.logger.Infof("sent %d/%d funding transactions", i+1, targetCount)
+		sentCount++
+		delegatorIndex++
+
+		// Check if we should continue filling the block
+		confirmed = atomic.LoadInt64(&confirmedCount)
+		if confirmed >= int64(targetCount) && sentCount%maxTxsPerBlock < 100 {
+			// We have enough confirmed and we're at the end of a block cycle, stop for now
+			break
 		}
 
 		// Small delay between transactions to ensure proper nonce ordering
-		time.Sleep(10 * time.Millisecond)
+		// Reduce delay as we get more efficient
+		if sentCount < 100 {
+			time.Sleep(10 * time.Millisecond)
+		} else {
+			time.Sleep(5 * time.Millisecond)
+		}
+
+		// Add context cancellation check
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 
-	s.logger.Infof("funding completed for iteration %d - sent %d funding transactions", iteration, targetCount)
+	finalConfirmed := atomic.LoadInt64(&confirmedCount)
+	s.logger.Infof("funding completed for iteration %d - confirmed: %d funding transactions", iteration, finalConfirmed)
 
-	// Wait for funding transactions to be included
-	s.logger.Infof("waiting for funding transactions to be included...")
-	time.Sleep(5 * time.Second)
+	// Wait for any remaining transactions to be included
+	s.logger.Debugf("waiting for remaining funding transactions to be confirmed...")
+	time.Sleep(3 * time.Second)
 
 	return nil
 }
 
 func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthorizations int, targetGasLimit uint64, blockCounter int) error {
-	s.logger.Infof("sending max bloating transaction with %d authorizations, gas limit: %d", targetAuthorizations, targetGasLimit)
-
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	if client == nil {
 		return fmt.Errorf("no client available for sending max bloating transaction")
 	}
+
+	s.logger.Infof("sending max bloating transaction with %d authorizations, gas limit: %d", targetAuthorizations, targetGasLimit)
 
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
@@ -766,7 +792,6 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 
 	// Build the authorizations for maximum state bloat
 	authorizations := s.buildMaxBloatingAuthorizations(targetAuthorizations, blockCounter)
-	s.logger.Infof("generated %d authorizations for max bloating", len(authorizations))
 
 	txData, err := txbuilder.SetCodeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
@@ -822,7 +847,7 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 			estimatedBytesPerAuth := 135.0 // ~135 bytes state change per EOA delegation
 			gasPerByte := gasPerAuth / estimatedBytesPerAuth
 
-			s.logger.WithField("rpc", client.GetName()).Infof(
+			s.logger.WithField("scenario", "setcodetx").Infof(
 				"MAX BLOATING SUCCESS - Block #%s, Gas Used: %d, Authorizations: %d, Gas/Auth: %.1f, Gas/Byte: %.1f, Total Fee: %s gwei",
 				receipt.BlockNumber.String(),
 				receipt.GasUsed,
@@ -854,8 +879,6 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 	}
 
 	s.logger.Infof("max bloating transaction submitted: %s", tx.Hash().String())
-	s.logger.Infof("awaiting max bloating transaction confirmation...")
 	wg.Wait()
-	s.logger.Infof("max bloating transaction confirmed and processed")
 	return nil
 }
