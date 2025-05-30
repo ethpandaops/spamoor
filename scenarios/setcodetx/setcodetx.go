@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +51,12 @@ type ScenarioOptions struct {
 	ClientGroup       string `yaml:"client_group"`
 }
 
+// EOAEntry represents a funded EOA account
+type EOAEntry struct {
+	Address    string `json:"address"`
+	PrivateKey string `json:"private_key"`
+}
+
 type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
@@ -58,6 +66,15 @@ type Scenario struct {
 	pendingWGroup sync.WaitGroup
 	delegatorSeed []byte
 	delegators    []*txbuilder.Wallet
+
+	// FIFO queue for funded accounts
+	eoaQueue      []EOAEntry
+	eoaQueueMutex sync.Mutex
+
+	// Semaphore for worker control
+	workerSemaphore chan struct{}
+	workerDone      chan struct{}
+	workerWg        sync.WaitGroup
 }
 
 var ScenarioName = "setcodetx"
@@ -165,6 +182,17 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 	// In max-bloating mode, we handle throughput automatically, so skip this validation
 	if !s.options.MaxBloating && s.options.TotalCount == 0 && s.options.Throughput == 0 {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
+	}
+
+	// Initialize FIFO queue and worker for EOA management
+	s.eoaQueue = make([]EOAEntry, 0)
+	s.workerSemaphore = make(chan struct{}, 1) // Buffered channel for semaphore
+	s.workerDone = make(chan struct{})
+
+	// Start the worker goroutine for writing EOAs to file
+	if s.options.MaxBloating {
+		s.workerWg.Add(1)
+		go s.eoaWorker()
 	}
 
 	return nil
@@ -546,12 +574,11 @@ func (s *Scenario) buildMaxBloatingAuthorizations(targetCount int, iteration int
 
 func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 	s.logger.Infof("starting max bloating mode: self-adjusting to target 29.9M gas per block, continuous operation")
-	defer s.logger.Infof("max bloating mode finished")
 
 	// Dynamic authorization count - starts conservatively and adjusts based on actual performance
 	// TODO: This should be set as a constant or similar computed as block_gas_limit/Gas_per_Auth (26000)
 	currentAuthorizations := 1000 // Start with known working value
-	// TODO: This should be obtained from the network or from the network.
+	// TODO: This should be obtained from the network.
 	targetGas := uint64(29900000) // Target 29.9M gas
 
 	var blockCounter int
@@ -583,6 +610,8 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 			time.Sleep(5 * time.Second) // Wait before retry
 			continue
 		}
+		// Open semaphore (green light) during analysis phase to allow worker to process EOA queue
+		s.openWorkerSemaphore()
 
 		s.logger.Infof("%%%%%%%%%%%%%%%%%%%% ANALYSIS PHASE #%d %%%%%%%%%%%%%%%%%%%%", blockCounter)
 		s.logger.WithField("scenario", "setcodetx").Infof("MAX BLOATING TX MINED - Block #%s, Gas Used: %d, Authorizations: %d, Gas/Auth: %.1f, Gas/Byte: %.1f, Total Fee: %s gwei",
@@ -625,6 +654,9 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 }
 
 func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount int, iteration int) error {
+	// Close semaphore (red light) during funding phase
+	s.closeWorkerSemaphore()
+
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	if client == nil {
 		return fmt.Errorf("no client available for funding delegators")
@@ -726,6 +758,10 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 				}
 				if receipt != nil && receipt.Status == 1 {
 					atomic.AddInt64(&confirmedCount, 1)
+
+					// Add successfully funded delegator to EOA queue
+					s.addEOAToQueue(delegator.GetAddress().Hex(), fmt.Sprintf("%x", delegator.GetPrivateKey().D))
+
 					// No progress logging - only log when target is reached
 				}
 			},
@@ -947,4 +983,125 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 	// Wait for transaction confirmation
 	result := <-resultChan
 	return result.gasUsed, result.blockNumber, result.authCount, result.gasPerAuth, result.gasPerByte, result.gweiTotalFee, result.err
+}
+
+// eoaWorker runs in a separate goroutine and writes funded EOAs to EOAs.json
+// when the semaphore is open (green). It sleeps when the semaphore is closed (red).
+func (s *Scenario) eoaWorker() {
+	defer s.workerWg.Done()
+
+	for {
+		select {
+		case <-s.workerDone:
+			// Shutdown signal received
+			return
+		case <-s.workerSemaphore:
+			// Semaphore is green, process the queue
+			s.processEOAQueue()
+		}
+	}
+}
+
+// processEOAQueue drains the EOA queue and writes entries to EOAs.json
+func (s *Scenario) processEOAQueue() {
+	for {
+		// Check if there are items in the queue
+		s.eoaQueueMutex.Lock()
+		if len(s.eoaQueue) == 0 {
+			s.eoaQueueMutex.Unlock()
+			return // Queue is empty, exit processing
+		}
+
+		// Dequeue all items (FIFO)
+		eoasToWrite := make([]EOAEntry, len(s.eoaQueue))
+		copy(eoasToWrite, s.eoaQueue)
+		s.eoaQueue = s.eoaQueue[:0] // Clear the queue
+		s.eoaQueueMutex.Unlock()
+
+		// Write to file
+		err := s.writeEOAsToFile(eoasToWrite)
+		if err != nil {
+			s.logger.Errorf("failed to write EOAs to file: %v", err)
+			// Re-queue the items if write failed
+			s.eoaQueueMutex.Lock()
+			s.eoaQueue = append(eoasToWrite, s.eoaQueue...)
+			s.eoaQueueMutex.Unlock()
+			return
+		}
+
+		s.logger.Debugf("wrote %d EOA entries to EOAs.json", len(eoasToWrite))
+		s.logger.Debugf("left %d EOA entries in queue", len(s.eoaQueue))
+	}
+}
+
+// writeEOAsToFile appends EOA entries to EOAs.json file
+func (s *Scenario) writeEOAsToFile(eoas []EOAEntry) error {
+	if len(eoas) == 0 {
+		return nil
+	}
+
+	fileName := "EOAs.json"
+
+	// Read existing entries if file exists
+	var existingEntries []EOAEntry
+	if data, err := os.ReadFile(fileName); err == nil {
+		json.Unmarshal(data, &existingEntries)
+	}
+
+	// Append new entries
+	allEntries := append(existingEntries, eoas...)
+
+	// Write back to file
+	data, err := json.MarshalIndent(allEntries, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal EOA entries: %w", err)
+	}
+
+	err = os.WriteFile(fileName, data, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write EOAs.json: %w", err)
+	}
+
+	return nil
+}
+
+// addEOAToQueue adds a funded EOA to the queue
+func (s *Scenario) addEOAToQueue(address, privateKey string) {
+	s.eoaQueueMutex.Lock()
+	defer s.eoaQueueMutex.Unlock()
+
+	entry := EOAEntry{
+		Address:    address,
+		PrivateKey: privateKey,
+	}
+
+	s.eoaQueue = append(s.eoaQueue, entry)
+}
+
+// openWorkerSemaphore opens the semaphore (green light) allowing the worker to process
+func (s *Scenario) openWorkerSemaphore() {
+	select {
+	case s.workerSemaphore <- struct{}{}:
+		// Semaphore opened successfully
+	default:
+		// Semaphore already open, do nothing
+	}
+}
+
+// closeWorkerSemaphore closes the semaphore (red light) putting the worker to sleep
+func (s *Scenario) closeWorkerSemaphore() {
+	select {
+	case <-s.workerSemaphore:
+		// Semaphore closed successfully
+	default:
+		// Semaphore already closed, do nothing
+	}
+}
+
+// shutdownWorker signals the worker to stop and waits for it to finish
+func (s *Scenario) shutdownWorker() {
+	if s.options.MaxBloating {
+		close(s.workerDone)
+		s.workerWg.Wait()
+	}
 }
