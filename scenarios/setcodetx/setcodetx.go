@@ -544,20 +544,21 @@ func (s *Scenario) buildMaxBloatingAuthorizations(targetCount int, iteration int
 }
 
 func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
-	s.logger.Infof("starting max bloating mode: targeting ~960 EOA delegations per block, continuous operation")
+	s.logger.Infof("starting max bloating mode: self-adjusting to target 29.9M gas per block, continuous operation")
 	defer s.logger.Infof("max bloating mode finished")
 
-	// For max bloating, we use exactly one transaction with ~960 authorizations per iteration
-	// This targets the theoretical maximum state bloat efficiency
-	const targetAuthorizations = 960
-	const targetGasLimit = 29000000 // Near block gas limit, leaving room for base transaction costs
+	// Dynamic authorization count - starts conservatively and adjusts based on actual performance
+	// TODO: This should be set as a constant or similar computed as block_gas_limit/Gas_per_Auth (26000)
+	currentAuthorizations := 1000 // Start with known working value
+	// TODO: This should be obtained from the network or from the network.
+	targetGas := uint64(29900000) // Target 29.9M gas
 
 	blockCounter := 0
 
 	for {
 		select {
 		case <-ctx.Done():
-			s.logger.Infof("max bloating mode stopping due to context cancellation")
+			s.logger.Errorf("max bloating mode stopping due to context cancellation")
 			return ctx.Err()
 		default:
 		}
@@ -565,7 +566,7 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 		blockCounter++
 
 		// Fund delegator accounts first
-		err := s.fundMaxBloatingDelegators(ctx, targetAuthorizations, blockCounter)
+		err := s.fundMaxBloatingDelegators(ctx, currentAuthorizations, blockCounter)
 		if err != nil {
 			s.logger.Errorf("failed to fund delegators for iteration %d: %v", blockCounter, err)
 			time.Sleep(5 * time.Second) // Wait before retry
@@ -573,11 +574,42 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 		}
 
 		// Send the max bloating transaction and wait for confirmation
-		err = s.sendMaxBloatingTransaction(ctx, targetAuthorizations, targetGasLimit, blockCounter)
+		actualGasUsed, authCount, err := s.sendMaxBloatingTransaction(ctx, currentAuthorizations, targetGas, blockCounter)
 		if err != nil {
 			s.logger.Errorf("failed to send max bloating transaction for iteration %d: %v", blockCounter, err)
 			time.Sleep(5 * time.Second) // Wait before retry
 			continue
+		}
+
+		// Self-adjust authorization count based on actual performance
+		if actualGasUsed > 0 && authCount > 0 {
+			gasPerAuth := float64(actualGasUsed) / float64(authCount)
+			targetAuths := int(float64(targetGas) / gasPerAuth)
+
+			// Calculate the adjustment needed
+			authDifference := targetAuths - authCount
+
+			if actualGasUsed < targetGas {
+				// We're under target, increase authorization count with a slight safety margin
+				newAuthorizations := currentAuthorizations + authDifference - 1
+
+				if newAuthorizations > currentAuthorizations {
+					s.logger.Infof("Adjusting authorizations: %d → %d (need %d more for target)",
+						currentAuthorizations, newAuthorizations, authDifference)
+					currentAuthorizations = newAuthorizations
+				}
+			} else if actualGasUsed > targetGas {
+				// We're over target, reduce to reach max block utilization
+				excess := actualGasUsed - targetGas
+				newAuthorizations := currentAuthorizations - int(excess) + 1
+
+				s.logger.Infof("Reducing authorizations: %d → %d (excess: %d gas)",
+					currentAuthorizations, newAuthorizations, excess)
+				currentAuthorizations = newAuthorizations
+
+			} else {
+				s.logger.Infof("Target achieved! Gas Used: %d / Target: %d", actualGasUsed, targetGas)
+			}
 		}
 
 		// Transaction confirmed - small delay before next iteration
@@ -591,7 +623,8 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 		return fmt.Errorf("no client available for funding delegators")
 	}
 
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
+	// Use root wallet since we set child wallet count to 0 in max-bloating mode
+	wallet := s.walletPool.GetRootWallet()
 
 	// Get suggested fees for funding transactions
 	var feeCap *big.Int
@@ -740,15 +773,16 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 	return nil
 }
 
-func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthorizations int, targetGasLimit uint64, blockCounter int) error {
+func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthorizations int, targetGasLimit uint64, blockCounter int) (uint64, int, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	if client == nil {
-		return fmt.Errorf("no client available for sending max bloating transaction")
+		return 0, 0, fmt.Errorf("no client available for sending max bloating transaction")
 	}
 
 	s.logger.Infof("sending max bloating transaction with %d authorizations, gas limit: %d", targetAuthorizations, targetGasLimit)
 
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
+	// Use root wallet since we set child wallet count to 0 in max-bloating mode
+	wallet := s.walletPool.GetRootWallet()
 
 	// Get suggested fees or use configured values
 	var feeCap *big.Int
@@ -765,7 +799,7 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 		var err error
 		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
 		if err != nil {
-			return fmt.Errorf("failed to get suggested fees: %w", err)
+			return 0, 0, fmt.Errorf("failed to get suggested fees: %w", err)
 		}
 	}
 
@@ -788,7 +822,7 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 	if s.options.Data != "" {
 		dataBytes, err := txbuilder.ParseBlobRefsBytes(strings.Split(s.options.Data, ","), nil)
 		if err != nil {
-			return fmt.Errorf("failed to parse call data: %w", err)
+			return 0, 0, fmt.Errorf("failed to parse call data: %w", err)
 		}
 		txCallData = dataBytes
 	}
@@ -806,17 +840,20 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 		AuthList:  authorizations,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to build transaction metadata: %w", err)
+		return 0, 0, fmt.Errorf("failed to build transaction metadata: %w", err)
 	}
 
 	tx, err := wallet.BuildSetCodeTx(txData)
 	if err != nil {
-		return fmt.Errorf("failed to build transaction: %w", err)
+		return 0, 0, fmt.Errorf("failed to build transaction: %w", err)
 	}
 
-	// Use WaitGroup to wait for transaction completion
-	var wg sync.WaitGroup
-	wg.Add(1)
+	// Use channels to capture transaction results
+	resultChan := make(chan struct {
+		gasUsed   uint64
+		authCount int
+		err       error
+	}, 1)
 
 	// Send the transaction
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
@@ -824,13 +861,21 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 		MaxRebroadcasts:     10,
 		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer wg.Done()
-
 			if err != nil {
 				s.logger.WithField("rpc", client.GetName()).Errorf("max bloating tx failed: %v", err)
+				resultChan <- struct {
+					gasUsed   uint64
+					authCount int
+					err       error
+				}{0, 0, err}
 				return
 			}
 			if receipt == nil {
+				resultChan <- struct {
+					gasUsed   uint64
+					authCount int
+					err       error
+				}{0, 0, fmt.Errorf("no receipt received")}
 				return
 			}
 
@@ -859,6 +904,12 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 				gasPerByte,
 				gweiTotalFee.String(),
 			)
+
+			resultChan <- struct {
+				gasUsed   uint64
+				authCount int
+				err       error
+			}{receipt.GasUsed, authCount, nil}
 		},
 		LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName())
@@ -878,10 +929,12 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 
 	if err != nil {
 		wallet.ResetPendingNonce(ctx, client)
-		return fmt.Errorf("failed to send max bloating transaction: %w", err)
+		return 0, 0, fmt.Errorf("failed to send max bloating transaction: %w", err)
 	}
 
 	s.logger.Infof("max bloating transaction submitted: %s", tx.Hash().String())
-	wg.Wait()
-	return nil
+
+	// Wait for transaction confirmation
+	result := <-resultChan
+	return result.gasUsed, result.authCount, result.err
 }
