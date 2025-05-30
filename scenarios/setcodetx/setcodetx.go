@@ -554,7 +554,7 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 	// TODO: This should be obtained from the network or from the network.
 	targetGas := uint64(29900000) // Target 29.9M gas
 
-	blockCounter := 0
+	var blockCounter int
 
 	for {
 		select {
@@ -577,7 +577,7 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 
 		// Send the max bloating transaction and wait for confirmation
 		s.logger.Infof("════════════════ BLOATING PHASE #%d ════════════════", blockCounter)
-		actualGasUsed, authCount, err := s.sendMaxBloatingTransaction(ctx, currentAuthorizations, targetGas, blockCounter)
+		actualGasUsed, blockNumber, authCount, gasPerAuth, gasPerByte, gweiTotalFee, err := s.sendMaxBloatingTransaction(ctx, currentAuthorizations, targetGas, blockCounter)
 		if err != nil {
 			s.logger.Errorf("failed to send max bloating transaction for iteration %d: %v", blockCounter, err)
 			time.Sleep(5 * time.Second) // Wait before retry
@@ -585,8 +585,8 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 		}
 
 		s.logger.Infof("%%%%%%%%%%%%%%%%%%%% ANALYSIS PHASE #%d %%%%%%%%%%%%%%%%%%%%", blockCounter)
-		s.logger.Infof("Performance Analysis - Block #%d: Gas Used: %d, Authorizations: %d, Gas/Auth: %.1f",
-			blockCounter, actualGasUsed, authCount, float64(actualGasUsed)/float64(authCount))
+		s.logger.WithField("scenario", "setcodetx").Infof("MAX BLOATING TX MINED - Block #%s, Gas Used: %d, Authorizations: %d, Gas/Auth: %.1f, Gas/Byte: %.1f, Total Fee: %s gwei",
+			blockNumber, actualGasUsed, authCount, gasPerAuth, gasPerByte, gweiTotalFee)
 
 		// Self-adjust authorization count based on actual performance
 		if actualGasUsed > 0 && authCount > 0 {
@@ -776,10 +776,10 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 	return nil
 }
 
-func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthorizations int, targetGasLimit uint64, blockCounter int) (uint64, int, error) {
+func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthorizations int, targetGasLimit uint64, blockCounter int) (uint64, string, int, float64, float64, string, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	if client == nil {
-		return 0, 0, fmt.Errorf("no client available for sending max bloating transaction")
+		return 0, "", 0, 0, 0, "", fmt.Errorf("no client available for sending max bloating transaction")
 	}
 
 	// Use root wallet since we set child wallet count to 0 in max-bloating mode
@@ -800,7 +800,7 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 		var err error
 		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
 		if err != nil {
-			return 0, 0, fmt.Errorf("failed to get suggested fees: %w", err)
+			return 0, "", 0, 0, 0, "", fmt.Errorf("failed to get suggested fees: %w", err)
 		}
 	}
 
@@ -823,7 +823,7 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 	if s.options.Data != "" {
 		dataBytes, err := txbuilder.ParseBlobRefsBytes(strings.Split(s.options.Data, ","), nil)
 		if err != nil {
-			return 0, 0, fmt.Errorf("failed to parse call data: %w", err)
+			return 0, "", 0, 0, 0, "", fmt.Errorf("failed to parse call data: %w", err)
 		}
 		txCallData = dataBytes
 	}
@@ -841,19 +841,23 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 		AuthList:  authorizations,
 	})
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to build transaction metadata: %w", err)
+		return 0, "", 0, 0, 0, "", fmt.Errorf("failed to build transaction metadata: %w", err)
 	}
 
 	tx, err := wallet.BuildSetCodeTx(txData)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to build transaction: %w", err)
+		return 0, "", 0, 0, 0, "", fmt.Errorf("failed to build transaction: %w", err)
 	}
 
 	// Use channels to capture transaction results
 	resultChan := make(chan struct {
-		gasUsed   uint64
-		authCount int
-		err       error
+		gasUsed      uint64
+		blockNumber  string
+		authCount    int
+		gasPerAuth   float64
+		gasPerByte   float64
+		gweiTotalFee string
+		err          error
 	}, 1)
 
 	// Send the transaction
@@ -865,18 +869,26 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 			if err != nil {
 				s.logger.WithField("rpc", client.GetName()).Errorf("max bloating tx failed: %v", err)
 				resultChan <- struct {
-					gasUsed   uint64
-					authCount int
-					err       error
-				}{0, 0, err}
+					gasUsed      uint64
+					blockNumber  string
+					authCount    int
+					gasPerAuth   float64
+					gasPerByte   float64
+					gweiTotalFee string
+					err          error
+				}{0, "", 0, 0, 0, "", err}
 				return
 			}
 			if receipt == nil {
 				resultChan <- struct {
-					gasUsed   uint64
-					authCount int
-					err       error
-				}{0, 0, fmt.Errorf("no receipt received")}
+					gasUsed      uint64
+					blockNumber  string
+					authCount    int
+					gasPerAuth   float64
+					gasPerByte   float64
+					gweiTotalFee string
+					err          error
+				}{0, "", 0, 0, 0, "", fmt.Errorf("no receipt received")}
 				return
 			}
 
@@ -893,24 +905,23 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 			// Calculate efficiency metrics
 			authCount := len(authorizations)
 			gasPerAuth := float64(receipt.GasUsed) / float64(authCount)
+			// TODO: This should be a constant.
 			estimatedBytesPerAuth := 135.0 // ~135 bytes state change per EOA delegation
 			gasPerByte := gasPerAuth / estimatedBytesPerAuth
 
-			s.logger.WithField("scenario", "setcodetx").Infof(
-				"MAX BLOATING SUCCESS - Block #%s, Gas Used: %d, Authorizations: %d, Gas/Auth: %.1f, Gas/Byte: %.1f, Total Fee: %s gwei",
-				receipt.BlockNumber.String(),
-				receipt.GasUsed,
+			resultChan <- struct {
+				gasUsed      uint64
+				blockNumber  string
+				authCount    int
+				gasPerAuth   float64
+				gasPerByte   float64
+				gweiTotalFee string
+				err          error
+			}{receipt.GasUsed, receipt.BlockNumber.String(),
 				authCount,
 				gasPerAuth,
 				gasPerByte,
-				gweiTotalFee.String(),
-			)
-
-			resultChan <- struct {
-				gasUsed   uint64
-				authCount int
-				err       error
-			}{receipt.GasUsed, authCount, nil}
+				gweiTotalFee.String(), nil}
 		},
 		LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName())
@@ -930,10 +941,10 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 
 	if err != nil {
 		wallet.ResetPendingNonce(ctx, client)
-		return 0, 0, fmt.Errorf("failed to send max bloating transaction: %w", err)
+		return 0, "", 0, 0, 0, "", fmt.Errorf("failed to send max bloating transaction: %w", err)
 	}
 
 	// Wait for transaction confirmation
 	result := <-resultChan
-	return result.gasUsed, result.authCount, result.err
+	return result.gasUsed, result.blockNumber, result.authCount, result.gasPerAuth, result.gasPerByte, result.gweiTotalFee, result.err
 }
