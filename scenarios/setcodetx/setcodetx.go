@@ -29,6 +29,20 @@ import (
 	"github.com/ethpandaops/spamoor/utils"
 )
 
+// EIP-7702 gas cost constants
+const (
+	// PER_AUTH_BASE_COST (EIP-7702) - upper bound on gas cost per authorization when delegating to existing contract in this scenario
+	GasPerAuthorization = 26000
+	// EstimatedBytesPerAuth - estimated state change in bytes per EOA delegation
+	EstimatedBytesPerAuth = 135.0
+	// DefaultTargetGasRatio - target percentage of block gas limit to use (99% for safety margin)
+	DefaultTargetGasRatio = 0.99
+	// FallbackBlockGasLimit - fallback gas limit if network query fails
+	FallbackBlockGasLimit = 30000000
+	// BaseTransferCost - gas cost for a standard ETH transfer
+	BaseTransferCost = 21000
+)
+
 type ScenarioOptions struct {
 	TotalCount        uint64 `yaml:"total_count"`
 	Throughput        uint64 `yaml:"throughput"`
@@ -201,6 +215,59 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 func (s *Scenario) Config() string {
 	yamlBytes, _ := yaml.Marshal(&s.options)
 	return string(yamlBytes)
+}
+
+// getNetworkBlockGasLimit retrieves the current block gas limit from the network
+// It waits for a new block to be mined (with 30s timeout) to ensure fresh data
+func (s *Scenario) getNetworkBlockGasLimit(ctx context.Context, client *txbuilder.Client) uint64 {
+	// Create a timeout context for the entire operation (30 seconds)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Get the current block number first
+	currentBlockNumber, err := client.GetEthClient().BlockNumber(timeoutCtx)
+	if err != nil {
+		s.logger.Warnf("failed to get current block number: %v, using fallback: %d", err, FallbackBlockGasLimit)
+		return FallbackBlockGasLimit
+	}
+
+	s.logger.Debugf("waiting for new block to be mined (current: %d, timeout: 30s)", currentBlockNumber)
+
+	// Wait for a new block to be mined (poll every 500ms)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	var latestBlock *types.Block
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			s.logger.Warnf("timeout waiting for new block to be mined, using fallback: %d", FallbackBlockGasLimit)
+			return FallbackBlockGasLimit
+		case <-ticker.C:
+			// Check for a new block
+			newBlockNumber, err := client.GetEthClient().BlockNumber(timeoutCtx)
+			if err != nil {
+				s.logger.Debugf("error checking block number: %v", err)
+				continue
+			}
+
+			// If we have a new block, get its details
+			if newBlockNumber > currentBlockNumber {
+				latestBlock, err = client.GetEthClient().BlockByNumber(timeoutCtx, nil)
+				if err != nil {
+					s.logger.Debugf("error getting latest block details: %v", err)
+					continue
+				}
+				s.logger.Debugf("new block mined: %d", newBlockNumber)
+				goto blockFound
+			}
+		}
+	}
+
+blockFound:
+	gasLimit := latestBlock.GasLimit()
+	s.logger.Debugf("network block gas limit from fresh block #%d: %d", latestBlock.NumberU64(), gasLimit)
+	return gasLimit
 }
 
 func (s *Scenario) Run(ctx context.Context) error {
@@ -573,13 +640,20 @@ func (s *Scenario) buildMaxBloatingAuthorizations(targetCount int, iteration int
 }
 
 func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
-	s.logger.Infof("starting max bloating mode: self-adjusting to target 29.9M gas per block, continuous operation")
+	s.logger.Infof("starting max bloating mode: self-adjusting to target block gas limit, continuous operation")
 
-	// Dynamic authorization count - starts conservatively and adjusts based on actual performance
-	// TODO: This should be set as a constant or similar computed as block_gas_limit/Gas_per_Auth (26000)
-	currentAuthorizations := 1000 // Start with known working value
-	// TODO: This should be obtained from the network.
-	targetGas := uint64(29900000) // Target 29.9M gas
+	// Get a client for network operations
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+
+	// Get the actual network block gas limit
+	networkGasLimit := s.getNetworkBlockGasLimit(ctx, client)
+	targetGas := uint64(float64(networkGasLimit) * DefaultTargetGasRatio)
+
+	// Calculate initial authorization count based on network gas limit and known gas cost per authorization
+	initialAuthorizations := int(targetGas / GasPerAuthorization)
+
+	// Dynamic authorization count - starts based on network parameters and adjusts based on actual performance
+	currentAuthorizations := initialAuthorizations
 
 	var blockCounter int
 
@@ -595,7 +669,7 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 
 		// Fund delegator accounts first
 		s.logger.Infof("════════════════ FUNDING PHASE #%d ════════════════", blockCounter)
-		err := s.fundMaxBloatingDelegators(ctx, currentAuthorizations, blockCounter)
+		err := s.fundMaxBloatingDelegators(ctx, currentAuthorizations, blockCounter, networkGasLimit)
 		if err != nil {
 			s.logger.Errorf("failed to fund delegators for iteration %d: %v", blockCounter, err)
 			time.Sleep(5 * time.Second) // Wait before retry
@@ -653,7 +727,7 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 	}
 }
 
-func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount int, iteration int) error {
+func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount int, iteration int, gasLimit uint64) error {
 	// Close semaphore (red light) during funding phase
 	s.closeWorkerSemaphore()
 
@@ -696,13 +770,12 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 	fundingAmount := uint256.NewInt(1)
 
 	var confirmedCount int64
-	sentCount := 0
+	sentCount := uint64(0)
 	delegatorIndex := uint64(iteration * 1000000) // Large offset per iteration to avoid conflicts
 
 	// Calculate approximate transactions per block based on gas limit
-	// Standard transfer = 21000 gas, typical block = ~30M gas = ~1400 txs per block
-	const maxTxsPerBlock = 1400
-	const blockTimeSeconds = 10 // Adjust based on your network
+	// Standard transfer = BaseTransferCost gas.
+	var maxTxsPerBlock = gasLimit / uint64(BaseTransferCost)
 
 	for {
 		// Check if we have enough confirmed transactions
@@ -730,7 +803,7 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 		txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       21000, // Standard ETH transfer gas
+			Gas:       BaseTransferCost, // Standard ETH transfer gas
 			To:        &delegatorAddr,
 			Value:     fundingAmount,
 			Data:      []byte{},
@@ -941,9 +1014,7 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 			// Calculate efficiency metrics
 			authCount := len(authorizations)
 			gasPerAuth := float64(receipt.GasUsed) / float64(authCount)
-			// TODO: This should be a constant.
-			estimatedBytesPerAuth := 135.0 // ~135 bytes state change per EOA delegation
-			gasPerByte := gasPerAuth / estimatedBytesPerAuth
+			gasPerByte := gasPerAuth / EstimatedBytesPerAuth
 
 			resultChan <- struct {
 				gasUsed      uint64
