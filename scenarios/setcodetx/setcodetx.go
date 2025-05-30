@@ -128,6 +128,10 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 		}
 	}
 
+	if s.options.MaxBloating && !s.options.RandomCodeAddr && s.options.CodeAddr == "" {
+		s.logger.Infof("no --code-addr specified, using ecrecover precompile as delegate: %s", common.HexToAddress("0x0000000000000000000000000000000000000001"))
+	}
+
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.MaxBloating {
@@ -460,7 +464,6 @@ func (s *Scenario) buildSetCodeAuthorizations(txIdx uint64) []types.SetCodeAutho
 			// to benefit from reduced gas costs (PER_AUTH_BASE_COST vs PER_EMPTY_ACCOUNT_COST)
 			// Precompiles are ideal as they're guaranteed to exist with code on all networks
 			codeAddr = common.HexToAddress("0x0000000000000000000000000000000000000001")
-			s.logger.Infof("no --code-addr specified, using ecrecover precompile as delegate: %s", codeAddr.Hex())
 		}
 
 		authorization := types.SetCodeAuthorization{
@@ -504,9 +507,7 @@ func (s *Scenario) buildMaxBloatingAuthorizations(targetCount int, iteration int
 		codeAddr = common.HexToAddress(s.options.CodeAddr)
 	} else {
 		// Default to using the ecrecover precompile (0x1) as delegate target
-		// This is perfect for max-bloating mode as it's guaranteed to exist with code
 		codeAddr = common.HexToAddress("0x0000000000000000000000000000000000000001")
-		s.logger.Infof("no --code-addr specified, using ecrecover precompile as delegate: %s", codeAddr.Hex())
 	}
 
 	chainId := s.walletPool.GetRootWallet().GetChainId().Uint64()
@@ -566,6 +567,7 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 		blockCounter++
 
 		// Fund delegator accounts first
+		s.logger.Infof("════════════════ FUNDING PHASE #%d ════════════════", blockCounter)
 		err := s.fundMaxBloatingDelegators(ctx, currentAuthorizations, blockCounter)
 		if err != nil {
 			s.logger.Errorf("failed to fund delegators for iteration %d: %v", blockCounter, err)
@@ -574,12 +576,17 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 		}
 
 		// Send the max bloating transaction and wait for confirmation
+		s.logger.Infof("════════════════ BLOATING PHASE #%d ════════════════", blockCounter)
 		actualGasUsed, authCount, err := s.sendMaxBloatingTransaction(ctx, currentAuthorizations, targetGas, blockCounter)
 		if err != nil {
 			s.logger.Errorf("failed to send max bloating transaction for iteration %d: %v", blockCounter, err)
 			time.Sleep(5 * time.Second) // Wait before retry
 			continue
 		}
+
+		s.logger.Infof("%%%%%%%%%%%%%%%%%%%% ANALYSIS PHASE #%d %%%%%%%%%%%%%%%%%%%%", blockCounter)
+		s.logger.Infof("Performance Analysis - Block #%d: Gas Used: %d, Authorizations: %d, Gas/Auth: %.1f",
+			blockCounter, actualGasUsed, authCount, float64(actualGasUsed)/float64(authCount))
 
 		// Self-adjust authorization count based on actual performance
 		if actualGasUsed > 0 && authCount > 0 {
@@ -674,7 +681,6 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 			if sentCount > 0 && (sentCount%100) > 50 {
 				// Continue to fill the block
 			} else {
-				s.logger.Infof("funding target reached: %d confirmed transactions", confirmed)
 				break
 			}
 		}
@@ -763,9 +769,6 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 		}
 	}
 
-	finalConfirmed := atomic.LoadInt64(&confirmedCount)
-	s.logger.Infof("funding completed for iteration %d - confirmed: %d funding transactions", iteration, finalConfirmed)
-
 	// Wait for any remaining transactions to be included
 	s.logger.Debugf("waiting for remaining funding transactions to be confirmed...")
 	time.Sleep(3 * time.Second)
@@ -778,8 +781,6 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 	if client == nil {
 		return 0, 0, fmt.Errorf("no client available for sending max bloating transaction")
 	}
-
-	s.logger.Infof("sending max bloating transaction with %d authorizations, gas limit: %d", targetAuthorizations, targetGasLimit)
 
 	// Use root wallet since we set child wallet count to 0 in max-bloating mode
 	wallet := s.walletPool.GetRootWallet()
@@ -931,8 +932,6 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 		wallet.ResetPendingNonce(ctx, client)
 		return 0, 0, fmt.Errorf("failed to send max bloating transaction: %w", err)
 	}
-
-	s.logger.Infof("max bloating transaction submitted: %s", tx.Hash().String())
 
 	// Wait for transaction confirmation
 	result := <-resultChan
