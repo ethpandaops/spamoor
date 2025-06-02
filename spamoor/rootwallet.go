@@ -15,6 +15,7 @@ type RootWallet struct {
 	txbatcher   *TxBatcher
 	txSemMutex  sync.Mutex
 	txSemaphore chan struct{}
+	txSemLimit  int
 }
 
 func InitRootWallet(ctx context.Context, privkey string, client *Client, logger logrus.FieldLogger) (*RootWallet, error) {
@@ -40,6 +41,7 @@ func InitRootWallet(ctx context.Context, privkey string, client *Client, logger 
 	return &RootWallet{
 		wallet:      rootWallet,
 		txSemaphore: make(chan struct{}, 200),
+		txSemLimit:  200,
 	}, nil
 }
 
@@ -54,6 +56,11 @@ func (wallet *RootWallet) WithWalletLock(ctx context.Context, txCount int, locke
 		defer wallet.txSemMutex.Unlock()
 
 		for i := 0; i < txCount; i++ {
+
+			if acquiredCount >= wallet.txSemLimit {
+				return nil
+			}
+
 			if lockedLogFn != nil {
 				select {
 				case <-ctx.Done():
