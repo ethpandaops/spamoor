@@ -22,6 +22,7 @@ spamoor calltx [flags]
 ### Contract Settings (required)
 - `--contract-code` - Contract bytecode to deploy (hex string)
 - `--contract-file` - Contract file to deploy (local file or HTTP URL)
+- `--contract-address` - Address of already deployed contract (skips deployment)
 - `--contract-args` - Constructor arguments for the contract (hex string)
 - `--call-data` - Data to pass to the function calls (hex string)
 
@@ -129,4 +130,21 @@ spamoor calltx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 5 \
   --call-abi-file "https://example.com/contract-abi.json" \
   --call-fn-name "setValue" \
   --call-args '["{txid}"]'
+```
+
+Call existing contract using address:
+```bash
+spamoor calltx -p "<PRIVKEY>" -h http://rpc-host:8545 -c 1000 \
+  --contract-address "0x1234567890123456789012345678901234567890" \
+  --call-fn-sig "transfer(address,uint256)" \
+  --call-args '["{randomaddr}", "{random:1000000}"]'
+```
+
+Call existing contract with ABI file:
+```bash
+spamoor calltx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 10 \
+  --contract-address "0xA0b86a33E6441e047c84E7c19Ff8e4Ca6c2B5B2F" \
+  --call-abi-file "./usdc-abi.json" \
+  --call-fn-name "balanceOf" \
+  --call-args '["{randomaddr}"]'
 ``` 

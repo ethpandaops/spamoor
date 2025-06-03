@@ -27,28 +27,29 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount     uint64 `yaml:"total_count"`
-	Throughput     uint64 `yaml:"throughput"`
-	MaxPending     uint64 `yaml:"max_pending"`
-	MaxWallets     uint64 `yaml:"max_wallets"`
-	Rebroadcast    uint64 `yaml:"rebroadcast"`
-	BaseFee        uint64 `yaml:"base_fee"`
-	TipFee         uint64 `yaml:"tip_fee"`
-	DeployGasLimit uint64 `yaml:"deploy_gas_limit"`
-	GasLimit       uint64 `yaml:"gas_limit"`
-	Amount         uint64 `yaml:"amount"`
-	RandomAmount   bool   `yaml:"random_amount"`
-	RandomTarget   bool   `yaml:"random_target"`
-	ContractCode   string `yaml:"contract_code"`
-	ContractFile   string `yaml:"contract_file"`
-	ContractArgs   string `yaml:"contract_args"`
-	CallData       string `yaml:"call_data"`
-	CallABI        string `yaml:"call_abi"`
-	CallABIFile    string `yaml:"call_abi_file"`
-	CallFnName     string `yaml:"call_fn_name"`
-	CallFnSig      string `yaml:"call_fn_sig"`
-	CallArgs       string `yaml:"call_args"`
-	ClientGroup    string `yaml:"client_group"`
+	TotalCount      uint64 `yaml:"total_count"`
+	Throughput      uint64 `yaml:"throughput"`
+	MaxPending      uint64 `yaml:"max_pending"`
+	MaxWallets      uint64 `yaml:"max_wallets"`
+	Rebroadcast     uint64 `yaml:"rebroadcast"`
+	BaseFee         uint64 `yaml:"base_fee"`
+	TipFee          uint64 `yaml:"tip_fee"`
+	DeployGasLimit  uint64 `yaml:"deploy_gas_limit"`
+	GasLimit        uint64 `yaml:"gas_limit"`
+	Amount          uint64 `yaml:"amount"`
+	RandomAmount    bool   `yaml:"random_amount"`
+	RandomTarget    bool   `yaml:"random_target"`
+	ContractCode    string `yaml:"contract_code"`
+	ContractFile    string `yaml:"contract_file"`
+	ContractAddress string `yaml:"contract_address"`
+	ContractArgs    string `yaml:"contract_args"`
+	CallData        string `yaml:"call_data"`
+	CallABI         string `yaml:"call_abi"`
+	CallABIFile     string `yaml:"call_abi_file"`
+	CallFnName      string `yaml:"call_fn_name"`
+	CallFnSig       string `yaml:"call_fn_sig"`
+	CallArgs        string `yaml:"call_args"`
+	ClientGroup     string `yaml:"client_group"`
 }
 
 type Scenario struct {
@@ -64,28 +65,29 @@ type Scenario struct {
 
 var ScenarioName = "calltx"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:     0,
-	Throughput:     0,
-	MaxPending:     0,
-	MaxWallets:     0,
-	Rebroadcast:    120,
-	BaseFee:        20,
-	TipFee:         2,
-	DeployGasLimit: 2000000,
-	GasLimit:       1000000,
-	Amount:         20,
-	RandomAmount:   false,
-	RandomTarget:   false,
-	ContractCode:   "",
-	ContractFile:   "",
-	ContractArgs:   "",
-	CallData:       "",
-	CallABI:        "",
-	CallABIFile:    "",
-	CallFnName:     "",
-	CallFnSig:      "",
-	CallArgs:       "",
-	ClientGroup:    "",
+	TotalCount:      0,
+	Throughput:      0,
+	MaxPending:      0,
+	MaxWallets:      0,
+	Rebroadcast:     120,
+	BaseFee:         20,
+	TipFee:          2,
+	DeployGasLimit:  2000000,
+	GasLimit:        1000000,
+	Amount:          20,
+	RandomAmount:    false,
+	RandomTarget:    false,
+	ContractCode:    "",
+	ContractFile:    "",
+	ContractAddress: "",
+	ContractArgs:    "",
+	CallData:        "",
+	CallABI:         "",
+	CallABIFile:     "",
+	CallFnName:      "",
+	CallFnSig:       "",
+	CallArgs:        "",
+	ClientGroup:     "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -116,6 +118,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
 	flags.StringVar(&s.options.ContractCode, "contract-code", ScenarioDefaultOptions.ContractCode, "Contract code to deploy")
 	flags.StringVar(&s.options.ContractFile, "contract-file", ScenarioDefaultOptions.ContractFile, "Contract file to deploy")
+	flags.StringVar(&s.options.ContractAddress, "contract-address", ScenarioDefaultOptions.ContractAddress, "Address of already deployed contract (skips deployment)")
 	flags.StringVar(&s.options.ContractArgs, "contract-args", ScenarioDefaultOptions.ContractArgs, "Contract arguments to pass to the constructor")
 	flags.StringVar(&s.options.CallData, "call-data", ScenarioDefaultOptions.CallData, "Data to pass to the function to call")
 	flags.StringVar(&s.options.CallABI, "call-abi", ScenarioDefaultOptions.CallABI, "JSON ABI of the contract for function calls")
@@ -157,11 +160,23 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if s.options.ContractCode == "" && s.options.ContractFile == "" {
-		return fmt.Errorf("either contract code or contract file must be set")
+	// Validate contract source options (mutually exclusive)
+	contractSources := 0
+	if s.options.ContractCode != "" {
+		contractSources++
 	}
-	if s.options.ContractCode != "" && s.options.ContractFile != "" {
-		return fmt.Errorf("only one of contract code or contract file can be set")
+	if s.options.ContractFile != "" {
+		contractSources++
+	}
+	if s.options.ContractAddress != "" {
+		contractSources++
+	}
+
+	if contractSources == 0 {
+		return fmt.Errorf("must specify one of: --contract-code, --contract-file, or --contract-address")
+	}
+	if contractSources > 1 {
+		return fmt.Errorf("only one of --contract-code, --contract-file, or --contract-address can be set")
 	}
 
 	// Initialize ABI call builder if ABI options are provided
@@ -215,39 +230,48 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
-	// load contract
-	var contractCode []byte
-	if s.options.ContractCode != "" {
-		contractCode = common.FromHex(s.options.ContractCode)
-	} else if strings.HasPrefix(s.options.ContractFile, "https://") || strings.HasPrefix(s.options.ContractFile, "http://") {
-		resp, err := http.Get(s.options.ContractFile)
-		if err != nil {
-			return fmt.Errorf("could not load contract file: %w", err)
+	if s.options.ContractAddress != "" {
+		// Existing contract
+		if !common.IsHexAddress(s.options.ContractAddress) {
+			return fmt.Errorf("invalid contract address format: %s", s.options.ContractAddress)
 		}
-		defer resp.Body.Close()
-		contractCode, err = io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("could not read contract file: %w", err)
-		}
+		s.contractAddr = common.HexToAddress(s.options.ContractAddress)
+		s.logger.Infof("using existing contract: %v", s.contractAddr.String())
 	} else {
-		code, err := os.ReadFile(s.options.ContractFile)
-		if err != nil {
-			return fmt.Errorf("could not read contract file: %w", err)
+		// New contract
+		var contractCode []byte
+		if s.options.ContractCode != "" {
+			contractCode = common.FromHex(s.options.ContractCode)
+		} else if strings.HasPrefix(s.options.ContractFile, "https://") || strings.HasPrefix(s.options.ContractFile, "http://") {
+			resp, err := http.Get(s.options.ContractFile)
+			if err != nil {
+				return fmt.Errorf("could not load contract file: %w", err)
+			}
+			defer resp.Body.Close()
+			contractCode, err = io.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("could not read contract file: %w", err)
+			}
+		} else {
+			code, err := os.ReadFile(s.options.ContractFile)
+			if err != nil {
+				return fmt.Errorf("could not read contract file: %w", err)
+			}
+			contractCode = code
 		}
-		contractCode = code
-	}
 
-	// deploy contract
-	contractReceipt, _, err := s.sendDeploymentTx(ctx, contractCode)
-	if err != nil {
-		s.logger.Errorf("could not deploy contract: %v", err)
-		return err
+		// deploy contract
+		contractReceipt, _, err := s.sendDeploymentTx(ctx, contractCode)
+		if err != nil {
+			s.logger.Errorf("could not deploy contract: %v", err)
+			return err
+		}
+		if contractReceipt == nil {
+			return fmt.Errorf("could not deploy contract: deployment failed")
+		}
+		s.contractAddr = contractReceipt.ContractAddress
+		s.logger.Infof("deployed contract: %v (confirmed in block #%v)", s.contractAddr.String(), contractReceipt.BlockNumber.String())
 	}
-	if contractReceipt == nil {
-		return fmt.Errorf("could not deploy contract: %w", err)
-	}
-	s.contractAddr = contractReceipt.ContractAddress
-	s.logger.Infof("deployed contract: %v (confirmed in block #%v)", s.contractAddr.String(), contractReceipt.BlockNumber.String())
 
 	// send transactions
 	maxPending := s.options.MaxPending
@@ -262,7 +286,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
-	err = utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
+	err := utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
 		TotalCount:                  s.options.TotalCount,
 		Throughput:                  s.options.Throughput,
 		MaxPending:                  maxPending,
@@ -339,7 +363,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, contractCode []byte) (*
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.GasLimit,
+		Gas:       s.options.DeployGasLimit,
 		To:        nil,
 		Value:     uint256.NewInt(0),
 		Data:      deployData,
@@ -349,10 +373,6 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, contractCode []byte) (*
 	}
 
 	tx, err := wallet.BuildDynamicFeeTx(txData)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	if err != nil {
 		return nil, nil, err
 	}
@@ -381,7 +401,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, contractCode []byte) (*
 
 	txWg.Wait()
 	if txErr != nil {
-		return nil, client, err
+		return nil, client, txErr
 	}
 	return txReceipt, client, nil
 }
