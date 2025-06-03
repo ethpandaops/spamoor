@@ -7,6 +7,7 @@ import (
 	blobconflicting "github.com/ethpandaops/spamoor/scenarios/blob-conflicting"
 	blobreplacements "github.com/ethpandaops/spamoor/scenarios/blob-replacements"
 	"github.com/ethpandaops/spamoor/scenarios/blobs"
+	"github.com/ethpandaops/spamoor/scenarios/calltx"
 	deploydestruct "github.com/ethpandaops/spamoor/scenarios/deploy-destruct"
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
@@ -24,6 +25,7 @@ var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
 	&blobconflicting.ScenarioDescriptor,
 	&blobs.ScenarioDescriptor,
 	&blobreplacements.ScenarioDescriptor,
+	&calltx.ScenarioDescriptor,
 	&deploydestruct.ScenarioDescriptor,
 	&deploytx.ScenarioDescriptor,
 	&eoatx.ScenarioDescriptor,

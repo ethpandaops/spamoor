@@ -1,4 +1,4 @@
-package erctx
+package calltx
 
 import (
 	"context"
@@ -74,7 +74,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TipFee:          2,
 	DeployGasLimit:  2000000,
 	GasLimit:        1000000,
-	Amount:          20,
+	Amount:          0,
 	RandomAmount:    false,
 	RandomTarget:    false,
 	ContractCode:    "",
@@ -248,16 +248,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 				return fmt.Errorf("could not load contract file: %w", err)
 			}
 			defer resp.Body.Close()
-			contractCode, err = io.ReadAll(resp.Body)
+			contractCodeHex, err := io.ReadAll(resp.Body)
 			if err != nil {
 				return fmt.Errorf("could not read contract file: %w", err)
 			}
+			contractCode = common.FromHex(strings.Trim(string(contractCodeHex), "\r\n\t "))
 		} else {
 			code, err := os.ReadFile(s.options.ContractFile)
 			if err != nil {
 				return fmt.Errorf("could not read contract file: %w", err)
 			}
-			contractCode = code
+			contractCode = common.FromHex(strings.Trim(string(code), "\r\n\t "))
 		}
 
 		// deploy contract
