@@ -33,6 +33,7 @@ Spamoor provides multiple scenarios for different transaction types:
 |----------|-------------|
 | [`eoatx`](./scenarios/eoatx/README.md) | **EOA Transactions**<br>Send standard EOA transactions with configurable amounts and targets |
 | [`erctx`](./scenarios/erctx/README.md) | **ERC20 Transactions**<br>Deploy a ERC20 contract and transfer tokens |
+| [`calltx`](./scenarios/calltx/README.md) | **Contract Calls**<br>Deploy a contract and repeatedly call a function on it |
 | [`deploytx`](./scenarios/deploytx/README.md) | **Contract Deployments**<br>Deploy contracts with custom bytecode |
 | [`deploy-destruct`](./scenarios/deploy-destruct/README.md) | **Self-Destruct Deployments**<br>Deploy contracts that self-destruct |
 | [`setcodetx`](./scenarios/setcodetx/README.md) | **Set Code Transactions**<br>Send EIP-7702 setcode-transactions with various settings |
