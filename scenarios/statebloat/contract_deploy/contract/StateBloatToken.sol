@@ -318,46 +318,6 @@ contract StateBloatToken {
         return 65;
     }
 
-    function dummy66() public pure returns (uint256) {
-        return 66;
-    }
-
-    function dummy67() public pure returns (uint256) {
-        return 67;
-    }
-
-    function dummy68() public pure returns (uint256) {
-        return 68;
-    }
-
-    function dummy69() public pure returns (uint256) {
-        return 69;
-    }
-
-    function dummy70() public pure returns (uint256) {
-        return 70;
-    }
-
-    function dummy71() public pure returns (uint256) {
-        return 71;
-    }
-
-    function dummy72() public pure returns (uint256) {
-        return 72;
-    }
-
-    function dummy73() public pure returns (uint256) {
-        return 73;
-    }
-
-    function dummy74() public pure returns (uint256) {
-        return 74;
-    }
-
-    function dummy75() public pure returns (uint256) {
-        return 75;
-    }
-
     function transferFrom1(
         address from,
         address to,
