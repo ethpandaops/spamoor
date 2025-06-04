@@ -50,7 +50,7 @@ type Scenario struct {
 var ScenarioName = "blob-conflicting"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TotalCount:                  0,
-	Throughput:                  0,
+	Throughput:                  6,
 	Sidecars:                    3,
 	MaxPending:                  0,
 	MaxWallets:                  0,
@@ -127,7 +127,7 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 	}
 
 	if s.options.TotalCount == 0 && s.options.Throughput == 0 {
-		s.options.Throughput = 1
+		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
 	return nil

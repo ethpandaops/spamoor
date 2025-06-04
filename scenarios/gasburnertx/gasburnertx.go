@@ -53,7 +53,7 @@ type Scenario struct {
 var ScenarioName = "gasburnertx"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TotalCount:     0,
-	Throughput:     0,
+	Throughput:     10,
 	MaxPending:     0,
 	MaxWallets:     0,
 	Rebroadcast:    120,
@@ -120,7 +120,7 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 	}
 
 	if s.options.TotalCount == 0 && s.options.Throughput == 0 {
-		s.options.Throughput = 1
+		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
 	return nil
