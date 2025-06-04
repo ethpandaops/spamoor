@@ -24,6 +24,7 @@ spamoor calltx [flags]
 - `--contract-file` - Contract file to deploy (local file or HTTP URL)
 - `--contract-address` - Address of already deployed contract (skips deployment)
 - `--contract-args` - Constructor arguments for the contract (hex string)
+- `--contract-addr-path` - Path to child contract created during deployment (e.g. '.0.1' for nonce 1 of nonce 0)
 - `--call-data` - Data to pass to the function calls (hex string)
 
 ### ABI-Based Call Data (alternative to --call-data)
@@ -147,4 +148,23 @@ spamoor calltx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 10 \
   --call-abi-file "./usdc-abi.json" \
   --call-fn-name "balanceOf" \
   --call-args '["{randomaddr}"]'
-``` 
+```
+
+## Child Contract Examples
+
+Call a child contract created during deployment:
+```bash
+spamoor calltx -p "<PRIVKEY>" -h http://rpc-host:8545 -c 1000 \
+  --contract-file "./factory.bin" \
+  --contract-addr-path ".0" \
+  --call-fn-sig "setValue(uint256)" \
+  --call-args '["{txid}"]'
+```
+
+Call a nested child contract (second level):
+```bash
+spamoor calltx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 5 \
+  --contract-file "./factory.bin" \
+  --contract-addr-path ".0.1" \
+  --call-data "0x06fdde03"
+```

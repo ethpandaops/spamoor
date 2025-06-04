@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -27,29 +29,30 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount      uint64 `yaml:"total_count"`
-	Throughput      uint64 `yaml:"throughput"`
-	MaxPending      uint64 `yaml:"max_pending"`
-	MaxWallets      uint64 `yaml:"max_wallets"`
-	Rebroadcast     uint64 `yaml:"rebroadcast"`
-	BaseFee         uint64 `yaml:"base_fee"`
-	TipFee          uint64 `yaml:"tip_fee"`
-	DeployGasLimit  uint64 `yaml:"deploy_gas_limit"`
-	GasLimit        uint64 `yaml:"gas_limit"`
-	Amount          uint64 `yaml:"amount"`
-	RandomAmount    bool   `yaml:"random_amount"`
-	RandomTarget    bool   `yaml:"random_target"`
-	ContractCode    string `yaml:"contract_code"`
-	ContractFile    string `yaml:"contract_file"`
-	ContractAddress string `yaml:"contract_address"`
-	ContractArgs    string `yaml:"contract_args"`
-	CallData        string `yaml:"call_data"`
-	CallABI         string `yaml:"call_abi"`
-	CallABIFile     string `yaml:"call_abi_file"`
-	CallFnName      string `yaml:"call_fn_name"`
-	CallFnSig       string `yaml:"call_fn_sig"`
-	CallArgs        string `yaml:"call_args"`
-	ClientGroup     string `yaml:"client_group"`
+	TotalCount       uint64 `yaml:"total_count"`
+	Throughput       uint64 `yaml:"throughput"`
+	MaxPending       uint64 `yaml:"max_pending"`
+	MaxWallets       uint64 `yaml:"max_wallets"`
+	Rebroadcast      uint64 `yaml:"rebroadcast"`
+	BaseFee          uint64 `yaml:"base_fee"`
+	TipFee           uint64 `yaml:"tip_fee"`
+	DeployGasLimit   uint64 `yaml:"deploy_gas_limit"`
+	GasLimit         uint64 `yaml:"gas_limit"`
+	Amount           uint64 `yaml:"amount"`
+	RandomAmount     bool   `yaml:"random_amount"`
+	RandomTarget     bool   `yaml:"random_target"`
+	ContractCode     string `yaml:"contract_code"`
+	ContractFile     string `yaml:"contract_file"`
+	ContractAddress  string `yaml:"contract_address"`
+	ContractArgs     string `yaml:"contract_args"`
+	ContractAddrPath string `yaml:"contract_addr_path"`
+	CallData         string `yaml:"call_data"`
+	CallABI          string `yaml:"call_abi"`
+	CallABIFile      string `yaml:"call_abi_file"`
+	CallFnName       string `yaml:"call_fn_name"`
+	CallFnSig        string `yaml:"call_fn_sig"`
+	CallArgs         string `yaml:"call_args"`
+	ClientGroup      string `yaml:"client_group"`
 }
 
 type Scenario struct {
@@ -65,29 +68,30 @@ type Scenario struct {
 
 var ScenarioName = "calltx"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:      0,
-	Throughput:      100,
-	MaxPending:      0,
-	MaxWallets:      0,
-	Rebroadcast:     120,
-	BaseFee:         20,
-	TipFee:          2,
-	DeployGasLimit:  2000000,
-	GasLimit:        1000000,
-	Amount:          0,
-	RandomAmount:    false,
-	RandomTarget:    false,
-	ContractCode:    "",
-	ContractFile:    "",
-	ContractAddress: "",
-	ContractArgs:    "",
-	CallData:        "",
-	CallABI:         "",
-	CallABIFile:     "",
-	CallFnName:      "",
-	CallFnSig:       "",
-	CallArgs:        "",
-	ClientGroup:     "",
+	TotalCount:       0,
+	Throughput:       100,
+	MaxPending:       0,
+	MaxWallets:       0,
+	Rebroadcast:      120,
+	BaseFee:          20,
+	TipFee:           2,
+	DeployGasLimit:   2000000,
+	GasLimit:         1000000,
+	Amount:           0,
+	RandomAmount:     false,
+	RandomTarget:     false,
+	ContractCode:     "",
+	ContractFile:     "",
+	ContractAddress:  "",
+	ContractArgs:     "",
+	ContractAddrPath: "",
+	CallData:         "",
+	CallABI:          "",
+	CallABIFile:      "",
+	CallFnName:       "",
+	CallFnSig:        "",
+	CallArgs:         "",
+	ClientGroup:      "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
 	Name:           ScenarioName,
@@ -120,6 +124,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.ContractFile, "contract-file", ScenarioDefaultOptions.ContractFile, "Contract file to deploy")
 	flags.StringVar(&s.options.ContractAddress, "contract-address", ScenarioDefaultOptions.ContractAddress, "Address of already deployed contract (skips deployment)")
 	flags.StringVar(&s.options.ContractArgs, "contract-args", ScenarioDefaultOptions.ContractArgs, "Contract arguments to pass to the constructor")
+	flags.StringVar(&s.options.ContractAddrPath, "contract-addr-path", ScenarioDefaultOptions.ContractAddrPath, "Path to child contract created during deployment (e.g. '.0.1' for nonce 1 of nonce 0)")
 	flags.StringVar(&s.options.CallData, "call-data", ScenarioDefaultOptions.CallData, "Data to pass to the function to call")
 	flags.StringVar(&s.options.CallABI, "call-abi", ScenarioDefaultOptions.CallABI, "JSON ABI of the contract for function calls")
 	flags.StringVar(&s.options.CallABIFile, "call-abi-file", ScenarioDefaultOptions.CallABIFile, "JSON ABI file of the contract for function calls")
@@ -272,6 +277,16 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 		s.contractAddr = contractReceipt.ContractAddress
 		s.logger.Infof("deployed contract: %v (confirmed in block #%v)", s.contractAddr.String(), contractReceipt.BlockNumber.String())
+	}
+
+	// Calculate child contract address if path is specified
+	if s.options.ContractAddrPath != "" {
+		childAddr, err := s.calculateChildContractAddress(s.contractAddr, s.options.ContractAddrPath)
+		if err != nil {
+			return fmt.Errorf("failed to calculate child contract address: %w", err)
+		}
+		s.logger.Infof("targeting child contract at path %s: %v", s.options.ContractAddrPath, childAddr.String())
+		s.contractAddr = childAddr
 	}
 
 	// send transactions
@@ -552,4 +567,32 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	}
 
 	return tx, client, wallet, nil
+}
+
+// calculateChildContractAddress calculates the address of a child contract based on the nonce path
+func (s *Scenario) calculateChildContractAddress(parentAddr common.Address, noncePath string) (common.Address, error) {
+	if noncePath == "" || !strings.HasPrefix(noncePath, ".") {
+		return common.Address{}, fmt.Errorf("invalid child contract path format, must start with '.' (e.g. '.0.1')")
+	}
+
+	// Remove the leading dot and split by dots
+	pathStr := strings.TrimPrefix(noncePath, ".")
+	if pathStr == "" {
+		return common.Address{}, fmt.Errorf("empty child contract path")
+	}
+
+	nonceParts := strings.Split(pathStr, ".")
+	currentAddr := parentAddr
+
+	for _, nonceStr := range nonceParts {
+		nonce, err := strconv.ParseUint(nonceStr, 10, 64)
+		if err != nil {
+			return common.Address{}, fmt.Errorf("invalid nonce value '%s' in path: %w", nonceStr, err)
+		}
+
+		// Calculate the child contract address using CREATE opcode formula
+		currentAddr = crypto.CreateAddress(currentAddr, nonce)
+	}
+
+	return currentAddr, nil
 }
