@@ -20,14 +20,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// WalletSelectionMode defines how wallets are selected from the pool.
 type WalletSelectionMode uint8
 
 var (
-	SelectWalletByIndex    WalletSelectionMode = 0
-	SelectWalletRandom     WalletSelectionMode = 1
+	// SelectWalletByIndex selects a wallet by index (modulo pool size).
+	SelectWalletByIndex WalletSelectionMode = 0
+	// SelectWalletRandom selects a random wallet from the pool.
+	SelectWalletRandom WalletSelectionMode = 1
+	// SelectWalletRoundRobin selects wallets in round-robin fashion.
 	SelectWalletRoundRobin WalletSelectionMode = 2
 )
 
+// WalletPoolConfig contains configuration settings for the wallet pool including
+// wallet count, funding amounts, and automatic refill behavior.
 type WalletPoolConfig struct {
 	WalletCount    uint64       `yaml:"wallet_count,omitempty"`
 	RefillAmount   *uint256.Int `yaml:"refill_amount"`
@@ -36,12 +42,17 @@ type WalletPoolConfig struct {
 	WalletSeed     string       `yaml:"seed"`
 }
 
+// WellKnownWalletConfig defines configuration for a named wallet with custom funding settings.
+// Well-known wallets have specific names and can have different refill amounts than regular wallets.
 type WellKnownWalletConfig struct {
 	Name          string
 	RefillAmount  *uint256.Int
 	RefillBalance *uint256.Int
 }
 
+// WalletPool manages a pool of child wallets derived from a root wallet with automatic funding
+// and balance monitoring. It provides wallet selection strategies, automatic refills when balances
+// drop below thresholds, and batch funding operations for efficiency.
 type WalletPool struct {
 	ctx         context.Context
 	config      WalletPoolConfig
@@ -59,11 +70,15 @@ type WalletPool struct {
 	reclaimedFunds   bool
 }
 
+// FundingRequest represents a request to fund a wallet with a specific amount.
+// Used internally for batch funding operations.
 type FundingRequest struct {
 	Wallet *Wallet
 	Amount *uint256.Int
 }
 
+// GetDefaultWalletConfig returns default wallet pool configuration for a given scenario.
+// It generates a random seed and sets reasonable defaults for refill amounts and intervals.
 func GetDefaultWalletConfig(scenarioName string) *WalletPoolConfig {
 	return &WalletPoolConfig{
 		WalletSeed:     fmt.Sprintf("%v-%v", scenarioName, rand.Intn(1000000)),
@@ -74,6 +89,8 @@ func GetDefaultWalletConfig(scenarioName string) *WalletPoolConfig {
 	}
 }
 
+// NewWalletPool creates a new wallet pool with the specified dependencies.
+// The pool must be configured and prepared with PrepareWallets() before use.
 func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *RootWallet, clientPool *ClientPool, txpool *TxPool) *WalletPool {
 	return &WalletPool{
 		ctx:              ctx,
@@ -87,26 +104,32 @@ func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *R
 	}
 }
 
+// GetContext returns the context associated with this wallet pool.
 func (pool *WalletPool) GetContext() context.Context {
 	return pool.ctx
 }
 
+// GetTxPool returns the transaction pool used by this wallet pool.
 func (pool *WalletPool) GetTxPool() *TxPool {
 	return pool.txpool
 }
 
+// GetClientPool returns the client pool used for blockchain interactions.
 func (pool *WalletPool) GetClientPool() *ClientPool {
 	return pool.clientPool
 }
 
+// GetRootWallet returns the root wallet that funds all child wallets.
 func (pool *WalletPool) GetRootWallet() *RootWallet {
 	return pool.rootWallet
 }
 
+// GetChainId returns the chain ID from the root wallet.
 func (pool *WalletPool) GetChainId() *big.Int {
 	return pool.rootWallet.wallet.GetChainId()
 }
 
+// LoadConfig loads wallet pool configuration from YAML string.
 func (pool *WalletPool) LoadConfig(configYaml string) error {
 	err := yaml.Unmarshal([]byte(configYaml), &pool.config)
 	if err != nil {
@@ -116,6 +139,7 @@ func (pool *WalletPool) LoadConfig(configYaml string) error {
 	return nil
 }
 
+// MarshalConfig returns the current configuration as a YAML string.
 func (pool *WalletPool) MarshalConfig() (string, error) {
 	yamlBytes, err := yaml.Marshal(&pool.config)
 	if err != nil {
@@ -125,38 +149,51 @@ func (pool *WalletPool) MarshalConfig() (string, error) {
 	return string(yamlBytes), nil
 }
 
+// SetWalletCount sets the number of child wallets to create.
 func (pool *WalletPool) SetWalletCount(count uint64) {
 	pool.config.WalletCount = count
 }
 
+// SetRunFundings enables or disables automatic wallet funding.
+// When disabled, wallets will not be automatically refilled when their balance drops.
 func (pool *WalletPool) SetRunFundings(runFundings bool) {
 	pool.runFundings = runFundings
 }
 
+// AddWellKnownWallet adds a named wallet with custom funding configuration.
+// Well-known wallets are created alongside regular numbered wallets.
 func (pool *WalletPool) AddWellKnownWallet(config *WellKnownWalletConfig) {
 	pool.wellKnownNames = append(pool.wellKnownNames, config)
 }
 
+// SetRefillAmount sets the amount sent to wallets when they need funding.
 func (pool *WalletPool) SetRefillAmount(amount *uint256.Int) {
 	pool.config.RefillAmount = amount
 }
 
+// SetRefillBalance sets the balance threshold below which wallets are automatically refilled.
 func (pool *WalletPool) SetRefillBalance(balance *uint256.Int) {
 	pool.config.RefillBalance = balance
 }
 
+// SetWalletSeed sets the seed used for deterministic wallet generation.
+// The same seed will always generate the same set of wallets.
 func (pool *WalletPool) SetWalletSeed(seed string) {
 	pool.config.WalletSeed = seed
 }
 
+// SetRefillInterval sets the interval in seconds between automatic balance checks.
 func (pool *WalletPool) SetRefillInterval(interval uint64) {
 	pool.config.RefillInterval = interval
 }
 
+// GetClient returns a client from the client pool using the specified selection strategy.
 func (pool *WalletPool) GetClient(mode ClientSelectionMode, input int, group string) *Client {
 	return pool.clientPool.GetClient(mode, input, group)
 }
 
+// GetWallet returns a wallet from the pool using the specified selection strategy.
+// Returns nil if no wallets are available.
 func (pool *WalletPool) GetWallet(mode WalletSelectionMode, input int) *Wallet {
 	pool.selectionMutex.Lock()
 	defer pool.selectionMutex.Unlock()
@@ -180,10 +217,15 @@ func (pool *WalletPool) GetWallet(mode WalletSelectionMode, input int) *Wallet {
 	return pool.childWallets[input]
 }
 
+// GetWellKnownWallet returns a well-known wallet by name.
+// Returns nil if the wallet doesn't exist.
 func (pool *WalletPool) GetWellKnownWallet(name string) *Wallet {
 	return pool.wellKnownWallets[name]
 }
 
+// GetWalletName returns a human-readable name for the given wallet address.
+// Returns "root" for the root wallet, numbered names for child wallets,
+// custom names for well-known wallets, or "unknown" if not found.
 func (pool *WalletPool) GetWalletName(address common.Address) string {
 	if pool.rootWallet.wallet.GetAddress() == address {
 		return "root"
@@ -205,6 +247,8 @@ func (pool *WalletPool) GetWalletName(address common.Address) string {
 	return "unknown"
 }
 
+// GetAllWallets returns a slice containing all wallets (well-known and child wallets).
+// The root wallet is not included in this list.
 func (pool *WalletPool) GetAllWallets() []*Wallet {
 	wallets := make([]*Wallet, len(pool.childWallets)+len(pool.wellKnownWallets))
 	for i, config := range pool.wellKnownNames {
@@ -214,14 +258,20 @@ func (pool *WalletPool) GetAllWallets() []*Wallet {
 	return wallets
 }
 
+// GetConfiguredWalletCount returns the configured number of child wallets.
 func (pool *WalletPool) GetConfiguredWalletCount() uint64 {
 	return pool.config.WalletCount
 }
 
+// GetWalletCount returns the actual number of child wallets created.
 func (pool *WalletPool) GetWalletCount() uint64 {
 	return uint64(len(pool.childWallets))
 }
 
+// PrepareWallets creates all configured wallets and funds them if needed.
+// It generates deterministic wallets based on the root wallet and seed,
+// then funds any wallets below the refill threshold. Also starts the
+// automatic balance monitoring if funding is enabled.
 func (pool *WalletPool) PrepareWallets() error {
 	if len(pool.childWallets) > 0 {
 		return nil
@@ -341,6 +391,9 @@ func (pool *WalletPool) PrepareWallets() error {
 	return nil
 }
 
+// prepareChildWallet creates a child wallet derived from the root wallet using deterministic key generation.
+// It generates a private key by hashing the root wallet's private key with the child index and seed.
+// Returns the wallet, funding request (if needed), and any error.
 func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *Client, seed string) (*Wallet, *FundingRequest, error) {
 	idxBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(idxBytes, childIdx)
@@ -354,6 +407,9 @@ func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *Client, seed
 	return pool.prepareWallet(fmt.Sprintf("%x", childKey), client, pool.config.RefillAmount, pool.config.RefillBalance)
 }
 
+// prepareWellKnownWallet creates a named wallet derived from the root wallet using deterministic key generation.
+// It generates a private key by hashing the root wallet's private key with the wallet name and seed.
+// Uses custom refill amounts from the config if specified, otherwise falls back to pool defaults.
 func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, client *Client, seed string) (*Wallet, *FundingRequest, error) {
 	idxBytes := make([]byte, len(config.Name))
 	copy(idxBytes, config.Name)
@@ -377,6 +433,9 @@ func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, cl
 	return pool.prepareWallet(fmt.Sprintf("%x", childKey), client, refillAmount, refillBalance)
 }
 
+// prepareWallet creates a wallet from a private key and checks if it needs funding.
+// Updates the wallet's state from the blockchain and creates a funding request if
+// the wallet's balance is below the specified refill threshold.
 func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmount *uint256.Int, refillBalance *uint256.Int) (*Wallet, *FundingRequest, error) {
 	childWallet, err := NewWallet(privkey)
 	if err != nil {
@@ -397,6 +456,9 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 	return childWallet, fundingReq, nil
 }
 
+// watchWalletBalancesLoop runs continuously to monitor and refill wallet balances.
+// It periodically checks all wallets and funds those below the refill threshold.
+// Exits when the context is cancelled or funds have been reclaimed.
 func (pool *WalletPool) watchWalletBalancesLoop() {
 	sleepTime := time.Duration(pool.config.RefillInterval) * time.Second
 	for {
@@ -420,6 +482,8 @@ func (pool *WalletPool) watchWalletBalancesLoop() {
 	}
 }
 
+// resupplyChildWallets checks all wallets and creates funding requests for those below the refill threshold.
+// It updates wallet states from the blockchain and processes any needed funding requests in batch.
 func (pool *WalletPool) resupplyChildWallets() error {
 	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
 	if client == nil {
@@ -528,45 +592,9 @@ func (pool *WalletPool) resupplyChildWallets() error {
 	return nil
 }
 
-func (pool *WalletPool) CheckChildWalletBalance(childWallet *Wallet) error {
-	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
-	if client == nil {
-		return fmt.Errorf("no client available")
-	}
-
-	balance, err := client.GetBalanceAt(pool.ctx, childWallet.GetAddress())
-	if err != nil {
-		return err
-	}
-	childWallet.SetBalance(balance)
-
-	refillAmount := pool.config.RefillAmount
-	refillBalance := pool.config.RefillBalance
-
-	for _, config := range pool.wellKnownNames {
-		wellKnownWallet := pool.wellKnownWallets[config.Name]
-		if wellKnownWallet != nil && wellKnownWallet.GetAddress().String() == childWallet.GetAddress().String() {
-			if config.RefillAmount != nil {
-				refillAmount = config.RefillAmount
-			}
-			if config.RefillBalance != nil {
-				refillBalance = config.RefillBalance
-			}
-		}
-	}
-
-	if childWallet.GetBalance().Cmp(refillBalance.ToBig()) >= 0 {
-		return nil
-	}
-
-	return pool.processFundingRequests([]*FundingRequest{
-		{
-			Wallet: childWallet,
-			Amount: refillAmount,
-		},
-	})
-}
-
+// processFundingRequests handles a batch of funding requests by creating and sending transactions.
+// It can use either individual transactions or batch transactions via the batcher contract for efficiency.
+// Processes transactions in chunks to avoid overwhelming the network.
 func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) error {
 	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
 	if client == nil {
@@ -637,6 +665,8 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 	})
 }
 
+// buildWalletFundingTx creates a transaction to fund a single wallet with the specified amount.
+// It gets suggested fees from the client and builds a dynamic fee transaction.
 func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client, refillAmount *uint256.Int) (*types.Transaction, error) {
 	if client == nil {
 		client = pool.clientPool.GetClient(SelectClientByIndex, 0, "")
@@ -673,6 +703,9 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client
 	return tx, nil
 }
 
+// buildWalletFundingBatchTx creates a transaction to fund multiple wallets using the batcher contract.
+// It calculates the total amount needed, encodes the funding requests as calldata,
+// and builds a transaction to the batcher contract with appropriate gas limits.
 func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, client *Client, batcher *TxBatcher) (*types.Transaction, error) {
 	if client == nil {
 		client = pool.clientPool.GetClient(SelectClientByIndex, 0, "")
@@ -720,11 +753,115 @@ func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, cl
 	return tx, nil
 }
 
+// reclaimTx holds a reclaim transaction and its associated wallet for fund recovery operations.
 type reclaimTx struct {
 	tx     *types.Transaction
 	wallet *Wallet
 }
 
+// buildWalletReclaimTx creates a transaction to reclaim funds from a child wallet back to the target address.
+// It calculates the maximum amount that can be reclaimed after accounting for transaction fees.
+// Returns nil if the wallet doesn't have enough balance to cover fees.
+func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *Wallet, client *Client, target common.Address) (*types.Transaction, error) {
+	if client == nil {
+		client = pool.clientPool.GetClient(SelectClientByIndex, 0, "")
+		if client == nil {
+			return nil, fmt.Errorf("no client available")
+		}
+	}
+	feeCap, tipCap, err := client.GetSuggestedFee(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if feeCap.Cmp(big.NewInt(200000000000)) < 0 {
+		feeCap = big.NewInt(200000000000)
+	}
+	if tipCap.Cmp(feeCap) < 0 {
+		tipCap = feeCap
+	}
+
+	feeAmount := big.NewInt(0).Mul(tipCap, big.NewInt(21000))
+	reclaimAmount := big.NewInt(0).Sub(childWallet.GetBalance(), feeAmount)
+
+	if reclaimAmount.Cmp(big.NewInt(0)) <= 0 {
+		return nil, nil
+	}
+
+	reclaimTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
+		GasFeeCap: uint256.MustFromBig(feeCap),
+		GasTipCap: uint256.MustFromBig(tipCap),
+		Gas:       21000,
+		To:        &target,
+		Value:     uint256.MustFromBig(reclaimAmount),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := childWallet.BuildDynamicFeeTx(reclaimTx)
+	if err != nil {
+		return nil, err
+	}
+
+	return tx, nil
+}
+
+// collectPoolWallets adds all wallets (root, child, and well-known) to the provided map.
+// This is used by the transaction pool to track which addresses belong to this wallet pool.
+func (pool *WalletPool) collectPoolWallets(walletMap map[common.Address]*Wallet) {
+	walletMap[pool.rootWallet.wallet.GetAddress()] = pool.rootWallet.wallet
+	for _, wallet := range pool.childWallets {
+		walletMap[wallet.GetAddress()] = wallet
+	}
+	for _, wallet := range pool.wellKnownWallets {
+		walletMap[wallet.GetAddress()] = wallet
+	}
+}
+
+// CheckChildWalletBalance checks and refills a specific wallet if needed.
+// This can be used to manually trigger funding for a single wallet.
+func (pool *WalletPool) CheckChildWalletBalance(childWallet *Wallet) error {
+	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
+	if client == nil {
+		return fmt.Errorf("no client available")
+	}
+
+	balance, err := client.GetBalanceAt(pool.ctx, childWallet.GetAddress())
+	if err != nil {
+		return err
+	}
+	childWallet.SetBalance(balance)
+
+	refillAmount := pool.config.RefillAmount
+	refillBalance := pool.config.RefillBalance
+
+	for _, config := range pool.wellKnownNames {
+		wellKnownWallet := pool.wellKnownWallets[config.Name]
+		if wellKnownWallet != nil && wellKnownWallet.GetAddress().String() == childWallet.GetAddress().String() {
+			if config.RefillAmount != nil {
+				refillAmount = config.RefillAmount
+			}
+			if config.RefillBalance != nil {
+				refillBalance = config.RefillBalance
+			}
+		}
+	}
+
+	if childWallet.GetBalance().Cmp(refillBalance.ToBig()) >= 0 {
+		return nil
+	}
+
+	return pool.processFundingRequests([]*FundingRequest{
+		{
+			Wallet: childWallet,
+			Amount: refillAmount,
+		},
+	})
+}
+
+// ReclaimFunds reclaims all funds from child wallets back to the root wallet.
+// This is typically called when shutting down to consolidate remaining funds.
+// After calling this, automatic funding is disabled.
 func (pool *WalletPool) ReclaimFunds(ctx context.Context, client *Client) error {
 	pool.reclaimedFunds = true
 
@@ -815,58 +952,4 @@ func (pool *WalletPool) ReclaimFunds(ctx context.Context, client *Client) error 
 	}
 
 	return nil
-}
-
-func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *Wallet, client *Client, target common.Address) (*types.Transaction, error) {
-	if client == nil {
-		client = pool.clientPool.GetClient(SelectClientByIndex, 0, "")
-		if client == nil {
-			return nil, fmt.Errorf("no client available")
-		}
-	}
-	feeCap, tipCap, err := client.GetSuggestedFee(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if feeCap.Cmp(big.NewInt(200000000000)) < 0 {
-		feeCap = big.NewInt(200000000000)
-	}
-	if tipCap.Cmp(feeCap) < 0 {
-		tipCap = feeCap
-	}
-
-	feeAmount := big.NewInt(0).Mul(tipCap, big.NewInt(21000))
-	reclaimAmount := big.NewInt(0).Sub(childWallet.GetBalance(), feeAmount)
-
-	if reclaimAmount.Cmp(big.NewInt(0)) <= 0 {
-		return nil, nil
-	}
-
-	reclaimTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
-		GasFeeCap: uint256.MustFromBig(feeCap),
-		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       21000,
-		To:        &target,
-		Value:     uint256.MustFromBig(reclaimAmount),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	tx, err := childWallet.BuildDynamicFeeTx(reclaimTx)
-	if err != nil {
-		return nil, err
-	}
-
-	return tx, nil
-}
-
-func (pool *WalletPool) collectPoolWallets(walletMap map[common.Address]*Wallet) {
-	walletMap[pool.rootWallet.wallet.GetAddress()] = pool.rootWallet.wallet
-	for _, wallet := range pool.childWallets {
-		walletMap[wallet.GetAddress()] = wallet
-	}
-	for _, wallet := range pool.wellKnownWallets {
-		walletMap[wallet.GetAddress()] = wallet
-	}
 }

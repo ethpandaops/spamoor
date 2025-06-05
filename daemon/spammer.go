@@ -17,15 +17,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SpammerStatus represents the execution state of a spammer instance.
+// It tracks whether the spammer is paused, running, finished, or failed.
 type SpammerStatus int
 
 const (
+	// SpammerStatusPaused indicates the spammer is stopped and can be resumed
 	SpammerStatusPaused SpammerStatus = iota
+	// SpammerStatusRunning indicates the spammer is actively executing its scenario
 	SpammerStatusRunning
+	// SpammerStatusFinished indicates the spammer completed its scenario successfully
 	SpammerStatusFinished
+	// SpammerStatusFailed indicates the spammer encountered an error and stopped
 	SpammerStatusFailed
 )
 
+// Spammer represents a single scenario execution instance with database persistence.
+// It manages the lifecycle of a scenario including wallet pool creation, configuration loading,
+// and execution monitoring with panic recovery.
 type Spammer struct {
 	daemon         *Daemon
 	logger         logrus.FieldLogger
@@ -38,6 +47,8 @@ type Spammer struct {
 	runningChan    chan struct{}
 }
 
+// SpammerConfig defines the wallet configuration for a spammer instance.
+// This includes the seed for deterministic wallet generation and funding parameters.
 type SpammerConfig struct {
 	Seed           string       `yaml:"seed"`
 	RefillAmount   *uint256.Int `yaml:"refill_amount"`
@@ -46,6 +57,9 @@ type SpammerConfig struct {
 	WalletCount    int          `yaml:"wallet_count"`
 }
 
+// restoreSpammer creates a spammer instance from database entity data.
+// It initializes logging with buffered scope, adds the spammer to the daemon map,
+// and automatically starts it if it was previously running.
 func (d *Daemon) restoreSpammer(dbEntity *db.Spammer) (*Spammer, error) {
 	logger := logscope.NewLogger(&logscope.ScopeOptions{
 		Parent:     d.logger.WithField("spammer_id", dbEntity.ID),
@@ -71,6 +85,9 @@ func (d *Daemon) restoreSpammer(dbEntity *db.Spammer) (*Spammer, error) {
 	return spammer, nil
 }
 
+// NewSpammer creates a new spammer instance with the specified configuration.
+// It validates the config, generates a unique ID (starting from 100), persists to database,
+// and optionally starts execution immediately. The ID counter is stored in database state.
 func (d *Daemon) NewSpammer(scenarioName string, config string, name string, description string, startImmediately bool) (*Spammer, error) {
 	// parse config for sanity checks
 	yaml.Unmarshal([]byte(config), &SpammerConfig{})
@@ -130,6 +147,9 @@ func (d *Daemon) NewSpammer(scenarioName string, config string, name string, des
 	return spammer, nil
 }
 
+// Start begins execution of the spammer's scenario in a separate goroutine.
+// It updates the status to running in the database and launches the scenario runner.
+// Returns an error if the database update fails.
 func (s *Spammer) Start() error {
 	s.dbEntity.Status = int(SpammerStatusRunning)
 	err := s.daemon.db.RunDBTransaction(func(tx *sqlx.Tx) error {
@@ -144,6 +164,9 @@ func (s *Spammer) Start() error {
 	return nil
 }
 
+// Pause stops the running scenario by canceling its context.
+// It waits up to 10 seconds for the scenario to stop gracefully.
+// Returns an error if the scenario is not running or fails to stop within the timeout.
 func (s *Spammer) Pause() error {
 	scenarioCancel := s.scenarioCancel
 	if scenarioCancel == nil {
@@ -160,6 +183,9 @@ func (s *Spammer) Pause() error {
 	}
 }
 
+// runScenario executes the spammer's scenario with comprehensive error handling.
+// It manages wallet pool creation, scenario initialization, configuration loading,
+// and handles panics with stack trace logging. Updates status in database on completion.
 func (s *Spammer) runScenario() {
 	if s.running {
 		return
@@ -248,38 +274,50 @@ func (s *Spammer) runScenario() {
 	scenarioErr = scenario.Run(s.scenarioCtx)
 }
 
+// GetID returns the unique identifier of the spammer instance.
 func (s *Spammer) GetID() int64 {
 	return s.dbEntity.ID
 }
 
+// GetName returns the human-readable name of the spammer instance.
 func (s *Spammer) GetName() string {
 	return s.dbEntity.Name
 }
 
+// GetDescription returns the description text of the spammer instance.
 func (s *Spammer) GetDescription() string {
 	return s.dbEntity.Description
 }
 
+// GetScenario returns the name of the scenario being executed by this spammer.
 func (s *Spammer) GetScenario() string {
 	return s.dbEntity.Scenario
 }
 
+// GetStatus returns the current execution status of the spammer as an integer.
+// Use SpammerStatus constants to interpret the returned value.
 func (s *Spammer) GetStatus() int {
 	return s.dbEntity.Status
 }
 
+// GetConfig returns the YAML configuration string used by this spammer.
 func (s *Spammer) GetConfig() string {
 	return s.dbEntity.Config
 }
 
+// GetCreatedAt returns the Unix timestamp when this spammer was created.
 func (s *Spammer) GetCreatedAt() int64 {
 	return s.dbEntity.CreatedAt
 }
 
+// GetLogScope returns the buffered log scope for this spammer.
+// This provides access to captured log messages for debugging and monitoring.
 func (s *Spammer) GetLogScope() *logscope.LogScope {
 	return s.logscope
 }
 
+// GetWalletPool returns the wallet pool used by this spammer for transaction submission.
+// Returns nil if the spammer has not been started or the wallet pool is not initialized.
 func (s *Spammer) GetWalletPool() *spamoor.WalletPool {
 	return s.walletPool
 }

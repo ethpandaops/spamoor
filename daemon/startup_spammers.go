@@ -10,7 +10,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// StartupSpammerConfig represents a single spammer configuration in the startup config file
+// StartupSpammerConfig represents a single spammer configuration in the startup config file.
+// It defines the scenario to run, display information, and custom configuration overrides
+// that will be merged with default scenario and wallet configurations.
 type StartupSpammerConfig struct {
 	Scenario    string                 `yaml:"scenario"`
 	Name        string                 `yaml:"name"`
@@ -18,7 +20,9 @@ type StartupSpammerConfig struct {
 	Config      map[string]interface{} `yaml:"config"`
 }
 
-// LoadStartupSpammers loads the startup spammers configuration from a file
+// LoadStartupSpammers loads the startup spammers configuration from a YAML file.
+// Returns nil if no config file is specified. The file should contain an array
+// of StartupSpammerConfig objects that define spammers to create on daemon startup.
 func (d *Daemon) LoadStartupSpammers(configFile string, logger logrus.FieldLogger) ([]StartupSpammerConfig, error) {
 	if configFile == "" {
 		return nil, nil
@@ -40,7 +44,10 @@ func (d *Daemon) LoadStartupSpammers(configFile string, logger logrus.FieldLogge
 	return spammers, nil
 }
 
-// AddStartupSpammers adds the startup spammers to the daemon
+// AddStartupSpammers creates and starts spammers from the startup configuration.
+// For each spammer config, it merges default scenario options with default wallet config
+// and custom overrides, then creates the spammer with auto-start enabled.
+// Default names and descriptions are generated if not provided.
 func (d *Daemon) AddStartupSpammers(spammers []StartupSpammerConfig) error {
 	for _, spammerConfig := range spammers {
 		scenario := scenarios.GetScenario(spammerConfig.Scenario)

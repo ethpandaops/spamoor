@@ -20,6 +20,9 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 )
 
+// ScenarioDescriptors contains all available scenario descriptors for the spamoor tool.
+// This registry includes scenarios for testing various Ethereum transaction types and patterns.
+// Each descriptor defines the configuration, constructor, and metadata for a specific test scenario.
 var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
 	&blobcombined.ScenarioDescriptor,
 	&blobconflicting.ScenarioDescriptor,
@@ -38,6 +41,9 @@ var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
 	&wallets.ScenarioDescriptor,
 }
 
+// GetScenario finds and returns a scenario descriptor by name.
+// It performs a linear search through all registered scenarios and returns
+// the matching descriptor, or nil if no scenario with the given name exists.
 func GetScenario(name string) *scenariotypes.ScenarioDescriptor {
 	for _, scenario := range ScenarioDescriptors {
 		if scenario.Name == name {
@@ -48,6 +54,9 @@ func GetScenario(name string) *scenariotypes.ScenarioDescriptor {
 	return nil
 }
 
+// GetScenarioNames returns a slice containing the names of all registered scenarios.
+// This is useful for CLI help text, validation, and displaying available options
+// to users. The order matches the order in ScenarioDescriptors.
 func GetScenarioNames() []string {
 	names := make([]string, len(ScenarioDescriptors))
 	for i, scenario := range ScenarioDescriptors {

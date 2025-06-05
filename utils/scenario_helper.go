@@ -9,6 +9,8 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const SecondsPerSlot uint64 = 12
+
 // TransactionScenarioOptions configures how the transaction scenario is executed.
 type TransactionScenarioOptions struct {
 	TotalCount                  uint64

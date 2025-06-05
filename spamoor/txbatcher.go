@@ -14,6 +14,7 @@ import (
 	"github.com/holiman/uint256"
 )
 
+// Assembly code for the batcher contract initialization
 const batcherGeasInit = `
 ;; Init code
 push @.start
@@ -29,6 +30,7 @@ return
 .start:
 `
 
+// Assembly code for the main batcher contract logic that forwards funds to multiple addresses
 const batcherGeasCode = `
 push 0                ;; [offset]
 jump @loop
@@ -95,11 +97,17 @@ exit2:
 `
 
 const (
-	BatcherTxLimit  = 50
-	BatcherBaseGas  = 50000
+	// BatcherTxLimit is the maximum number of transactions that can be batched in a single call.
+	BatcherTxLimit = 50
+	// BatcherBaseGas is the base gas cost for executing a batcher transaction.
+	BatcherBaseGas = 50000
+	// BatcherGasPerTx is the additional gas cost per transaction in the batch.
 	BatcherGasPerTx = 35000
 )
 
+// TxBatcher manages the deployment and operation of a smart contract that batches
+// multiple fund transfers into a single transaction. It compiles and deploys
+// assembly code that efficiently forwards funds to multiple recipients.
 type TxBatcher struct {
 	txpool     *TxPool
 	isDeployed bool
@@ -107,12 +115,23 @@ type TxBatcher struct {
 	address    common.Address
 }
 
+// NewTxBatcher creates a new TxBatcher instance with the specified transaction pool.
+// The batcher must be deployed with Deploy() before it can be used.
 func NewTxBatcher(txpool *TxPool) *TxBatcher {
 	return &TxBatcher{
 		txpool: txpool,
 	}
 }
 
+// Deploy compiles and deploys the batcher smart contract to the blockchain.
+// It uses assembly code to create an efficient contract that can forward funds
+// to multiple addresses in a single transaction. The deployment is protected
+// by a mutex to ensure it only happens once.
+//
+// Parameters:
+//   - ctx: context for the deployment transaction
+//   - wallet: wallet to deploy the contract from
+//   - client: optional client to use (if nil, uses pool's default client)
 func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) error {
 	b.deployMtx.Lock()
 	defer b.deployMtx.Unlock()
@@ -185,10 +204,15 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 	return nil
 }
 
+// GetAddress returns the deployed contract address.
+// Returns zero address if the contract hasn't been deployed yet.
 func (b *TxBatcher) GetAddress() common.Address {
 	return b.address
 }
 
+// GetRequestCalldata encodes funding requests into calldata format expected by the batcher contract.
+// Each request is encoded as 32 bytes: 20 bytes for the address and 12 bytes for the amount.
+// Returns the encoded calldata that can be used in a transaction to the batcher contract.
 func (b *TxBatcher) GetRequestCalldata(requests []*FundingRequest) ([]byte, error) {
 	calldata := make([]byte, len(requests)*32)
 	for i, request := range requests {

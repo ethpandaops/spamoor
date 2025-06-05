@@ -17,7 +17,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// BlockInfo represents information about a processed block
+// BlockInfo represents information about a processed block including
+// hash, parent hash, and timestamp for chain reorganization detection.
 type BlockInfo struct {
 	Number     uint64
 	Hash       common.Hash
@@ -25,7 +26,8 @@ type BlockInfo struct {
 	Timestamp  uint64
 }
 
-// TxInfo represents information about a confirmed transaction
+// TxInfo represents information about a confirmed transaction including
+// the transaction details, associated wallets, and send options.
 type TxInfo struct {
 	TxHash     common.Hash
 	From       common.Address
@@ -36,6 +38,9 @@ type TxInfo struct {
 	Options    *SendTransactionOptions
 }
 
+// TxPool manages transaction submission, confirmation tracking, and chain reorganization handling.
+// It monitors blockchain blocks, tracks transaction confirmations, handles reorgs by re-submitting
+// affected transactions, and provides transaction awaiting functionality with automatic rebroadcasting.
 type TxPool struct {
 	options          *TxPoolOptions
 	processStaleChan chan uint64
@@ -51,6 +56,7 @@ type TxPool struct {
 	confirmedTxs map[uint64][]*TxInfo
 }
 
+// TxPoolOptions contains configuration options for the transaction pool.
 type TxPoolOptions struct {
 	Context              context.Context
 	ClientPool           *ClientPool
@@ -58,10 +64,20 @@ type TxPoolOptions struct {
 	GetActiveWalletPools func() []*WalletPool
 }
 
+// TxConfirmFn is a callback function called when a transaction is confirmed or fails.
+// It receives the transaction, receipt (if successful), and any error that occurred.
 type TxConfirmFn func(tx *types.Transaction, receipt *types.Receipt, err error)
+
+// TxLogFn is a callback function for logging transaction submission attempts.
+// It receives the client used, retry count, rebroadcast count, and any error.
 type TxLogFn func(client *Client, retry int, rebroadcast int, err error)
+
+// TxRebroadcastFn is a callback function called before each transaction rebroadcast.
+// It receives the transaction, send options, and the client being used for rebroadcast.
 type TxRebroadcastFn func(tx *types.Transaction, options *SendTransactionOptions, client *Client)
 
+// SendTransactionOptions contains options for transaction submission including
+// client selection, confirmation callbacks, rebroadcast settings, and logging.
 type SendTransactionOptions struct {
 	Client             *Client
 	ClientGroup        string
@@ -76,6 +92,10 @@ type SendTransactionOptions struct {
 	TransactionBytes    []byte
 }
 
+// NewTxPool creates a new transaction pool with the specified options.
+// It starts background goroutines for block processing and stale transaction handling.
+// The pool automatically begins monitoring the blockchain for new blocks and managing
+// transaction confirmations and reorgs.
 func NewTxPool(options *TxPoolOptions) *TxPool {
 	pool := &TxPool{
 		options:          options,
@@ -99,6 +119,10 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 	return pool
 }
 
+// runTxPoolLoop continuously monitors for new blocks and processes them.
+// It tracks the highest block number across all clients and processes new blocks
+// sequentially. Also triggers stale transaction processing when new blocks arrive.
+// Runs until the context is cancelled and recovers from panics with logging.
 func (pool *TxPool) runTxPoolLoop() {
 	defer func() {
 		if err := recover(); err != nil {
@@ -142,6 +166,9 @@ func (pool *TxPool) runTxPoolLoop() {
 	}
 }
 
+// processStaleTransactionsLoop handles stale transaction confirmation checking.
+// It listens for block number updates and processes stale confirmations for all
+// active wallets. Runs until the context is cancelled and recovers from panics.
 func (pool *TxPool) processStaleTransactionsLoop() {
 	defer func() {
 		if err := recover(); err != nil {
@@ -161,6 +188,9 @@ func (pool *TxPool) processStaleTransactionsLoop() {
 	}
 }
 
+// getWalletMap collects all wallets from active wallet pools into a single map.
+// It iterates through all active wallet pools and calls their collectPoolWallets
+// method to build a comprehensive address-to-wallet mapping.
 func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
 	walletMap := map[common.Address]*Wallet{}
 	walletPools := pool.options.GetActiveWalletPools()
@@ -170,6 +200,10 @@ func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
 	return walletMap
 }
 
+// processBlock processes a single block for transaction confirmations and reorg detection.
+// It loads the block body, checks for chain reorganizations by comparing parent hashes,
+// stores block information for reorg tracking, and processes all transactions in the block.
+// Also handles cleanup of old block data based on the reorg depth setting.
 func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumber uint64) error {
 	pool.lastBlockNumber = blockNumber
 
@@ -225,6 +259,10 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	return pool.processBlockTxs(ctx, client, blockNumber, blockBody, chainId, walletMap)
 }
 
+// processBlockTxs processes all transactions in a block for confirmation tracking.
+// It loads block receipts, decodes transaction senders, updates wallet states for
+// confirmed transactions, and tracks transaction information for reorg recovery.
+// Also handles cleanup of old confirmed transaction data.
 func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockBody *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
 	t1 := time.Now()
 	txCount := len(blockBody.Transactions())
@@ -302,6 +340,9 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 	return nil
 }
 
+// getHighestBlockNumber queries all good clients to find the highest block number.
+// It runs concurrent queries to all available clients and returns the highest
+// block number found along with the clients that reported that height.
 func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 	wg := &sync.WaitGroup{}
@@ -342,6 +383,8 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 	return highestBlockNumber, highestBlockNumberClients
 }
 
+// getBlockBody retrieves a block body from the specified client.
+// It uses a 5-second timeout and returns the block if successful, nil otherwise.
 func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumber uint64) *types.Block {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -354,6 +397,9 @@ func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumbe
 	return nil
 }
 
+// getBlockReceipts retrieves all transaction receipts for a block.
+// It validates that the number of receipts matches the expected transaction count
+// and uses a 5-second timeout for the request.
 func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockNumber uint64, txCount int) ([]*types.Receipt, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -377,10 +423,17 @@ func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockN
 	return nil, receiptErr
 }
 
+// SendTransaction submits a transaction to the network with the specified options.
+// It handles client selection, rebroadcasting, confirmation tracking, and error handling.
+// The transaction is automatically rebroadcast according to the options until confirmed.
 func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions) error {
 	return pool.addPendingTransaction(ctx, wallet, tx, options, true)
 }
 
+// addPendingTransaction handles the core transaction submission logic.
+// It starts a confirmation tracking goroutine, submits the transaction to clients,
+// and optionally sets up automatic rebroadcasting. The submitNow parameter controls
+// whether to immediately submit or just set up confirmation tracking.
 func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, submitNow bool) error {
 	confirmCtx, confirmCancel := context.WithCancel(ctx)
 	wg := &sync.WaitGroup{}
@@ -422,10 +475,10 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 
 	submitTx := func(client *Client) error {
 		if options.TransactionBytes != nil {
-			return client.SendRawTransactionCtx(ctx, options.TransactionBytes)
+			return client.SendRawTransaction(ctx, options.TransactionBytes)
 		}
 
-		return client.SendTransactionCtx(ctx, tx)
+		return client.SendTransaction(ctx, tx)
 	}
 
 	if submitNow {
@@ -496,10 +549,17 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 	return nil
 }
 
+// AwaitTransaction waits for a transaction to be confirmed and returns its receipt.
+// It monitors the blockchain for the transaction and handles reorgs by continuing
+// to wait if the transaction gets reorged out of the chain.
 func (pool *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction) (*types.Receipt, error) {
 	return pool.awaitTransaction(ctx, wallet, tx, nil)
 }
 
+// awaitTransaction waits for a specific transaction to be confirmed.
+// It uses the wallet's nonce channel system to wait for confirmation and
+// handles cases where the transaction might be replaced or reorged.
+// The wg parameter is signaled when confirmation tracking is set up.
 func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, wg *sync.WaitGroup) (*types.Receipt, error) {
 	txHash := tx.Hash()
 	nonceChan, isFirstPendingTx := wallet.getTxNonceChan(tx.Nonce())
@@ -532,6 +592,9 @@ func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *ty
 	return pool.loadTransactionReceipt(ctx, tx), nil
 }
 
+// SendAndAwaitTxRange sends multiple transactions and waits for all of them to be confirmed.
+// It automatically handles fee calculation, balance updates, and provides confirmation
+// callbacks for each transaction. All transactions are processed concurrently.
 func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet *Wallet, txs []*types.Transaction, options *SendTransactionOptions) error {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
@@ -584,6 +647,9 @@ func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet *Wallet, txs
 	return nil
 }
 
+// processTransactionInclusion handles the confirmation of a transaction from a tracked wallet.
+// It updates the wallet's nonce state, signals any waiting confirmation channels,
+// and cleans up completed nonce channels. Updates the wallet's confirmation tracking.
 func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wallet, tx *types.Transaction, receipt *types.Receipt) {
 	nonce := tx.Nonce()
 
@@ -611,6 +677,10 @@ func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wall
 
 }
 
+// processStaleConfirmations recovers stale transactions that may have been missed.
+// It checks if a wallet has pending transactions that are older than 10 blocks,
+// queries the current nonce from the blockchain, and recovers any confirmed
+// transactions that weren't properly tracked.
 func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet) {
 	if len(wallet.txNonceChans) > 0 && blockNumber > wallet.lastConfirmation+10 {
 		wallet.lastConfirmation = blockNumber
@@ -650,10 +720,15 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 	}
 }
 
+// processTransactionReceival handles incoming transactions to tracked wallets.
+// It updates the wallet's balance by adding the received transaction value.
 func (pool *TxPool) processTransactionReceival(wallet *Wallet, tx *types.Transaction) {
 	wallet.balance = wallet.balance.Add(wallet.balance, tx.Value())
 }
 
+// loadTransactionReceipt attempts to load a transaction receipt from multiple clients.
+// It retries up to 5 times with different clients and includes exponential backoff.
+// Returns nil if the receipt cannot be loaded after all retries.
 func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transaction) *types.Receipt {
 	retryCount := uint64(0)
 
@@ -668,7 +743,7 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 		//nolint:gocritic // ignore
 		defer reqCtxCancel()
 
-		receipt, err := client.GetTransactionReceiptCtx(reqCtx, tx.Hash())
+		receipt, err := client.GetTransactionReceipt(reqCtx, tx.Hash())
 		if err == nil {
 			return receipt
 		}
@@ -694,7 +769,9 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 	}
 }
 
-// handleReorg handles a chain reorganization
+// handleReorg handles a detected chain reorganization by re-submitting affected transactions.
+// It finds the common ancestor, identifies reorged-out transactions, resets wallet nonces,
+// and re-submits the affected transactions as pending. Also processes the new canonical blocks.
 func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlock *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
 	newBlockParents := []*types.Block{}
 

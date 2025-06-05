@@ -15,6 +15,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Daemon manages multiple spammer instances with database persistence and graceful shutdown.
+// It orchestrates the lifecycle of spammers including restoration from database, global configuration
+// management, and coordinated shutdown with a 10-second timeout.
 type Daemon struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -32,6 +35,9 @@ type Daemon struct {
 	globalCfg map[string]interface{}
 }
 
+// NewDaemon creates a new daemon instance with the provided components.
+// It initializes a cancellable context, spammer map, and global configuration map.
+// The daemon manages spammer instances and handles their lifecycle.
 func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool *spamoor.ClientPool, rootWallet *spamoor.RootWallet, txpool *spamoor.TxPool, db *db.Database) *Daemon {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &Daemon{
@@ -47,18 +53,27 @@ func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool 
 	}
 }
 
+// SetGlobalCfg sets a global configuration value that can be accessed by all spammers.
+// This allows sharing configuration data across multiple spammer instances.
 func (d *Daemon) SetGlobalCfg(name string, value interface{}) {
 	d.globalCfg[name] = value
 }
 
+// GetGlobalCfg returns the global configuration map that contains shared configuration
+// values accessible to all spammer instances.
 func (d *Daemon) GetGlobalCfg() map[string]interface{} {
 	return d.globalCfg
 }
 
+// GetClientPool returns the RPC client pool used by all spammers.
+// This provides access to the Ethereum client connections for transaction submission.
 func (d *Daemon) GetClientPool() *spamoor.ClientPool {
 	return d.clientPool
 }
 
+// Run initializes the daemon by restoring spammers from the database.
+// Returns true if this is the first launch, false if spammers were restored.
+// Marks the first launch state in the database to track initialization status.
 func (d *Daemon) Run() (bool, error) {
 	// check if this is the first launch
 	var notFirstLaunch bool
@@ -88,6 +103,9 @@ func (d *Daemon) Run() (bool, error) {
 	return !notFirstLaunch, nil
 }
 
+// GetSpammer retrieves a spammer instance by ID from the internal map.
+// Returns nil if the spammer with the given ID does not exist.
+// This method is thread-safe using read locks.
 func (d *Daemon) GetSpammer(id int64) *Spammer {
 	d.spammerMapMtx.RLock()
 	defer d.spammerMapMtx.RUnlock()
@@ -95,6 +113,9 @@ func (d *Daemon) GetSpammer(id int64) *Spammer {
 	return d.spammerMap[id]
 }
 
+// GetAllSpammers returns all spammer instances sorted by ID in descending order.
+// This provides a snapshot of all active spammer instances managed by the daemon.
+// The returned slice is safe to modify as it's a copy.
 func (d *Daemon) GetAllSpammers() []*Spammer {
 	d.spammerMapMtx.RLock()
 	defer d.spammerMapMtx.RUnlock()
@@ -111,6 +132,9 @@ func (d *Daemon) GetAllSpammers() []*Spammer {
 	return spammerList
 }
 
+// DeleteSpammer removes a spammer from both the daemon and database.
+// If the spammer is running, it will be paused first before deletion.
+// Returns an error if the spammer is not found or if database deletion fails.
 func (d *Daemon) DeleteSpammer(id int64) error {
 	d.spammerMapMtx.Lock()
 	defer d.spammerMapMtx.Unlock()
@@ -138,6 +162,9 @@ func (d *Daemon) DeleteSpammer(id int64) error {
 	return nil
 }
 
+// UpdateSpammer modifies the name, description, and configuration of an existing spammer.
+// The configuration is validated by attempting to unmarshal it into SpammerConfig.
+// Returns an error if the spammer is not found, config is invalid, or database update fails.
 func (d *Daemon) UpdateSpammer(id int64, name string, description string, config string) error {
 	d.spammerMapMtx.Lock()
 	defer d.spammerMapMtx.Unlock()
@@ -167,6 +194,9 @@ func (d *Daemon) UpdateSpammer(id int64, name string, description string, config
 	return nil
 }
 
+// ReclaimSpammer reclaims funds from all wallets in the spammer's wallet pool.
+// This transfers remaining ETH back to the root wallet for reuse.
+// Returns an error if the spammer is not found or if fund reclamation fails.
 func (d *Daemon) ReclaimSpammer(id int64) error {
 	spammer := d.GetSpammer(id)
 	if spammer == nil {
@@ -180,10 +210,15 @@ func (d *Daemon) ReclaimSpammer(id int64) error {
 	return spammer.walletPool.ReclaimFunds(d.ctx, nil)
 }
 
+// GetRootWallet returns the root wallet used for funding spammer wallets.
+// This provides access to the main wallet that distributes funds to child wallets.
 func (d *Daemon) GetRootWallet() *spamoor.RootWallet {
 	return d.rootWallet
 }
 
+// Shutdown performs a graceful shutdown of the daemon and all running spammers.
+// It cancels the context to stop all spammers, waits up to 10 seconds for them to finish,
+// and closes the database connection. This ensures clean resource cleanup.
 func (d *Daemon) Shutdown() {
 	d.logger.Info("initiating graceful shutdown")
 

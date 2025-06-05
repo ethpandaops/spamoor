@@ -11,14 +11,21 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// ClientSelectionMode defines how clients are selected from the pool.
 type ClientSelectionMode uint8
 
 var (
-	SelectClientByIndex    ClientSelectionMode = 0
-	SelectClientRandom     ClientSelectionMode = 1
+	// SelectClientByIndex selects a client by index (modulo pool size).
+	SelectClientByIndex ClientSelectionMode = 0
+	// SelectClientRandom selects a random client from the pool.
+	SelectClientRandom ClientSelectionMode = 1
+	// SelectClientRoundRobin selects clients in round-robin fashion.
 	SelectClientRoundRobin ClientSelectionMode = 2
 )
 
+// ClientPool manages a pool of Ethereum RPC clients with health monitoring and selection strategies.
+// It automatically monitors client health by checking block heights and maintains a list of "good" clients
+// that are within 2 blocks of the highest observed block height.
 type ClientPool struct {
 	ctx            context.Context
 	rpcHosts       []string
@@ -30,6 +37,8 @@ type ClientPool struct {
 	rrClientIdx    int
 }
 
+// NewClientPool creates a new ClientPool with the specified RPC hosts and logger.
+// The pool must be initialized with PrepareClients() before use.
 func NewClientPool(ctx context.Context, rpcHosts []string, logger logrus.FieldLogger) *ClientPool {
 	return &ClientPool{
 		ctx:      ctx,
@@ -38,6 +47,9 @@ func NewClientPool(ctx context.Context, rpcHosts []string, logger logrus.FieldLo
 	}
 }
 
+// PrepareClients initializes all clients in the pool and starts health monitoring.
+// It creates Client instances for each RPC host, determines the chain ID,
+// and begins periodic health checks. Returns an error if no usable clients are found.
 func (pool *ClientPool) PrepareClients() error {
 	pool.allClients = make([]*Client, 0)
 
@@ -85,6 +97,9 @@ func (pool *ClientPool) PrepareClients() error {
 	return nil
 }
 
+// watchClientStatusLoop continuously monitors client health in the background.
+// It periodically calls watchClientStatus() to check all clients and update the good clients list.
+// Runs every 2 minutes normally, but reduces to 10 seconds on errors. Exits when context is cancelled.
 func (pool *ClientPool) watchClientStatusLoop() {
 	sleepTime := 2 * time.Minute
 	for {
@@ -104,6 +119,9 @@ func (pool *ClientPool) watchClientStatusLoop() {
 	}
 }
 
+// watchClientStatus checks the health of all clients by querying their current block height.
+// It runs concurrent health checks and updates the goodClients list with clients that are
+// within 2 blocks of the highest observed block height. Logs the results of the health check.
 func (pool *ClientPool) watchClientStatus() error {
 	wg := &sync.WaitGroup{}
 	mtx := sync.Mutex{}
@@ -146,6 +164,13 @@ func (pool *ClientPool) watchClientStatus() error {
 	return nil
 }
 
+// GetClient returns a client from the pool based on the specified selection mode.
+// Parameters:
+//   - mode: how to select the client (by index, random, or round-robin)
+//   - input: used as index when mode is SelectClientByIndex
+//   - group: client group filter ("" for default, "*" for any, or specific group name)
+//
+// Returns nil if no suitable clients are available.
 func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group string) *Client {
 	pool.selectionMutex.Lock()
 	defer pool.selectionMutex.Unlock()
@@ -193,12 +218,15 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 	return clientCandidates[input]
 }
 
+// GetAllClients returns a copy of all clients in the pool, regardless of their health status.
 func (pool *ClientPool) GetAllClients() []*Client {
 	clients := make([]*Client, len(pool.allClients))
 	copy(clients, pool.allClients)
 	return clients
 }
 
+// GetAllGoodClients returns a copy of all clients currently considered healthy
+// (within 2 blocks of the highest observed block height).
 func (pool *ClientPool) GetAllGoodClients() []*Client {
 	clients := make([]*Client, len(pool.goodClients))
 	copy(clients, pool.goodClients)

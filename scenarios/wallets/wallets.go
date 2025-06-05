@@ -72,11 +72,6 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 	return nil
 }
 
-func (s *Scenario) Config() string {
-	yamlBytes, _ := yaml.Marshal(&s.options)
-	return string(yamlBytes)
-}
-
 func (s *Scenario) Run(ctx context.Context) error {
 	wallet := s.walletPool.GetRootWallet().GetWallet()
 	s.logger.Infof("Root Wallet  %v  nonce: %6d  balance: %v ETH", wallet.GetAddress().String(), wallet.GetNonce(), utils.WeiToEther(uint256.MustFromBig(wallet.GetBalance())))
