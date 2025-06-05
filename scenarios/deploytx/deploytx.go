@@ -3,6 +3,7 @@ package deploytx
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -141,6 +142,10 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 			}
 			s.bytecodes = append(s.bytecodes, common.FromHex(hexStr))
 		}
+	}
+
+	if len(s.bytecodes) == 0 {
+		return errors.New(`no bytecodes provided, please specify at least one bytecode to deploy(eg: --bytecodes "0x1234,0x5678")`)
 	}
 
 	return nil
