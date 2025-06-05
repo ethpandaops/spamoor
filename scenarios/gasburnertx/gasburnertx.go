@@ -420,12 +420,19 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		tipCap = big.NewInt(1000000000)
 	}
 
+	txIdBytes := make([]byte, 4)
+	txIdBytes[0] = byte(txIdx >> 24)
+	txIdBytes[1] = byte(txIdx >> 16)
+	txIdBytes[2] = byte(txIdx >> 8)
+	txIdBytes[3] = byte(txIdx)
+
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       s.options.GasUnitsToBurn,
 		To:        &s.gasBurnerContractAddr,
 		Value:     uint256.NewInt(0),
+		Data:      txIdBytes,
 	})
 	if err != nil {
 		return nil, nil, wallet, err
