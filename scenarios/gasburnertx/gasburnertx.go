@@ -12,13 +12,11 @@ import (
 	geas "github.com/fjl/geas/asm"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ethpandaops/spamoor/scenarios/gasburnertx/contract"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
@@ -260,25 +258,27 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 	`
 	contractGeasTpl := `
 	%s
-	push 0                ;; [loop_counter, custom]
+	gas                   ;; [gas, custom]
+	push 0                ;; [loop_counter, gas, custom]
 	jump @loop
 
 	exit:
-		push 0            ;; [0, loop_counter, custom]
-        mstore            ;; [custom]
-        push 32           ;; [32, custom]
-        push 0            ;; [0, 32, custom]
-        return            ;; [custom]
+		push 0            ;; [0, loop_counter, gas, custom]
+        mstore            ;; [gas, custom]
+        push 32           ;; [32, gas, custom]
+        push 0            ;; [0, 32, gas, custom]
+		log1              ;; [custom]
+        stop              ;; [custom]
 
 	loop:
-		push 10000        ;; [10000, loop_counter, custom]
-		gas               ;; [gas, 10000, loop_counter, custom]
-		lt                ;; [gas < 10000, loop_counter, custom]
-		jumpi @exit       ;; [loop_counter, custom]
+		push 10000        ;; [10000, loop_counter, gas, custom]
+		gas               ;; [gas, 10000, loop_counter, gas, custom]
+		lt                ;; [gas < 10000, loop_counter, gas, custom]
+		jumpi @exit       ;; [loop_counter, gas, custom]
 
 		;; increase loop_counter
-		push 1            ;; [1, loop_counter, custom]
-		add               ;; [loop_counter+1, custom]
+		push 1            ;; [1, loop_counter, gas, custom]
+		add               ;; [loop_counter+1, gas, custom]
 
 		;; dummy opcodes to burn gas
 		%s
@@ -334,16 +334,21 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 
 	workerCodeBytes = append(initcode, workerCodeBytes...)
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       2000000,
-	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		_, deployTx, _, err := contract.DeployGasBurner(transactOpts, client.GetEthClient(), workerCodeBytes)
-		return deployTx, err
+		To:        nil,
+		Value:     uint256.NewInt(0),
+		Data:      workerCodeBytes,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, client, err
+	}
+
+	tx, err := wallet.BuildDynamicFeeTx(txData)
+	if err != nil {
+		return nil, client, err
 	}
 
 	var txReceipt *types.Receipt
@@ -415,18 +420,18 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		tipCap = big.NewInt(1000000000)
 	}
 
-	gasBurnerContract, err := contract.NewGasBurner(s.gasBurnerContractAddr, client.GetEthClient())
+	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
+		GasFeeCap: uint256.MustFromBig(feeCap),
+		GasTipCap: uint256.MustFromBig(tipCap),
+		Gas:       s.options.GasUnitsToBurn,
+		To:        &s.gasBurnerContractAddr,
+		Value:     uint256.NewInt(0),
+	})
 	if err != nil {
 		return nil, nil, wallet, err
 	}
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
-		GasFeeCap: uint256.MustFromBig(feeCap),
-		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.GasUnitsToBurn + 50000,
-	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		return gasBurnerContract.BurnGasUnits(transactOpts, big.NewInt(int64(s.options.GasUnitsToBurn)))
-	})
+	tx, err := wallet.BuildDynamicFeeTx(txData)
 	if err != nil {
 		return nil, nil, wallet, err
 	}
