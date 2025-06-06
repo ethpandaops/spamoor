@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -540,4 +541,96 @@ func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) 
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
+}
+
+// ClientEntry represents a client in the API response
+type ClientEntry struct {
+	Index       int    `json:"index"`
+	Name        string `json:"name"`
+	Group       string `json:"group"`
+	Version     string `json:"version"`
+	BlockHeight uint64 `json:"block_height"`
+	IsReady     bool   `json:"ready"`
+	RpcHost     string `json:"rpc_host"`
+}
+
+// UpdateClientGroupRequest represents the request body for updating a client group
+type UpdateClientGroupRequest struct {
+	Group string `json:"group"`
+}
+
+// GetClients godoc
+// @Id getClients
+// @Summary Get all clients
+// @Tags Client
+// @Description Returns a list of all clients with their details
+// @Produce json
+// @Success 200 {object} Response{data=[]ClientEntry} "Success"
+// @Router /api/clients [get]
+func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	goodClients := ah.daemon.GetClientPool().GetAllGoodClients()
+	allClients := ah.daemon.GetClientPool().GetAllClients()
+
+	response := make([]ClientEntry, len(allClients))
+
+	for i, client := range allClients {
+		blockHeight, _ := client.GetLastBlockHeight()
+
+		version, err := client.GetClientVersion(ctx)
+		if err != nil {
+			version = "Unknown"
+		}
+
+		response[i] = ClientEntry{
+			Index:       i,
+			Name:        client.GetName(),
+			Group:       client.GetClientGroup(),
+			Version:     version,
+			BlockHeight: blockHeight,
+			IsReady:     slices.Contains(goodClients, client),
+			RpcHost:     client.GetRPCHost(),
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// UpdateClientGroup godoc
+// @Id updateClientGroup
+// @Summary Update client group
+// @Tags Client
+// @Description Updates the group for a specific client
+// @Accept json
+// @Param index path int true "Client index"
+// @Param request body UpdateClientGroupRequest true "New group name"
+// @Success 200 {object} Response "Success"
+// @Failure 400 {object} Response "Invalid client index"
+// @Failure 404 {object} Response "Client not found"
+// @Router /api/client/{index}/group [put]
+func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	index, err := strconv.Atoi(vars["index"])
+	if err != nil {
+		http.Error(w, "Invalid client index", http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateClientGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	allClients := ah.daemon.GetClientPool().GetAllClients()
+	if index < 0 || index >= len(allClients) {
+		http.Error(w, "Client not found", http.StatusNotFound)
+		return
+	}
+
+	client := allClients[index]
+	client.SetClientGroup(req.Group)
+
+	w.WriteHeader(http.StatusOK)
 }

@@ -57,6 +57,8 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/spammer/{id}", apiHandler.GetSpammerDetails).Methods("GET")
 	apiRouter.HandleFunc("/spammer/{id}", apiHandler.UpdateSpammer).Methods("PUT")
 	apiRouter.HandleFunc("/spammer/{id}/logs/stream", apiHandler.StreamSpammerLogs).Methods("GET")
+	apiRouter.HandleFunc("/clients", apiHandler.GetClients).Methods("GET")
+	apiRouter.HandleFunc("/client/{index}/group", apiHandler.UpdateClientGroup).Methods("PUT")
 
 	// swagger
 	router.PathPrefix("/docs/").Handler(docs.GetSwaggerHandler(logrus.StandardLogger()))

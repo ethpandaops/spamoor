@@ -141,6 +141,12 @@ func (client *Client) UpdateWallet(ctx context.Context, wallet *Wallet) error {
 	return nil
 }
 
+// SetClientGroup sets the client group name for the client.
+// This is used to group clients together and target them with specific scenarios.
+func (client *Client) SetClientGroup(group string) {
+	client.clientGroup = group
+}
+
 func (client *Client) getContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if client.Timeout > 0 {
 		return context.WithTimeout(ctx, client.Timeout)
