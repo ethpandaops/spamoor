@@ -183,17 +183,21 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 
 	if group == "" {
 		for _, client := range pool.goodClients {
-			if client.GetClientGroup() == "default" {
+			if client.IsEnabled() && client.GetClientGroup() == "default" {
 				clientCandidates = append(clientCandidates, client)
 			}
 		}
 	} else if group == "*" {
-		clientCandidates = pool.goodClients
+		for _, client := range pool.goodClients {
+			if client.IsEnabled() {
+				clientCandidates = append(clientCandidates, client)
+			}
+		}
 	}
 
 	if len(clientCandidates) == 0 {
 		for _, client := range pool.goodClients {
-			if group == "" || client.GetClientGroup() == group {
+			if client.IsEnabled() && (group == "" || client.GetClientGroup() == group) {
 				clientCandidates = append(clientCandidates, client)
 			}
 		}

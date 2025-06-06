@@ -1,4 +1,23 @@
 definitions:
+  api.ClientEntry:
+    properties:
+      block_height:
+        type: integer
+      enabled:
+        type: boolean
+      group:
+        type: string
+      index:
+        type: integer
+      name:
+        type: string
+      ready:
+        type: boolean
+      rpc_host:
+        type: string
+      version:
+        type: string
+    type: object
   api.CreateSpammerRequest:
     properties:
       config:
@@ -69,6 +88,16 @@ definitions:
       status:
         type: integer
     type: object
+  api.UpdateClientEnabledRequest:
+    properties:
+      enabled:
+        type: boolean
+    type: object
+  api.UpdateClientGroupRequest:
+    properties:
+      group:
+        type: string
+    type: object
   api.UpdateSpammerRequest:
     properties:
       config:
@@ -81,6 +110,95 @@ definitions:
 info:
   contact: {}
 paths:
+  /api/client/{index}/enabled:
+    put:
+      consumes:
+      - application/json
+      description: Updates the enabled state for a specific client
+      operationId: updateClientEnabled
+      parameters:
+      - description: Client index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: New enabled state
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateClientEnabledRequest'
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid client index
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Client not found
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Update client enabled state
+      tags:
+      - Client
+  /api/client/{index}/group:
+    put:
+      consumes:
+      - application/json
+      description: Updates the group for a specific client
+      operationId: updateClientGroup
+      parameters:
+      - description: Client index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: New group name
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateClientGroupRequest'
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid client index
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Client not found
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Update client group
+      tags:
+      - Client
+  /api/clients:
+    get:
+      description: Returns a list of all clients with their details
+      operationId: getClients
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/api.ClientEntry'
+                  type: array
+              type: object
+      summary: Get all clients
+      tags:
+      - Client
   /api/scenarios:
     get:
       description: Returns a list of all scenarios

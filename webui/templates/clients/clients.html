@@ -1,0 +1,200 @@
+{{ define "page" }}
+  <div class="container mt-2">
+    <div class="card mt-2">
+      <div class="card-body px-0 py-3">
+        <h2 class="px-2">Clients</h2>
+        <div class="table-responsive px-0 py-1">
+          <table class="table table-nobr" id="clients">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Group</th>
+                <th>Status</th>
+                <th>Enabled</th>
+                <th>Block Height</th>
+                <th>Version</th>
+                <th style="width: 120px;">Actions</th>
+              </tr>
+            </thead>
+              <tbody>
+                {{ range $i, $client := .Clients }}
+                  <tr>
+                    <td>{{ $client.Index }}</td>
+                    <td>{{ $client.Name }}</td>
+                    <td>
+                      <span class="client-group">{{ $client.Group }}</span>
+                    </td>
+                    <td>
+                      {{ if $client.IsReady }}
+                        <span class="badge rounded-pill text-bg-success">Online</span>
+                      {{ else }}
+                        <span class="badge rounded-pill text-bg-danger">Offline</span>
+                      {{ end }}
+                    </td>
+                    <td>
+                      {{ if $client.Enabled }}
+                        <span class="badge rounded-pill text-bg-success client-enabled">Enabled</span>
+                      {{ else }}
+                        <span class="badge rounded-pill text-bg-secondary client-enabled">Disabled</span>
+                      {{ end }}
+                    </td>
+                    <td>{{ $client.BlockHeight }}</td>
+                    <td>
+                      <span class="text-truncate d-inline-block" style="max-width: 400px">{{ $client.Version }}</span>
+                      <i class="fa fa-copy text-muted p-1" role="button" data-bs-toggle="tooltip" title="Copy to clipboard" data-clipboard-text="{{ $client.Version }}"></i>
+                    </td>
+                    <td>
+                      <div class="btn-group" role="group">
+                        <button class="btn btn-sm btn-primary edit-group-btn" 
+                                data-index="{{ $client.Index }}" 
+                                data-group="{{ $client.Group }}"
+                                title="Edit Group" data-bs-toggle="tooltip" data-bs-placement="top">
+                          <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-sm {{ if $client.Enabled }}btn-warning{{ else }}btn-success{{ end }} toggle-enabled-btn" 
+                                data-index="{{ $client.Index }}" 
+                                data-enabled="{{ $client.Enabled }}"
+                                title="{{ if $client.Enabled }}Disable Client{{ else }}Enable Client{{ end }}" data-bs-toggle="tooltip" data-bs-placement="top">
+                          <i class="fas {{ if $client.Enabled }}fa-power-off{{ else }}fa-play{{ end }}"></i>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                {{ end }}
+              </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Client Group Modal -->
+  <div class="modal fade" id="editClientGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Client Group</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="editClientGroupForm">
+            <input type="hidden" name="index">
+            <div class="mb-3">
+              <label class="form-label">Client Group</label>
+              <input type="text" class="form-control" name="group" required>
+              <div class="form-text">Common groups: default, primary, secondary, backup</div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="submitClientGroupEdit()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{{ end }}
+
+{{ define "js" }}
+<script>
+function editClientGroup(index, currentGroup) {
+  const form = document.getElementById('editClientGroupForm');
+  form.querySelector('[name="index"]').value = index;
+  form.querySelector('[name="group"]').value = currentGroup;
+  new bootstrap.Modal(document.getElementById('editClientGroupModal')).show();
+}
+
+async function submitClientGroupEdit() {
+  const form = document.getElementById('editClientGroupForm');
+  const index = form.querySelector('[name="index"]').value;
+  const group = form.querySelector('[name="group"]').value;
+  
+  try {
+    await fetch('/api/client/' + index + '/group', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({group: group})
+    });
+    
+    const tableRows = document.querySelectorAll('#clients tbody tr');
+    const targetRow = tableRows[parseInt(index)];
+    const groupCell = targetRow.querySelector('.client-group');
+    groupCell.textContent = group;
+    
+    bootstrap.Modal.getInstance(document.getElementById('editClientGroupModal')).hide();
+    
+    alert('Client group updated successfully');
+  } catch (err) {
+    alert('Failed to update client group: ' + err.message);
+  }
+}
+
+async function toggleClientEnabled(index, currentEnabled) {
+  const newEnabled = !currentEnabled;
+  
+  try {
+    await fetch('/api/client/' + index + '/enabled', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: newEnabled})
+    });
+    
+    const tableRows = document.querySelectorAll('#clients tbody tr');
+    const targetRow = tableRows[parseInt(index)];
+    const enabledCell = targetRow.querySelector('.client-enabled');
+    const toggleButton = targetRow.querySelector('.toggle-enabled-btn');
+    const toggleIcon = toggleButton.querySelector('i');
+    
+    if (newEnabled) {
+      enabledCell.textContent = 'Enabled';
+      enabledCell.className = 'badge rounded-pill text-bg-success client-enabled';
+      toggleButton.className = 'btn btn-sm btn-warning toggle-enabled-btn';
+      toggleButton.title = 'Disable Client';
+      toggleIcon.className = 'fas fa-power-off';
+    } else {
+      enabledCell.textContent = 'Disabled';
+      enabledCell.className = 'badge rounded-pill text-bg-secondary client-enabled';
+      toggleButton.className = 'btn btn-sm btn-success toggle-enabled-btn';
+      toggleButton.title = 'Enable Client';
+      toggleIcon.className = 'fas fa-play';
+    }
+    
+    toggleButton.dataset.enabled = newEnabled;
+    
+    const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
+    if (tooltip) {
+      tooltip.dispose();
+      new bootstrap.Tooltip(toggleButton);
+    }
+    
+    alert('Client ' + (newEnabled ? 'enabled' : 'disabled') + ' successfully');
+  } catch (err) {
+    alert('Failed to update client enabled state: ' + err.message);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+  tooltipTriggerList.map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+  
+  document.querySelectorAll('.edit-group-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      const index = button.dataset.index;
+      const group = button.dataset.group;
+      editClientGroup(index, group);
+    });
+  });
+  
+  document.querySelectorAll('.toggle-enabled-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      const index = button.dataset.index;
+      const enabled = button.dataset.enabled === 'true';
+      toggleClientEnabled(index, enabled);
+    });
+  });
+});
+</script>
+{{ end }}
+{{ define "css" }}
+{{ end }}

@@ -27,6 +27,7 @@ type Client struct {
 	logger    *logrus.Entry
 
 	clientGroup string
+	enabled     bool
 
 	gasSuggestionMutex sync.Mutex
 	lastGasSuggestion  time.Time
@@ -88,6 +89,7 @@ func NewClient(rpchost string) (*Client, error) {
 		rpchost:     rpchost,
 		logger:      logrus.WithField("rpc", rpchost),
 		clientGroup: clientGroup,
+		enabled:     true,
 	}, nil
 }
 
@@ -139,6 +141,23 @@ func (client *Client) UpdateWallet(ctx context.Context, wallet *Wallet) error {
 	wallet.SetBalance(balance)
 
 	return nil
+}
+
+// SetClientGroup sets the client group name for the client.
+// This is used to group clients together and target them with specific scenarios.
+func (client *Client) SetClientGroup(group string) {
+	client.clientGroup = group
+}
+
+// IsEnabled returns whether the client is enabled for selection.
+func (client *Client) IsEnabled() bool {
+	return client.enabled
+}
+
+// SetEnabled sets the enabled state of the client.
+// Disabled clients will not be considered for selection in the client pool.
+func (client *Client) SetEnabled(enabled bool) {
+	client.enabled = enabled
 }
 
 func (client *Client) getContext(ctx context.Context) (context.Context, context.CancelFunc) {
