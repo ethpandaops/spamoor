@@ -552,11 +552,17 @@ type ClientEntry struct {
 	BlockHeight uint64 `json:"block_height"`
 	IsReady     bool   `json:"ready"`
 	RpcHost     string `json:"rpc_host"`
+	Enabled     bool   `json:"enabled"`
 }
 
 // UpdateClientGroupRequest represents the request body for updating a client group
 type UpdateClientGroupRequest struct {
 	Group string `json:"group"`
+}
+
+// UpdateClientEnabledRequest represents the request body for updating a client's enabled state
+type UpdateClientEnabledRequest struct {
+	Enabled bool `json:"enabled"`
 }
 
 // GetClients godoc
@@ -590,6 +596,7 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 			BlockHeight: blockHeight,
 			IsReady:     slices.Contains(goodClients, client),
 			RpcHost:     client.GetRPCHost(),
+			Enabled:     client.IsEnabled(),
 		}
 	}
 
@@ -631,6 +638,44 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 
 	client := allClients[index]
 	client.SetClientGroup(req.Group)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// UpdateClientEnabled godoc
+// @Id updateClientEnabled
+// @Summary Update client enabled state
+// @Tags Client
+// @Description Updates the enabled state for a specific client
+// @Accept json
+// @Param index path int true "Client index"
+// @Param request body UpdateClientEnabledRequest true "New enabled state"
+// @Success 200 {object} Response "Success"
+// @Failure 400 {object} Response "Invalid client index"
+// @Failure 404 {object} Response "Client not found"
+// @Router /api/client/{index}/enabled [put]
+func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	index, err := strconv.Atoi(vars["index"])
+	if err != nil {
+		http.Error(w, "Invalid client index", http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateClientEnabledRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	allClients := ah.daemon.GetClientPool().GetAllClients()
+	if index < 0 || index >= len(allClients) {
+		http.Error(w, "Client not found", http.StatusNotFound)
+		return
+	}
+
+	client := allClients[index]
+	client.SetEnabled(req.Enabled)
 
 	w.WriteHeader(http.StatusOK)
 }

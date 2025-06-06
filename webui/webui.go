@@ -39,7 +39,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	// register frontend routes
 	frontendHandler := handlers.NewFrontendHandler(daemon)
 	router.HandleFunc("/", frontendHandler.Index).Methods("GET")
-	router.HandleFunc("/health", frontendHandler.Health).Methods("GET")
+	router.HandleFunc("/clients", frontendHandler.Clients).Methods("GET")
 	router.HandleFunc("/wallets", frontendHandler.Wallets).Methods("GET")
 
 	// API routes
@@ -59,6 +59,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/spammer/{id}/logs/stream", apiHandler.StreamSpammerLogs).Methods("GET")
 	apiRouter.HandleFunc("/clients", apiHandler.GetClients).Methods("GET")
 	apiRouter.HandleFunc("/client/{index}/group", apiHandler.UpdateClientGroup).Methods("PUT")
+	apiRouter.HandleFunc("/client/{index}/enabled", apiHandler.UpdateClientEnabled).Methods("PUT")
 
 	// swagger
 	router.PathPrefix("/docs/").Handler(docs.GetSwaggerHandler(logrus.StandardLogger()))

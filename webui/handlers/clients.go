@@ -8,44 +8,45 @@ import (
 	"github.com/ethpandaops/spamoor/webui/server"
 )
 
-type HealthPage struct {
-	Clients     []*HealthPageClient `json:"clients"`
-	ClientCount uint64              `json:"client_count"`
+type ClientsPage struct {
+	Clients     []*ClientsPageClient `json:"clients"`
+	ClientCount uint64               `json:"client_count"`
 }
 
-type HealthPageClient struct {
+type ClientsPageClient struct {
 	Index       int    `json:"index"`
 	Name        string `json:"name"`
 	Group       string `json:"group"`
 	Version     string `json:"version"`
 	BlockHeight uint64 `json:"block_height"`
 	IsReady     bool   `json:"ready"`
+	Enabled     bool   `json:"enabled"`
 }
 
-// Health will return the "health" page using a go template
-func (fh *FrontendHandler) Health(w http.ResponseWriter, r *http.Request) {
+// Clients will return the "clients" page using a go template
+func (fh *FrontendHandler) Clients(w http.ResponseWriter, r *http.Request) {
 	var templateFiles = append(server.LayoutTemplateFiles,
-		"health/health.html",
+		"clients/clients.html",
 	)
 
 	var pageTemplate = server.GetTemplate(templateFiles...)
-	data := server.InitPageData(r, "health", "/health", "Health", templateFiles)
+	data := server.InitPageData(r, "clients", "/clients", "Clients", templateFiles)
 
 	var pageError error
-	data.Data, pageError = fh.getHealthPageData(r.Context())
+	data.Data, pageError = fh.getClientsPageData(r.Context())
 	if pageError != nil {
 		server.HandlePageError(w, r, pageError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html")
-	if server.HandleTemplateError(w, r, "health.go", "Health", "", pageTemplate.ExecuteTemplate(w, "layout", data)) != nil {
+	if server.HandleTemplateError(w, r, "clients.go", "Clients", "", pageTemplate.ExecuteTemplate(w, "layout", data)) != nil {
 		return // an error has occurred and was processed
 	}
 }
 
-func (fh *FrontendHandler) getHealthPageData(ctx context.Context) (*HealthPage, error) {
-	pageData := &HealthPage{
-		Clients: []*HealthPageClient{},
+func (fh *FrontendHandler) getClientsPageData(ctx context.Context) (*ClientsPage, error) {
+	pageData := &ClientsPage{
+		Clients: []*ClientsPageClient{},
 	}
 
 	goodClients := fh.daemon.GetClientPool().GetAllGoodClients()
@@ -59,13 +60,14 @@ func (fh *FrontendHandler) getHealthPageData(ctx context.Context) (*HealthPage, 
 			version = "Unknown"
 		}
 
-		clientData := &HealthPageClient{
+		clientData := &ClientsPageClient{
 			Index:       idx,
 			Name:        client.GetName(),
 			Group:       client.GetClientGroup(),
 			Version:     version,
 			BlockHeight: blockHeight,
 			IsReady:     slices.Contains(goodClients, client),
+			Enabled:     client.IsEnabled(),
 		}
 
 		pageData.Clients = append(pageData.Clients, clientData)

@@ -3,6 +3,8 @@ definitions:
     properties:
       block_height:
         type: integer
+      enabled:
+        type: boolean
       group:
         type: string
       index:
@@ -86,6 +88,11 @@ definitions:
       status:
         type: integer
     type: object
+  api.UpdateClientEnabledRequest:
+    properties:
+      enabled:
+        type: boolean
+    type: object
   api.UpdateClientGroupRequest:
     properties:
       group:
@@ -103,6 +110,40 @@ definitions:
 info:
   contact: {}
 paths:
+  /api/client/{index}/enabled:
+    put:
+      consumes:
+      - application/json
+      description: Updates the enabled state for a specific client
+      operationId: updateClientEnabled
+      parameters:
+      - description: Client index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: New enabled state
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateClientEnabledRequest'
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid client index
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Client not found
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Update client enabled state
+      tags:
+      - Client
   /api/client/{index}/group:
     put:
       consumes:

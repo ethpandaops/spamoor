@@ -11,9 +11,10 @@
                 <th>Name</th>
                 <th>Group</th>
                 <th>Status</th>
+                <th>Enabled</th>
                 <th>Block Height</th>
                 <th>Version</th>
-                <th style="width: 80px;">Actions</th>
+                <th style="width: 120px;">Actions</th>
               </tr>
             </thead>
               <tbody>
@@ -31,18 +32,33 @@
                         <span class="badge rounded-pill text-bg-danger">Offline</span>
                       {{ end }}
                     </td>
+                    <td>
+                      {{ if $client.Enabled }}
+                        <span class="badge rounded-pill text-bg-success client-enabled">Enabled</span>
+                      {{ else }}
+                        <span class="badge rounded-pill text-bg-secondary client-enabled">Disabled</span>
+                      {{ end }}
+                    </td>
                     <td>{{ $client.BlockHeight }}</td>
                     <td>
                       <span class="text-truncate d-inline-block" style="max-width: 400px">{{ $client.Version }}</span>
                       <i class="fa fa-copy text-muted p-1" role="button" data-bs-toggle="tooltip" title="Copy to clipboard" data-clipboard-text="{{ $client.Version }}"></i>
                     </td>
                     <td>
-                      <button class="btn btn-sm btn-outline-primary edit-group-btn" 
-                              data-index="{{ $client.Index }}" 
-                              data-group="{{ $client.Group }}"
-                              title="Edit Group" data-bs-toggle="tooltip" data-bs-placement="top">
-                        <i class="fas fa-edit"></i>
-                      </button>
+                      <div class="btn-group" role="group">
+                        <button class="btn btn-sm btn-primary edit-group-btn" 
+                                data-index="{{ $client.Index }}" 
+                                data-group="{{ $client.Group }}"
+                                title="Edit Group" data-bs-toggle="tooltip" data-bs-placement="top">
+                          <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-sm {{ if $client.Enabled }}btn-warning{{ else }}btn-success{{ end }} toggle-enabled-btn" 
+                                data-index="{{ $client.Index }}" 
+                                data-enabled="{{ $client.Enabled }}"
+                                title="{{ if $client.Enabled }}Disable Client{{ else }}Enable Client{{ end }}" data-bs-toggle="tooltip" data-bs-placement="top">
+                          <i class="fas {{ if $client.Enabled }}fa-power-off{{ else }}fa-play{{ end }}"></i>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 {{ end }}
@@ -114,15 +130,67 @@ async function submitClientGroupEdit() {
   }
 }
 
+async function toggleClientEnabled(index, currentEnabled) {
+  const newEnabled = !currentEnabled;
+  
+  try {
+    await fetch('/api/client/' + index + '/enabled', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: newEnabled})
+    });
+    
+    const tableRows = document.querySelectorAll('#clients tbody tr');
+    const targetRow = tableRows[parseInt(index)];
+    const enabledCell = targetRow.querySelector('.client-enabled');
+    const toggleButton = targetRow.querySelector('.toggle-enabled-btn');
+    const toggleIcon = toggleButton.querySelector('i');
+    
+    if (newEnabled) {
+      enabledCell.textContent = 'Enabled';
+      enabledCell.className = 'badge rounded-pill text-bg-success client-enabled';
+      toggleButton.className = 'btn btn-sm btn-warning toggle-enabled-btn';
+      toggleButton.title = 'Disable Client';
+      toggleIcon.className = 'fas fa-power-off';
+    } else {
+      enabledCell.textContent = 'Disabled';
+      enabledCell.className = 'badge rounded-pill text-bg-secondary client-enabled';
+      toggleButton.className = 'btn btn-sm btn-success toggle-enabled-btn';
+      toggleButton.title = 'Enable Client';
+      toggleIcon.className = 'fas fa-play';
+    }
+    
+    toggleButton.dataset.enabled = newEnabled;
+    
+    const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
+    if (tooltip) {
+      tooltip.dispose();
+      new bootstrap.Tooltip(toggleButton);
+    }
+    
+    alert('Client ' + (newEnabled ? 'enabled' : 'disabled') + ' successfully');
+  } catch (err) {
+    alert('Failed to update client enabled state: ' + err.message);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
   tooltipTriggerList.map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
-
+  
   document.querySelectorAll('.edit-group-btn').forEach(button => {
     button.addEventListener('click', () => {
       const index = button.dataset.index;
       const group = button.dataset.group;
       editClientGroup(index, group);
+    });
+  });
+  
+  document.querySelectorAll('.toggle-enabled-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      const index = button.dataset.index;
+      const enabled = button.dataset.enabled === 'true';
+      toggleClientEnabled(index, enabled);
     });
   });
 });

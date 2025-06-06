@@ -15,6 +15,57 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/client/{index}/enabled": {
+            "put": {
+                "description": "Updates the enabled state for a specific client",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Update client enabled state",
+                "operationId": "updateClientEnabled",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Client index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New enabled state",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.UpdateClientEnabledRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid client index",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Client not found",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/client/{index}/group": {
             "put": {
                 "description": "Updates the group for a specific client",
@@ -693,6 +744,9 @@ const docTemplate = `{
                 "block_height": {
                     "type": "integer"
                 },
+                "enabled": {
+                    "type": "boolean"
+                },
                 "group": {
                     "type": "string"
                 },
@@ -817,6 +871,14 @@ const docTemplate = `{
                 },
                 "status": {
                     "type": "integer"
+                }
+            }
+        },
+        "api.UpdateClientEnabledRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
                 }
             }
         },
