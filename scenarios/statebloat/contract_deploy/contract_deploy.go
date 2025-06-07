@@ -48,6 +48,14 @@ type PendingTransaction struct {
 	PrivateKey *ecdsa.PrivateKey
 }
 
+// BlockDeploymentStats tracks deployment statistics per block
+type BlockDeploymentStats struct {
+	BlockNumber       uint64
+	ContractCount     int
+	TotalGasUsed      uint64
+	TotalBytecodeSize int
+}
+
 type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
@@ -65,12 +73,21 @@ type Scenario struct {
 	// Results tracking
 	deployedContracts []ContractDeployment
 	contractsMutex    sync.Mutex
+
+	// Block-level statistics tracking
+	blockStats      map[uint64]*BlockDeploymentStats
+	blockStatsMutex sync.Mutex
+	lastLoggedBlock uint64
+
+	// Block monitoring for real-time logging
+	blockMonitorCancel context.CancelFunc
+	blockMonitorDone   chan struct{}
 }
 
 var ScenarioName = "contract-deploy"
 var ScenarioDefaultOptions = ScenarioOptions{
 	MaxPending:      10,
-	MaxWallets:      0,
+	MaxWallets:      1000,
 	BaseFee:         20,
 	TipFee:          2,
 	ClientGroup:     "default",
@@ -93,10 +110,10 @@ func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
+	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
+	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
-	flags.Uint64Var(&s.options.MaxTransactions, "max-transactions", ScenarioDefaultOptions.MaxTransactions, "Maximum number of transactions to send (0 for unlimited)")
+	flags.Uint64Var(&s.options.MaxTransactions, "max-transactions", ScenarioDefaultOptions.MaxTransactions, "Maximum number of transactions to send (0 = use rate limiting based on block gas limit)")
 	return nil
 }
 
@@ -112,6 +129,8 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 
 	if s.options.MaxWallets > 0 {
 		walletPool.SetWalletCount(s.options.MaxWallets)
+	} else if s.options.MaxTransactions == 0 {
+		walletPool.SetWalletCount(1)
 	} else {
 		walletPool.SetWalletCount(1000)
 	}
@@ -150,7 +169,7 @@ func (s *Scenario) waitForPendingTxSlot(ctx context.Context) {
 
 		// Check and clean up confirmed transactions
 		s.processPendingTransactions(ctx)
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -224,35 +243,54 @@ func (s *Scenario) recordDeployedContract(contractAddress common.Address, privat
 
 	s.deployedContracts = append(s.deployedContracts, deployment)
 
-	// Calculate detailed information for logging
-	walletAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
-
-	// Get the actual transaction to calculate real bytecode size
+	// Get the actual deployed contract bytecode size
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
-	var bytecodeSize int = 24564 // Default fallback
-	var gasPerByte float64
+	// TODO: This should be a constant documented on how this number is obtained.
+	var bytecodeSize int = 23914
 
 	if client != nil {
-		tx, _, err := client.GetEthClient().TransactionByHash(context.Background(), txHash)
+		// Get the actual deployed bytecode size using eth_getCode
+		contractCode, err := client.GetEthClient().CodeAt(context.Background(), contractAddress, nil)
 		if err == nil {
-			bytecodeSize = len(tx.Data())
+			bytecodeSize = len(contractCode)
 		}
 	}
 
-	// Calculate gas per byte
-	gasPerByte = float64(receipt.GasUsed) / float64(max(bytecodeSize, 1))
+	blockNumber := receipt.BlockNumber.Uint64()
 
-	// Log with detailed information
+	// Debug logging for block tracking
 	s.logger.WithFields(logrus.Fields{
-		"block_number":     receipt.BlockNumber.Uint64(),
-		"bytecode_size":    bytecodeSize,
-		"contract_address": deployment.ContractAddress,
-		"gas_per_byte":     fmt.Sprintf("%.2f", gasPerByte),
-		"gas_used":         receipt.GasUsed,
-		"total_contracts":  len(s.deployedContracts),
-		"tx_hash":          txHash.Hex(),
-		"wallet_address":   walletAddress.Hex(),
-	}).Info("Contract successfully deployed and recorded")
+		"tx_block":        blockNumber,
+		"existing_blocks": len(s.blockStats),
+	}).Debug("Recording contract deployment")
+
+	// Update block-level statistics
+	s.blockStatsMutex.Lock()
+	defer s.blockStatsMutex.Unlock()
+
+	if s.blockStats == nil {
+		s.blockStats = make(map[uint64]*BlockDeploymentStats)
+	}
+
+	// Create or update current block stats (removed the old logging logic)
+	if s.blockStats[blockNumber] == nil {
+		s.blockStats[blockNumber] = &BlockDeploymentStats{
+			BlockNumber: blockNumber,
+		}
+		s.logger.WithField("block_number", blockNumber).Debug("Created new block stats")
+	}
+
+	blockStat := s.blockStats[blockNumber]
+	blockStat.ContractCount++
+	blockStat.TotalGasUsed += receipt.GasUsed
+	blockStat.TotalBytecodeSize += bytecodeSize
+
+	s.logger.WithFields(logrus.Fields{
+		"block_number":       blockNumber,
+		"contracts_in_block": blockStat.ContractCount,
+		"gas_used":           blockStat.TotalGasUsed,
+		"bytecode_size":      blockStat.TotalBytecodeSize,
+	}).Debug("Updated block stats")
 
 	// Save the deployments.json file each time a contract is confirmed
 	if err := s.saveDeploymentsMapping(); err != nil {
@@ -297,9 +335,85 @@ func (s *Scenario) saveDeploymentsMapping() error {
 	return nil
 }
 
+// startBlockMonitor starts a background goroutine that monitors for new blocks
+// and logs block deployment summaries immediately when blocks are mined
+func (s *Scenario) startBlockMonitor(ctx context.Context) {
+	monitorCtx, cancel := context.WithCancel(ctx)
+	s.blockMonitorCancel = cancel
+	s.blockMonitorDone = make(chan struct{})
+
+	go func() {
+		defer close(s.blockMonitorDone)
+
+		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+		if client == nil {
+			s.logger.Warn("No client available for block monitoring")
+			return
+		}
+
+		ethClient := client.GetEthClient()
+		ticker := time.NewTicker(2 * time.Second) // Poll every 2 seconds
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-monitorCtx.Done():
+				return
+			case <-ticker.C:
+				// Get current block number
+				latestBlock, err := ethClient.BlockByNumber(monitorCtx, nil)
+				if err != nil {
+					s.logger.WithError(err).Debug("Failed to get latest block for monitoring")
+					continue
+				}
+
+				currentBlockNumber := latestBlock.Number().Uint64()
+
+				// Log any completed blocks that haven't been logged yet
+				s.blockStatsMutex.Lock()
+				for bn := s.lastLoggedBlock + 1; bn < currentBlockNumber; bn++ {
+					if stats, exists := s.blockStats[bn]; exists && stats.ContractCount > 0 {
+						avgGasPerByte := float64(stats.TotalGasUsed) / float64(max(stats.TotalBytecodeSize, 1))
+
+						s.contractsMutex.Lock()
+						totalContracts := len(s.deployedContracts)
+						s.contractsMutex.Unlock()
+
+						s.logger.WithFields(logrus.Fields{
+							"block_number":        bn,
+							"contracts_deployed":  stats.ContractCount,
+							"total_gas_used":      stats.TotalGasUsed,
+							"total_bytecode_size": stats.TotalBytecodeSize,
+							"avg_gas_per_byte":    fmt.Sprintf("%.2f", avgGasPerByte),
+							"total_contracts":     totalContracts,
+						}).Info("Block deployment summary")
+
+						s.lastLoggedBlock = bn
+					}
+				}
+				s.blockStatsMutex.Unlock()
+			}
+		}
+	}()
+}
+
+// stopBlockMonitor stops the block monitoring goroutine
+func (s *Scenario) stopBlockMonitor() {
+	if s.blockMonitorCancel != nil {
+		s.blockMonitorCancel()
+	}
+	if s.blockMonitorDone != nil {
+		<-s.blockMonitorDone // Wait for goroutine to finish
+	}
+}
+
 func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
+
+	// Start block monitoring for real-time logging
+	s.startBlockMonitor(ctx)
+	defer s.stopBlockMonitor()
 
 	// Cache chain ID at startup
 	chainID, err := s.getChainID(ctx)
@@ -309,14 +423,57 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	s.logger.Infof("Chain ID: %s", chainID.String())
 
+	// Calculate rate limiting based on block gas limit if max-transactions is 0
+	var maxTxsPerBlock uint64
+	var useRateLimiting bool
+
+	if s.options.MaxTransactions == 0 {
+		// Get block gas limit from the network
+		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+		if client == nil {
+			return fmt.Errorf("no client available for gas limit query")
+		}
+
+		latestBlock, err := client.GetEthClient().BlockByNumber(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("failed to get latest block: %w", err)
+		}
+
+		blockGasLimit := latestBlock.GasLimit()
+		// TODO: This should be a constant.
+		estimatedGasPerContract := uint64(4949468) // Updated estimate based on contract size reduction
+		maxTxsPerBlock = blockGasLimit / estimatedGasPerContract
+		useRateLimiting = true
+
+		s.logger.Infof("Rate limiting enabled: block gas limit %d, gas per contract %d, max txs per block %d",
+			blockGasLimit, estimatedGasPerContract, maxTxsPerBlock)
+	}
+
 	txIdxCounter := uint64(0)
 	totalTxCount := atomic.Uint64{}
+	blockTxCount := uint64(0)
+	lastBlockTime := time.Now()
 
 	for {
-		// Check if we've reached max transactions
+		// Check if we've reached max transactions (if set)
 		if s.options.MaxTransactions > 0 && txIdxCounter >= s.options.MaxTransactions {
 			s.logger.Infof("reached maximum number of transactions (%d)", s.options.MaxTransactions)
 			break
+		}
+
+		// Rate limiting logic
+		if useRateLimiting {
+			// If we've sent maxTxsPerBlock transactions, wait for next block interval
+			if blockTxCount >= maxTxsPerBlock {
+				timeSinceLastBlock := time.Since(lastBlockTime)
+				if timeSinceLastBlock < 12*time.Second { // Assume ~12 second block time
+					sleepTime := 12*time.Second - timeSinceLastBlock
+					s.logger.Infof("Rate limit reached (%d txs), waiting %v for next block", maxTxsPerBlock, sleepTime)
+					time.Sleep(sleepTime)
+				}
+				blockTxCount = 0
+				lastBlockTime = time.Now()
+			}
 		}
 
 		// Wait for available slot
@@ -332,8 +489,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 		txIdxCounter++
 		totalTxCount.Add(1)
+		blockTxCount++
 
-		// Process pending transactions periodically
+		// Process pending transactions periodically with 1 second intervals
 		if txIdxCounter%10 == 0 {
 			s.processPendingTransactions(ctx)
 
@@ -348,7 +506,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Wait for all pending transactions to complete
+	// Wait for all pending transactions to complete with 1 second intervals
 	s.logger.Info("Waiting for remaining transactions to complete...")
 	for {
 		s.processPendingTransactions(ctx)
@@ -362,8 +520,29 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 
 		s.logger.Infof("Waiting for %d pending transactions...", pendingCount)
-		time.Sleep(2 * time.Second)
+		time.Sleep(1 * time.Second) // Changed from 2 seconds to 1 second
 	}
+
+	// Stop block monitoring before final cleanup
+	s.stopBlockMonitor()
+
+	// Log any remaining unlogged blocks (final blocks) - keep this as final safety net
+	s.blockStatsMutex.Lock()
+	for bn, stats := range s.blockStats {
+		if bn > s.lastLoggedBlock && stats.ContractCount > 0 {
+			avgGasPerByte := float64(stats.TotalGasUsed) / float64(max(stats.TotalBytecodeSize, 1))
+
+			s.logger.WithFields(logrus.Fields{
+				"block_number":        bn,
+				"contracts_deployed":  stats.ContractCount,
+				"total_gas_used":      stats.TotalGasUsed,
+				"total_bytecode_size": stats.TotalBytecodeSize,
+				"avg_gas_per_byte":    fmt.Sprintf("%.2f", avgGasPerByte),
+				"total_contracts":     len(s.deployedContracts),
+			}).Info("Block deployment summary")
+		}
+	}
+	s.blockStatsMutex.Unlock()
 
 	// Log final summary
 	s.contractsMutex.Lock()
@@ -526,14 +705,6 @@ func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt
 	s.pendingTxsMutex.Lock()
 	s.pendingTxs[tx.Hash()] = pendingTx
 	s.pendingTxsMutex.Unlock()
-
-	s.logger.WithFields(logrus.Fields{
-		"tx_hash":       tx.Hash().Hex(),
-		"nonce":         nonce,
-		"base_fee_gwei": s.options.BaseFee,
-		"tip_fee_gwei":  s.options.TipFee,
-		"attempt":       attempt + 1,
-	}).Info("Transaction sent")
 
 	return nil
 }
