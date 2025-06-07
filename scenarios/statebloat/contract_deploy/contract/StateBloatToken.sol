@@ -12,6 +12,10 @@ contract StateBloatToken {
     // Salt to make each deployment unique
     uint256 public immutable salt;
 
+    // Large constant to increase bytecode size to exactly 24KiB
+    string public constant PADDING_DATA =
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(
         address indexed owner,
@@ -316,6 +320,23 @@ contract StateBloatToken {
 
     function dummy65() public pure returns (uint256) {
         return 65;
+    }
+
+    // Additional dummy functions to increase bytecode to exactly 24KiB
+    function dummy66() public pure returns (uint256) {
+        return 66;
+    }
+
+    function dummy67() public pure returns (uint256) {
+        return 67;
+    }
+
+    function dummy68() public pure returns (uint256) {
+        return 68;
+    }
+
+    function dummy69() public pure returns (uint256) {
+        return 69;
     }
 
     function transferFrom1(
