@@ -41,6 +41,8 @@ const (
 	FallbackBlockGasLimit = 30000000
 	// BaseTransferCost - gas cost for a standard ETH transfer
 	BaseTransferCost = 21000
+	// MaxTransactionSize - Ethereum transaction size limit in bytes (128KiB)
+	MaxTransactionSize = 131072 // 128 * 1024
 )
 
 type ScenarioOptions struct {
@@ -667,13 +669,21 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 
 		blockCounter++
 
-		// Fund delegator accounts first
-		s.logger.Infof("════════════════ FUNDING PHASE #%d ════════════════", blockCounter)
-		err := s.fundMaxBloatingDelegators(ctx, currentAuthorizations, blockCounter, networkGasLimit)
-		if err != nil {
-			s.logger.Errorf("failed to fund delegators for iteration %d: %v", blockCounter, err)
-			time.Sleep(5 * time.Second) // Wait before retry
-			continue
+		// For the first iteration, we need to fund delegators before bloating
+		// For subsequent iterations, funding happens after analysis
+		if blockCounter == 1 {
+			s.logger.Infof("════════════════ INITIAL FUNDING PHASE ════════════════")
+			err := s.fundMaxBloatingDelegators(ctx, currentAuthorizations, blockCounter, networkGasLimit)
+			if err != nil {
+				s.logger.Errorf("failed to fund delegators for initial iteration: %v", err)
+				time.Sleep(5 * time.Second) // Wait before retry
+				blockCounter--              // Retry the same iteration
+				continue
+			}
+
+			// Wait for funding transactions to be confirmed and included in blocks
+			s.logger.Infof("Waiting for funding transactions to be confirmed...")
+			time.Sleep(15 * time.Second) // Wait for at least one block to ensure funding txs are mined
 		}
 
 		// Send the max bloating transaction and wait for confirmation
@@ -684,6 +694,10 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 			time.Sleep(5 * time.Second) // Wait before retry
 			continue
 		}
+
+		// Wait a moment to ensure no more transactions are being processed
+		time.Sleep(2 * time.Second)
+
 		// Open semaphore (green light) during analysis phase to allow worker to process EOA queue
 		s.openWorkerSemaphore()
 
@@ -724,6 +738,19 @@ func (s *Scenario) runMaxBloatingMode(ctx context.Context) error {
 
 		// Transaction confirmed - small delay before next iteration
 		time.Sleep(2 * time.Second)
+
+		// Now fund delegators for the next iteration (except on the last iteration)
+		// This ensures funding happens AFTER bloating transactions are confirmed
+		s.logger.Infof("════════════════ FUNDING PHASE #%d (for next iteration) ════════════════", blockCounter)
+		err = s.fundMaxBloatingDelegators(ctx, currentAuthorizations, blockCounter+1, networkGasLimit)
+		if err != nil {
+			s.logger.Errorf("failed to fund delegators for next iteration: %v", err)
+			// Don't fail the entire loop, just log the error and continue
+		}
+
+		// Wait for funding transactions to be confirmed before next bloating phase
+		s.logger.Infof("Waiting for funding transactions to be confirmed before next iteration...")
+		time.Sleep(15 * time.Second) // Ensure funding txs are mined in separate blocks
 	}
 }
 
@@ -847,7 +874,6 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 		})
 
 		if err != nil {
-			s.logger.Debugf("failed to send funding transaction for delegator %d: %v", delegatorIndex, err)
 			delegatorIndex++
 			continue
 		}
@@ -879,7 +905,6 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 	}
 
 	// Wait for any remaining transactions to be included
-	s.logger.Debugf("waiting for remaining funding transactions to be confirmed...")
 	time.Sleep(3 * time.Second)
 
 	return nil
@@ -940,6 +965,20 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 	// Build the authorizations for maximum state bloat
 	authorizations := s.buildMaxBloatingAuthorizations(targetAuthorizations, blockCounter)
 
+	// Check transaction size and split into batches if needed
+	batches := s.splitAuthorizationsBatches(authorizations, len(txCallData))
+
+	if len(batches) == 1 {
+		// Single transaction - use existing logic
+		return s.sendSingleMaxBloatingTransaction(ctx, batches[0], txCallData, feeCap, tipCap, amount, toAddr, targetGasLimit, wallet, client)
+	} else {
+		// Multiple transactions needed - send them as a batch
+		return s.sendBatchedMaxBloatingTransactions(ctx, batches, txCallData, feeCap, tipCap, amount, toAddr, targetGasLimit, wallet, client)
+	}
+}
+
+// sendSingleMaxBloatingTransaction sends a single transaction (original logic)
+func (s *Scenario) sendSingleMaxBloatingTransaction(ctx context.Context, authorizations []types.SetCodeAuthorization, txCallData []byte, feeCap, tipCap *big.Int, amount *uint256.Int, toAddr common.Address, targetGasLimit uint64, wallet *txbuilder.Wallet, client *txbuilder.Client) (uint64, string, int, float64, float64, string, error) {
 	txData, err := txbuilder.SetCodeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
@@ -957,6 +996,18 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 	if err != nil {
 		return 0, "", 0, 0, 0, "", fmt.Errorf("failed to build transaction: %w", err)
 	}
+
+	// Log actual transaction size
+	txSize := len(tx.Data())
+	if encoded, err := tx.MarshalBinary(); err == nil {
+		txSize = len(encoded)
+	}
+	sizeKiB := float64(txSize) / 1024.0
+	exceedsLimit := txSize > MaxTransactionSize
+	limitKiB := float64(MaxTransactionSize) / 1024.0
+
+	s.logger.WithField("scenario", "setcodetx").Infof("MAX BLOATING TX SIZE: %d bytes (%.2f KiB) | Limit: %d bytes (%.1f KiB) | %d authorizations | Exceeds limit: %v",
+		txSize, sizeKiB, MaxTransactionSize, limitKiB, len(authorizations), exceedsLimit)
 
 	// Use channels to capture transaction results
 	resultChan := make(chan struct {
@@ -1056,6 +1107,187 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 	return result.gasUsed, result.blockNumber, result.authCount, result.gasPerAuth, result.gasPerByte, result.gweiTotalFee, result.err
 }
 
+// sendBatchedMaxBloatingTransactions sends multiple transactions when size limit is exceeded
+func (s *Scenario) sendBatchedMaxBloatingTransactions(ctx context.Context, batches [][]types.SetCodeAuthorization, txCallData []byte, feeCap, tipCap *big.Int, amount *uint256.Int, toAddr common.Address, targetGasLimit uint64, wallet *txbuilder.Wallet, client *txbuilder.Client) (uint64, string, int, float64, float64, string, error) {
+	s.logger.Infof("Transaction size limit exceeded, sending %d batched transactions with minimal delay", len(batches))
+
+	// Aggregate results
+	var totalGasUsed uint64
+	var totalAuthCount int
+	var totalFees *big.Int = big.NewInt(0)
+	var lastBlockNumber string
+
+	// Create result channels for all batches upfront
+	resultChans := make([]chan struct {
+		gasUsed      uint64
+		blockNumber  string
+		authCount    int
+		gweiTotalFee string
+		err          error
+	}, len(batches))
+
+	// Send all batches quickly with minimal delay to increase chance of same block inclusion
+	for batchIndex, batch := range batches {
+		// Create result channel for this batch
+		resultChans[batchIndex] = make(chan struct {
+			gasUsed      uint64
+			blockNumber  string
+			authCount    int
+			gweiTotalFee string
+			err          error
+		}, 1)
+
+		s.logger.Infof("Sending batch %d/%d with %d authorizations", batchIndex+1, len(batches), len(batch))
+
+		// Calculate appropriate gas limit for this batch based on authorization count
+		// Each authorization needs ~26000 gas, plus some overhead for the transaction itself
+		batchGasLimit := uint64(len(batch))*GasPerAuthorization + BaseTransferCost + uint64(len(txCallData)*16)
+
+		// Ensure we don't exceed the target limit per transaction
+		maxGasPerTx := targetGasLimit
+		if batchGasLimit > maxGasPerTx {
+			batchGasLimit = maxGasPerTx
+		}
+
+		// Build the transaction for this batch
+		txData, err := txbuilder.SetCodeTx(&txbuilder.TxMetadata{
+			GasFeeCap: uint256.MustFromBig(feeCap),
+			GasTipCap: uint256.MustFromBig(tipCap),
+			Gas:       batchGasLimit,
+			To:        &toAddr,
+			Value:     amount,
+			Data:      txCallData,
+			AuthList:  batch,
+		})
+		if err != nil {
+			return 0, "", 0, 0, 0, "", fmt.Errorf("failed to build batch %d transaction metadata: %w", batchIndex+1, err)
+		}
+
+		tx, err := wallet.BuildSetCodeTx(txData)
+		if err != nil {
+			return 0, "", 0, 0, 0, "", fmt.Errorf("failed to build batch %d transaction: %w", batchIndex+1, err)
+		}
+
+		// Log actual transaction size for this batch
+		txSize := len(tx.Data())
+		if encoded, err := tx.MarshalBinary(); err == nil {
+			txSize = len(encoded)
+		}
+		sizeKiB := float64(txSize) / 1024.0
+		s.logger.WithField("scenario", "setcodetx").Infof("BATCH %d/%d TX SIZE: %d bytes (%.2f KiB) | %d authorizations | Gas limit: %d",
+			batchIndex+1, len(batches), txSize, sizeKiB, len(batch), batchGasLimit)
+
+		// Send the transaction immediately without waiting for confirmation
+		resultChan := resultChans[batchIndex]
+		err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
+			Client:              client,
+			MaxRebroadcasts:     10,
+			RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
+			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				if err != nil {
+					s.logger.WithField("rpc", client.GetName()).Errorf("batch %d tx failed: %v", batchIndex+1, err)
+					resultChan <- struct {
+						gasUsed      uint64
+						blockNumber  string
+						authCount    int
+						gweiTotalFee string
+						err          error
+					}{0, "", 0, "", err}
+					return
+				}
+				if receipt == nil {
+					resultChan <- struct {
+						gasUsed      uint64
+						blockNumber  string
+						authCount    int
+						gweiTotalFee string
+						err          error
+					}{0, "", 0, "", fmt.Errorf("batch %d: no receipt received", batchIndex+1)}
+					return
+				}
+
+				effectiveGasPrice := receipt.EffectiveGasPrice
+				if effectiveGasPrice == nil {
+					effectiveGasPrice = big.NewInt(0)
+				}
+				feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+				totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
+				wallet.SubBalance(totalAmount)
+
+				gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
+
+				s.logger.WithField("rpc", client.GetName()).Infof("Batch %d/%d confirmed: %d gas, block %s",
+					batchIndex+1, len(batches), receipt.GasUsed, receipt.BlockNumber.String())
+
+				resultChan <- struct {
+					gasUsed      uint64
+					blockNumber  string
+					authCount    int
+					gweiTotalFee string
+					err          error
+				}{receipt.GasUsed, receipt.BlockNumber.String(), len(batch), gweiTotalFee.String(), nil}
+			},
+			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
+				logger := s.logger.WithField("rpc", client.GetName())
+				if err != nil {
+					logger.Errorf("failed sending batch %d tx: %v", batchIndex+1, err)
+				} else if retry > 0 || rebroadcast > 0 {
+					logger.Debugf("successfully sent batch %d tx (retry/rebroadcast)", batchIndex+1)
+				}
+			},
+		})
+
+		if err != nil {
+			wallet.ResetPendingNonce(ctx, client)
+			return 0, "", 0, 0, 0, "", fmt.Errorf("failed to send batch %d transaction: %w", batchIndex+1, err)
+		}
+
+		// Small delay to avoid overwhelming the network but keep transactions close together
+		if batchIndex < len(batches)-1 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	// Now wait for all batch confirmations
+	s.logger.Infof("All %d batches sent, waiting for confirmations...", len(batches))
+	blockNumbers := make(map[string]int) // Track which blocks contain our transactions
+	for batchIndex := range batches {
+		result := <-resultChans[batchIndex]
+		if result.err != nil {
+			return 0, "", 0, 0, 0, "", fmt.Errorf("batch %d failed: %w", batchIndex+1, result.err)
+		}
+
+		// Aggregate successful results
+		totalGasUsed += result.gasUsed
+		totalAuthCount += result.authCount
+		lastBlockNumber = result.blockNumber
+
+		// Track block numbers
+		blockNumbers[result.blockNumber]++
+
+		// Parse and add fee
+		if feeGwei, ok := new(big.Int).SetString(result.gweiTotalFee, 10); ok {
+			totalFees.Add(totalFees, feeGwei)
+		}
+	}
+
+	// Log block distribution
+	s.logger.Infof("Bloating transactions were included in %d blocks:", len(blockNumbers))
+	for blockNum, txCount := range blockNumbers {
+		s.logger.Infof("  Block #%s: %d bloating transaction(s)", blockNum, txCount)
+	}
+
+	// Calculate aggregate metrics
+	gasPerAuth := float64(totalGasUsed) / float64(totalAuthCount)
+	gasPerByte := gasPerAuth / EstimatedBytesPerAuth
+
+	// Log summary of batched transactions
+	s.logger.WithField("scenario", "setcodetx").Infof("BATCHED MAX BLOATING SUMMARY: %d batches sent | Total: %d gas, %d auths, %s gwei fees",
+		len(batches), totalGasUsed, totalAuthCount, totalFees.String())
+
+	return totalGasUsed, lastBlockNumber, totalAuthCount, gasPerAuth, gasPerByte, totalFees.String(), nil
+}
+
 // eoaWorker runs in a separate goroutine and writes funded EOAs to EOAs.json
 // when the semaphore is open (green). It sleeps when the semaphore is closed (red).
 func (s *Scenario) eoaWorker() {
@@ -1100,8 +1332,6 @@ func (s *Scenario) processEOAQueue() {
 			return
 		}
 
-		s.logger.Debugf("wrote %d EOA entries to EOAs.json", len(eoasToWrite))
-		s.logger.Debugf("left %d EOA entries in queue", len(s.eoaQueue))
 	}
 }
 
@@ -1175,4 +1405,54 @@ func (s *Scenario) shutdownWorker() {
 		close(s.workerDone)
 		s.workerWg.Wait()
 	}
+}
+
+// calculateTransactionSize estimates the serialized size of a transaction with given authorizations
+func (s *Scenario) calculateTransactionSize(authCount int, callDataSize int) int {
+	// Rough estimation based on RLP encoding structure:
+	// - Base transaction overhead: ~200 bytes
+	// - Each SetCodeAuthorization: ~135 bytes (ChainId(8) + Address(20) + Nonce(8) + YParity(1) + R(32) + S(32) + RLP overhead)
+	// - Call data: variable size
+	// - Additional RLP encoding overhead: ~50 bytes
+
+	baseSize := 200 + callDataSize + 50
+	authSize := authCount * 135
+	return baseSize + authSize
+}
+
+// splitAuthorizationsBatches splits authorizations into batches that fit within transaction size limit
+func (s *Scenario) splitAuthorizationsBatches(authorizations []types.SetCodeAuthorization, callDataSize int) [][]types.SetCodeAuthorization {
+	if len(authorizations) == 0 {
+		return [][]types.SetCodeAuthorization{authorizations}
+	}
+
+	// Calculate how many authorizations can fit in one transaction
+	maxAuthsPerTx := (MaxTransactionSize - 200 - callDataSize - 50) / 135
+	if maxAuthsPerTx <= 0 {
+		s.logger.Warnf("Transaction call data too large, using minimal batch size of 1")
+		maxAuthsPerTx = 1
+	}
+
+	// If all authorizations fit in one transaction, return as single batch
+	if len(authorizations) <= maxAuthsPerTx {
+		estimatedSize := s.calculateTransactionSize(len(authorizations), callDataSize)
+		s.logger.Infof("All %d authorizations fit in single transaction (estimated size: %d bytes)", len(authorizations), estimatedSize)
+		return [][]types.SetCodeAuthorization{authorizations}
+	}
+
+	// Split into multiple batches
+	var batches [][]types.SetCodeAuthorization
+	for i := 0; i < len(authorizations); i += maxAuthsPerTx {
+		end := i + maxAuthsPerTx
+		if end > len(authorizations) {
+			end = len(authorizations)
+		}
+		batch := authorizations[i:end]
+		estimatedSize := s.calculateTransactionSize(len(batch), callDataSize)
+		s.logger.Infof("Created batch %d with %d authorizations (estimated size: %d bytes)", len(batches)+1, len(batch), estimatedSize)
+		batches = append(batches, batch)
+	}
+
+	s.logger.Infof("Split %d authorizations into %d batches (max %d auths per batch)", len(authorizations), len(batches), maxAuthsPerTx)
+	return batches
 }
