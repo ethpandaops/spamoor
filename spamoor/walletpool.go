@@ -68,6 +68,9 @@ type WalletPool struct {
 	selectionMutex   sync.Mutex
 	rrWalletIdx      int
 	reclaimedFunds   bool
+	
+	// Optional callback to track transaction results for metrics
+	transactionTracker func(err error)
 }
 
 // FundingRequest represents a request to fund a wallet with a specific amount.
@@ -185,6 +188,16 @@ func (pool *WalletPool) SetWalletSeed(seed string) {
 // SetRefillInterval sets the interval in seconds between automatic balance checks.
 func (pool *WalletPool) SetRefillInterval(interval uint64) {
 	pool.config.RefillInterval = interval
+}
+
+// SetTransactionTracker sets the optional callback to track transaction results for metrics.
+func (pool *WalletPool) SetTransactionTracker(tracker func(err error)) {
+	pool.transactionTracker = tracker
+}
+
+// GetTransactionTracker returns the transaction tracking callback if set.
+func (pool *WalletPool) GetTransactionTracker() func(err error) {
+	return pool.transactionTracker
 }
 
 // GetClient returns a client from the client pool using the specified selection strategy.

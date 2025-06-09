@@ -159,6 +159,9 @@ func (s *Spammer) Start() error {
 		return fmt.Errorf("failed to update spammer: %w", err)
 	}
 
+	// Track spammer start for metrics
+	s.daemon.TrackSpammerStatusChange(s.dbEntity.ID, true)
+
 	go s.runScenario()
 
 	return nil
@@ -226,6 +229,9 @@ func (s *Spammer) runScenario() {
 			s.dbEntity.Status = int(SpammerStatusFinished)
 		}
 
+		// Track spammer stop for metrics (not running anymore)
+		s.daemon.TrackSpammerStatusChange(s.dbEntity.ID, false)
+
 		err := s.daemon.db.RunDBTransaction(func(tx *sqlx.Tx) error {
 			return s.daemon.db.UpdateSpammer(tx, s.dbEntity)
 		})
@@ -245,6 +251,7 @@ func (s *Spammer) runScenario() {
 	}
 
 	s.walletPool = spamoor.NewWalletPool(s.scenarioCtx, s.logger, s.daemon.rootWallet, s.daemon.clientPool, s.daemon.txpool)
+	s.walletPool.SetTransactionTracker(s.TrackTransactionResult)
 	scenarioOptions := &scenariotypes.ScenarioOptions{
 		WalletPool: s.walletPool,
 		Config:     s.dbEntity.Config,
@@ -320,4 +327,13 @@ func (s *Spammer) GetLogScope() *logscope.LogScope {
 // Returns nil if the spammer has not been started or the wallet pool is not initialized.
 func (s *Spammer) GetWalletPool() *spamoor.WalletPool {
 	return s.walletPool
+}
+
+// TrackTransactionResult records transaction success or failure for metrics
+func (s *Spammer) TrackTransactionResult(err error) {
+	if err != nil {
+		s.daemon.TrackTransactionFailure(s.dbEntity.ID)
+	} else {
+		s.daemon.TrackTransactionSent(s.dbEntity.ID)
+	}
 }

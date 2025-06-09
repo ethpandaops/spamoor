@@ -452,6 +452,23 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 			}()
 		}
 
+		// Track transaction result for metrics
+		defer func() {
+			walletPools := pool.options.GetActiveWalletPools()
+			for _, walletPool := range walletPools {
+				if tracker := walletPool.GetTransactionTracker(); tracker != nil {
+					// Check if this wallet belongs to this pool
+					allWallets := walletPool.GetAllWallets()
+					for _, poolWallet := range allWallets {
+						if poolWallet.GetAddress() == wallet.GetAddress() {
+							tracker(err)
+							break
+						}
+					}
+				}
+			}
+		}()
+
 		receipt, err = pool.awaitTransaction(confirmCtx, wallet, tx, wg)
 		if confirmCtx.Err() != nil {
 			err = nil
@@ -507,6 +524,21 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 	if err != nil {
 		if confirmCancel != nil {
 			confirmCancel()
+		}
+
+		// Track initial transaction submission failure for metrics
+		walletPools := pool.options.GetActiveWalletPools()
+		for _, walletPool := range walletPools {
+			if tracker := walletPool.GetTransactionTracker(); tracker != nil {
+				// Check if this wallet belongs to this pool
+				allWallets := walletPool.GetAllWallets()
+				for _, poolWallet := range allWallets {
+					if poolWallet.GetAddress() == wallet.GetAddress() {
+						tracker(err)
+						break
+					}
+				}
+			}
 		}
 
 		return err
