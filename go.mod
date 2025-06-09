@@ -19,7 +19,7 @@ require (
 	github.com/swaggo/swag v1.16.4
 	github.com/tdewolff/minify v2.3.6+incompatible
 	github.com/urfave/negroni v1.0.0
-	golang.org/x/time v0.11.0
+	golang.org/x/time v0.12.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
