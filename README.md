@@ -78,6 +78,26 @@ The web interface runs on `http://localhost:8080` by default and provides:
 The daemon exposes a REST API for programmatic control.
 See the API Documentation in the spamoor web interface for details.
 
+### Export/Import Functionality
+Spamoor supports exporting and importing spammer configurations as YAML files:
+
+- **Export**: Save existing spammers to YAML format for backup or sharing
+- **Import**: Load spammers from YAML files, URLs, or raw YAML data
+- **Includes**: YAML files can include other files or URLs for modular configurations
+- **Startup Integration**: Import spammers automatically on daemon startup
+
+```bash
+# Import from file
+spamoor-daemon --startup-spammer="spammer-configs.yaml"
+
+# Example YAML with includes
+- scenario: "eoatx"
+  name: "Main Test"
+  config:
+    wallet_count: 10
+- include: "common-spammers.yaml"
+- include: "https://example.com/stress-tests.yaml"
+```
 
 ## Contributing
 
