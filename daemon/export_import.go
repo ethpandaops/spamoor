@@ -255,29 +255,6 @@ func (d *Daemon) spammerExistsByScenarioAndName(scenario, name string) bool {
 	return false
 }
 
-// generateUniqueName generates a unique spammer name by appending numbers if needed
-// Note: This function is now unused by import logic but kept for potential future use
-func (d *Daemon) generateUniqueName(baseName string) string {
-	existingSpammers := d.GetAllSpammers()
-	existingNames := make(map[string]bool)
-	for _, existing := range existingSpammers {
-		existingNames[existing.GetName()] = true
-	}
-
-	if !existingNames[baseName] {
-		return baseName
-	}
-
-	counter := 1
-	for {
-		candidateName := fmt.Sprintf("%s (%d)", baseName, counter)
-		if !existingNames[candidateName] {
-			return candidateName
-		}
-		counter++
-	}
-}
-
 // mergeConfiguration merges scenario defaults with imported configuration
 func (d *Daemon) mergeConfiguration(scenario *scenariotypes.ScenarioDescriptor, importedConfig map[string]interface{}) (string, error) {
 	// Get default configurations
