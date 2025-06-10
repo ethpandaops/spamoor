@@ -70,7 +70,7 @@
               {{ end }}
             </td>
             <td>{{ .Scenario }}</td>
-            <td>
+            <td class="status-cell">
               {{ if eq .Status 0 }}
                 <span class="badge bg-info">Paused</span>
               {{ else if eq .Status 1 }}
@@ -291,7 +291,7 @@ async function startSpammer(id) {
     await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
     
     const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
-    const statusCell = row.querySelector('td:nth-child(4)');
+    const statusCell = row.querySelector('.status-cell');
     const toggleButton = row.querySelector('.spammer-toggle-btn');
     const reclaimButton = row.querySelector('.spammer-reclaim-btn');
     
@@ -318,7 +318,7 @@ async function pauseSpammer(id) {
     await fetch(`/api/spammer/${id}/pause`, {method: 'POST'});
     
     const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
-    const statusCell = row.querySelector('td:nth-child(4)');
+    const statusCell = row.querySelector('.status-cell');
     const toggleButton = row.querySelector('.spammer-toggle-btn');
     const reclaimButton = row.querySelector('.spammer-reclaim-btn');
     
