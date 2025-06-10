@@ -1,0 +1,47 @@
+- scenario: "transaction_pool_spam"
+  name: "Example Pool Spammer"
+  description: "Example spammer configuration for transaction pool spam"
+  config:
+    # Wallet configuration
+    seed: "example-pool-spam-123456"
+    refill_amount: 5000000000000000000  # 5 ETH
+    refill_balance: 1000000000000000000 # 1 ETH
+    refill_interval: 600
+    wallet_count: 10
+    
+    # Scenario specific configuration
+    transactions_per_batch: 100
+    batch_interval: 10000
+    gas_price_modifier: 1.0
+
+- scenario: "simple_transfer"
+  name: "Simple Transfer Example"
+  description: "Basic transfer spammer for testing"
+  config:
+    # Wallet configuration
+    seed: "simple-transfer-789012"
+    refill_amount: 2000000000000000000  # 2 ETH
+    refill_balance: 500000000000000000  # 0.5 ETH
+    refill_interval: 300
+    wallet_count: 5
+    
+    # Scenario specific configuration
+    transfer_amount: 100000000000000000  # 0.1 ETH
+    transfer_interval: 5000
+
+- scenario: "blob_transfer"
+  name: "Blob Transfer Spammer"
+  description: "Spammer for blob transactions"
+  config:
+    # Wallet configuration
+    seed: "blob-transfer-345678"
+    refill_amount: 10000000000000000000  # 10 ETH
+    refill_balance: 2000000000000000000  # 2 ETH
+    refill_interval: 900
+    wallet_count: 20
+    
+    # Scenario specific configuration
+    blob_count: 6
+    blob_size: 131072
+    gas_fee_cap: 50000000000
+    blob_gas_fee_cap: 20000000000 

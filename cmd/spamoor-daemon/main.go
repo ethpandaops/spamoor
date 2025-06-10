@@ -44,7 +44,7 @@ func main() {
 	flags.StringVarP(&cliArgs.privkey, "privkey", "p", "", "The private key of the wallet to send funds from.")
 	flags.IntVarP(&cliArgs.port, "port", "P", 8080, "The port to run the webui on.")
 	flags.StringVarP(&cliArgs.dbFile, "db", "d", "spamoor.db", "The file to store the database in.")
-	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file with startup spammers configuration")
+	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file or URL with startup spammers configuration")
 	flags.Uint64Var(&cliArgs.fuluActivation, "fulu-activation", 0, "The unix timestamp of the Fulu activation (if activated)")
 	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
 	flags.Parse(os.Args)
@@ -159,15 +159,9 @@ func main() {
 
 	// load startup spammers if configured
 	if firstLaunch && cliArgs.startupSpammer != "" {
-		startupSpammers, err := spamoorDaemon.LoadStartupSpammers(cliArgs.startupSpammer, logger.WithField("module", "startup"))
+		err := spamoorDaemon.ImportSpammersOnStartup(cliArgs.startupSpammer, logger.WithField("module", "startup"))
 		if err != nil {
-			logger.Errorf("failed to load startup spammers: %v", err)
-		} else if len(startupSpammers) > 0 {
-			logger.Infof("adding %d startup spammers", len(startupSpammers))
-			err = spamoorDaemon.AddStartupSpammers(startupSpammers)
-			if err != nil {
-				logger.Errorf("failed to add startup spammers: %v", err)
-			}
+			logger.Errorf("failed to import startup spammers: %v", err)
 		}
 	}
 

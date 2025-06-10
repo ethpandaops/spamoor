@@ -679,3 +679,79 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 
 	w.WriteHeader(http.StatusOK)
 }
+
+// ExportSpammersRequest represents the request body for exporting spammers
+type ExportSpammersRequest struct {
+	SpammerIDs []int64 `json:"spammer_ids,omitempty"` // If empty, exports all spammers
+}
+
+// ImportSpammersRequest represents the request body for importing spammers
+type ImportSpammersRequest struct {
+	Input string `json:"input"` // Can be YAML data or a URL
+}
+
+// ExportSpammers godoc
+// @Id exportSpammers
+// @Summary Export spammers to YAML
+// @Tags Spammer
+// @Description Exports specified spammers or all spammers to YAML format
+// @Accept json
+// @Produce text/plain
+// @Param request body ExportSpammersRequest false "Spammer IDs to export (optional)"
+// @Success 200 {string} string "YAML configuration"
+// @Failure 400 {object} Response "Invalid request"
+// @Failure 500 {object} Response "Server Error"
+// @Router /api/spammers/export [post]
+func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
+	var req ExportSpammersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	yamlData, err := ah.daemon.ExportSpammers(req.SpammerIDs...)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-yaml")
+	w.Header().Set("Content-Disposition", "attachment; filename=spammers-export.yaml")
+	w.Write([]byte(yamlData))
+}
+
+// ImportSpammers godoc
+// @Id importSpammers
+// @Summary Import spammers from YAML data or URL
+// @Tags Spammer
+// @Description Imports spammers from YAML data or URL with validation and deduplication
+// @Accept json
+// @Produce json
+// @Param request body ImportSpammersRequest true "Import configuration"
+// @Success 200 {object} Response{data=daemon.ImportResult} "Success"
+// @Failure 400 {object} Response "Invalid request"
+// @Failure 500 {object} Response "Server Error"
+// @Router /api/spammers/import [post]
+func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
+	var req ImportSpammersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Input == "" {
+		http.Error(w, "input is required", http.StatusBadRequest)
+		return
+	}
+
+	result, err := ah.daemon.ImportSpammers(req.Input)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(Response{Data: result})
+}
+
+
