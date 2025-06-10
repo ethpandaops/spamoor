@@ -735,6 +735,111 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/api/spammers/export": {
+            "post": {
+                "description": "Exports specified spammers or all spammers to YAML format",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "Spammer"
+                ],
+                "summary": "Export spammers to YAML",
+                "operationId": "exportSpammers",
+                "parameters": [
+                    {
+                        "description": "Spammer IDs to export (optional)",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/api.ExportSpammersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "YAML configuration",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/spammers/import": {
+            "post": {
+                "description": "Imports spammers from YAML data or URL with validation and deduplication",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Spammer"
+                ],
+                "summary": "Import spammers from YAML data or URL",
+                "operationId": "importSpammers",
+                "parameters": [
+                    {
+                        "description": "Import configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.ImportSpammersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/daemon.ImportResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -784,6 +889,27 @@ const docTemplate = `{
                 },
                 "startImmediately": {
                     "type": "boolean"
+                }
+            }
+        },
+        "api.ExportSpammersRequest": {
+            "type": "object",
+            "properties": {
+                "spammer_ids": {
+                    "description": "If empty, exports all spammers",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "api.ImportSpammersRequest": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "description": "Can be YAML data or a URL",
+                    "type": "string"
                 }
             }
         },
@@ -901,6 +1027,107 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "daemon.ImportResult": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "imported": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/daemon.ImportedSpammerInfo"
+                    }
+                },
+                "imported_count": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "validation": {
+                    "$ref": "#/definitions/daemon.ImportValidationResult"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "daemon.ImportValidationResult": {
+            "type": "object",
+            "properties": {
+                "duplicates": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "invalid_scenarios": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "spammers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/daemon.SpammerValidationInfo"
+                    }
+                },
+                "total_spammers": {
+                    "type": "integer"
+                },
+                "valid_spammers": {
+                    "type": "integer"
+                }
+            }
+        },
+        "daemon.ImportedSpammerInfo": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "scenario": {
+                    "type": "string"
+                }
+            }
+        },
+        "daemon.SpammerValidationInfo": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "scenario": {
+                    "type": "string"
+                },
+                "valid": {
+                    "type": "boolean"
                 }
             }
         }

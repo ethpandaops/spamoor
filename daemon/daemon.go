@@ -33,6 +33,9 @@ type Daemon struct {
 	spammerWg     sync.WaitGroup
 
 	globalCfg map[string]interface{}
+
+	// Metrics collector for Prometheus metrics
+	metricsCollector *MetricsCollector
 }
 
 // NewDaemon creates a new daemon instance with the provided components.
@@ -214,6 +217,61 @@ func (d *Daemon) ReclaimSpammer(id int64) error {
 // This provides access to the main wallet that distributes funds to child wallets.
 func (d *Daemon) GetRootWallet() *spamoor.RootWallet {
 	return d.rootWallet
+}
+
+// TrackTransactionSent records a successful transaction send for metrics
+func (d *Daemon) TrackTransactionSent(spammerID int64) {
+	if d.metricsCollector == nil {
+		return
+	}
+
+	spammer := d.GetSpammer(spammerID)
+	if spammer == nil {
+		return
+	}
+
+	d.metricsCollector.IncrementTransactionsSent(
+		spammer.GetID(),
+		spammer.GetName(),
+		spammer.GetScenario(),
+	)
+}
+
+// TrackTransactionFailure records a failed transaction for metrics
+func (d *Daemon) TrackTransactionFailure(spammerID int64) {
+	if d.metricsCollector == nil {
+		return
+	}
+
+	spammer := d.GetSpammer(spammerID)
+	if spammer == nil {
+		return
+	}
+
+	d.metricsCollector.IncrementTransactionFailures(
+		spammer.GetID(),
+		spammer.GetName(),
+		spammer.GetScenario(),
+	)
+}
+
+// TrackSpammerStatusChange updates the spammer running status metric
+func (d *Daemon) TrackSpammerStatusChange(spammerID int64, running bool) {
+	if d.metricsCollector == nil {
+		return
+	}
+
+	spammer := d.GetSpammer(spammerID)
+	if spammer == nil {
+		return
+	}
+
+	d.metricsCollector.SetSpammerRunning(
+		spammer.GetID(),
+		spammer.GetName(),
+		spammer.GetScenario(),
+		running,
+	)
 }
 
 // Shutdown performs a graceful shutdown of the daemon and all running spammers.

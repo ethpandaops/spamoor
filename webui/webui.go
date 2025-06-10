@@ -13,6 +13,7 @@ import (
 	"github.com/ethpandaops/spamoor/webui/server"
 	"github.com/ethpandaops/spamoor/webui/types"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/negroni"
 
@@ -28,6 +29,14 @@ var (
 )
 
 func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
+	// Initialize metrics collector
+	err := daemon.InitializeMetrics()
+	if err != nil {
+		logrus.Errorf("failed to initialize metrics: %v", err)
+	} else {
+		logrus.Info("metrics endpoint available at /metrics")
+	}
+
 	// init router
 	router := mux.NewRouter()
 
@@ -60,6 +69,13 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/clients", apiHandler.GetClients).Methods("GET")
 	apiRouter.HandleFunc("/client/{index}/group", apiHandler.UpdateClientGroup).Methods("PUT")
 	apiRouter.HandleFunc("/client/{index}/enabled", apiHandler.UpdateClientEnabled).Methods("PUT")
+
+	// Export/Import routes
+	apiRouter.HandleFunc("/spammers/export", apiHandler.ExportSpammers).Methods("POST")
+	apiRouter.HandleFunc("/spammers/import", apiHandler.ImportSpammers).Methods("POST")
+
+	// metrics endpoint
+	router.Handle("/metrics", promhttp.Handler()).Methods("GET")
 
 	// swagger
 	router.PathPrefix("/docs/").Handler(docs.GetSwaggerHandler(logrus.StandardLogger()))

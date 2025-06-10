@@ -1,0 +1,3 @@
+{
+  "input": "- scenario: \"simple_transfer\"\n  name: \"Test Import Spammer\"\n  description: \"Example spammer imported via API\"\n  config:\n    seed: \"test-import-123\"\n    refill_amount: 1000000000000000000\n    refill_balance: 500000000000000000\n    refill_interval: 300\n    wallet_count: 5\n    transfer_amount: 100000000000000000\n    transfer_interval: 5000"
+} 
