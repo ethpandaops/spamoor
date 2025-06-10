@@ -25,12 +25,16 @@ This scenario deploys contracts that are exactly 24kB in size (EIP-170 limit) to
 
 ## Batch Strategy
 
-The scenario automatically calculates how many contracts can fit in one block:
-- Default block gas limit: 30,000,000 gas
-- Gas per contract: 4,967,200 gas
-- Contracts per batch: ~6 contracts per block
+The scenario uses block-aware batching to maximize block filling:
+- Monitors actual block production in real-time (no timing assumptions)
+- Queries network for actual block gas limit on startup
+- Gas per contract: 4,949,468 gas (measured from actual deployments)
+- Dynamically calculates transactions per block based on gas limit
+- Sends transaction batches immediately when new blocks are detected
+- Updates MaxPending to match block capacity for optimal throughput
+- Example: With 90M gas limit → ~18 contracts per block
 
-This ensures optimal utilization of block space while maintaining predictable transaction inclusion patterns.
+This ensures every block is filled to capacity without skipping any blocks. The scenario adapts to the actual block production rate of the network.
 
 ## 🚀 Usage
 
@@ -45,15 +49,16 @@ go build -o bin/spamoor cmd/spamoor/main.go
 ```
 
 #### Key Flags
-- `--max-transactions` - Number of contracts to deploy (0 = infinite, default: 0)
-- `--max-pending` - Max concurrent pending transactions (default: 10)
-- `--max-wallets` - Max child wallets to use (default: 1000)
+- `--max-transactions` - Total number of contracts to deploy (0 = infinite, default: 0)
+- `--max-wallets` - Max child wallets to use (0 = root wallet only, default: 0)
 - `--basefee` - Base fee per gas in gwei (default: 20)
 - `--tipfee` - Tip fee per gas in gwei (default: 2)
+
+Note: The scenario uses only the root wallet by default to simplify nonce management and ensure reliable transaction ordering. It automatically calculates the optimal number of concurrent transactions based on the network's block gas limit and monitors actual block production to send batches that fill every block to capacity.
 
 #### Example with Anvil node
 ```bash
 ./bin/spamoor --privkey ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
   --rpchost http://localhost:8545 contract-deploy \
-  --max-transactions 100 --max-pending 20 --basefee 25 --tipfee 5
+  --max-transactions 100 --basefee 25 --tipfee 5
 ``` 

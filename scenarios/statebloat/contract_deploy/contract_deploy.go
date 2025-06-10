@@ -27,12 +27,33 @@ import (
 	"github.com/ethpandaops/spamoor/spamoor"
 )
 
+// Constants for the contract deployment scenario
+const (
+	// EstimatedGasPerContract is the estimated gas used per contract deployment
+	// This value is based on the actual gas usage of deploying the StateBloatToken contract
+	// which has a bytecode size of ~23.9KB
+	EstimatedGasPerContract = uint64(4949468)
+
+	// DeploymentGasLimit is the gas limit for contract deployment transactions
+	DeploymentGasLimit = uint64(4980000)
+
+	// EstimatedDeployedBytecodeSize is the estimated size of the deployed contract bytecode
+	// This is the actual bytecode size on-chain after deployment
+	EstimatedDeployedBytecodeSize = 23914
+
+	// MaxPendingMultiplier is the multiplier for calculating max pending transactions
+	// We allow 2x the block capacity to handle network delays and variations
+	MaxPendingMultiplier = 2
+
+	// DefaultMaxPending is the default max pending transactions for manual mode
+	// This is only used when max-transactions is set (not using adaptive max pending)
+	DefaultMaxPending = 10
+)
+
 type ScenarioOptions struct {
-	MaxPending      uint64 `yaml:"max_pending"`
 	MaxWallets      uint64 `yaml:"max_wallets"`
 	BaseFee         uint64 `yaml:"base_fee"`
 	TipFee          uint64 `yaml:"tip_fee"`
-	ClientGroup     string `yaml:"client_group"`
 	MaxTransactions uint64 `yaml:"max_transactions"`
 }
 
@@ -82,15 +103,16 @@ type Scenario struct {
 	// Block monitoring for real-time logging
 	blockMonitorCancel context.CancelFunc
 	blockMonitorDone   chan struct{}
+
+	// Auto-calculated max pending transactions
+	maxPending uint64
 }
 
 var ScenarioName = "contract-deploy"
 var ScenarioDefaultOptions = ScenarioOptions{
-	MaxPending:      10,
 	MaxWallets:      1000,
 	BaseFee:         20,
 	TipFee:          2,
-	ClientGroup:     "default",
 	MaxTransactions: 0,
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -108,12 +130,10 @@ func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
 }
 
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
-	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
-	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
-	flags.Uint64Var(&s.options.MaxTransactions, "max-transactions", ScenarioDefaultOptions.MaxTransactions, "Maximum number of transactions to send (0 = use rate limiting based on block gas limit)")
+	flags.Uint64Var(&s.options.MaxTransactions, "max-transactions", ScenarioDefaultOptions.MaxTransactions, "Maximum number of transactions to send (0 = unlimited with adaptive max pending based on block gas limit)")
 	return nil
 }
 
@@ -135,6 +155,9 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 		walletPool.SetWalletCount(1000)
 	}
 
+	// Initialize default max pending for manual mode
+	s.maxPending = DefaultMaxPending
+
 	return nil
 }
 
@@ -146,7 +169,7 @@ func (s *Scenario) Config() string {
 // getChainID caches the chain ID to avoid repeated RPC calls
 func (s *Scenario) getChainID(ctx context.Context) (*big.Int, error) {
 	s.chainIDOnce.Do(func() {
-		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
 		if client == nil {
 			s.chainIDError = fmt.Errorf("no client available for chain ID")
 			return
@@ -157,13 +180,14 @@ func (s *Scenario) getChainID(ctx context.Context) (*big.Int, error) {
 }
 
 // waitForPendingTxSlot waits until we have capacity for another transaction
+// This is the primary flow control mechanism to prevent overwhelming the network
 func (s *Scenario) waitForPendingTxSlot(ctx context.Context) {
 	for {
 		s.pendingTxsMutex.RLock()
 		count := len(s.pendingTxs)
 		s.pendingTxsMutex.RUnlock()
 
-		if count < int(s.options.MaxPending) {
+		if count < int(s.maxPending) {
 			return
 		}
 
@@ -174,10 +198,11 @@ func (s *Scenario) waitForPendingTxSlot(ctx context.Context) {
 }
 
 // processPendingTransactions checks for transaction confirmations and updates state
+// This function is critical for maintaining accurate pending count and flow control
 func (s *Scenario) processPendingTransactions(ctx context.Context) {
 	s.pendingTxsMutex.Lock()
 
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
 	if client == nil {
 		s.pendingTxsMutex.Unlock()
 		return
@@ -244,9 +269,8 @@ func (s *Scenario) recordDeployedContract(contractAddress common.Address, privat
 	s.deployedContracts = append(s.deployedContracts, deployment)
 
 	// Get the actual deployed contract bytecode size
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
-	// TODO: This should be a constant documented on how this number is obtained.
-	var bytecodeSize int = 23914
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
+	var bytecodeSize int = EstimatedDeployedBytecodeSize
 
 	if client != nil {
 		// Get the actual deployed bytecode size using eth_getCode
@@ -345,7 +369,7 @@ func (s *Scenario) startBlockMonitor(ctx context.Context) {
 	go func() {
 		defer close(s.blockMonitorDone)
 
-		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
 		if client == nil {
 			s.logger.Warn("No client available for block monitoring")
 			return
@@ -423,13 +447,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	s.logger.Infof("Chain ID: %s", chainID.String())
 
-	// Calculate rate limiting based on block gas limit if max-transactions is 0
-	var maxTxsPerBlock uint64
-	var useRateLimiting bool
-
+	// Calculate adaptive max pending based on block gas limit if max-transactions is 0
 	if s.options.MaxTransactions == 0 {
 		// Get block gas limit from the network
-		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
 		if client == nil {
 			return fmt.Errorf("no client available for gas limit query")
 		}
@@ -440,19 +461,18 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 
 		blockGasLimit := latestBlock.GasLimit()
-		// TODO: This should be a constant.
-		estimatedGasPerContract := uint64(4949468) // Updated estimate based on contract size reduction
-		maxTxsPerBlock = blockGasLimit / estimatedGasPerContract
-		useRateLimiting = true
+		maxTxsPerBlock := blockGasLimit / EstimatedGasPerContract
 
-		s.logger.Infof("Rate limiting enabled: block gas limit %d, gas per contract %d, max txs per block %d",
-			blockGasLimit, estimatedGasPerContract, maxTxsPerBlock)
+		// Auto-calculate max pending transactions based on block gas limit
+		// Allow up to 2x the block capacity to handle network delays
+		s.maxPending = maxTxsPerBlock * MaxPendingMultiplier
+
+		s.logger.Infof("Adaptive max pending enabled: block gas limit %d, gas per contract %d, max txs per block %d, max pending %d",
+			blockGasLimit, EstimatedGasPerContract, maxTxsPerBlock, s.maxPending)
 	}
 
 	txIdxCounter := uint64(0)
 	totalTxCount := atomic.Uint64{}
-	blockTxCount := uint64(0)
-	lastBlockTime := time.Now()
 
 	for {
 		// Check if we've reached max transactions (if set)
@@ -461,22 +481,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			break
 		}
 
-		// Rate limiting logic
-		if useRateLimiting {
-			// If we've sent maxTxsPerBlock transactions, wait for next block interval
-			if blockTxCount >= maxTxsPerBlock {
-				timeSinceLastBlock := time.Since(lastBlockTime)
-				if timeSinceLastBlock < 12*time.Second { // Assume ~12 second block time
-					sleepTime := 12*time.Second - timeSinceLastBlock
-					s.logger.Infof("Rate limit reached (%d txs), waiting %v for next block", maxTxsPerBlock, sleepTime)
-					time.Sleep(sleepTime)
-				}
-				blockTxCount = 0
-				lastBlockTime = time.Now()
-			}
-		}
-
-		// Wait for available slot
+		// Wait for available slot based on max pending
 		s.waitForPendingTxSlot(ctx)
 
 		// Send a single transaction
@@ -489,7 +494,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 		txIdxCounter++
 		totalTxCount.Add(1)
-		blockTxCount++
 
 		// Process pending transactions periodically with 1 second intervals
 		if txIdxCounter%10 == 0 {
@@ -590,7 +594,7 @@ func (s *Scenario) sendTransaction(ctx context.Context, txIdx uint64) error {
 
 // updateDynamicFees queries the network and updates base fee and tip fee
 func (s *Scenario) updateDynamicFees(ctx context.Context) error {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
@@ -636,7 +640,7 @@ func (s *Scenario) updateDynamicFees(ctx context.Context) error {
 // attemptTransaction makes a single attempt to send a transaction
 func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt int) error {
 	// Get client and wallet
-	client := s.walletPool.GetClient(spamoor.SelectClientRoundRobin, 0, s.options.ClientGroup)
+	client := s.walletPool.GetClient(spamoor.SelectClientRoundRobin, 0, "")
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletRoundRobin, 0)
 
 	if client == nil {
@@ -667,7 +671,7 @@ func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt
 
 	auth.Nonce = big.NewInt(int64(nonce))
 	auth.Value = big.NewInt(0)
-	auth.GasLimit = 5200000 // Fixed gas limit for contract deployment
+	auth.GasLimit = DeploymentGasLimit // Fixed gas limit for contract deployment
 
 	// Set EIP-1559 fee parameters
 	if s.options.BaseFee > 0 {
