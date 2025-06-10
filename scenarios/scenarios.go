@@ -13,6 +13,10 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/erctx"
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
+	contractdeploy "github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy"
+	eoadelegation "github.com/ethpandaops/spamoor/scenarios/statebloat/eoa_delegation"
+
+	//extcodesizeoverload "github.com/ethpandaops/spamoor/scenarios/statebloat/extcodesize_overload"
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 )
@@ -30,6 +34,9 @@ var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
 	&setcodetx.ScenarioDescriptor,
 	&uniswapswaps.ScenarioDescriptor,
 	&wallets.ScenarioDescriptor,
+	&contractdeploy.ScenarioDescriptor,
+	&eoadelegation.ScenarioDescriptor,
+	//&extcodesizeoverload.ScenarioDescriptor,
 }
 
 func GetScenario(name string) *scenariotypes.ScenarioDescriptor {
