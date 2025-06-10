@@ -34,7 +34,7 @@ func (d *Daemon) ImportSpammersOnStartup(source string, logger logrus.FieldLogge
 	}
 
 	logger.Infof("successfully imported %d spammers", len(result.Imported))
-	
+
 	// Start all imported spammers (this is the key difference from regular import)
 	startedCount := 0
 	if len(result.Imported) > 0 {

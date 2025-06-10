@@ -33,7 +33,7 @@ type Daemon struct {
 	spammerWg     sync.WaitGroup
 
 	globalCfg map[string]interface{}
-	
+
 	// Metrics collector for Prometheus metrics
 	metricsCollector *MetricsCollector
 }
@@ -224,12 +224,12 @@ func (d *Daemon) TrackTransactionSent(spammerID int64) {
 	if d.metricsCollector == nil {
 		return
 	}
-	
+
 	spammer := d.GetSpammer(spammerID)
 	if spammer == nil {
 		return
 	}
-	
+
 	d.metricsCollector.IncrementTransactionsSent(
 		spammer.GetID(),
 		spammer.GetName(),
@@ -242,12 +242,12 @@ func (d *Daemon) TrackTransactionFailure(spammerID int64) {
 	if d.metricsCollector == nil {
 		return
 	}
-	
+
 	spammer := d.GetSpammer(spammerID)
 	if spammer == nil {
 		return
 	}
-	
+
 	d.metricsCollector.IncrementTransactionFailures(
 		spammer.GetID(),
 		spammer.GetName(),
@@ -260,12 +260,12 @@ func (d *Daemon) TrackSpammerStatusChange(spammerID int64, running bool) {
 	if d.metricsCollector == nil {
 		return
 	}
-	
+
 	spammer := d.GetSpammer(spammerID)
 	if spammer == nil {
 		return
 	}
-	
+
 	d.metricsCollector.SetSpammerRunning(
 		spammer.GetID(),
 		spammer.GetName(),

@@ -193,14 +193,14 @@ func isFilePath(input string) bool {
 	if len(input) > 0 && (input[0] == '-' || input[0] == '[' || input[0] == '{') {
 		return false
 	}
-	
+
 	// Check if file exists
 	if _, err := os.Stat(input); err == nil {
 		return true
 	}
-	
+
 	// Check if it looks like a path (contains / or \)
-	return len(input) > 0 && (input[0] == '/' || input[0] == '.' || input[0] == '~' || 
+	return len(input) > 0 && (input[0] == '/' || input[0] == '.' || input[0] == '~' ||
 		(len(input) > 1 && input[1] == ':')) // Windows drive letter
 }
 
@@ -325,11 +325,11 @@ func (d *Daemon) validateImportData(yamlData string) (*ImportValidationResult, e
 	}
 
 	result := &ImportValidationResult{
-		TotalSpammers: len(importConfigs),
-		ValidSpammers: 0,
-		Duplicates:    []string{},
+		TotalSpammers:    len(importConfigs),
+		ValidSpammers:    0,
+		Duplicates:       []string{},
 		InvalidScenarios: []string{},
-		Spammers: []SpammerValidationInfo{},
+		Spammers:         []SpammerValidationInfo{},
 	}
 
 	existingSpammers := d.GetAllSpammers()
@@ -373,12 +373,12 @@ func (d *Daemon) validateImportData(yamlData string) (*ImportValidationResult, e
 
 // ImportResult contains the results of an import operation
 type ImportResult struct {
-	ImportedCount int                      `json:"imported_count"`
-	Validation    *ImportValidationResult  `json:"validation"`
-	Imported      []ImportedSpammerInfo    `json:"imported"`
-	Errors        []string                 `json:"errors"`
-	Warnings      []string                 `json:"warnings"`
-	Message       string                   `json:"message"`
+	ImportedCount int                     `json:"imported_count"`
+	Validation    *ImportValidationResult `json:"validation"`
+	Imported      []ImportedSpammerInfo   `json:"imported"`
+	Errors        []string                `json:"errors"`
+	Warnings      []string                `json:"warnings"`
+	Message       string                  `json:"message"`
 }
 
 type ImportedSpammerInfo struct {
@@ -390,11 +390,11 @@ type ImportedSpammerInfo struct {
 
 // ImportValidationResult contains validation results for import data
 type ImportValidationResult struct {
-	TotalSpammers     int                      `json:"total_spammers"`
-	ValidSpammers     int                      `json:"valid_spammers"`
-	Duplicates        []string                 `json:"duplicates"`
-	InvalidScenarios  []string                 `json:"invalid_scenarios"`
-	Spammers         []SpammerValidationInfo  `json:"spammers"`
+	TotalSpammers    int                     `json:"total_spammers"`
+	ValidSpammers    int                     `json:"valid_spammers"`
+	Duplicates       []string                `json:"duplicates"`
+	InvalidScenarios []string                `json:"invalid_scenarios"`
+	Spammers         []SpammerValidationInfo `json:"spammers"`
 }
 
 // SpammerValidationInfo contains validation info for a single spammer
@@ -404,4 +404,4 @@ type SpammerValidationInfo struct {
 	Description string   `json:"description"`
 	Valid       bool     `json:"valid"`
 	Issues      []string `json:"issues"`
-} 
+}

@@ -68,7 +68,7 @@ type WalletPool struct {
 	selectionMutex   sync.Mutex
 	rrWalletIdx      int
 	reclaimedFunds   bool
-	
+
 	// Optional callback to track transaction results for metrics
 	transactionTracker func(err error)
 }
