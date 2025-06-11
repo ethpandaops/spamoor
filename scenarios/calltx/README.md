@@ -45,7 +45,7 @@ The `--call-args` parameter supports the following placeholders:
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--deploy-gas-limit` - Gas limit for deployment transaction (default: 2000000)
-- `--gas-limit` - Gas limit for call transactions (default: 1000000)
+- `--gas-limit` - Gas limit for call transactions. Set to 0 to burn all available block gas. (default: 1000000)
 - `--amount` - ETH amount to send with each call in gwei (default: 20)
 - `--random-amount` - Use random amounts (with --amount as limit)
 - `--random-target` - Use random destination addresses

@@ -243,6 +243,23 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		tipCap = big.NewInt(1000000000)
 	}
 
+	// Determine gas limit: use block gas limit if GasLimit is 0
+	gasLimit := s.options.GasLimit
+	if gasLimit == 0 {
+		var err error
+		gasLimit, err = s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
+		if err != nil {
+			s.logger.Warnf("tx %6d: failed to fetch current gas limit: %v, using fallback", txIdx+1, err)
+			gasLimit = 30000000
+		} else if gasLimit == 0 {
+			// Final fallback to a reasonable default if no block gas limit is available
+			gasLimit = 30000000
+			s.logger.Warnf("tx %6d: no gas limit available, using fallback %v", txIdx+1, gasLimit)
+		} else {
+			s.logger.Debugf("tx %6d: using block gas limit %v", txIdx+1, gasLimit)
+		}
+	}
+
 	deployData := s.bytecodes[int(txIdx)%len(s.bytecodes)]
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),

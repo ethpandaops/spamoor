@@ -18,12 +18,13 @@ import (
 )
 
 // BlockInfo represents information about a processed block including
-// hash, parent hash, and timestamp for chain reorganization detection.
+// hash, parent hash, gas limit, and timestamp for chain reorganization detection.
 type BlockInfo struct {
 	Number     uint64
 	Hash       common.Hash
 	ParentHash common.Hash
 	Timestamp  uint64
+	GasLimit   uint64
 }
 
 // TxInfo represents information about a confirmed transaction including
@@ -54,6 +55,10 @@ type TxPool struct {
 	// Transaction tracking for reorg recovery
 	txsMutex     sync.RWMutex
 	confirmedTxs map[uint64][]*TxInfo
+
+	// Current block gas limit tracking
+	currentGasLimit uint64
+	gasLimitMutex   sync.RWMutex
 }
 
 // TxPoolOptions contains configuration options for the transaction pool.
@@ -248,7 +253,13 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 		Hash:       blockBody.Hash(),
 		ParentHash: blockBody.ParentHash(),
 		Timestamp:  blockBody.Time(),
+		GasLimit:   blockBody.GasLimit(),
 	}
+
+	// Update current gas limit
+	pool.gasLimitMutex.Lock()
+	pool.currentGasLimit = blockBody.GasLimit()
+	pool.gasLimitMutex.Unlock()
 
 	// Clean up old blocks
 	if blockNumber > uint64(pool.reorgDepth) {
@@ -914,6 +925,58 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	for _, parentBlock := range newBlockParents {
 		pool.processBlockTxs(ctx, client, parentBlock.NumberU64(), parentBlock, chainId, walletMap)
 	}
+
+	return nil
+}
+
+// GetCurrentGasLimit returns the current gas limit of the transaction pool.
+func (pool *TxPool) GetCurrentGasLimit() uint64 {
+	pool.gasLimitMutex.RLock()
+	defer pool.gasLimitMutex.RUnlock()
+	return pool.currentGasLimit
+}
+
+// GetCurrentGasLimitWithInit returns the current gas limit, initializing it from RPC if needed.
+// This is a convenience method that combines GetCurrentGasLimit and InitializeGasLimit.
+func (pool *TxPool) GetCurrentGasLimitWithInit() (uint64, error) {
+	gasLimit := pool.GetCurrentGasLimit()
+	if gasLimit == 0 {
+		if err := pool.InitializeGasLimit(); err != nil {
+			return 0, err
+		}
+		gasLimit = pool.GetCurrentGasLimit()
+	}
+	return gasLimit, nil
+}
+
+// InitializeGasLimit fetches the current block gas limit from the network if not already set.
+// This is useful during startup when the pool hasn't processed any blocks yet.
+func (pool *TxPool) InitializeGasLimit() error {
+	pool.gasLimitMutex.Lock()
+	defer pool.gasLimitMutex.Unlock()
+
+	// If we already have a gas limit, don't fetch it again
+	if pool.currentGasLimit > 0 {
+		return nil
+	}
+
+	// Try to get a client to fetch the latest block
+	client := pool.options.ClientPool.GetClient(SelectClientRandom, 0, "")
+	if client == nil {
+		return fmt.Errorf("no client available to fetch gas limit")
+	}
+
+	// Fetch the latest block to get the gas limit
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	latestBlock, err := client.client.BlockByNumber(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to fetch latest block for gas limit: %w", err)
+	}
+
+	pool.currentGasLimit = latestBlock.GasLimit()
+	logrus.Infof("initialized gas limit from latest block: %v", pool.currentGasLimit)
 
 	return nil
 }

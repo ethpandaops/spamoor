@@ -22,7 +22,7 @@ spamoor deploytx [flags]
 ### Transaction Settings
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
-- `--gaslimit` - Gas limit per deployment in gwei (default: 1000000)
+- `--gaslimit` - Gas limit per deployment. Set to 0 to burn all available block gas. (default: 1000000)
 - `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
 
 ### Bytecode Configuration
