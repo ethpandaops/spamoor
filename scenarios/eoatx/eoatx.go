@@ -34,6 +34,7 @@ type ScenarioOptions struct {
 	GasLimit     uint64 `yaml:"gas_limit"`
 	Amount       uint64 `yaml:"amount"`
 	Data         string `yaml:"data"`
+	To           string `yaml:"to"`
 	Timeout      string `yaml:"timeout"`
 	RandomAmount bool   `yaml:"random_amount"`
 	RandomTarget bool   `yaml:"random_target"`
@@ -61,6 +62,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	GasLimit:     21000,
 	Amount:       20,
 	Data:         "",
+	To:           "",
 	Timeout:      "",
 	RandomAmount: false,
 	RandomTarget: false,
@@ -92,6 +94,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.GasLimit, "gaslimit", ScenarioDefaultOptions.GasLimit, "Gas limit to use in transactions")
 	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (in gwei)")
 	flags.StringVar(&s.options.Data, "data", ScenarioDefaultOptions.Data, "Transaction call data to send")
+	flags.StringVar(&s.options.To, "to", ScenarioDefaultOptions.To, "Target address to send transactions to (uses existing logic when empty)")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
@@ -245,15 +248,20 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		}
 	}
 
-	toAddr := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
-	if s.options.RandomTarget {
-		addrBytes := make([]byte, 20)
-		rand.Read(addrBytes)
-		toAddr = common.Address(addrBytes)
-	}
+	var toAddr common.Address
+	if s.options.To != "" {
+		toAddr = common.HexToAddress(s.options.To)
+	} else {
+		toAddr = s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
+		if s.options.RandomTarget {
+			addrBytes := make([]byte, 20)
+			rand.Read(addrBytes)
+			toAddr = common.Address(addrBytes)
+		}
 
-	if s.options.SelfTxOnly {
-		toAddr = wallet.GetAddress()
+		if s.options.SelfTxOnly {
+			toAddr = wallet.GetAddress()
+		}
 	}
 
 	txCallData := []byte{}
