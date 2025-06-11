@@ -33,6 +33,7 @@ type ScenarioOptions struct {
 	BaseFee        uint64 `yaml:"base_fee"`
 	TipFee         uint64 `yaml:"tip_fee"`
 	GasUnitsToBurn uint64 `yaml:"gas_units_to_burn"`
+	GasRemainder   uint64 `yaml:"gas_remainder"`
 	Timeout        string `yaml:"timeout"`
 	OpcodesEas     string `yaml:"opcodes"`
 	InitOpcodesEas string `yaml:"init_opcodes"`
@@ -59,6 +60,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:        20,
 	TipFee:         2,
 	GasUnitsToBurn: 2000000,
+	GasRemainder:   10000,
 	Timeout:        "",
 	OpcodesEas:     "",
 	InitOpcodesEas: "",
@@ -87,6 +89,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasUnitsToBurn, "gas-units-to-burn", ScenarioDefaultOptions.GasUnitsToBurn, "The number of gas units for each tx to cost")
+	flags.Uint64Var(&s.options.GasRemainder, "gas-remainder", ScenarioDefaultOptions.GasRemainder, "The minimum number of gas units that must be left to do another round of the gasburner loop")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.OpcodesEas, "opcodes", "", "EAS opcodes to use for burning gas in the gasburner contract")
 	flags.StringVar(&s.options.InitOpcodesEas, "init-opcodes", "", "EAS opcodes to use for the init code of the gasburner contract")
@@ -280,7 +283,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
         stop              ;; [custom]
 
 	loop:
-		push 10000        ;; [10000, loop_counter, gas, custom]
+		push %d           ;; [gas_remainder, loop_counter, gas, custom]
 		gas               ;; [gas, 10000, loop_counter, gas, custom]
 		lt                ;; [gas < 10000, loop_counter, gas, custom]
 		jumpi @exit       ;; [loop_counter, gas, custom]
@@ -310,7 +313,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 
 	if len(opcodesGeas) > 0 && strings.HasPrefix(opcodesGeas, "0x") {
 		// opcodes in bytecode format
-		contractCode := compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, defaultOpcodesGeas))
+		contractCode := compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, s.options.GasRemainder, defaultOpcodesGeas))
 		if contractCode == nil {
 			return nil, client, fmt.Errorf("failed to compile template contract code")
 		}
@@ -330,12 +333,12 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 		workerCodeBytes = contractCodeBytes
 	} else if len(opcodesGeas) > 0 {
 		// opcodes in geas format
-		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, opcodesGeas))
+		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, s.options.GasRemainder, opcodesGeas))
 		if workerCodeBytes == nil {
 			return nil, client, fmt.Errorf("failed to compile template contract code")
 		}
 	} else {
-		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, defaultOpcodesGeas))
+		workerCodeBytes = compiler.CompileString(fmt.Sprintf(contractGeasTpl, contractInitOpcodesGeas, s.options.GasRemainder, defaultOpcodesGeas))
 		if workerCodeBytes == nil {
 			return nil, client, fmt.Errorf("failed to compile default contract code")
 		}

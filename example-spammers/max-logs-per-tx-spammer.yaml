@@ -1,0 +1,24 @@
+- scenario: gasburnertx
+  name: Max log emission spammer
+  description: ""
+  config:
+    throughput: 2
+    max_pending: 4
+    max_wallets: 0
+    client_group: ""
+    gas_units_to_burn: 0 # burn all available block gas
+    init_opcodes: |
+        PUSH 0x1337133713371337133713371337133713371337133713371337133713371337
+        PUSH 0
+        MSTORE
+    opcodes: |
+        PUSH 32
+        PUSH 0
+        LOG0
+    rebroadcast: 120
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: gasburnertx-746272
+    base_fee: 2
+    tip_fee: 1
