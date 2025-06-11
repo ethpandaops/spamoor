@@ -32,7 +32,7 @@ devnet:
 	.hack/devnet/run.sh
 
 devnet-run: devnet
-	go run cmd/spamoor-daemon/main.go --rpchost-file .hack/devnet/generated-hosts.txt --privkey 3fd98b5187bf6526734efaa644ffbb4e3670d66f5d0268ce0323ec09124bff61 --port 8080 --db .hack/devnet/generated-spamoor.db
+	go run cmd/spamoor-daemon/main.go --rpchost-file .hack/devnet/generated-hosts.txt --privkey 3fd98b5187bf6526734efaa644ffbb4e3670d66f5d0268ce0323ec09124bff61 --port 8080 --db .hack/devnet/custom-spamoor.db
 
 devnet-clean:
 	.hack/devnet/cleanup.sh
