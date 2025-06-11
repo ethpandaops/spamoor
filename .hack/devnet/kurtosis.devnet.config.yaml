@@ -1,0 +1,18 @@
+participants_matrix:
+  el:
+    - el_type: geth
+    - el_type: reth
+  cl:
+    - cl_type: lighthouse
+network_params:
+  electra_fork_epoch: 0
+  preset: mainnet
+  gas_limit: 60000000
+  genesis_gaslimit: 60000000
+additional_services:
+  - dora
+  - blockscout
+port_publisher:
+  additional_services:
+    enabled: true
+    public_port_start: 36000
