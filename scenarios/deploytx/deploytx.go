@@ -36,6 +36,7 @@ type ScenarioOptions struct {
 	TipFee        uint64 `yaml:"tip_fee"`
 	Bytecodes     string `yaml:"bytecodes"`
 	BytecodesFile string `yaml:"bytecodes_file"`
+	Timeout       string `yaml:"timeout"`
 	ClientGroup   string `yaml:"client_group"`
 }
 
@@ -61,6 +62,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TipFee:        2,
 	Bytecodes:     "",
 	BytecodesFile: "",
+	Timeout:       "",
 	ClientGroup:   "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -88,6 +90,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in deployment transactions (in gwei)")
 	flags.StringVar(&s.options.Bytecodes, "bytecodes", ScenarioDefaultOptions.Bytecodes, "Bytecodes to deploy (, separated list of hex bytecodes)")
 	flags.StringVar(&s.options.BytecodesFile, "bytecodes-file", ScenarioDefaultOptions.BytecodesFile, "File with bytecodes to deploy (list with hex bytecodes)")
+	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
@@ -167,11 +170,23 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
+	// Parse timeout
+	var timeout time.Duration
+	if s.options.Timeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(s.options.Timeout)
+		if err != nil {
+			return fmt.Errorf("invalid timeout value: %v", err)
+		}
+		s.logger.Infof("Timeout set to %v", timeout)
+	}
+
 	err := utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
 		TotalCount:                  s.options.TotalCount,
 		Throughput:                  s.options.Throughput,
 		MaxPending:                  maxPending,
 		ThroughputIncrementInterval: 0,
+		Timeout:                     timeout,
 
 		Logger: s.logger,
 		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {

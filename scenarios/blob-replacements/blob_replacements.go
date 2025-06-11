@@ -38,6 +38,7 @@ type ScenarioOptions struct {
 	BlobV1Percent               uint64                   `yaml:"blob_v1_percent"`
 	FuluActivation              utils.FlexibleJsonUInt64 `yaml:"fulu_activation"`
 	ThroughputIncrementInterval uint64                   `yaml:"throughput_increment_interval"`
+	Timeout                     string                   `yaml:"timeout"`
 	ClientGroup                 string                   `yaml:"client_group"`
 }
 
@@ -65,6 +66,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BlobV1Percent:               100,
 	FuluActivation:              math.MaxInt64,
 	ThroughputIncrementInterval: 0,
+	Timeout:                     "",
 	ClientGroup:                 "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -96,6 +98,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
 	flags.Uint64Var((*uint64)(&s.options.FuluActivation), "fulu-activation", uint64(ScenarioDefaultOptions.FuluActivation), "Unix timestamp of the Fulu activation")
 	flags.Uint64Var(&s.options.ThroughputIncrementInterval, "throughput-increment-interval", ScenarioDefaultOptions.ThroughputIncrementInterval, "Increment the throughput every interval (in sec).")
+	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
@@ -155,11 +158,23 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
+	// Parse timeout
+	var timeout time.Duration
+	if s.options.Timeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(s.options.Timeout)
+		if err != nil {
+			return fmt.Errorf("invalid timeout value: %v", err)
+		}
+		s.logger.Infof("Timeout set to %v", timeout)
+	}
+
 	err := utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
 		TotalCount:                  s.options.TotalCount,
 		Throughput:                  s.options.Throughput,
 		MaxPending:                  maxPending,
 		ThroughputIncrementInterval: s.options.ThroughputIncrementInterval,
+		Timeout:                     timeout,
 
 		Logger: s.logger,
 		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {

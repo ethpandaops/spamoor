@@ -34,6 +34,7 @@ type ScenarioOptions struct {
 	GasLimit     uint64 `yaml:"gas_limit"`
 	Amount       uint64 `yaml:"amount"`
 	Data         string `yaml:"data"`
+	Timeout      string `yaml:"timeout"`
 	RandomAmount bool   `yaml:"random_amount"`
 	RandomTarget bool   `yaml:"random_target"`
 	SelfTxOnly   bool   `yaml:"self_tx_only"`
@@ -60,6 +61,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	GasLimit:     21000,
 	Amount:       20,
 	Data:         "",
+	Timeout:      "",
 	RandomAmount: false,
 	RandomTarget: false,
 	SelfTxOnly:   false,
@@ -90,6 +92,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.GasLimit, "gaslimit", ScenarioDefaultOptions.GasLimit, "Gas limit to use in transactions")
 	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (in gwei)")
 	flags.StringVar(&s.options.Data, "data", ScenarioDefaultOptions.Data, "Transaction call data to send")
+	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
 	flags.BoolVar(&s.options.SelfTxOnly, "self-tx-only", ScenarioDefaultOptions.SelfTxOnly, "Only send transactions to self")
@@ -146,11 +149,22 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
+	// Parse timeout duration
+	var timeout time.Duration
+	if s.options.Timeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(s.options.Timeout)
+		if err != nil {
+			return fmt.Errorf("invalid timeout format '%s': %w", s.options.Timeout, err)
+		}
+	}
+
 	err := utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
 		TotalCount:                  s.options.TotalCount,
 		Throughput:                  s.options.Throughput,
 		MaxPending:                  maxPending,
 		ThroughputIncrementInterval: 0,
+		Timeout:                     timeout,
 
 		Logger: s.logger,
 		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {

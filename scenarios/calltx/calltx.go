@@ -52,6 +52,7 @@ type ScenarioOptions struct {
 	CallFnName       string `yaml:"call_fn_name"`
 	CallFnSig        string `yaml:"call_fn_sig"`
 	CallArgs         string `yaml:"call_args"`
+	Timeout          string `yaml:"timeout"`
 	ClientGroup      string `yaml:"client_group"`
 }
 
@@ -91,6 +92,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	CallFnName:       "",
 	CallFnSig:        "",
 	CallArgs:         "",
+	Timeout:          "",
 	ClientGroup:      "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -132,6 +134,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.CallFnSig, "call-fn-sig", ScenarioDefaultOptions.CallFnSig, "Function signature to call (alternative to --call-abi)")
 	flags.StringVar(&s.options.CallArgs, "call-args", ScenarioDefaultOptions.CallArgs, "JSON array of arguments to pass to the function")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	return nil
 }
 
@@ -297,11 +300,23 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
+	// Parse timeout
+	var timeout time.Duration
+	if s.options.Timeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(s.options.Timeout)
+		if err != nil {
+			return fmt.Errorf("invalid timeout value: %v", err)
+		}
+		s.logger.Infof("Timeout set to %v", timeout)
+	}
+
 	err := utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
 		TotalCount:                  s.options.TotalCount,
 		Throughput:                  s.options.Throughput,
 		MaxPending:                  maxPending,
 		ThroughputIncrementInterval: 0,
+		Timeout:                     timeout,
 
 		Logger: s.logger,
 		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {

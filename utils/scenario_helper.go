@@ -17,6 +17,7 @@ type TransactionScenarioOptions struct {
 	Throughput                  uint64
 	MaxPending                  uint64
 	ThroughputIncrementInterval uint64
+	Timeout                     time.Duration // Maximum duration for scenario execution (0 = no timeout)
 
 	// Logger for scenario execution information
 	Logger *logrus.Entry
@@ -45,6 +46,15 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	txIdxCounter := uint64(0)
 	pendingCount := atomic.Int64{}
 	txCount := atomic.Uint64{}
+
+	// Apply timeout if specified
+	if options.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
+		defer cancel()
+
+		options.Logger.Infof("scenario will timeout after %v", options.Timeout)
+	}
 
 	var lastChan chan bool
 	var pendingChan chan bool

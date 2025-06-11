@@ -37,6 +37,7 @@ type ScenarioOptions struct {
 	BuyRatio      uint64 `yaml:"buy_ratio"`
 	Slippage      uint64 `yaml:"slippage"`
 	SellThreshold string `yaml:"sell_threshold"`
+	Timeout       string `yaml:"timeout"`
 	ClientGroup   string `yaml:"client_group"`
 }
 
@@ -66,6 +67,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BuyRatio:      50,
 	Slippage:      50,
 	SellThreshold: "100000000000000000000000", // 10000 DAI
+	Timeout:       "",
 	ClientGroup:   "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -96,6 +98,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BuyRatio, "buy-ratio", ScenarioDefaultOptions.BuyRatio, "Ratio of buy vs sell swaps (0-100)")
 	flags.Uint64Var(&s.options.Slippage, "slippage", ScenarioDefaultOptions.Slippage, "Slippage tolerance in basis points")
 	flags.StringVar(&s.options.SellThreshold, "sell-threshold", ScenarioDefaultOptions.SellThreshold, "DAI balance threshold to force sell (in wei)")
+	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
@@ -197,11 +200,23 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
+	// Parse timeout
+	var timeout time.Duration
+	if s.options.Timeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(s.options.Timeout)
+		if err != nil {
+			return fmt.Errorf("invalid timeout value: %v", err)
+		}
+		s.logger.Infof("Timeout set to %v", timeout)
+	}
+
 	err = utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
 		TotalCount:                  s.options.TotalCount,
 		Throughput:                  s.options.Throughput,
 		MaxPending:                  maxPending,
 		ThroughputIncrementInterval: 0,
+		Timeout:                     timeout,
 
 		Logger: s.logger,
 		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {

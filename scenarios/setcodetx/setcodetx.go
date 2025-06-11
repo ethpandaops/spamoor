@@ -43,6 +43,7 @@ type ScenarioOptions struct {
 	RandomAmount      bool   `yaml:"random_amount"`
 	RandomTarget      bool   `yaml:"random_target"`
 	RandomCodeAddr    bool   `yaml:"random_code_addr"`
+	Timeout           string `yaml:"timeout"`
 	ClientGroup       string `yaml:"client_group"`
 }
 
@@ -74,6 +75,8 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	CodeAddr:          "",
 	RandomAmount:      false,
 	RandomTarget:      false,
+	RandomCodeAddr:    false,
+	Timeout:           "",
 	ClientGroup:       "",
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -108,6 +111,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
 	flags.BoolVar(&s.options.RandomCodeAddr, "random-code-addr", ScenarioDefaultOptions.RandomCodeAddr, "Use random delegation target for transactions")
+	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	return nil
 }
@@ -169,11 +173,23 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
+	// Parse timeout
+	var timeout time.Duration
+	if s.options.Timeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(s.options.Timeout)
+		if err != nil {
+			return fmt.Errorf("invalid timeout value: %v", err)
+		}
+		s.logger.Infof("Timeout set to %v", timeout)
+	}
+
 	err := utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
 		TotalCount:                  s.options.TotalCount,
 		Throughput:                  s.options.Throughput,
 		MaxPending:                  maxPending,
 		ThroughputIncrementInterval: 0,
+		Timeout:                     timeout,
 
 		Logger: s.logger,
 		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
