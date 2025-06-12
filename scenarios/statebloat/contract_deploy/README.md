@@ -51,7 +51,7 @@ go build -o bin/spamoor cmd/spamoor/main.go
 #### Key Flags
 - `--max-transactions` - Total number of contracts to deploy (0 = infinite, default: 0)
 - `--max-wallets` - Max child wallets to use (0 = root wallet only, default: 0)
-- `--basefee` - Base fee per gas in gwei (default: 20)
+- `--basefee` - Base fee per gas in gwei (default: 10)
 - `--tipfee` - Tip fee per gas in gwei (default: 2)
 
 Note: The scenario uses only the root wallet by default to simplify nonce management and ensure reliable transaction ordering. It automatically calculates the optimal number of concurrent transactions based on the network's block gas limit and monitors actual block production to send batches that fill every block to capacity.
@@ -60,5 +60,5 @@ Note: The scenario uses only the root wallet by default to simplify nonce manage
 ```bash
 ./bin/spamoor --privkey ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
   --rpchost http://localhost:8545 contract-deploy \
-  --max-transactions 100 --basefee 25 --tipfee 5
+  --max-transactions 0
 ``` 

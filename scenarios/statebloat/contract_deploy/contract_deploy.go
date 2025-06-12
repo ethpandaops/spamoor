@@ -67,6 +67,7 @@ type ContractDeployment struct {
 type PendingTransaction struct {
 	TxHash     common.Hash
 	PrivateKey *ecdsa.PrivateKey
+	Timestamp  time.Time
 }
 
 // BlockDeploymentStats tracks deployment statistics per block
@@ -110,9 +111,9 @@ type Scenario struct {
 
 var ScenarioName = "contract-deploy"
 var ScenarioDefaultOptions = ScenarioOptions{
-	MaxWallets:      1000,
-	BaseFee:         20,
-	TipFee:          2,
+	MaxWallets:      0, // Use root wallet only by default
+	BaseFee:         5, // Moderate base fee (5 gwei)
+	TipFee:          1, // Priority fee (1 gwei)
 	MaxTransactions: 0,
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -149,10 +150,10 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 
 	if s.options.MaxWallets > 0 {
 		walletPool.SetWalletCount(s.options.MaxWallets)
-	} else if s.options.MaxTransactions == 0 {
-		walletPool.SetWalletCount(1)
 	} else {
-		walletPool.SetWalletCount(1000)
+		// Use only root wallet by default for better efficiency
+		// This avoids child wallet funding overhead
+		walletPool.SetWalletCount(0)
 	}
 
 	// Initialize default max pending for manual mode
@@ -210,6 +211,7 @@ func (s *Scenario) processPendingTransactions(ctx context.Context) {
 
 	ethClient := client.GetEthClient()
 	var confirmedTxs []common.Hash
+	var timedOutTxs []common.Hash
 	var successfulDeployments []struct {
 		ContractAddress common.Address
 		PrivateKey      *ecdsa.PrivateKey
@@ -218,6 +220,13 @@ func (s *Scenario) processPendingTransactions(ctx context.Context) {
 	}
 
 	for txHash, pendingTx := range s.pendingTxs {
+		// Check if transaction is too old (1 minute timeout)
+		if time.Since(pendingTx.Timestamp) > 1*time.Minute {
+			s.logger.Warnf("Transaction %s timed out after 1 minute, removing from pending", txHash.Hex())
+			timedOutTxs = append(timedOutTxs, txHash)
+			continue
+		}
+
 		receipt, err := ethClient.TransactionReceipt(ctx, txHash)
 		if err != nil {
 			// Transaction still pending or error retrieving receipt
@@ -244,6 +253,11 @@ func (s *Scenario) processPendingTransactions(ctx context.Context) {
 
 	// Remove confirmed transactions from pending map
 	for _, txHash := range confirmedTxs {
+		delete(s.pendingTxs, txHash)
+	}
+
+	// Remove timed out transactions from pending map
+	for _, txHash := range timedOutTxs {
 		delete(s.pendingTxs, txHash)
 	}
 
@@ -611,15 +625,7 @@ func (s *Scenario) updateDynamicFees(ctx context.Context) error {
 		// Convert base fee from wei to gwei
 		currentBaseFeeGwei := new(big.Int).Div(latestBlock.BaseFee(), big.NewInt(1000000000))
 
-		// Set new base fee to current base fee + 20% buffer
-		newBaseFeeGwei := new(big.Int).Mul(currentBaseFeeGwei, big.NewInt(120))
-		newBaseFeeGwei = new(big.Int).Div(newBaseFeeGwei, big.NewInt(100))
-
-		// Ensure minimum increase of 5 gwei
-		minIncrease := big.NewInt(5)
-		if newBaseFeeGwei.Cmp(new(big.Int).Add(big.NewInt(int64(s.options.BaseFee)), minIncrease)) < 0 {
-			newBaseFeeGwei = new(big.Int).Add(big.NewInt(int64(s.options.BaseFee)), minIncrease)
-		}
+		newBaseFeeGwei := new(big.Int).Add(currentBaseFeeGwei, big.NewInt(100))
 
 		s.options.BaseFee = newBaseFeeGwei.Uint64()
 
@@ -627,7 +633,7 @@ func (s *Scenario) updateDynamicFees(ctx context.Context) error {
 		if s.options.TipFee+1 > 3 {
 			s.options.TipFee = s.options.TipFee + 1
 		} else {
-			s.options.TipFee = 3 // Minimum 3 gwei tip
+			s.options.TipFee = 2 // Minimum 3 gwei tip
 		}
 
 		s.logger.Infof("Updated dynamic fees - Base fee: %d gwei, Tip fee: %d gwei (network base fee: %s gwei)",
@@ -641,7 +647,7 @@ func (s *Scenario) updateDynamicFees(ctx context.Context) error {
 func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt int) error {
 	// Get client and wallet
 	client := s.walletPool.GetClient(spamoor.SelectClientRoundRobin, 0, "")
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletRoundRobin, 0)
+	wallet := s.walletPool.GetRootWallet()
 
 	if client == nil {
 		return fmt.Errorf("no client available")
@@ -704,6 +710,7 @@ func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt
 	pendingTx := &PendingTransaction{
 		TxHash:     tx.Hash(),
 		PrivateKey: wallet.GetPrivateKey(),
+		Timestamp:  time.Now(),
 	}
 
 	s.pendingTxsMutex.Lock()
