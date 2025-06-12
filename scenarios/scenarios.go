@@ -12,6 +12,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
 	"github.com/ethpandaops/spamoor/scenarios/erctx"
+	"github.com/ethpandaops/spamoor/scenarios/factorydeploytx"
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/geastx"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
@@ -33,6 +34,7 @@ var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
 	&deploytx.ScenarioDescriptor,
 	&eoatx.ScenarioDescriptor,
 	&erctx.ScenarioDescriptor,
+	&factorydeploytx.ScenarioDescriptor,
 	&gasburnertx.ScenarioDescriptor,
 	&geastx.ScenarioDescriptor,
 	&setcodetx.ScenarioDescriptor,

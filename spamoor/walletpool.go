@@ -2,6 +2,7 @@ package spamoor
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -48,6 +49,7 @@ type WellKnownWalletConfig struct {
 	Name          string
 	RefillAmount  *uint256.Int
 	RefillBalance *uint256.Int
+	VeryWellKnown bool
 }
 
 // WalletPool manages a pool of child wallets derived from a root wallet with automatic funding
@@ -234,6 +236,33 @@ func (pool *WalletPool) GetWallet(mode WalletSelectionMode, input int) *Wallet {
 // Returns nil if the wallet doesn't exist.
 func (pool *WalletPool) GetWellKnownWallet(name string) *Wallet {
 	return pool.wellKnownWallets[name]
+}
+
+// GetVeryWellKnownWalletAddress derives the address of a "very well known" wallet
+// without registering it. Very well known wallets are derived only from the root
+// wallet's private key and the wallet name, without any scenario seed.
+// This makes them consistent across different scenario runs.
+func (pool *WalletPool) GetVeryWellKnownWalletAddress(name string) common.Address {
+	idxBytes := make([]byte, len(name))
+	copy(idxBytes, name)
+	// VeryWellKnown wallets don't use the seed, so we skip adding it
+
+	parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
+	childKey := sha256.Sum256(append(parentKey, idxBytes...))
+
+	// Derive private key and then address
+	privateKey, err := crypto.HexToECDSA(fmt.Sprintf("%x", childKey))
+	if err != nil {
+		return common.Address{}
+	}
+
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return common.Address{}
+	}
+
+	return crypto.PubkeyToAddress(*publicKeyECDSA)
 }
 
 // GetWalletName returns a human-readable name for the given wallet address.
@@ -426,7 +455,7 @@ func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *Client, seed
 func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, client *Client, seed string) (*Wallet, *FundingRequest, error) {
 	idxBytes := make([]byte, len(config.Name))
 	copy(idxBytes, config.Name)
-	if seed != "" {
+	if seed != "" && !config.VeryWellKnown {
 		seedBytes := []byte(seed)
 		idxBytes = append(idxBytes, seedBytes...)
 	}

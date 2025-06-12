@@ -220,7 +220,8 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 			abiContent = s.options.CallABI
 		}
 
-		s.abiCallBuilder, err = utils.NewABICallDataBuilder(abiContent, s.options.CallFnName, s.options.CallFnSig, s.options.CallArgs)
+		callArgsWithPlaceholders := s.replaceCallDataPlaceholders(s.options.CallArgs)
+		s.abiCallBuilder, err = utils.NewABICallDataBuilder(abiContent, s.options.CallFnName, s.options.CallFnSig, callArgsWithPlaceholders)
 		if err != nil {
 			return fmt.Errorf("failed to initialize ABI call builder: %w", err)
 		}
@@ -508,8 +509,9 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			return nil, nil, wallet, fmt.Errorf("failed to build ABI call data: %w", err)
 		}
 	} else if s.options.CallData != "" {
-		// Use raw call data
-		dataBytes, err := txbuilder.ParseBlobRefsBytes(strings.Split(s.options.CallData, ","), nil)
+		// Use raw call data with placeholder replacement
+		callDataWithPlaceholders := s.replaceCallDataPlaceholders(s.options.CallData)
+		dataBytes, err := txbuilder.ParseBlobRefsBytes(strings.Split(callDataWithPlaceholders, ","), nil)
 		if err != nil {
 			return nil, nil, wallet, err
 		}
@@ -594,6 +596,21 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	}
 
 	return tx, client, wallet, nil
+}
+
+// replaceCallDataPlaceholders replaces placeholders in call data with actual values
+func (s *Scenario) replaceCallDataPlaceholders(callData string) string {
+	// Replace factory address placeholder with well-known CREATE2 factory address
+	if strings.Contains(callData, "{factory_address}") {
+		// Use the same well-known CREATE2 factory address as factorydeploytx scenario
+		// Get the very well known factory deployer wallet address and calculate the factory address
+		factoryWalletAddr := s.walletPool.GetVeryWellKnownWalletAddress("create2-factory-deployer")
+		factoryAddr := crypto.CreateAddress(factoryWalletAddr, 0)
+		result := strings.ReplaceAll(callData, "{factory_address}", factoryAddr.Hex())
+		return result
+	}
+
+	return callData
 }
 
 // calculateChildContractAddress calculates the address of a child contract based on the nonce path
