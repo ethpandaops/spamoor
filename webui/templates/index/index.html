@@ -111,7 +111,7 @@
           </tr>
           <tr class="d-none log-row" data-spammer-id="{{ .ID }}">
             <td colspan="6" class="p-0">
-              <div class="log-container bg-dark text-light p-3" style="max-height: 400px; overflow-y: auto;">
+              <div class="log-container p-3" style="max-height: 400px; overflow-y: auto;">
                 <div class="logs font-monospace small"></div>
               </div>
             </td>
@@ -909,23 +909,47 @@ function showImportError(message) {
 
 {{ define "css" }}
 <style>
+/* Log Container - Adapts to theme */
+.log-container {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.375rem;
+}
+
+/* Dark theme specific styles */
+[data-bs-theme="dark"] .log-container {
+  background-color: #1a1d20;
+  border-color: #495057;
+}
+
+/* Light theme specific styles */
+[data-bs-theme="light"] .log-container {
+  background-color: #f8f9fa;
+  border-color: #dee2e6;
+}
+
 .log-entry {
   word-break: break-word;
   margin-bottom: 0.25rem;
   border-left: 3px solid transparent;
   padding-left: 0.5rem;
+  color: var(--bs-body-color);
 }
 
 .log-entry.text-danger {
   border-left-color: var(--bs-danger);
+  color: var(--bs-danger);
 }
 
 .log-entry.text-warning {
   border-left-color: var(--bs-warning);
+  color: var(--bs-warning);
 }
 
 .log-entry.text-info {
   border-left-color: var(--bs-info);
+  color: var(--bs-info);
 }
 
 .message-text {
@@ -945,9 +969,24 @@ function showImportError(message) {
   padding: 0.15em 0.4em;
   font-weight: normal;
   line-height: 1;
-  background-color: #2d3238 !important;
-  color: #adb5bd;
   white-space: nowrap;
+  background-color: var(--bs-secondary) !important;
+  color: var(--bs-body-color);
+  border: 1px solid var(--bs-border-color);
+}
+
+/* Dark theme badge styling */
+[data-bs-theme="dark"] .log-entry .badge {
+  background-color: #2d3238 !important;
+  color: #adb5bd !important;
+  border-color: #495057;
+}
+
+/* Light theme badge styling */
+[data-bs-theme="light"] .log-entry .badge {
+  background-color: #e9ecef !important;
+  color: #495057 !important;
+  border-color: #ced4da;
 }
 
 .log-entry .more-fields {
@@ -960,7 +999,33 @@ function showImportError(message) {
   white-space: pre-line;
 }
 
-/* Import modal dark mode support */
+/* Status badges - better contrast */
+.badge.bg-info {
+  background-color: var(--bs-info) !important;
+  color: var(--bs-white) !important;
+}
+
+.badge.bg-success {
+  background-color: var(--bs-success) !important;
+  color: var(--bs-white) !important;
+}
+
+.badge.bg-secondary {
+  background-color: var(--bs-secondary) !important;
+  color: var(--bs-white) !important;
+}
+
+.badge.bg-danger {
+  background-color: var(--bs-danger) !important;
+  color: var(--bs-white) !important;
+}
+
+.badge.bg-warning {
+  background-color: var(--bs-warning) !important;
+  color: var(--bs-black) !important;
+}
+
+/* Import modal - proper theme support */
 .yaml-preview {
   background-color: var(--bs-body-bg);
   color: var(--bs-body-color);
@@ -986,7 +1051,7 @@ function showImportError(message) {
   box-shadow: 0 0 0 0.25rem rgba(var(--bs-primary-rgb), 0.25);
 }
 
-/* File input styling for dark mode */
+/* File input styling */
 .modal-body .form-control[type="file"] {
   background-color: var(--bs-body-bg);
   color: var(--bs-body-color);
@@ -998,12 +1063,90 @@ function showImportError(message) {
   color: var(--bs-body-color);
   margin-right: 0.75rem;
   border-radius: 0.375rem;
+  border: 1px solid var(--bs-border-color);
+  padding: 0.25rem 0.5rem;
 }
 
-/* Radio button styling for dark mode */
+/* Radio button styling */
 .modal-body .btn-check:checked + .btn-outline-primary {
   background-color: var(--bs-primary);
   border-color: var(--bs-primary);
+  color: var(--bs-white);
+}
+
+/* Table improvements for dark mode */
+.table {
+  --bs-table-bg: var(--bs-body-bg);
+  --bs-table-color: var(--bs-body-color);
+}
+
+[data-bs-theme="dark"] .table {
+  --bs-table-striped-bg: rgba(255, 255, 255, 0.05);
+  --bs-table-hover-bg: rgba(255, 255, 255, 0.075);
+}
+
+/* Modal improvements */
+[data-bs-theme="dark"] .modal-content {
+  background-color: var(--bs-dark);
+  border-color: var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .modal-header {
+  border-bottom-color: var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .modal-footer {
+  border-top-color: var(--bs-border-color);
+}
+
+/* Button improvements for better contrast */
+.btn-group .btn {
+  border-color: var(--bs-border-color);
+}
+
+/* Dropdown improvements */
+[data-bs-theme="dark"] .dropdown-menu {
+  background-color: var(--bs-dark);
+  border-color: var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .dropdown-item {
+  color: var(--bs-body-color);
+}
+
+[data-bs-theme="dark"] .dropdown-item:hover,
+[data-bs-theme="dark"] .dropdown-item:focus {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: var(--bs-body-color);
+}
+
+[data-bs-theme="dark"] .dropdown-divider {
+  border-top-color: var(--bs-border-color);
+}
+
+/* Alert improvements */
+[data-bs-theme="dark"] .alert-info {
+  background-color: rgba(13, 202, 240, 0.1);
+  border-color: rgba(13, 202, 240, 0.2);
+  color: #9ec5fe;
+}
+
+[data-bs-theme="dark"] .alert-warning {
+  background-color: rgba(255, 193, 7, 0.1);
+  border-color: rgba(255, 193, 7, 0.2);
+  color: #ffda6a;
+}
+
+[data-bs-theme="dark"] .alert-success {
+  background-color: rgba(25, 135, 84, 0.1);
+  border-color: rgba(25, 135, 84, 0.2);
+  color: #75b798;
+}
+
+[data-bs-theme="dark"] .alert-danger {
+  background-color: rgba(220, 53, 69, 0.1);
+  border-color: rgba(220, 53, 69, 0.2);
+  color: #f1aeb5;
 }
 </style>
 {{ end }}
