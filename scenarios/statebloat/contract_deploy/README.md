@@ -45,15 +45,14 @@ go build -o bin/spamoor cmd/spamoor/main.go
 ```
 
 #### Key Flags
-- `--max-transactions` - Number of contracts to deploy (0 = infinite, default: 0)
-- `--max-pending` - Max concurrent pending transactions (default: 10)
-- `--max-wallets` - Max child wallets to use (default: 1000)
-- `--basefee` - Base fee per gas in gwei (default: 20)
+- `--max-transactions` - Total number of contracts to deploy (0 = infinite, default: 0)
+- `--max-wallets` - Max child wallets to use (0 = root wallet only, default: 0)
+- `--basefee` - Base fee per gas in gwei (default: 10)
 - `--tipfee` - Tip fee per gas in gwei (default: 2)
 
 #### Example with Anvil node
 ```bash
 ./bin/spamoor --privkey ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
   --rpchost http://localhost:8545 contract-deploy \
-  --max-transactions 100 --max-pending 20 --basefee 25 --tipfee 5
+  --max-transactions 0
 ``` 
