@@ -99,6 +99,12 @@ spamoor-daemon --startup-spammer="spammer-configs.yaml"
 - include: "https://example.com/stress-tests.yaml"
 ```
 
+### Metrics
+The daemon exposes Prometheus metrics at the `/metrics` endpoint, providing real-time monitoring capabilities for running spammer scenarios. These metrics include:
+- Transaction counts and success/failure rates
+- Scenario-specific metrics
+- System performance indicators
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
