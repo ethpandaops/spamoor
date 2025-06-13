@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -57,10 +58,13 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	}
 
 	var lastChan chan bool
-	var pendingChan chan bool
+	var maxPending atomic.Uint64
+	var pendingMutex sync.Mutex
+	var pendingCond *sync.Cond
 
 	if options.MaxPending > 0 {
-		pendingChan = make(chan bool, options.MaxPending)
+		maxPending.Store(options.MaxPending)
+		pendingCond = sync.NewCond(&pendingMutex)
 	}
 
 	initialRate := rate.Limit(float64(options.Throughput) / float64(SecondsPerSlot))
@@ -70,6 +74,9 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	limiter := rate.NewLimiter(initialRate, 1)
 
 	if options.ThroughputIncrementInterval != 0 {
+		// Calculate the ratio between MaxPending and Throughput
+		pendingRatio := float64(options.MaxPending) / float64(options.Throughput)
+
 		go func() {
 			ticker := time.NewTicker(time.Duration(options.ThroughputIncrementInterval) * time.Second)
 			for {
@@ -77,8 +84,18 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 				case <-ticker.C:
 					throughput := limiter.Limit() * 12
 					newThroughput := throughput + 1
-					options.Logger.Infof("Increasing throughput from %.3f to %.3f", throughput, newThroughput)
+					newMaxPending := uint64(float64(newThroughput) * pendingRatio)
+
+					options.Logger.Infof("Increasing throughput from %.3f to %.3f and max pending from %d to %d",
+						throughput, newThroughput, maxPending.Load(), newMaxPending)
+
 					limiter.SetLimit(rate.Limit(float64(newThroughput) / float64(SecondsPerSlot)))
+					maxPending.Store(newMaxPending)
+
+					// Signal one waiting goroutine that capacity has increased
+					if pendingCond != nil {
+						pendingCond.Signal()
+					}
 				case <-ctx.Done():
 					return
 				}
@@ -100,9 +117,16 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 		txIdx := txIdxCounter
 		txIdxCounter++
 
-		if pendingChan != nil {
-			// await pending transactions
-			pendingChan <- true
+		if options.MaxPending > 0 {
+			pendingMutex.Lock()
+			for pendingCount.Load() >= int64(maxPending.Load()) {
+				pendingCond.Wait()
+				if ctx.Err() != nil {
+					pendingMutex.Unlock()
+					return nil
+				}
+			}
+			pendingMutex.Unlock()
 		}
 		pendingCount.Add(1)
 
@@ -116,9 +140,8 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 
 			logcb, err := options.ProcessNextTxFn(ctx, txIdx, func() {
 				pendingCount.Add(-1)
-				if pendingChan != nil {
-					time.Sleep(10 * time.Millisecond)
-					<-pendingChan
+				if pendingCond != nil {
+					pendingCond.Signal()
 				}
 			})
 
