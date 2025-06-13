@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -380,8 +379,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 						}
 						wg.Done()
 					},
-					MaxRebroadcasts:     10,
-					RebroadcastInterval: 30 * time.Second,
+					Rebroadcast: true,
 				})
 				if err != nil {
 					u.logger.Errorf("failed to send approval tx: %v", err)

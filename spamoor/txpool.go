@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 	"runtime/debug"
 	"slices"
@@ -92,9 +93,8 @@ type SendTransactionOptions struct {
 	LogFn         TxLogFn
 	OnRebroadcast TxRebroadcastFn
 
-	MaxRebroadcasts     int
-	RebroadcastInterval time.Duration
-	TransactionBytes    []byte
+	Rebroadcast      bool
+	TransactionBytes []byte
 }
 
 // NewTxPool creates a new transaction pool with the specified options.
@@ -555,38 +555,9 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 		return err
 	}
 
-	if options.MaxRebroadcasts > 0 {
-		go func() {
-			for i := 0; i < options.MaxRebroadcasts; i++ {
-				select {
-				case <-confirmCtx.Done():
-					return
-				case <-time.After(options.RebroadcastInterval):
-				}
-
-				clientCount := len(pool.options.ClientPool.GetAllGoodClients())
-				for j := 0; j < clientCount; j++ {
-					client := pool.options.ClientPool.GetClient(SelectClientByIndex, i+j+options.ClientsStartOffset+1, options.ClientGroup)
-					if client == nil {
-						continue
-					}
-
-					if options.OnRebroadcast != nil {
-						options.OnRebroadcast(tx, options, client)
-					}
-
-					err = submitTx(client)
-
-					if options.LogFn != nil {
-						options.LogFn(client, j, i+1, err)
-					}
-
-					if err == nil || strings.Contains(err.Error(), "already known") {
-						break
-					}
-				}
-			}
-		}()
+	// Start reliable rebroadcast if enabled
+	if options.Rebroadcast {
+		pool.startReliableRebroadcast(ctx, confirmCtx, wallet, tx, options)
 	}
 
 	return nil
@@ -646,7 +617,8 @@ func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet *Wallet, txs
 			tx := txs[idx]
 
 			return pool.SendTransaction(ctx, wallet, tx, &SendTransactionOptions{
-				Client: options.Client,
+				Client:      options.Client,
+				Rebroadcast: true,
 				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 					defer wg.Done()
 
@@ -673,9 +645,6 @@ func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet *Wallet, txs
 						options.OnConfirm(tx, receipt, nil)
 					}
 				},
-
-				MaxRebroadcasts:     10,
-				RebroadcastInterval: 30 * time.Second,
 			})
 		}(idx)
 
@@ -892,7 +861,8 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 
 			// add tx as pending tx
 			txOptions := &SendTransactionOptions{
-				Client: client,
+				Client:      client,
+				Rebroadcast: true,
 				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 					if err != nil {
 						logrus.WithError(err).Errorf("error confirming reorged out tx %v", tx.Hash())
@@ -900,8 +870,6 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 						logrus.Infof("reorged out tx %v confirmed", tx.Hash())
 					}
 				},
-				RebroadcastInterval: 30 * time.Second,
-				MaxRebroadcasts:     10,
 			}
 
 			if tx.Options != nil {
@@ -979,4 +947,95 @@ func (pool *TxPool) InitializeGasLimit() error {
 	logrus.Infof("initialized gas limit from latest block: %v", pool.currentGasLimit)
 
 	return nil
+}
+
+// calculateBackoffDelay calculates the exponential backoff delay for rebroadcast attempts.
+// Uses 30s base delay, 1.5x multiplier, with 10min maximum delay.
+func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
+	const (
+		baseDelay  = 30 * time.Second
+		multiplier = 1.5
+		maxDelay   = 10 * time.Minute
+	)
+
+	delay := time.Duration(float64(baseDelay) * math.Pow(multiplier, float64(retryCount)))
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+	return delay
+}
+
+// isTransactionBlocking checks if a transaction is blocking wallet progress.
+// Returns true if the transaction nonce is the next required nonce for the wallet.
+func (pool *TxPool) isTransactionBlocking(wallet *Wallet, txNonce uint64) bool {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	// This transaction is the next one that needs to be included
+	return txNonce == wallet.confirmedNonce+1
+}
+
+// startReliableRebroadcast starts a reliable rebroadcast goroutine for a transaction.
+// It uses exponential backoff and unlimited retries, only rebroadcasting when the
+// transaction is blocking wallet progress.
+func (pool *TxPool) startReliableRebroadcast(ctx context.Context, confirmCtx context.Context, fromWallet *Wallet, tx *types.Transaction, options *SendTransactionOptions) {
+	retryCount := uint64(0)
+
+	go func() {
+		for {
+			// Calculate backoff delay
+			backoffDelay := pool.calculateBackoffDelay(retryCount)
+
+			select {
+			case <-confirmCtx.Done():
+				return // Transaction confirmed
+			case <-time.After(backoffDelay):
+				// Check if this transaction is blocking wallet progress
+				if !pool.isTransactionBlocking(fromWallet, tx.Nonce()) {
+					// Transaction is not the next required nonce, stop rebroadcasting
+					return
+				}
+
+				// Perform rebroadcast using existing logic
+				pool.rebroadcastTransaction(ctx, tx, options, retryCount)
+				retryCount++
+			}
+		}
+	}()
+}
+
+// rebroadcastTransaction performs the actual rebroadcast of a transaction.
+// This method encapsulates the existing rebroadcast logic for reuse.
+func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transaction, options *SendTransactionOptions, retryCount uint64) {
+	submitTx := func(client *Client) error {
+		var err error
+		if options.TransactionBytes != nil {
+			err = client.SendRawTransaction(ctx, options.TransactionBytes)
+		} else {
+			err = client.SendTransaction(ctx, tx)
+		}
+		return err
+	}
+
+	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
+	for j := 0; j < clientCount; j++ {
+		client := pool.options.ClientPool.GetClient(SelectClientByIndex, j+options.ClientsStartOffset+1, options.ClientGroup)
+		if client == nil {
+			continue
+		}
+
+		if options.OnRebroadcast != nil {
+			options.OnRebroadcast(tx, options, client)
+		}
+
+		err := submitTx(client)
+
+		if options.LogFn != nil {
+			options.LogFn(client, j, int(retryCount), err)
+		}
+
+		if err == nil || strings.Contains(err.Error(), "already known") {
+			break
+		}
+	}
 }

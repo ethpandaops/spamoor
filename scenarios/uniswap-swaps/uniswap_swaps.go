@@ -58,7 +58,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Throughput:    10,
 	MaxPending:    0,
 	MaxWallets:    0,
-	Rebroadcast:   120,
+	Rebroadcast:   1,
 	BaseFee:       20,
 	TipFee:        2,
 	PairCount:     1,
@@ -89,7 +89,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", ScenarioDefaultOptions.Throughput, "Number of transfer transactions to send per slot")
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
-	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Number of seconds to wait before re-broadcasting a transaction")
+	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transfer transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transfer transactions (in gwei)")
 	flags.Uint64Var(&s.options.PairCount, "pair-count", ScenarioDefaultOptions.PairCount, "Number of uniswap pairs to deploy")
@@ -528,17 +528,11 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, nil, wallet, err
 	}
 
-	rebroadcast := 0
-	if s.options.Rebroadcast > 0 {
-		rebroadcast = 10
-	}
-
 	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
-		Client:              client,
-		MaxRebroadcasts:     rebroadcast,
-		RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
+		Client:      client,
+		Rebroadcast: s.options.Rebroadcast > 0,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			defer func() {
 				onComplete()
@@ -568,6 +562,9 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		},
 		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName())
+			if retry == 0 && rebroadcast > 0 {
+				logger.Infof("rebroadcasting tx %6d", txIdx+1)
+			}
 			if retry > 0 {
 				logger = logger.WithField("retry", retry)
 			}

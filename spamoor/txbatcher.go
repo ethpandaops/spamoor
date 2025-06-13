@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -191,9 +190,8 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 	}
 
 	err = b.txpool.SendTransaction(ctx, wallet, tx, &SendTransactionOptions{
-		Client:              client,
-		MaxRebroadcasts:     10,
-		RebroadcastInterval: 30 * time.Second,
+		Client:      client,
+		Rebroadcast: true,
 	})
 	if err != nil {
 		return err
