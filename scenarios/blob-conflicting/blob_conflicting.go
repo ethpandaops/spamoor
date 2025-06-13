@@ -55,7 +55,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Sidecars:                    3,
 	MaxPending:                  0,
 	MaxWallets:                  0,
-	Rebroadcast:                 30,
+	Rebroadcast:                 1,
 	BaseFee:                     20,
 	TipFee:                      2,
 	BlobFee:                     20,
@@ -85,7 +85,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64VarP(&s.options.Sidecars, "sidecars", "b", ScenarioDefaultOptions.Sidecars, "Number of blob sidecars per blob transactions")
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
-	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Number of seconds to wait before re-broadcasting a transaction")
+	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
@@ -303,11 +303,6 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		return nil, nil, wallet, 0, err
 	}
 
-	rebroadcast := 0
-	if s.options.Rebroadcast > 0 {
-		rebroadcast = 10
-	}
-
 	var blobCellProofs []kzg4844.Proof
 
 	if s.options.BlobV1Percent > 0 {
@@ -343,9 +338,8 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	s.pendingWGroup.Add(2)
 	go func() {
 		err1 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx1, &spamoor.SendTransactionOptions{
-			Client:              client,
-			MaxRebroadcasts:     rebroadcast,
-			RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
+			Client:      client,
+			Rebroadcast: s.options.Rebroadcast > 0,
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				defer func() {
 					onComplete()
@@ -391,9 +385,8 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		delay := time.Duration(rand.Int63n(500)) * time.Millisecond
 		time.Sleep(delay)
 		err2 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx2, &spamoor.SendTransactionOptions{
-			Client:              client2,
-			MaxRebroadcasts:     rebroadcast,
-			RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
+			Client:      client2,
+			Rebroadcast: s.options.Rebroadcast > 0,
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				defer func() {
 					s.pendingWGroup.Done()
@@ -410,6 +403,9 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 			},
 			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 				logger := s.logger.WithField("rpc", client.GetName())
+				if retry == 0 && rebroadcast > 0 {
+					logger.Infof("rebroadcasting blob tx %6d", txIdx+1)
+				}
 				if retry > 0 {
 					logger = logger.WithField("retry", retry)
 				}
