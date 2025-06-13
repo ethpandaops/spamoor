@@ -285,7 +285,6 @@ func (client *Client) GetLastBlockHeight() (uint64, time.Time) {
 // GetClientVersion returns the client version string from the web3_clientVersion RPC call.
 // Results are cached for 30 minutes to reduce RPC calls.
 func (client *Client) GetClientVersion(ctx context.Context) (string, error) {
-
 	if time.Since(client.clientVersionTime) < 30*time.Minute {
 		return client.clientVersion, nil
 	}
@@ -293,7 +292,7 @@ func (client *Client) GetClientVersion(ctx context.Context) (string, error) {
 	var result string
 	err := client.rpcClient.CallContext(ctx, &result, "web3_clientVersion")
 	if err != nil {
-		return "", err
+		return client.clientVersion, err
 	}
 
 	client.clientVersion = result

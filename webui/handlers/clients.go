@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"sync"
+	"time"
 
 	"github.com/ethpandaops/spamoor/webui/server"
 )
@@ -51,28 +53,40 @@ func (fh *FrontendHandler) getClientsPageData(ctx context.Context) (*ClientsPage
 
 	goodClients := fh.daemon.GetClientPool().GetAllGoodClients()
 
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	wg := sync.WaitGroup{}
+
 	// Get all clients from pool
 	for idx, client := range fh.daemon.GetClientPool().GetAllClients() {
 		blockHeight, _ := client.GetLastBlockHeight()
-
-		version, err := client.GetClientVersion(ctx)
-		if err != nil {
-			version = "Unknown"
-		}
 
 		clientData := &ClientsPageClient{
 			Index:       idx,
 			Name:        client.GetName(),
 			Group:       client.GetClientGroup(),
-			Version:     version,
 			BlockHeight: blockHeight,
 			IsReady:     slices.Contains(goodClients, client),
 			Enabled:     client.IsEnabled(),
 		}
 
+		wg.Add(1)
+		go func(clientData *ClientsPageClient) {
+			version, err := client.GetClientVersion(ctx)
+			if err != nil {
+				version = "Unknown"
+			}
+
+			clientData.Version = version
+			wg.Done()
+		}(clientData)
+
 		pageData.Clients = append(pageData.Clients, clientData)
 	}
 	pageData.ClientCount = uint64(len(pageData.Clients))
+
+	wg.Wait()
 
 	return pageData, nil
 }
