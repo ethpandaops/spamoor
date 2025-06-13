@@ -993,7 +993,7 @@ func (pool *TxPool) startReliableRebroadcast(ctx context.Context, confirmCtx con
 				// Check if this transaction is blocking wallet progress
 				if !pool.isTransactionBlocking(fromWallet, tx.Nonce()) {
 					// Transaction is not the next required nonce, stop rebroadcasting
-					return
+					continue
 				}
 
 				// Perform rebroadcast using existing logic
