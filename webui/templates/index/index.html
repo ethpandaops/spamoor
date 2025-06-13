@@ -99,7 +99,7 @@
                   <button class="btn btn-sm btn-primary" onclick="editSpammer({{ .ID }})" title="Edit Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                     <i class="fas fa-edit"></i>
                   </button>
-                  <button class="btn btn-sm btn-info spammer-reclaim-btn" {{ if eq .Status 1 }}diabled="disabled"{{ end }} onclick="reclaimFunds({{ .ID }})" title="Reclaim Funds" data-bs-toggle="tooltip" data-bs-placement="top">
+                  <button class="btn btn-sm btn-info spammer-reclaim-btn" {{ if eq .Status 1 }}disabled="disabled"{{ end }} onclick="reclaimFunds({{ .ID }})" title="Reclaim Funds" data-bs-toggle="tooltip" data-bs-placement="top">
                     <i class="fas fa-money-bill-wave"></i>
                   </button>
                   <button class="btn btn-sm btn-danger" onclick="deleteSpammer({{ .ID }})" title="Delete Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
