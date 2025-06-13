@@ -972,7 +972,7 @@ func (pool *TxPool) isTransactionBlocking(wallet *Wallet, txNonce uint64) bool {
 	defer wallet.txNonceMutex.Unlock()
 
 	// This transaction is the next one that needs to be included
-	return txNonce == wallet.confirmedNonce+1
+	return txNonce == wallet.confirmedNonce
 }
 
 // startReliableRebroadcast starts a reliable rebroadcast goroutine for a transaction.
