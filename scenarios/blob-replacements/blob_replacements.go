@@ -9,16 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"gopkg.in/yaml.v3"
 
 	"github.com/ethpandaops/spamoor/scenariotypes"
-	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/spamoortypes"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
@@ -45,7 +44,7 @@ type ScenarioOptions struct {
 type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
-	walletPool *spamoor.WalletPool
+	walletPool spamoortypes.WalletPool
 
 	pendingWGroup sync.WaitGroup
 }
@@ -206,9 +205,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, spamoortypes.Client, spamoortypes.Wallet, uint8, error) {
+	client := s.walletPool.GetClient(spamoortypes.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
+	wallet := s.walletPool.GetWallet(spamoortypes.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 
 	defer func() {
@@ -220,7 +219,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 	if rand.Intn(100) < 50 {
 		// 50% chance to send transaction via another client
 		// will cause some replacement txs being sent via different clients than the original tx
-		client = s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
+		client = s.walletPool.GetClient(spamoortypes.SelectClientRandom, 0, s.options.ClientGroup)
 	}
 
 	if client == nil {
@@ -290,7 +289,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 		}
 	}
 
-	toAddr := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
+	toAddr := s.walletPool.GetWallet(spamoortypes.SelectWalletByIndex, int(txIdx)+1).GetAddress()
 	blobTx, err := txbuilder.BuildBlobTx(&txbuilder.TxMetadata{
 		GasFeeCap:  uint256.MustFromBig(feeCap),
 		GasTipCap:  uint256.MustFromBig(tipCap),
@@ -344,7 +343,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 	var awaitConfirmation bool = true
 	transactionSubmitted = true
 	s.pendingWGroup.Add(1)
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 		Client:           client,
 		Rebroadcast:      s.options.Rebroadcast > 0,
 		TransactionBytes: txBytes,
@@ -383,7 +382,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 
 			s.logger.WithField("rpc", client.GetName()).Debugf("blob tx %6d.%v confirmed in block #%v!  total fee: %v gwei (base: %v, blob: %v)", txIdx+1, replacementIdx, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
 		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
+		LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName())
 			if retry == 0 && rebroadcast > 0 {
 				logger.Infof("rebroadcasting blob tx %6d.%v", txIdx+1, replacementIdx)
@@ -400,7 +399,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 				logger.Debugf("successfully sent blob tx %6d.%v", txIdx+1, replacementIdx)
 			}
 		},
-		OnRebroadcast: func(tx *types.Transaction, options *spamoor.SendTransactionOptions, client *spamoor.Client) {
+		OnRebroadcast: func(tx *types.Transaction, options *spamoortypes.SendTransactionOptions, client spamoortypes.Client) {
 			// we might need to switch to v1 after fulu activation
 			txBytes, _ := getTxBytes()
 			options.TransactionBytes = txBytes

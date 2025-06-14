@@ -6,15 +6,17 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/holiman/uint256"
+	"github.com/jmoiron/sqlx"
+	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
+
 	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/daemon/logscope"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/holiman/uint256"
-	"github.com/jmoiron/sqlx"
-	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
+	"github.com/ethpandaops/spamoor/spamoortypes"
 )
 
 // SpammerStatus represents the execution state of a spammer instance.
@@ -40,7 +42,7 @@ type Spammer struct {
 	logger         logrus.FieldLogger
 	logscope       *logscope.LogScope
 	dbEntity       *db.Spammer
-	walletPool     *spamoor.WalletPool
+	walletPool     spamoortypes.WalletPool
 	scenarioCtx    context.Context
 	scenarioCancel context.CancelFunc
 	running        bool
@@ -325,7 +327,7 @@ func (s *Spammer) GetLogScope() *logscope.LogScope {
 
 // GetWalletPool returns the wallet pool used by this spammer for transaction submission.
 // Returns nil if the spammer has not been started or the wallet pool is not initialized.
-func (s *Spammer) GetWalletPool() *spamoor.WalletPool {
+func (s *Spammer) GetWalletPool() spamoortypes.WalletPool {
 	return s.walletPool
 }
 

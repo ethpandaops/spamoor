@@ -11,16 +11,16 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"gopkg.in/yaml.v3"
 
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/spamoortypes"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
@@ -50,11 +50,11 @@ type ScenarioOptions struct {
 type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
-	walletPool *spamoor.WalletPool
+	walletPool spamoortypes.WalletPool
 
 	pendingWGroup sync.WaitGroup
 	delegatorSeed []byte
-	delegators    []*spamoor.Wallet
+	delegators    []spamoortypes.Wallet
 }
 
 var ScenarioName = "setcodetx"
@@ -150,7 +150,7 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 	rand.Read(s.delegatorSeed)
 
 	if s.options.MaxDelegators > 0 {
-		s.delegators = make([]*spamoor.Wallet, 0, s.options.MaxDelegators)
+		s.delegators = make([]spamoortypes.Wallet, 0, s.options.MaxDelegators)
 	}
 
 	return nil
@@ -221,9 +221,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, spamoortypes.Client, spamoortypes.Wallet, error) {
+	client := s.walletPool.GetClient(spamoortypes.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
+	wallet := s.walletPool.GetWallet(spamoortypes.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 
 	defer func() {
@@ -270,7 +270,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		}
 	}
 
-	toAddr := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
+	toAddr := s.walletPool.GetWallet(spamoortypes.SelectWalletByIndex, int(txIdx)+1).GetAddress()
 	if s.options.RandomTarget {
 		addrBytes := make([]byte, 20)
 		rand.Read(addrBytes)
@@ -308,7 +308,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -338,7 +338,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, len(receipt.Logs))
 		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
+		LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName())
 			if retry == 0 && rebroadcast > 0 {
 				logger.Infof("rebroadcasting tx %6d", txIdx+1)
@@ -382,7 +382,7 @@ func (s *Scenario) buildSetCodeAuthorizations(txIdx uint64) []types.SetCodeAutho
 			delegatorIndex = delegatorIndex % s.options.MaxDelegators
 		}
 
-		var delegator *spamoor.Wallet
+		var delegator spamoortypes.Wallet
 		if s.options.MaxDelegators > 0 && len(s.delegators) > int(delegatorIndex) {
 			delegator = s.delegators[delegatorIndex]
 		} else {
@@ -406,7 +406,7 @@ func (s *Scenario) buildSetCodeAuthorizations(txIdx uint64) []types.SetCodeAutho
 		} else if s.options.CodeAddr != "" {
 			codeAddr = common.HexToAddress(s.options.CodeAddr)
 		} else {
-			codeAddr = s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)).GetAddress()
+			codeAddr = s.walletPool.GetWallet(spamoortypes.SelectWalletByIndex, int(txIdx)).GetAddress()
 		}
 
 		authorization := types.SetCodeAuthorization{
@@ -427,13 +427,13 @@ func (s *Scenario) buildSetCodeAuthorizations(txIdx uint64) []types.SetCodeAutho
 	return authorizations
 }
 
-func (s *Scenario) prepareDelegator(delegatorIndex uint64) (*spamoor.Wallet, error) {
+func (s *Scenario) prepareDelegator(delegatorIndex uint64) (spamoortypes.Wallet, error) {
 	idxBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(idxBytes, delegatorIndex)
 	if s.options.MaxDelegators > 0 {
 		seedBytes := []byte(s.delegatorSeed)
 		idxBytes = append(idxBytes, seedBytes...)
 	}
-	childKey := sha256.Sum256(append(common.FromHex(s.walletPool.GetRootWallet().GetWallet().GetAddress().Hex()), idxBytes...))
+	childKey := sha256.Sum256(append(common.FromHex(s.walletPool.GetRootWallet().GetAddress().Hex()), idxBytes...))
 	return spamoor.NewWallet(fmt.Sprintf("%x", childKey))
 }

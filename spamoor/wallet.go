@@ -13,9 +13,11 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/spamoor/spamoortypes"
+	"github.com/ethpandaops/spamoor/txbuilder"
 )
 
 // Wallet represents an Ethereum wallet with private key management, nonce tracking,
@@ -32,23 +34,17 @@ type Wallet struct {
 	confirmedNonce uint64
 	balance        *big.Int
 
-	txNonceChans     map[uint64]*nonceStatus
+	txNonceChans     map[uint64]*spamoortypes.NonceStatus
 	txNonceMutex     sync.Mutex
 	lastConfirmation uint64
-}
-
-// nonceStatus tracks the confirmation status of a transaction with a specific nonce
-type nonceStatus struct {
-	receipt *types.Receipt
-	channel chan bool
 }
 
 // NewWallet creates a new wallet from a private key string.
 // If privkey is empty, generates a new random private key.
 // The privkey parameter accepts hex strings with or without "0x" prefix.
-func NewWallet(privkey string) (*Wallet, error) {
+func NewWallet(privkey string) (spamoortypes.Wallet, error) {
 	wallet := &Wallet{
-		txNonceChans: map[uint64]*nonceStatus{},
+		txNonceChans: map[uint64]*spamoortypes.NonceStatus{},
 	}
 	err := wallet.loadPrivateKey(privkey)
 	if err != nil {
@@ -123,6 +119,12 @@ func (wallet *Wallet) GetNonce() uint64 {
 // This represents the highest nonce that has been confirmed on-chain.
 func (wallet *Wallet) GetConfirmedNonce() uint64 {
 	return wallet.confirmedNonce
+}
+
+// SetConfirmedNonce updates the last confirmed nonce for this wallet.
+// This is typically called when a transaction is confirmed to update the confirmed nonce.
+func (wallet *Wallet) SetConfirmedNonce(nonce uint64) {
+	wallet.confirmedNonce = nonce
 }
 
 // GetBalance returns the current balance of the wallet.
@@ -260,7 +262,7 @@ func (wallet *Wallet) ReplaceBlobTx(txData *types.BlobTx, nonce uint64) (*types.
 // ResetPendingNonce syncs the wallet's pending nonce with the blockchain.
 // This is useful for recovering from nonce mismatches or wallet state corruption.
 // It queries the pending nonce from the client and updates the wallet accordingly.
-func (wallet *Wallet) ResetPendingNonce(ctx context.Context, client *Client) {
+func (wallet *Wallet) ResetPendingNonce(ctx context.Context, client spamoortypes.Client) {
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
 
@@ -287,11 +289,11 @@ func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
 	return signedTx, nil
 }
 
-// getTxNonceChan returns or creates a nonce status channel for tracking transaction confirmation.
+// GetTxNonceChan returns or creates a nonce status channel for tracking transaction confirmation.
 // It manages a map of nonce channels used to wait for specific transaction confirmations.
 // Returns the nonce status and a boolean indicating if this is the first pending transaction.
 // If the target nonce is already confirmed, returns nil and false.
-func (wallet *Wallet) getTxNonceChan(targetNonce uint64) (*nonceStatus, bool) {
+func (wallet *Wallet) GetTxNonceChan(targetNonce uint64) (*spamoortypes.NonceStatus, bool) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
@@ -304,10 +306,87 @@ func (wallet *Wallet) getTxNonceChan(targetNonce uint64) (*nonceStatus, bool) {
 		return nonceChan, false
 	}
 
-	nonceChan = &nonceStatus{
-		channel: make(chan bool),
+	nonceChan = &spamoortypes.NonceStatus{
+		Channel: make(chan bool),
 	}
 	wallet.txNonceChans[targetNonce] = nonceChan
 
 	return nonceChan, len(wallet.txNonceChans) == 1
+}
+
+func (wallet *Wallet) GetLastConfirmation() uint64 {
+	return wallet.lastConfirmation
+}
+
+func (wallet *Wallet) SetLastConfirmation(nonce uint64) {
+	wallet.lastConfirmation = nonce
+}
+
+// processTransactionInclusion handles the confirmation of a transaction from a tracked wallet.
+// It updates the wallet's nonce state, signals any waiting confirmation channels,
+// and cleans up completed nonce channels. Updates the wallet's confirmation tracking.
+func (wallet *Wallet) ProcessTransactionInclusion(blockNumber uint64, tx *types.Transaction, receipt *types.Receipt) {
+	nonce := tx.Nonce()
+
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	if nonceChan := wallet.txNonceChans[nonce]; nonceChan != nil {
+		nonceChan.Receipt = receipt
+	}
+
+	wallet.confirmedNonce = nonce + 1
+	if nonce+1 > wallet.pendingNonce.Load() {
+		wallet.pendingNonce.Store(nonce + 1)
+	}
+	if blockNumber > wallet.lastConfirmation {
+		wallet.lastConfirmation = blockNumber
+	}
+
+	for n := range wallet.txNonceChans {
+		if n <= nonce {
+			close(wallet.txNonceChans[n].Channel)
+			delete(wallet.txNonceChans, n)
+		}
+	}
+}
+
+// RevertTransactionReceival subtracts the value of the transaction from the wallet's balance.
+// This is used to revert the balance when a transaction is reverted.
+func (wallet *Wallet) RevertTransactionReceival(tx *types.Transaction) {
+	wallet.balance = wallet.balance.Sub(wallet.balance, tx.Value())
+}
+
+// ProcessTransactionReceival adds the value of the transaction to the wallet's balance.
+// This is used to update the balance when a transaction is received.
+func (wallet *Wallet) ProcessTransactionReceival(tx *types.Transaction) {
+	wallet.balance = wallet.balance.Add(wallet.balance, tx.Value())
+}
+
+// GetPendingTxCount returns the number of pending transactions for this wallet.
+func (wallet *Wallet) GetPendingTxCount() int {
+	return len(wallet.txNonceChans)
+}
+
+// ProcessStaleTransactions recovers stale transactions that may have been missed.
+// It closes the confirmation channels for stale transactions and deletes them from the nonce channel map.
+func (wallet *Wallet) ProcessStaleTransactions(blockNumber uint64, nonce uint64) {
+	pendingNonce := 0
+	for n := range wallet.txNonceChans {
+		pendingNonce = int(n)
+		break
+	}
+
+	logrus.Debugf("recovering %v stale transactions for %v (current nonce %v, cache nonce %v, first pending nonce: %v)", len(wallet.txNonceChans), wallet.address.String(), nonce, wallet.confirmedNonce, pendingNonce)
+
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	for n := range wallet.txNonceChans {
+		if n < nonce {
+			logrus.Warnf("recovering stale confirmed transactions for %v (nonce %v)", wallet.address.String(), n)
+			close(wallet.txNonceChans[n].Channel)
+			delete(wallet.txNonceChans, n)
+		}
+	}
 }

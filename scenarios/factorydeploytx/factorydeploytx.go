@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -17,10 +15,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"gopkg.in/yaml.v3"
 
 	"github.com/ethpandaops/spamoor/scenarios/factorydeploytx/contract"
 	"github.com/ethpandaops/spamoor/scenariotypes"
-	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/spamoortypes"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
@@ -45,7 +44,7 @@ type ScenarioOptions struct {
 type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
-	walletPool *spamoor.WalletPool
+	walletPool spamoortypes.WalletPool
 
 	factoryAddr   common.Address
 	initCodeBytes []byte
@@ -114,7 +113,7 @@ func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
 
 	// Set up well-known factory wallet if enabled
 	if s.options.WellKnownFactory {
-		s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
+		s.walletPool.AddWellKnownWallet(&spamoortypes.WellKnownWalletConfig{
 			Name:          "create2-factory-deployer",
 			RefillAmount:  uint256.NewInt(10000000000000000000), // 10 ETH
 			RefillBalance: uint256.NewInt(1000000000000000000),  // 1 ETH
@@ -242,13 +241,13 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		return common.Address{}, fmt.Errorf("factory deployer wallet not available")
 	}
 
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	client := s.walletPool.GetClient(spamoortypes.SelectClientByIndex, 0, s.options.ClientGroup)
 	if client == nil {
 		return common.Address{}, fmt.Errorf("no client available")
 	}
 
 	// Check if factory already exists by checking deployer nonce
-	deployerNonce, err := client.GetEthClient().NonceAt(ctx, factoryWallet.GetAddress(), nil)
+	deployerNonce, err := client.GetNonceAt(ctx, factoryWallet.GetAddress(), nil)
 	if err != nil {
 		return common.Address{}, fmt.Errorf("failed to get deployer nonce: %w", err)
 	}
@@ -307,7 +306,7 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 	txWg := sync.WaitGroup{}
 	txWg.Add(1)
 
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, factoryWallet, tx, &spamoor.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, factoryWallet, tx, &spamoortypes.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -332,9 +331,9 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 	return txReceipt.ContractAddress, nil
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, spamoortypes.Client, spamoortypes.Wallet, error) {
+	client := s.walletPool.GetClient(spamoortypes.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
+	wallet := s.walletPool.GetWallet(spamoortypes.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 
 	defer func() {
@@ -398,7 +397,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -441,7 +440,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			s.logger.WithField("rpc", client.GetName()).Debugf("deployment tx %d confirmed in block #%v. deployed at: %v, total fee: %v gwei (base: %v)",
 				txIdx+1, receipt.BlockNumber.String(), deployedAddr.String(), gweiTotalFee, gweiBaseFee)
 		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
+		LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName())
 			if retry == 0 && rebroadcast > 0 {
 				logger.Infof("rebroadcasting tx %6d", txIdx+1)

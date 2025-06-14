@@ -14,8 +14,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/spamoor/spamoortypes"
 )
 
 // BlockInfo represents information about a processed block including
@@ -35,9 +36,9 @@ type TxInfo struct {
 	From       common.Address
 	To         *common.Address
 	Tx         *types.Transaction
-	FromWallet *Wallet
-	ToWallet   *Wallet
-	Options    *SendTransactionOptions
+	FromWallet spamoortypes.Wallet
+	ToWallet   spamoortypes.Wallet
+	Options    *spamoortypes.SendTransactionOptions
 }
 
 // TxPool manages transaction submission, confirmation tracking, and chain reorganization handling.
@@ -65,36 +66,9 @@ type TxPool struct {
 // TxPoolOptions contains configuration options for the transaction pool.
 type TxPoolOptions struct {
 	Context              context.Context
-	ClientPool           *ClientPool
+	ClientPool           spamoortypes.ClientPool
 	ReorgDepth           int // Number of blocks to keep in memory for reorg tracking
-	GetActiveWalletPools func() []*WalletPool
-}
-
-// TxConfirmFn is a callback function called when a transaction is confirmed or fails.
-// It receives the transaction, receipt (if successful), and any error that occurred.
-type TxConfirmFn func(tx *types.Transaction, receipt *types.Receipt, err error)
-
-// TxLogFn is a callback function for logging transaction submission attempts.
-// It receives the client used, retry count, rebroadcast count, and any error.
-type TxLogFn func(client *Client, retry int, rebroadcast int, err error)
-
-// TxRebroadcastFn is a callback function called before each transaction rebroadcast.
-// It receives the transaction, send options, and the client being used for rebroadcast.
-type TxRebroadcastFn func(tx *types.Transaction, options *SendTransactionOptions, client *Client)
-
-// SendTransactionOptions contains options for transaction submission including
-// client selection, confirmation callbacks, rebroadcast settings, and logging.
-type SendTransactionOptions struct {
-	Client             *Client
-	ClientGroup        string
-	ClientsStartOffset int
-
-	OnConfirm     TxConfirmFn
-	LogFn         TxLogFn
-	OnRebroadcast TxRebroadcastFn
-
-	Rebroadcast      bool
-	TransactionBytes []byte
+	GetActiveWalletPools func() []spamoortypes.WalletPool
 }
 
 // NewTxPool creates a new transaction pool with the specified options.
@@ -187,7 +161,25 @@ func (pool *TxPool) processStaleTransactionsLoop() {
 			return
 		case blockNumber := <-pool.processStaleChan:
 			for _, wallet := range pool.getWalletMap() {
-				pool.processStaleConfirmations(blockNumber, wallet)
+				if wallet.GetPendingTxCount() > 0 && blockNumber > wallet.GetLastConfirmation()+10 {
+					wallet.SetLastConfirmation(blockNumber)
+
+					var lastNonce uint64
+					var err error
+					for retry := 0; retry < 3; retry++ {
+						client := pool.options.ClientPool.GetClient(spamoortypes.SelectClientRandom, retry, "")
+						if client == nil {
+							continue
+						}
+
+						lastNonce, err = client.GetNonceAt(pool.options.Context, wallet.GetAddress(), big.NewInt(int64(blockNumber)))
+						if err == nil {
+							break
+						}
+					}
+
+					wallet.ProcessStaleTransactions(blockNumber, lastNonce)
+				}
 			}
 		}
 	}
@@ -196,11 +188,11 @@ func (pool *TxPool) processStaleTransactionsLoop() {
 // getWalletMap collects all wallets from active wallet pools into a single map.
 // It iterates through all active wallet pools and calls their collectPoolWallets
 // method to build a comprehensive address-to-wallet mapping.
-func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
-	walletMap := map[common.Address]*Wallet{}
+func (pool *TxPool) getWalletMap() map[common.Address]spamoortypes.Wallet {
+	walletMap := map[common.Address]spamoortypes.Wallet{}
 	walletPools := pool.options.GetActiveWalletPools()
 	for _, walletPool := range walletPools {
-		walletPool.collectPoolWallets(walletMap)
+		walletPool.CollectPoolWallets(walletMap)
 	}
 	return walletMap
 }
@@ -209,11 +201,11 @@ func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
 // It loads the block body, checks for chain reorganizations by comparing parent hashes,
 // stores block information for reorg tracking, and processes all transactions in the block.
 // Also handles cleanup of old block data based on the reorg depth setting.
-func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumber uint64) error {
+func (pool *TxPool) processBlock(ctx context.Context, client spamoortypes.Client, blockNumber uint64) error {
 	pool.lastBlockNumber = blockNumber
 
 	walletPools := pool.options.GetActiveWalletPools()
-	walletMap := map[common.Address]*Wallet{}
+	walletMap := map[common.Address]spamoortypes.Wallet{}
 
 	var chainId *big.Int
 	for _, walletPool := range walletPools {
@@ -221,7 +213,7 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 			continue
 		}
 		chainId = walletPool.GetChainId()
-		walletPool.collectPoolWallets(walletMap)
+		walletPool.CollectPoolWallets(walletMap)
 	}
 
 	if len(walletMap) == 0 {
@@ -274,7 +266,7 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 // It loads block receipts, decodes transaction senders, updates wallet states for
 // confirmed transactions, and tracks transaction information for reorg recovery.
 // Also handles cleanup of old confirmed transaction data.
-func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockBody *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
+func (pool *TxPool) processBlockTxs(ctx context.Context, client spamoortypes.Client, blockNumber uint64, blockBody *types.Block, chainId *big.Int, walletMap map[common.Address]spamoortypes.Wallet) error {
 	t1 := time.Now()
 	txCount := len(blockBody.Transactions())
 	receipts, err := pool.getBlockReceipts(ctx, client, blockNumber, txCount)
@@ -305,7 +297,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		txHash := tx.Hash()
 		fromWallet := walletMap[txFrom]
 		toAddr := tx.To()
-		toWallet := (*Wallet)(nil)
+		toWallet := (spamoortypes.Wallet)(nil)
 		if toAddr != nil {
 			toWallet = walletMap[*toAddr]
 		}
@@ -326,11 +318,11 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		if fromWallet != nil {
 			confirmCount++
 			affectedWalletMap[txFrom] = true
-			pool.processTransactionInclusion(blockNumber, fromWallet, tx, receipt)
+			fromWallet.ProcessTransactionInclusion(blockNumber, tx, receipt)
 		}
 
 		if toWallet != nil {
-			pool.processTransactionReceival(toWallet, tx)
+			toWallet.ProcessTransactionReceival(tx)
 		}
 	}
 
@@ -354,7 +346,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 // getHighestBlockNumber queries all good clients to find the highest block number.
 // It runs concurrent queries to all available clients and returns the highest
 // block number found along with the clients that reported that height.
-func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
+func (pool *TxPool) getHighestBlockNumber() (uint64, []spamoortypes.Client) {
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 	wg := &sync.WaitGroup{}
 
@@ -363,10 +355,10 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	highestBlockNumberClients := []*Client{}
+	highestBlockNumberClients := []spamoortypes.Client{}
 
 	for i := 0; i < clientCount; i++ {
-		client := pool.options.ClientPool.GetClient(SelectClientByIndex, i, "")
+		client := pool.options.ClientPool.GetClient(spamoortypes.SelectClientByIndex, i, "")
 		if client == nil {
 			continue
 		}
@@ -374,7 +366,7 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			blockNumber, err := client.client.BlockNumber(ctx)
+			blockNumber, err := client.GetBlockHeight(ctx)
 			if err != nil {
 				return
 			}
@@ -382,7 +374,7 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 			highestBlockNumberMutex.Lock()
 			if blockNumber > highestBlockNumber {
 				highestBlockNumber = blockNumber
-				highestBlockNumberClients = []*Client{client}
+				highestBlockNumberClients = []spamoortypes.Client{client}
 			} else if blockNumber == highestBlockNumber {
 				highestBlockNumberClients = append(highestBlockNumberClients, client)
 			}
@@ -396,11 +388,11 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 
 // getBlockBody retrieves a block body from the specified client.
 // It uses a 5-second timeout and returns the block if successful, nil otherwise.
-func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumber uint64) *types.Block {
+func (pool *TxPool) getBlockBody(ctx context.Context, client spamoortypes.Client, blockNumber uint64) *types.Block {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	blockBody, err := client.client.BlockByNumber(ctx, big.NewInt(int64(blockNumber)))
+	blockBody, err := client.GetBlock(ctx, blockNumber)
 	if err == nil {
 		return blockBody
 	}
@@ -411,19 +403,12 @@ func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumbe
 // getBlockReceipts retrieves all transaction receipts for a block.
 // It validates that the number of receipts matches the expected transaction count
 // and uses a 5-second timeout for the request.
-func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockNumber uint64, txCount int) ([]*types.Receipt, error) {
+func (pool *TxPool) getBlockReceipts(ctx context.Context, client spamoortypes.Client, blockNumber uint64, txCount int) ([]*types.Receipt, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	var receiptErr error
-	blockNum := rpc.BlockNumber(blockNumber)
-
-	blockReceipts, err := client.client.BlockReceipts(ctx, rpc.BlockNumberOrHash{
-		BlockNumber: &blockNum,
-	})
-	if err != nil {
-		receiptErr = err
-	} else {
+	blockReceipts, receiptErr := client.GetBlockReceipts(ctx, blockNumber)
+	if receiptErr == nil {
 		if len(blockReceipts) != txCount {
 			return nil, fmt.Errorf("block %v has %v receipts, expected %v", blockNumber, len(blockReceipts), txCount)
 		}
@@ -437,7 +422,7 @@ func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockN
 // SendTransaction submits a transaction to the network with the specified options.
 // It handles client selection, rebroadcasting, confirmation tracking, and error handling.
 // The transaction is automatically rebroadcast according to the options until confirmed.
-func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions) error {
+func (pool *TxPool) SendTransaction(ctx context.Context, wallet spamoortypes.Wallet, tx *types.Transaction, options *spamoortypes.SendTransactionOptions) error {
 	return pool.addPendingTransaction(ctx, wallet, tx, options, true)
 }
 
@@ -445,14 +430,13 @@ func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *typ
 // It starts a confirmation tracking goroutine, submits the transaction to clients,
 // and optionally sets up automatic rebroadcasting. The submitNow parameter controls
 // whether to immediately submit or just set up confirmation tracking.
-func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, submitNow bool) error {
+func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet spamoortypes.Wallet, tx *types.Transaction, options *spamoortypes.SendTransactionOptions, submitNow bool) error {
 	confirmCtx, confirmCancel := context.WithCancel(ctx)
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
 	go func() {
 		var receipt *types.Receipt
-
 		var err error
 
 		defer confirmCancel()
@@ -501,7 +485,7 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 
 	var err error
 
-	submitTx := func(client *Client) error {
+	submitTx := func(client spamoortypes.Client) error {
 		if options.TransactionBytes != nil {
 			return client.SendRawTransaction(ctx, options.TransactionBytes)
 		}
@@ -514,7 +498,7 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 		for i := 0; i < clientCount; i++ {
 			client := options.Client
 			if client == nil || i > 0 {
-				client = pool.options.ClientPool.GetClient(SelectClientByIndex, i+options.ClientsStartOffset, options.ClientGroup)
+				client = pool.options.ClientPool.GetClient(spamoortypes.SelectClientByIndex, i+options.ClientsStartOffset, options.ClientGroup)
 			}
 			if client == nil {
 				continue
@@ -535,6 +519,11 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 	if err != nil {
 		if confirmCancel != nil {
 			confirmCancel()
+		}
+
+		// Call OnConfirm callback immediately for submission failures
+		if options.OnConfirm != nil {
+			options.OnConfirm(tx, nil, err)
 		}
 
 		// Track initial transaction submission failure for metrics
@@ -566,7 +555,7 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 // AwaitTransaction waits for a transaction to be confirmed and returns its receipt.
 // It monitors the blockchain for the transaction and handles reorgs by continuing
 // to wait if the transaction gets reorged out of the chain.
-func (pool *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction) (*types.Receipt, error) {
+func (pool *TxPool) AwaitTransaction(ctx context.Context, wallet spamoortypes.Wallet, tx *types.Transaction) (*types.Receipt, error) {
 	return pool.awaitTransaction(ctx, wallet, tx, nil)
 }
 
@@ -574,12 +563,12 @@ func (pool *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *ty
 // It uses the wallet's nonce channel system to wait for confirmation and
 // handles cases where the transaction might be replaced or reorged.
 // The wg parameter is signaled when confirmation tracking is set up.
-func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, wg *sync.WaitGroup) (*types.Receipt, error) {
+func (pool *TxPool) awaitTransaction(ctx context.Context, wallet spamoortypes.Wallet, tx *types.Transaction, wg *sync.WaitGroup) (*types.Receipt, error) {
 	txHash := tx.Hash()
-	nonceChan, isFirstPendingTx := wallet.getTxNonceChan(tx.Nonce())
+	nonceChan, isFirstPendingTx := wallet.GetTxNonceChan(tx.Nonce())
 
-	if isFirstPendingTx && pool.lastBlockNumber > wallet.lastConfirmation+1 {
-		wallet.lastConfirmation = pool.lastBlockNumber - 1
+	if isFirstPendingTx && pool.lastBlockNumber > wallet.GetLastConfirmation()+1 {
+		wallet.SetLastConfirmation(pool.lastBlockNumber - 1)
 	}
 
 	if wg != nil {
@@ -590,10 +579,10 @@ func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *ty
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-nonceChan.channel:
+		case <-nonceChan.Channel:
 		}
 
-		receipt := nonceChan.receipt
+		receipt := nonceChan.Receipt
 		if receipt != nil {
 			if bytes.Equal(receipt.TxHash[:], txHash[:]) {
 				return receipt, nil
@@ -609,14 +598,14 @@ func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *ty
 // SendAndAwaitTxRange sends multiple transactions and waits for all of them to be confirmed.
 // It automatically handles fee calculation, balance updates, and provides confirmation
 // callbacks for each transaction. All transactions are processed concurrently.
-func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet *Wallet, txs []*types.Transaction, options *SendTransactionOptions) error {
+func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet spamoortypes.Wallet, txs []*types.Transaction, options *spamoortypes.SendTransactionOptions) error {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	for idx := range txs {
 		err := func(idx int) error {
 			tx := txs[idx]
 
-			return pool.SendTransaction(ctx, wallet, tx, &SendTransactionOptions{
+			return pool.SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 				Client:      options.Client,
 				Rebroadcast: true,
 				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -659,85 +648,6 @@ func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet *Wallet, txs
 	return nil
 }
 
-// processTransactionInclusion handles the confirmation of a transaction from a tracked wallet.
-// It updates the wallet's nonce state, signals any waiting confirmation channels,
-// and cleans up completed nonce channels. Updates the wallet's confirmation tracking.
-func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wallet, tx *types.Transaction, receipt *types.Receipt) {
-	nonce := tx.Nonce()
-
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	if nonceChan := wallet.txNonceChans[nonce]; nonceChan != nil {
-		nonceChan.receipt = receipt
-	}
-
-	wallet.confirmedNonce = nonce + 1
-	if nonce+1 > wallet.pendingNonce.Load() {
-		wallet.pendingNonce.Store(nonce + 1)
-	}
-	if blockNumber > wallet.lastConfirmation {
-		wallet.lastConfirmation = blockNumber
-	}
-
-	for n := range wallet.txNonceChans {
-		if n <= nonce {
-			close(wallet.txNonceChans[n].channel)
-			delete(wallet.txNonceChans, n)
-		}
-	}
-
-}
-
-// processStaleConfirmations recovers stale transactions that may have been missed.
-// It checks if a wallet has pending transactions that are older than 10 blocks,
-// queries the current nonce from the blockchain, and recovers any confirmed
-// transactions that weren't properly tracked.
-func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet) {
-	if len(wallet.txNonceChans) > 0 && blockNumber > wallet.lastConfirmation+10 {
-		wallet.lastConfirmation = blockNumber
-
-		var lastNonce uint64
-		var err error
-		for retry := 0; retry < 3; retry++ {
-			client := pool.options.ClientPool.GetClient(SelectClientRandom, retry, "")
-			if client == nil {
-				continue
-			}
-
-			lastNonce, err = client.GetNonceAt(pool.options.Context, wallet.address, big.NewInt(int64(blockNumber)))
-			if err == nil {
-				break
-			}
-		}
-
-		pendingNonce := 0
-		for n := range wallet.txNonceChans {
-			pendingNonce = int(n)
-			break
-		}
-
-		logrus.Debugf("recovering %v stale transactions for %v (current nonce %v, cache nonce %v, first pending nonce: %v)", len(wallet.txNonceChans), wallet.address.String(), lastNonce, wallet.confirmedNonce, pendingNonce)
-
-		wallet.txNonceMutex.Lock()
-		defer wallet.txNonceMutex.Unlock()
-
-		for n := range wallet.txNonceChans {
-			if n < lastNonce {
-				logrus.WithError(err).Warnf("recovering stale confirmed transactions for %v (nonce %v)", wallet.address.String(), n)
-				close(wallet.txNonceChans[n].channel)
-				delete(wallet.txNonceChans, n)
-			}
-		}
-	}
-}
-
-// processTransactionReceival handles incoming transactions to tracked wallets.
-// It updates the wallet's balance by adding the received transaction value.
-func (pool *TxPool) processTransactionReceival(wallet *Wallet, tx *types.Transaction) {
-	wallet.balance = wallet.balance.Add(wallet.balance, tx.Value())
-}
-
 // loadTransactionReceipt attempts to load a transaction receipt from multiple clients.
 // It retries up to 5 times with different clients and includes exponential backoff.
 // Returns nil if the receipt cannot be loaded after all retries.
@@ -745,7 +655,7 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 	retryCount := uint64(0)
 
 	for {
-		client := pool.options.ClientPool.GetClient(SelectClientRandom, int(retryCount), "")
+		client := pool.options.ClientPool.GetClient(spamoortypes.SelectClientRandom, int(retryCount), "")
 		if client == nil {
 			return nil
 		}
@@ -784,7 +694,7 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 // handleReorg handles a detected chain reorganization by re-submitting affected transactions.
 // It finds the common ancestor, identifies reorged-out transactions, resets wallet nonces,
 // and re-submits the affected transactions as pending. Also processes the new canonical blocks.
-func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlock *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
+func (pool *TxPool) handleReorg(ctx context.Context, client spamoortypes.Client, blockNumber uint64, newBlock *types.Block, chainId *big.Int, walletMap map[common.Address]spamoortypes.Wallet) error {
 	newBlockParents := []*types.Block{}
 
 	// let's assume a reorg of 2 blocks:
@@ -854,13 +764,11 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 			if !resetWallets[tx.From] {
 				resetWallets[tx.From] = true
 
-				tx.FromWallet.txNonceMutex.Lock()
-				tx.FromWallet.confirmedNonce = tx.Tx.Nonce()
-				tx.FromWallet.txNonceMutex.Unlock()
+				tx.FromWallet.SetConfirmedNonce(tx.Tx.Nonce())
 			}
 
 			// add tx as pending tx
-			txOptions := &SendTransactionOptions{
+			txOptions := &spamoortypes.SendTransactionOptions{
 				Client:      client,
 				Rebroadcast: true,
 				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -883,8 +791,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 		}
 
 		if tx.ToWallet != nil {
-			// reverse processTransactionReceival
-			tx.ToWallet.balance = tx.ToWallet.balance.Sub(tx.ToWallet.balance, tx.Tx.Value())
+			tx.ToWallet.RevertTransactionReceival(tx.Tx)
 		}
 	}
 
@@ -929,7 +836,7 @@ func (pool *TxPool) InitializeGasLimit() error {
 	}
 
 	// Try to get a client to fetch the latest block
-	client := pool.options.ClientPool.GetClient(SelectClientRandom, 0, "")
+	client := pool.options.ClientPool.GetClient(spamoortypes.SelectClientRandom, 0, "")
 	if client == nil {
 		return fmt.Errorf("no client available to fetch gas limit")
 	}
@@ -938,12 +845,12 @@ func (pool *TxPool) InitializeGasLimit() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	latestBlock, err := client.client.BlockByNumber(ctx, nil)
+	gasLimit, err := client.GetLatestGasLimit(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch latest block for gas limit: %w", err)
 	}
 
-	pool.currentGasLimit = latestBlock.GasLimit()
+	pool.currentGasLimit = gasLimit
 	logrus.Infof("initialized gas limit from latest block: %v", pool.currentGasLimit)
 
 	return nil
@@ -965,20 +872,10 @@ func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
 	return delay
 }
 
-// isTransactionBlocking checks if a transaction is blocking wallet progress.
-// Returns true if the transaction nonce is the next required nonce for the wallet.
-func (pool *TxPool) isTransactionBlocking(wallet *Wallet, txNonce uint64) bool {
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	// This transaction is the next one that needs to be included
-	return txNonce == wallet.confirmedNonce
-}
-
 // startReliableRebroadcast starts a reliable rebroadcast goroutine for a transaction.
 // It uses exponential backoff and unlimited retries, only rebroadcasting when the
 // transaction is blocking wallet progress.
-func (pool *TxPool) startReliableRebroadcast(ctx context.Context, confirmCtx context.Context, fromWallet *Wallet, tx *types.Transaction, options *SendTransactionOptions) {
+func (pool *TxPool) startReliableRebroadcast(ctx context.Context, confirmCtx context.Context, fromWallet spamoortypes.Wallet, tx *types.Transaction, options *spamoortypes.SendTransactionOptions) {
 	retryCount := uint64(0)
 
 	go func() {
@@ -991,7 +888,7 @@ func (pool *TxPool) startReliableRebroadcast(ctx context.Context, confirmCtx con
 				return // Transaction confirmed
 			case <-time.After(backoffDelay):
 				// Check if this transaction is blocking wallet progress
-				if !pool.isTransactionBlocking(fromWallet, tx.Nonce()) {
+				if tx.Nonce() != fromWallet.GetNextNonce() {
 					// Transaction is not the next required nonce, stop rebroadcasting
 					continue
 				}
@@ -1006,8 +903,8 @@ func (pool *TxPool) startReliableRebroadcast(ctx context.Context, confirmCtx con
 
 // rebroadcastTransaction performs the actual rebroadcast of a transaction.
 // This method encapsulates the existing rebroadcast logic for reuse.
-func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transaction, options *SendTransactionOptions, retryCount uint64) {
-	submitTx := func(client *Client) error {
+func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transaction, options *spamoortypes.SendTransactionOptions, retryCount uint64) {
+	submitTx := func(client spamoortypes.Client) error {
 		var err error
 		if options.TransactionBytes != nil {
 			err = client.SendRawTransaction(ctx, options.TransactionBytes)
@@ -1019,7 +916,7 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 	for j := 0; j < clientCount; j++ {
-		client := pool.options.ClientPool.GetClient(SelectClientByIndex, j+options.ClientsStartOffset+1, options.ClientGroup)
+		client := pool.options.ClientPool.GetClient(spamoortypes.SelectClientByIndex, j+options.ClientsStartOffset+1, options.ClientGroup)
 		if client == nil {
 			continue
 		}

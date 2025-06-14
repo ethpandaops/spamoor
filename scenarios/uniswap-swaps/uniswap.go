@@ -9,11 +9,12 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethpandaops/spamoor/scenarios/uniswap-swaps/contract"
-	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/spamoor/scenarios/uniswap-swaps/contract"
+	"github.com/ethpandaops/spamoor/spamoortypes"
+	"github.com/ethpandaops/spamoor/txbuilder"
 )
 
 type UniswapOptions struct {
@@ -27,7 +28,7 @@ type UniswapOptions struct {
 
 type Uniswap struct {
 	ctx            context.Context
-	walletPool     *spamoor.WalletPool
+	walletPool     spamoortypes.WalletPool
 	deploymentInfo *DeploymentInfo
 	logger         *logrus.Entry
 	options        UniswapOptions
@@ -43,7 +44,7 @@ type Uniswap struct {
 	Tokens  map[common.Address]*contract.Dai
 }
 
-func NewUniswap(ctx context.Context, walletPool *spamoor.WalletPool, logger *logrus.Entry, options UniswapOptions) *Uniswap {
+func NewUniswap(ctx context.Context, walletPool spamoortypes.WalletPool, logger *logrus.Entry, options UniswapOptions) *Uniswap {
 	return &Uniswap{
 		ctx:           ctx,
 		walletPool:    walletPool,
@@ -57,7 +58,7 @@ func NewUniswap(ctx context.Context, walletPool *spamoor.WalletPool, logger *log
 func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) error {
 	u.deploymentInfo = deploymentInfo
 
-	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup)
+	client := u.walletPool.GetClient(spamoortypes.SelectClientByIndex, 0, u.options.ClientGroup)
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
@@ -175,7 +176,7 @@ func (u *Uniswap) UpdateTokenBalance(walletAddr common.Address, tokenAddr common
 	u.tokenBalances[walletAddr][tokenAddr] = newBalance
 }
 
-func (u *Uniswap) getTxFee(ctx context.Context, client *spamoor.Client) (*big.Int, *big.Int, error) {
+func (u *Uniswap) getTxFee(ctx context.Context, client spamoortypes.Client) (*big.Int, *big.Int, error) {
 	var feeCap *big.Int
 	var tipCap *big.Int
 
@@ -215,7 +216,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 	maxAllowance := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 
 	// Get a client for fee calculation
-	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup)
+	client := u.walletPool.GetClient(spamoortypes.SelectClientByIndex, 0, u.options.ClientGroup)
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
@@ -227,7 +228,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 	// Track all approval transactions
 	var approvalTxs []*types.Transaction
-	var approvalWallets []*spamoor.Wallet
+	var approvalWallets []spamoortypes.Wallet
 
 	// For each wallet and token pair
 	for _, wallet := range wallets {
@@ -363,15 +364,15 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 		// Send each transaction to a different client
 		for i, tx := range approvalTxs {
 			// Get a different client for each transaction
-			txClient := u.walletPool.GetClient(spamoor.SelectClientByIndex, i, u.options.ClientGroup)
+			txClient := u.walletPool.GetClient(spamoortypes.SelectClientByIndex, i, u.options.ClientGroup)
 			if txClient == nil {
 				txClient = client
 			}
 
 			wg.Add(1)
 
-			go func(tx *types.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
-				err := u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &spamoor.SendTransactionOptions{
+			go func(tx *types.Transaction, client spamoortypes.Client, wallet spamoortypes.Wallet) {
+				err := u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 					Client: client,
 					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 						if err != nil {

@@ -2,25 +2,15 @@ package spamoor
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"math/big"
 	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
-)
 
-// ClientSelectionMode defines how clients are selected from the pool.
-type ClientSelectionMode uint8
-
-var (
-	// SelectClientByIndex selects a client by index (modulo pool size).
-	SelectClientByIndex ClientSelectionMode = 0
-	// SelectClientRandom selects a random client from the pool.
-	SelectClientRandom ClientSelectionMode = 1
-	// SelectClientRoundRobin selects clients in round-robin fashion.
-	SelectClientRoundRobin ClientSelectionMode = 2
+	"github.com/ethpandaops/spamoor/spamoortypes"
 )
 
 // ClientPool manages a pool of Ethereum RPC clients with health monitoring and selection strategies.
@@ -28,10 +18,11 @@ var (
 // that are within 2 blocks of the highest observed block height.
 type ClientPool struct {
 	ctx            context.Context
+	clientFactory  func(string) (spamoortypes.Client, error)
 	rpcHosts       []string
 	logger         logrus.FieldLogger
-	allClients     []*Client
-	goodClients    []*Client
+	allClients     []spamoortypes.Client
+	goodClients    []spamoortypes.Client
 	chainId        *big.Int
 	selectionMutex sync.Mutex
 	rrClientIdx    int
@@ -41,9 +32,12 @@ type ClientPool struct {
 // The pool must be initialized with PrepareClients() before use.
 func NewClientPool(ctx context.Context, rpcHosts []string, logger logrus.FieldLogger) *ClientPool {
 	return &ClientPool{
-		ctx:      ctx,
-		rpcHosts: rpcHosts,
-		logger:   logger,
+		ctx:           ctx,
+		rpcHosts:      rpcHosts,
+		logger:        logger,
+		allClients:    make([]spamoortypes.Client, 0),
+		goodClients:   make([]spamoortypes.Client, 0),
+		clientFactory: NewClient,
 	}
 }
 
@@ -51,47 +45,33 @@ func NewClientPool(ctx context.Context, rpcHosts []string, logger logrus.FieldLo
 // It creates Client instances for each RPC host, determines the chain ID,
 // and begins periodic health checks. Returns an error if no usable clients are found.
 func (pool *ClientPool) PrepareClients() error {
-	pool.allClients = make([]*Client, 0)
+	if len(pool.rpcHosts) == 0 {
+		return errors.New("no rpc hosts provided")
+	}
 
-	var chainId *big.Int
-	for _, rpcHost := range pool.rpcHosts {
-		client, err := NewClient(rpcHost)
+	for _, rpchost := range pool.rpcHosts {
+		client, err := pool.clientFactory(rpchost)
 		if err != nil {
-			pool.logger.Errorf("failed creating client for '%v': %v", client.GetRPCHost(), err.Error())
+			pool.logger.Warnf("failed to create client for '%v': %v", rpchost, err)
 			continue
 		}
-
 		pool.allClients = append(pool.allClients, client)
-
-		if chainId == nil {
-			client.Timeout = 10 * time.Second
-			cliChainId, err := client.GetChainId(pool.ctx)
-			if err != nil {
-				pool.logger.Errorf("failed getting chainid from '%v': %v", client.GetRPCHost(), err.Error())
-				continue
-			}
-			chainId = cliChainId
-		}
-		client.Timeout = 30 * time.Second
 	}
 
 	if len(pool.allClients) == 0 {
-		return fmt.Errorf("no rpc hosts provided")
+		return errors.New("no useable clients")
 	}
 
-	if chainId == nil {
-		return fmt.Errorf("no useable clients")
+	// Get chain ID from first client
+	chainId, err := pool.allClients[0].GetChainId(pool.ctx)
+	if err != nil {
+		return err
 	}
-
 	pool.chainId = chainId
 
 	pool.logger.Infof("initialized client pool with %v clients (chain id: %v)", len(pool.allClients), pool.chainId)
 
-	err := pool.watchClientStatus()
-	if err != nil {
-		return err
-	}
-	// watch client status
+	// Start monitoring client status
 	go pool.watchClientStatusLoop()
 
 	return nil
@@ -130,7 +110,7 @@ func (pool *ClientPool) watchClientStatus() error {
 
 	for idx, client := range pool.allClients {
 		wg.Add(1)
-		go func(idx int, client *Client) {
+		go func(idx int, client spamoortypes.Client) {
 			defer wg.Done()
 
 			blockHeight, err := client.GetBlockHeight(pool.ctx)
@@ -148,7 +128,7 @@ func (pool *ClientPool) watchClientStatus() error {
 	}
 	wg.Wait()
 
-	goodClients := make([]*Client, 0)
+	goodClients := make([]spamoortypes.Client, 0)
 	goodHead := highestHead
 	if goodHead > 2 {
 		goodHead -= 2
@@ -171,7 +151,7 @@ func (pool *ClientPool) watchClientStatus() error {
 //   - group: client group filter ("" for default, "*" for any, or specific group name)
 //
 // Returns nil if no suitable clients are available.
-func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group string) *Client {
+func (pool *ClientPool) GetClient(mode spamoortypes.ClientSelectionMode, input int, group string) spamoortypes.Client {
 	pool.selectionMutex.Lock()
 	defer pool.selectionMutex.Unlock()
 
@@ -179,7 +159,7 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 		return nil
 	}
 
-	clientCandidates := make([]*Client, 0)
+	clientCandidates := make([]spamoortypes.Client, 0)
 
 	if group == "" {
 		for _, client := range pool.goodClients {
@@ -208,11 +188,11 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 	}
 
 	switch mode {
-	case SelectClientByIndex:
+	case spamoortypes.SelectClientByIndex:
 		input = input % len(clientCandidates)
-	case SelectClientRandom:
+	case spamoortypes.SelectClientRandom:
 		input = rand.Intn(len(clientCandidates))
-	case SelectClientRoundRobin:
+	case spamoortypes.SelectClientRoundRobin:
 		input = pool.rrClientIdx
 		pool.rrClientIdx++
 		if pool.rrClientIdx >= len(clientCandidates) {
@@ -223,16 +203,16 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 }
 
 // GetAllClients returns a copy of all clients in the pool, regardless of their health status.
-func (pool *ClientPool) GetAllClients() []*Client {
-	clients := make([]*Client, len(pool.allClients))
+func (pool *ClientPool) GetAllClients() []spamoortypes.Client {
+	clients := make([]spamoortypes.Client, len(pool.allClients))
 	copy(clients, pool.allClients)
 	return clients
 }
 
 // GetAllGoodClients returns a copy of all clients currently considered healthy
 // (within 2 blocks of the highest observed block height).
-func (pool *ClientPool) GetAllGoodClients() []*Client {
-	clients := make([]*Client, len(pool.goodClients))
+func (pool *ClientPool) GetAllGoodClients() []spamoortypes.Client {
+	clients := make([]spamoortypes.Client, len(pool.goodClients))
 	copy(clients, pool.goodClients)
 	return clients
 }

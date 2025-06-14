@@ -13,6 +13,7 @@ import (
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/spamoortypes"
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/ethpandaops/spamoor/webui"
 	"github.com/ethpandaops/spamoor/webui/types"
@@ -89,7 +90,7 @@ func main() {
 	}
 
 	// init root wallet
-	client := clientPool.GetClient(spamoor.SelectClientRandom, 0, "")
+	client := clientPool.GetClient(spamoortypes.SelectClientRandom, 0, "")
 	if client == nil {
 		panic(fmt.Errorf("no client available"))
 	}
@@ -119,8 +120,8 @@ func main() {
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
 		Context:    ctx,
 		ClientPool: clientPool,
-		GetActiveWalletPools: func() []*spamoor.WalletPool {
-			walletPools := make([]*spamoor.WalletPool, 0)
+		GetActiveWalletPools: func() []spamoortypes.WalletPool {
+			walletPools := make([]spamoortypes.WalletPool, 0)
 			for _, sp := range spamoorDaemon.GetAllSpammers() {
 				walletPool := sp.GetWalletPool()
 				if walletPool != nil {
