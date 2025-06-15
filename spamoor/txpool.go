@@ -435,6 +435,7 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet spamoortyp
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
+	var submitErrMutex sync.RWMutex
 	var submitErr error
 
 	go func() {
@@ -468,7 +469,9 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet spamoortyp
 
 		receipt, err = pool.awaitTransaction(confirmCtx, wallet, tx, wg)
 		if confirmCtx.Err() != nil {
+			submitErrMutex.RLock()
 			err = submitErr
+			submitErrMutex.RUnlock()
 		}
 
 		if receipt != nil {
@@ -523,7 +526,9 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet spamoortyp
 	}
 
 	if err != nil {
+		submitErrMutex.Lock()
 		submitErr = err
+		submitErrMutex.Unlock()
 		confirmCancel()
 
 		// Track initial transaction submission failure for metrics

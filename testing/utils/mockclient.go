@@ -3,6 +3,7 @@ package testingutils
 import (
 	"context"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -15,6 +16,7 @@ import (
 
 // MockClient is a mock implementation of Client for testing
 type MockClient struct {
+	mu          sync.RWMutex
 	name        string
 	clientGroup string
 	enabled     bool
@@ -114,6 +116,8 @@ func (m *MockClient) SetEnabled(enabled bool) {
 
 // GetChainId returns the mock chain ID
 func (m *MockClient) GetChainId(ctx context.Context) (*big.Int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -122,11 +126,15 @@ func (m *MockClient) GetChainId(ctx context.Context) (*big.Int, error) {
 
 // GetNonce returns the mock nonce
 func (m *MockClient) GetNonce() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.nonce
 }
 
 // GetNonceAt returns the mock nonce
 func (m *MockClient) GetNonceAt(ctx context.Context, wallet common.Address, blockNumber *big.Int) (uint64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.err != nil {
 		return 0, m.err
 	}
@@ -135,6 +143,8 @@ func (m *MockClient) GetNonceAt(ctx context.Context, wallet common.Address, bloc
 
 // GetPendingNonceAt returns the mock pending nonce
 func (m *MockClient) GetPendingNonceAt(ctx context.Context, wallet common.Address) (uint64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.err != nil {
 		return 0, m.err
 	}
@@ -159,6 +169,8 @@ func (m *MockClient) GetSuggestedFee(ctx context.Context) (*big.Int, *big.Int, e
 
 // SendTransaction is a mock implementation
 func (m *MockClient) SendTransaction(ctx context.Context, tx *types.Transaction) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.err
 }
 
@@ -177,6 +189,8 @@ func (m *MockClient) GetTransactionReceipt(ctx context.Context, txHash common.Ha
 
 // GetBlockHeight returns the mock block height
 func (m *MockClient) GetBlockHeight(ctx context.Context) (uint64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.err != nil {
 		return 0, m.err
 	}
@@ -222,6 +236,8 @@ func (m *MockClient) GetLatestGasLimit(ctx context.Context) (uint64, error) {
 
 // SetMockError sets an error to be returned by mock methods
 func (m *MockClient) SetMockError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.err = err
 }
 

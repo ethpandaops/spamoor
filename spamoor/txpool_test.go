@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -553,10 +554,10 @@ func TestTxPoolCallbackBehavior(t *testing.T) {
 				}
 				tx, _ := wallet.BuildDynamicFeeTx(txData)
 
-				callbackCalled := false
+				var callbackCalled int32
 				err = txPool.SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-						callbackCalled = true
+						atomic.AddInt32(&callbackCalled, 1)
 						assert.NoError(t, err)
 						assert.NotNil(t, receipt)
 					},
@@ -566,7 +567,7 @@ func TestTxPoolCallbackBehavior(t *testing.T) {
 				wallet.ProcessTransactionInclusion(0, tx, &types.Receipt{Status: 1, TxHash: tx.Hash(), BlockNumber: big.NewInt(0)})
 
 				time.Sleep(50 * time.Millisecond)
-				assert.True(t, callbackCalled)
+				assert.Equal(t, int32(1), atomic.LoadInt32(&callbackCalled))
 			},
 		},
 		{
@@ -606,11 +607,11 @@ func TestTxPoolCallbackBehavior(t *testing.T) {
 				}
 				tx, _ := wallet.BuildDynamicFeeTx(txData)
 
-				callbackCalled := false
+				var callbackCalled int32
 				client.SetMockError(errors.New("submission failed"))
 				err = txPool.SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-						callbackCalled = true
+						atomic.AddInt32(&callbackCalled, 1)
 						assert.Error(t, err)
 						assert.Nil(t, receipt)
 					},
@@ -618,7 +619,7 @@ func TestTxPoolCallbackBehavior(t *testing.T) {
 				assert.Error(t, err)
 
 				time.Sleep(50 * time.Millisecond)
-				assert.True(t, callbackCalled)
+				assert.Equal(t, int32(1), atomic.LoadInt32(&callbackCalled))
 			},
 		},
 		{
@@ -656,10 +657,10 @@ func TestTxPoolCallbackBehavior(t *testing.T) {
 				}
 				tx, _ := wallet.BuildDynamicFeeTx(txData)
 
-				callbackCalled := false
+				var callbackCalled int32
 				err = txPool.SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-						callbackCalled = true
+						atomic.AddInt32(&callbackCalled, 1)
 						assert.NoError(t, err)
 						assert.Nil(t, receipt)
 					},
@@ -671,7 +672,7 @@ func TestTxPoolCallbackBehavior(t *testing.T) {
 				cancel()
 
 				time.Sleep(150 * time.Millisecond)
-				assert.True(t, callbackCalled)
+				assert.Equal(t, int32(1), atomic.LoadInt32(&callbackCalled))
 			},
 		},
 		{
@@ -710,17 +711,17 @@ func TestTxPoolCallbackBehavior(t *testing.T) {
 				}
 				tx, _ := wallet.BuildDynamicFeeTx(txData)
 
-				logCalled := false
+				var logCalled int32
 				err = txPool.SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 					Rebroadcast: true,
 					LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
-						logCalled = true
+						atomic.AddInt32(&logCalled, 1)
 					},
 				})
 				assert.NoError(t, err)
 
 				time.Sleep(50 * time.Millisecond)
-				assert.True(t, logCalled)
+				assert.Equal(t, int32(1), atomic.LoadInt32(&logCalled))
 			},
 		},
 	}
