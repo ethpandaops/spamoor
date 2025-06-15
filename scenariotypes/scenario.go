@@ -3,7 +3,7 @@ package scenariotypes
 import (
 	"context"
 
-	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/spamoortypes"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 )
@@ -18,7 +18,7 @@ type ScenarioDescriptor struct {
 
 // ScenarioOptions contains the options for the scenario initialization.
 type ScenarioOptions struct {
-	WalletPool *spamoor.WalletPool
+	WalletPool spamoortypes.WalletPool
 	Config     string
 	GlobalCfg  map[string]interface{}
 }

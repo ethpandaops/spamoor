@@ -8,10 +8,11 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethpandaops/spamoor/scenarios/uniswap-swaps/contract"
-	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/holiman/uint256"
+
+	"github.com/ethpandaops/spamoor/scenarios/uniswap-swaps/contract"
+	"github.com/ethpandaops/spamoor/spamoortypes"
+	"github.com/ethpandaops/spamoor/txbuilder"
 )
 
 type DeploymentInfo struct {
@@ -40,7 +41,7 @@ type PairDeploymentInfo struct {
 }
 
 func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
-	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup)
+	client := u.walletPool.GetClient(spamoortypes.SelectClientByIndex, 0, u.options.ClientGroup)
 	if client == nil {
 		return nil, fmt.Errorf("no client available")
 	}
@@ -200,7 +201,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			Gas:       800000,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployPairLiquidityProvider(transactOpts, client.GetEthClient(), ownerWallet.GetAddress(), u.walletPool.GetRootWallet().GetWallet().GetAddress(), deploymentInfo.UniswapRouterAAddr, deploymentInfo.UniswapRouterBAddr, deploymentInfo.Weth9Addr)
+			_, deployTx, _, err := contract.DeployPairLiquidityProvider(transactOpts, client.GetEthClient(), ownerWallet.GetAddress(), u.walletPool.GetRootWallet().GetAddress(), deploymentInfo.UniswapRouterAAddr, deploymentInfo.UniswapRouterBAddr, deploymentInfo.Weth9Addr)
 			return deployTx, err
 		})
 		if err != nil {
@@ -262,7 +263,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 				Gas:       200000,
 				Value:     uint256.NewInt(0),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return pairInfo.Dai.Rely(transactOpts, u.walletPool.GetRootWallet().GetWallet().GetAddress())
+				return pairInfo.Dai.Rely(transactOpts, u.walletPool.GetRootWallet().GetAddress())
 			})
 			if err != nil {
 				return nil, fmt.Errorf("could not make owner wallet a minter for the Dai: %w", err)
@@ -326,7 +327,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			if endIdx > len(deploymentTxs) {
 				endIdx = len(deploymentTxs)
 			}
-			err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, deployerWallet, deploymentTxs[txIdx:endIdx], &spamoor.SendTransactionOptions{
+			err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, deployerWallet, deploymentTxs[txIdx:endIdx], &spamoortypes.SendTransactionOptions{
 				Client: client,
 				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 					if err != nil {
@@ -343,14 +344,14 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	// provide liquidity to the pairs
 	rootWallet := u.walletPool.GetRootWallet()
-	err = rootWallet.WithWalletLock(u.ctx, len(deploymentInfo.Pairs), func() {
+	err = u.walletPool.WithRootWalletLock(u.ctx, len(deploymentInfo.Pairs), func() {
 		u.logger.Infof("root wallet is locked, waiting for other funding txs to finish...")
 	}, func() error {
 		liquidityTxs := []*types.Transaction{}
 		daiLiquidity := new(big.Int).Mul(u.options.EthLiquidityPerPair.ToBig(), big.NewInt(int64(u.options.DaiLiquidityFactor)))
 
 		for _, pairInfo := range deploymentInfo.Pairs {
-			tx, err := rootWallet.GetWallet().BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+			tx, err := rootWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
 				Gas:       6000000,
@@ -375,7 +376,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 				if endIdx > len(liquidityTxs) {
 					endIdx = len(liquidityTxs)
 				}
-				err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, rootWallet.GetWallet(), liquidityTxs[txIdx:endIdx], &spamoor.SendTransactionOptions{
+				err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, rootWallet, liquidityTxs[txIdx:endIdx], &spamoortypes.SendTransactionOptions{
 					Client: client,
 					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 						if err != nil {

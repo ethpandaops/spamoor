@@ -12,19 +12,18 @@ import (
 	"sync"
 	"time"
 
-	geas "github.com/fjl/geas/asm"
-	"gopkg.in/yaml.v3"
-
-	"github.com/ethpandaops/spamoor/scenariotypes"
-	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/ethpandaops/spamoor/txbuilder"
-	"github.com/ethpandaops/spamoor/utils"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	geas "github.com/fjl/geas/asm"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"gopkg.in/yaml.v3"
+
+	"github.com/ethpandaops/spamoor/scenariotypes"
+	"github.com/ethpandaops/spamoor/spamoortypes"
+	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/utils"
 )
 
 type ScenarioOptions struct {
@@ -47,7 +46,7 @@ type ScenarioOptions struct {
 type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
-	walletPool *spamoor.WalletPool
+	walletPool spamoortypes.WalletPool
 
 	geasContractAddr common.Address
 
@@ -249,9 +248,9 @@ func (s *Scenario) trimGeasOpcodes(opcodesGeas string) string {
 	return opcodesGeas
 }
 
-func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*types.Receipt, *spamoor.Client, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
+func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*types.Receipt, spamoortypes.Client, error) {
+	client := s.walletPool.GetClient(spamoortypes.SelectClientByIndex, 0, s.options.ClientGroup)
+	wallet := s.walletPool.GetWallet(spamoortypes.SelectWalletByIndex, 0)
 
 	if client == nil {
 		return nil, client, fmt.Errorf("no client available")
@@ -346,7 +345,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 	txWg := sync.WaitGroup{}
 	txWg.Add(1)
 
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -369,9 +368,9 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 	return txReceipt, client, nil
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, spamoortypes.Client, spamoortypes.Wallet, error) {
+	client := s.walletPool.GetClient(spamoortypes.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
+	wallet := s.walletPool.GetWallet(spamoortypes.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 
 	defer func() {
@@ -437,7 +436,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -467,7 +466,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, len(receipt.Logs))
 		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
+		LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName())
 			if retry == 0 && rebroadcast > 0 {
 				logger.Infof("rebroadcasting tx %6d", txIdx+1)

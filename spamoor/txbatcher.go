@@ -8,9 +8,11 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	geas "github.com/fjl/geas/asm"
 	"github.com/holiman/uint256"
+
+	"github.com/ethpandaops/spamoor/spamoortypes"
+	"github.com/ethpandaops/spamoor/txbuilder"
 )
 
 // Assembly code for the batcher contract initialization
@@ -131,7 +133,7 @@ func NewTxBatcher(txpool *TxPool) *TxBatcher {
 //   - ctx: context for the deployment transaction
 //   - wallet: wallet to deploy the contract from
 //   - client: optional client to use (if nil, uses pool's default client)
-func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) error {
+func (b *TxBatcher) Deploy(ctx context.Context, wallet spamoortypes.Wallet, client spamoortypes.Client) error {
 	b.deployMtx.Lock()
 	defer b.deployMtx.Unlock()
 
@@ -156,7 +158,7 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 	deployData := append(initcode, batcherGeasCode...)
 
 	if client == nil {
-		client = b.txpool.options.ClientPool.GetClient(SelectClientByIndex, 0, "")
+		client = b.txpool.options.ClientPool.GetClient(spamoortypes.SelectClientByIndex, 0, "")
 		if client == nil {
 			return fmt.Errorf("no client available")
 		}
@@ -189,7 +191,7 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 		return err
 	}
 
-	err = b.txpool.SendTransaction(ctx, wallet, tx, &SendTransactionOptions{
+	err = b.txpool.SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
 	})
