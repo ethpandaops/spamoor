@@ -3,6 +3,7 @@ package spamoor
 import (
 	"context"
 	"errors"
+	"math/big"
 	"testing"
 	"time"
 
@@ -497,16 +498,100 @@ func TestClientPoolClientBlockReceipts(t *testing.T) {
 func TestClientPoolClientGasLimit(t *testing.T) {
 	ctx := context.Background()
 	logger := &testingutils.MockLogger{}
-	pool := NewClientPool(ctx, []string{"mock://localhost:8545"}, logger)
+	pool := NewClientPool(ctx, []string{}, logger)
 
-	// Create mock client with gas limit
+	// Manually add mock client
 	mock := testingutils.NewMockClient()
 	mock.SetMockGasLimit(30000000)
+	mock.SetMockChainId(big.NewInt(1))
+	mock.SetMockBlockHeight(100)
+
 	pool.allClients = []spamoortypes.Client{mock}
 	pool.goodClients = []spamoortypes.Client{mock}
 
-	// Test gas limit handling
-	gasLimit, err := mock.GetLatestGasLimit(ctx)
+	client := pool.GetClient(spamoortypes.SelectClientByIndex, 0, "")
+	require.NotNil(t, client)
+
+	gasLimit, err := client.GetLatestGasLimit(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(30000000), gasLimit)
+}
+
+func TestClientPool_GetAllClients(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	pool := NewClientPool(ctx, []string{}, logger)
+
+	mock1 := testingutils.NewMockClient()
+	mock2 := testingutils.NewMockClient()
+
+	pool.allClients = []spamoortypes.Client{mock1, mock2}
+
+	allClients := pool.GetAllClients()
+	assert.Len(t, allClients, 2)
+	assert.Equal(t, mock1, allClients[0])
+	assert.Equal(t, mock2, allClients[1])
+}
+
+func TestClientPool_GetAllGoodClients(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	pool := NewClientPool(ctx, []string{}, logger)
+
+	mock1 := testingutils.NewMockClient()
+	mock2 := testingutils.NewMockClient()
+
+	pool.allClients = []spamoortypes.Client{mock1, mock2}
+	pool.goodClients = []spamoortypes.Client{mock1} // Only mock1 is good
+
+	goodClients := pool.GetAllGoodClients()
+	assert.Len(t, goodClients, 1)
+	assert.Equal(t, mock1, goodClients[0])
+}
+
+func TestClientPool_WatchClientStatusLoop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	logger := &testingutils.MockLogger{}
+	pool := NewClientPool(ctx, []string{}, logger)
+
+	mock := testingutils.NewMockClient()
+	mock.SetMockBlockHeight(100)
+	pool.allClients = []spamoortypes.Client{mock}
+
+	// Start the watch loop in a goroutine
+	go pool.watchClientStatusLoop()
+
+	// Let it run briefly
+	time.Sleep(10 * time.Millisecond)
+
+	// Cancel the context to stop the loop
+	cancel()
+
+	// Give it time to stop
+	time.Sleep(10 * time.Millisecond)
+
+	// Test passes if no panic or deadlock occurs
+}
+
+func TestClientPool_WatchClientStatus(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	pool := NewClientPool(ctx, []string{}, logger)
+
+	mock := testingutils.NewMockClient()
+	mock.SetMockBlockHeight(100)
+	pool.allClients = []spamoortypes.Client{mock}
+
+	// Test with good client
+	err := pool.watchClientStatus()
+	assert.NoError(t, err)
+	assert.Len(t, pool.goodClients, 1)
+
+	// Test with error client
+	mock.SetMockError(errors.New("test error"))
+	err = pool.watchClientStatus()
+	assert.NoError(t, err) // watchClientStatus doesn't return errors from individual clients
+	// Note: The mock client with error will still be considered "good" because
+	// watchClientStatus only checks block height, and the error doesn't prevent
+	// the mock from returning a block height of 100
 }

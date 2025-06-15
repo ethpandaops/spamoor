@@ -45,7 +45,7 @@ func TestWalletPool_Basic(t *testing.T) {
 	assert.Equal(t, ctx, walletPool.GetContext())
 	assert.Equal(t, txPool, walletPool.GetTxPool())
 	assert.Equal(t, clientPool, walletPool.GetClientPool())
-	assert.Equal(t, rootWallet, walletPool.GetRootWallet())
+	assert.Equal(t, rootWallet.GetWallet(), walletPool.GetRootWallet())
 }
 
 func TestWalletPool_Configuration(t *testing.T) {

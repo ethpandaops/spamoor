@@ -72,6 +72,7 @@ func (pool *ClientPool) PrepareClients() error {
 	pool.logger.Infof("initialized client pool with %v clients (chain id: %v)", len(pool.allClients), pool.chainId)
 
 	// Start monitoring client status
+	pool.watchClientStatus()
 	go pool.watchClientStatusLoop()
 
 	return nil

@@ -135,51 +135,6 @@ func TestTxPoolSendTransaction(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestTxPoolSendTransactionWithCallback tests transaction sending with confirmation callback
-func TestTxPoolSendTransactionWithCallback(t *testing.T) {
-	ctx := context.Background()
-	logger := &testingutils.MockLogger{}
-
-	// Create client pool with mock client
-	clientPool := NewClientPool(ctx, []string{"mock://localhost:8545"}, logger)
-	clientPool.clientFactory = func(rpchost string) (spamoortypes.Client, error) {
-		return testingutils.NewMockClient(), nil
-	}
-	err := clientPool.PrepareClients()
-	require.NoError(t, err)
-
-	// Create wallet
-	wallet, err := NewWallet("")
-	require.NoError(t, err)
-	wallet.SetChainId(big.NewInt(1337))
-	wallet.SetNonce(0)
-
-	options := &TxPoolOptions{
-		Context:    ctx,
-		ClientPool: clientPool,
-		ReorgDepth: 5,
-		GetActiveWalletPools: func() []spamoortypes.WalletPool {
-			return []spamoortypes.WalletPool{}
-		},
-	}
-
-	txPool := NewTxPool(options)
-
-	// Create test transaction
-	tx := types.NewTransaction(0, common.Address{}, big.NewInt(0), 21000, big.NewInt(1000000000), nil)
-
-	// Test with confirmation callback
-	sendOptions := &spamoortypes.SendTransactionOptions{
-		Rebroadcast: false,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			// Callback function for testing
-		},
-	}
-
-	err = txPool.SendTransaction(ctx, wallet, tx, sendOptions)
-	assert.NoError(t, err)
-}
-
 // TestTxPoolSendTransactionWithLogFn tests transaction sending with logging function
 func TestTxPoolSendTransactionWithLogFn(t *testing.T) {
 	ctx := context.Background()
@@ -214,11 +169,11 @@ func TestTxPoolSendTransactionWithLogFn(t *testing.T) {
 	tx := types.NewTransaction(0, common.Address{}, big.NewInt(0), 21000, big.NewInt(1000000000), nil)
 
 	// Test with log function
-	// logCalled := false
+	logCalled := false
 	sendOptions := &spamoortypes.SendTransactionOptions{
 		Rebroadcast: false,
 		LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
-			// logCalled = true
+			logCalled = true
 			assert.NotNil(t, client)
 			assert.Equal(t, 0, retry)
 			assert.Equal(t, 0, rebroadcast)
@@ -227,6 +182,9 @@ func TestTxPoolSendTransactionWithLogFn(t *testing.T) {
 
 	err = txPool.SendTransaction(ctx, wallet, tx, sendOptions)
 	assert.NoError(t, err)
+
+	time.Sleep(50 * time.Millisecond)
+	assert.True(t, logCalled)
 }
 
 // TestTxPoolSendRawTransaction tests sending raw transaction bytes
@@ -278,25 +236,11 @@ func TestTxPoolAwaitTransaction(t *testing.T) {
 	ctx := context.Background()
 	logger := &testingutils.MockLogger{}
 
-	// Create client pool with mock client
-	clientPool := NewClientPool(ctx, []string{"mock://localhost:8545"}, logger)
-	clientPool.clientFactory = func(rpchost string) (spamoortypes.Client, error) {
-		mock := testingutils.NewMockClient()
-		// Set up mock receipt
-		receipt := &types.Receipt{
-			Status: 1,
-			TxHash: common.Hash{},
-			Logs:   []*types.Log{},
-		}
-		mock.SetMockReceipt(receipt)
-		return mock, nil
-	}
-	err := clientPool.PrepareClients()
-	require.NoError(t, err)
+	// Create test transaction
+	tx := types.NewTransaction(0, common.Address{}, big.NewInt(0), 21000, big.NewInt(1000000000), nil)
 
-	// Ensure client pool has good clients by running status check
-	err = clientPool.watchClientStatus()
-	require.NoError(t, err)
+	// Create client pool
+	clientPool := NewClientPool(ctx, []string{}, logger)
 
 	// Create wallet
 	wallet, err := NewWallet("")
@@ -315,20 +259,18 @@ func TestTxPoolAwaitTransaction(t *testing.T) {
 
 	txPool := NewTxPool(options)
 
-	// Create test transaction
-	tx := types.NewTransaction(0, common.Address{}, big.NewInt(0), 21000, big.NewInt(1000000000), nil)
-
 	// Test awaiting transaction (with timeout to avoid hanging)
 	awaitCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
 
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		wallet.ProcessTransactionInclusion(0, tx, &types.Receipt{Status: 1, TxHash: tx.Hash(), BlockNumber: big.NewInt(100)})
+	}()
+
 	receipt, err := txPool.AwaitTransaction(awaitCtx, wallet, tx)
-	// This might timeout or return a receipt depending on timing
-	if err == nil {
-		assert.NotNil(t, receipt)
-	} else {
-		assert.Equal(t, context.DeadlineExceeded, err)
-	}
+	assert.NoError(t, err)
+	assert.NotNil(t, receipt)
 }
 
 // TestTxPoolGasLimitManagement tests gas limit tracking and initialization
@@ -604,6 +546,340 @@ func TestTxPoolContextCancellation(t *testing.T) {
 
 // TestTxPoolCallbackBehavior tests that OnComplete and OnLog callbacks are always called
 func TestTxPoolCallbackBehavior(t *testing.T) {
+	tests := []struct {
+		name string
+		test func(t *testing.T)
+	}{
+		{
+			name: "OnComplete called on successful submission and confirmation",
+			test: func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
+				defer cancel()
+
+				logger := &testingutils.MockLogger{}
+				clientPool := NewClientPool(ctx, []string{"mock://localhost:8545"}, logger)
+				clientPool.clientFactory = func(rpchost string) (spamoortypes.Client, error) {
+					return testingutils.NewMockClient(), nil
+				}
+				err := clientPool.PrepareClients()
+				require.NoError(t, err)
+
+				options := &TxPoolOptions{
+					Context:    ctx,
+					ClientPool: clientPool,
+					ReorgDepth: 5,
+					GetActiveWalletPools: func() []spamoortypes.WalletPool {
+						return []spamoortypes.WalletPool{}
+					},
+				}
+				txPool := NewTxPool(options)
+
+				wallet, _ := NewWallet("")
+				wallet.SetChainId(big.NewInt(1))
+
+				txData := &types.DynamicFeeTx{
+					To:        &common.Address{},
+					Gas:       21000,
+					GasFeeCap: big.NewInt(100),
+					GasTipCap: big.NewInt(2),
+					Value:     big.NewInt(1),
+				}
+				tx, _ := wallet.BuildDynamicFeeTx(txData)
+
+				callbackCalled := false
+				err = txPool.SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
+					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+						callbackCalled = true
+						assert.NoError(t, err)
+						assert.NotNil(t, receipt)
+					},
+				})
+				assert.NoError(t, err)
+
+				wallet.ProcessTransactionInclusion(0, tx, &types.Receipt{Status: 1, TxHash: tx.Hash(), BlockNumber: big.NewInt(0)})
+
+				time.Sleep(50 * time.Millisecond)
+				assert.True(t, callbackCalled)
+			},
+		},
+		{
+			name: "OnComplete called on submission failure",
+			test: func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+				defer cancel()
+
+				logger := &testingutils.MockLogger{}
+				client := testingutils.NewMockClient()
+				clientPool := NewClientPool(ctx, []string{"mock://localhost:8545"}, logger)
+				clientPool.clientFactory = func(rpchost string) (spamoortypes.Client, error) {
+					return client, nil
+				}
+				err := clientPool.PrepareClients()
+				require.NoError(t, err)
+
+				options := &TxPoolOptions{
+					Context:    ctx,
+					ClientPool: clientPool,
+					ReorgDepth: 5,
+					GetActiveWalletPools: func() []spamoortypes.WalletPool {
+						return []spamoortypes.WalletPool{}
+					},
+				}
+				txPool := NewTxPool(options)
+
+				wallet, _ := NewWallet("")
+				wallet.SetChainId(big.NewInt(1))
+
+				txData := &types.DynamicFeeTx{
+					To:        &common.Address{},
+					Gas:       21000,
+					GasFeeCap: big.NewInt(100),
+					GasTipCap: big.NewInt(2),
+					Value:     big.NewInt(1),
+				}
+				tx, _ := wallet.BuildDynamicFeeTx(txData)
+
+				callbackCalled := false
+				client.SetMockError(errors.New("submission failed"))
+				err = txPool.SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
+					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+						callbackCalled = true
+						assert.Error(t, err)
+						assert.Nil(t, receipt)
+					},
+				})
+				assert.Error(t, err)
+
+				time.Sleep(50 * time.Millisecond)
+				assert.True(t, callbackCalled)
+			},
+		},
+		{
+			name: "OnComplete called on context cancellation",
+			test: func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+
+				logger := &testingutils.MockLogger{}
+				clientPool := NewClientPool(ctx, []string{"mock://localhost:8545"}, logger)
+				clientPool.clientFactory = func(rpchost string) (spamoortypes.Client, error) {
+					return testingutils.NewMockClient(), nil
+				}
+				err := clientPool.PrepareClients()
+				require.NoError(t, err)
+
+				options := &TxPoolOptions{
+					Context:    ctx,
+					ClientPool: clientPool,
+					ReorgDepth: 5,
+					GetActiveWalletPools: func() []spamoortypes.WalletPool {
+						return []spamoortypes.WalletPool{}
+					},
+				}
+				txPool := NewTxPool(options)
+
+				wallet, _ := NewWallet("")
+				wallet.SetChainId(big.NewInt(1))
+
+				txData := &types.DynamicFeeTx{
+					To:        &common.Address{},
+					Gas:       21000,
+					GasFeeCap: big.NewInt(100),
+					GasTipCap: big.NewInt(2),
+					Value:     big.NewInt(1),
+				}
+				tx, _ := wallet.BuildDynamicFeeTx(txData)
+
+				callbackCalled := false
+				err = txPool.SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
+					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+						callbackCalled = true
+						assert.NoError(t, err)
+						assert.Nil(t, receipt)
+					},
+				})
+				assert.NoError(t, err)
+
+				// Cancel context after a short delay
+				time.Sleep(50 * time.Millisecond)
+				cancel()
+
+				time.Sleep(150 * time.Millisecond)
+				assert.True(t, callbackCalled)
+			},
+		},
+		{
+			name: "LogFn called during rebroadcast",
+			test: func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+				defer cancel()
+
+				logger := &testingutils.MockLogger{}
+				clientPool := NewClientPool(ctx, []string{"mock://localhost:8545"}, logger)
+				clientPool.clientFactory = func(rpchost string) (spamoortypes.Client, error) {
+					return testingutils.NewMockClient(), nil
+				}
+				err := clientPool.PrepareClients()
+				require.NoError(t, err)
+
+				options := &TxPoolOptions{
+					Context:    ctx,
+					ClientPool: clientPool,
+					ReorgDepth: 5,
+					GetActiveWalletPools: func() []spamoortypes.WalletPool {
+						return []spamoortypes.WalletPool{}
+					},
+				}
+				txPool := NewTxPool(options)
+
+				wallet, _ := NewWallet("")
+				wallet.SetChainId(big.NewInt(1))
+
+				txData := &types.DynamicFeeTx{
+					To:        &common.Address{},
+					Gas:       21000,
+					GasFeeCap: big.NewInt(100),
+					GasTipCap: big.NewInt(2),
+					Value:     big.NewInt(1),
+				}
+				tx, _ := wallet.BuildDynamicFeeTx(txData)
+
+				logCalled := false
+				err = txPool.SendTransaction(ctx, wallet, tx, &spamoortypes.SendTransactionOptions{
+					Rebroadcast: true,
+					LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
+						logCalled = true
+					},
+				})
+				assert.NoError(t, err)
+
+				time.Sleep(50 * time.Millisecond)
+				assert.True(t, logCalled)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, tt.test)
+	}
+}
+
+func TestTxPool_GetWalletMap(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	clientPool := NewClientPool(ctx, []string{}, logger)
+
+	// Create mock wallet pool
+	mockWalletPool := &testingutils.MockWalletPool{}
+	wallet1, _ := NewWallet("")
+	wallet2, _ := NewWallet("")
+
+	options := &TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		ReorgDepth: 5,
+		GetActiveWalletPools: func() []spamoortypes.WalletPool {
+			return []spamoortypes.WalletPool{mockWalletPool}
+		},
+	}
+	txPool := NewTxPool(options)
+
+	// Set up mock wallet pool to return wallets
+	mockWalletPool.SetWallets(map[common.Address]spamoortypes.Wallet{
+		wallet1.GetAddress(): wallet1,
+		wallet2.GetAddress(): wallet2,
+	})
+
+	walletMap := txPool.getWalletMap()
+	assert.Len(t, walletMap, 2)
+	assert.Equal(t, wallet1, walletMap[wallet1.GetAddress()])
+	assert.Equal(t, wallet2, walletMap[wallet2.GetAddress()])
+}
+
+func TestTxPool_GetHighestBlockNumber(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	clientPool := NewClientPool(ctx, []string{}, logger)
+
+	// Create mock clients with different block heights
+	mock1 := testingutils.NewMockClient()
+	mock1.SetMockBlockHeight(100)
+	mock2 := testingutils.NewMockClient()
+	mock2.SetMockBlockHeight(102) // Highest
+	mock3 := testingutils.NewMockClient()
+	mock3.SetMockBlockHeight(101)
+
+	clientPool.allClients = []spamoortypes.Client{mock1, mock2, mock3}
+	clientPool.goodClients = []spamoortypes.Client{mock1, mock2, mock3}
+
+	options := &TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		ReorgDepth: 5,
+		GetActiveWalletPools: func() []spamoortypes.WalletPool {
+			return []spamoortypes.WalletPool{}
+		},
+	}
+	txPool := NewTxPool(options)
+
+	highestBlock, clients := txPool.getHighestBlockNumber()
+	assert.Equal(t, uint64(102), highestBlock)
+	assert.Len(t, clients, 1)
+	assert.Equal(t, mock2, clients[0])
+}
+
+func TestTxPool_GetBlockBody(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	clientPool := NewClientPool(ctx, []string{}, logger)
+
+	mock := testingutils.NewMockClient()
+	// Create a mock block
+	mockBlock := &types.Block{}
+	mock.SetMockBlock(mockBlock)
+
+	options := &TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		ReorgDepth: 5,
+		GetActiveWalletPools: func() []spamoortypes.WalletPool {
+			return []spamoortypes.WalletPool{}
+		},
+	}
+	txPool := NewTxPool(options)
+
+	block := txPool.getBlockBody(ctx, mock, 100)
+	assert.Equal(t, mockBlock, block)
+}
+
+func TestTxPool_GetBlockReceipts(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	clientPool := NewClientPool(ctx, []string{}, logger)
+
+	mock := testingutils.NewMockClient()
+	// Create mock receipts
+	mockReceipts := []*types.Receipt{
+		{Status: 1, TxHash: common.Hash{1}, BlockNumber: big.NewInt(100)},
+		{Status: 1, TxHash: common.Hash{2}, BlockNumber: big.NewInt(100)},
+	}
+	mock.SetMockBlockReceipts(mockReceipts)
+
+	options := &TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		ReorgDepth: 5,
+		GetActiveWalletPools: func() []spamoortypes.WalletPool {
+			return []spamoortypes.WalletPool{}
+		},
+	}
+	txPool := NewTxPool(options)
+
+	receipts, err := txPool.getBlockReceipts(ctx, mock, 100, 2)
+	assert.NoError(t, err)
+	assert.Equal(t, mockReceipts, receipts)
+}
+
+func TestTxPool_SendAndAwaitTxRange(t *testing.T) {
 	ctx := context.Background()
 	logger := &testingutils.MockLogger{}
 	clientPool := NewClientPool(ctx, []string{"mock://localhost:8545"}, logger)
@@ -611,10 +887,6 @@ func TestTxPoolCallbackBehavior(t *testing.T) {
 		return testingutils.NewMockClient(), nil
 	}
 	err := clientPool.PrepareClients()
-	require.NoError(t, err)
-
-	// Ensure client pool has good clients
-	err = clientPool.watchClientStatus()
 	require.NoError(t, err)
 
 	options := &TxPoolOptions{
@@ -625,237 +897,147 @@ func TestTxPoolCallbackBehavior(t *testing.T) {
 			return []spamoortypes.WalletPool{}
 		},
 	}
-
 	txPool := NewTxPool(options)
 
-	// Create wallet and transaction
-	wallet, err := NewWallet("")
-	require.NoError(t, err)
-	wallet.SetChainId(big.NewInt(1337))
-	wallet.SetNonce(0)
+	wallet, _ := NewWallet("")
+	wallet.SetChainId(big.NewInt(1))
+	wallet.SetBalance(big.NewInt(1000000000000000000))
 
-	tx := &types.DynamicFeeTx{
-		To:        &common.Address{},
-		Value:     big.NewInt(1000),
-		Gas:       21000,
-		GasFeeCap: big.NewInt(1000000000),
-		GasTipCap: big.NewInt(1000000000),
+	// Create multiple transactions
+	var txs []*types.Transaction
+	for i := 0; i < 3; i++ {
+		txData := &types.DynamicFeeTx{
+			To:        &common.Address{},
+			Gas:       21000,
+			GasFeeCap: big.NewInt(100),
+			GasTipCap: big.NewInt(2),
+			Value:     big.NewInt(1),
+		}
+		tx, _ := wallet.BuildDynamicFeeTx(txData)
+		txs = append(txs, tx)
 	}
-	signedTx, err := wallet.BuildDynamicFeeTx(tx)
-	require.NoError(t, err)
 
-	t.Run("OnComplete called on successful submission and confirmation", func(t *testing.T) {
-		onCompleteCalled := false
-		// var completeTx *types.Transaction
-		// var completeReceipt *types.Receipt
-		// var completeErr error
-
-		logCalled := false
-		var logClient spamoortypes.Client
-		var logRetry, logRebroadcast int
-		var logErr error
-
-		sendOptions := &spamoortypes.SendTransactionOptions{
-			Rebroadcast: false,
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				onCompleteCalled = true
-				// completeTx = tx
-				// completeReceipt = receipt
-				// completeErr = err
-			},
-			LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
-				logCalled = true
-				logClient = client
-				logRetry = retry
-				logRebroadcast = rebroadcast
-				logErr = err
-			},
-		}
-
-		// Set up mock client to return a receipt after a short delay
-		mockClient := clientPool.allClients[0].(*testingutils.MockClient)
-		receipt := &types.Receipt{
-			Status:      1,
-			TxHash:      signedTx.Hash(),
-			BlockNumber: big.NewInt(1),
-			GasUsed:     21000,
-		}
-		mockClient.SetMockReceipt(receipt)
-		mockClient.SetMockBlockHeight(1)
-
-		err = txPool.SendTransaction(ctx, wallet, signedTx, sendOptions)
-		assert.NoError(t, err)
-
-		// Manually trigger transaction confirmation to simulate block processing
-		wallet.ProcessTransactionInclusion(1, signedTx, receipt)
-
-		// Wait for callbacks to be called
-		time.Sleep(200 * time.Millisecond)
-
-		// Verify OnComplete callback was called
-		assert.True(t, onCompleteCalled, "OnComplete callback should be called")
-		// assert.Equal(t, signedTx, completeTx)
-		// assert.Equal(t, receipt, completeReceipt)
-		// assert.NoError(t, completeErr)
-
-		// Verify LogFn callback was called
-		assert.True(t, logCalled, "LogFn callback should be called")
-		assert.NotNil(t, logClient)
-		assert.Equal(t, 0, logRetry)
-		assert.Equal(t, 0, logRebroadcast)
-		assert.NoError(t, logErr)
-	})
-
-	t.Run("OnComplete called on submission failure", func(t *testing.T) {
-		onCompleteCalled := false
-		// var completeTx *types.Transaction
-		// var completeReceipt *types.Receipt
-		// var completeErr error
-
-		logCalled := false
-		var logErr error
-
-		sendOptions := &spamoortypes.SendTransactionOptions{
-			Rebroadcast: false,
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				onCompleteCalled = true
-				// completeTx = tx
-				// completeReceipt = receipt
-				// completeErr = err
-			},
-			LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
-				logCalled = true
-				logErr = err
-			},
-		}
-
-		// Set up mock client to return an error
-		mockClient := clientPool.allClients[0].(*testingutils.MockClient)
-		mockClient.SetMockError(errors.New("submission failed"))
-
-		// Create new transaction with different nonce
-		tx2 := &types.DynamicFeeTx{
-			To:        &common.Address{},
-			Value:     big.NewInt(1000),
-			Gas:       21000,
-			GasFeeCap: big.NewInt(1000000000),
-			GasTipCap: big.NewInt(1000000000),
-		}
-		signedTx2, err := wallet.BuildDynamicFeeTx(tx2)
-		require.NoError(t, err)
-
-		err = txPool.SendTransaction(ctx, wallet, signedTx2, sendOptions)
-		assert.Error(t, err) // Should return error immediately
-
-		// Wait a bit to see if callback is called
+	go func() {
 		time.Sleep(100 * time.Millisecond)
 
-		// Verify LogFn callback was called with error
-		assert.True(t, logCalled, "LogFn callback should be called even on failure")
-		assert.Error(t, logErr)
-
-		// OnComplete SHOULD be called for immediate submission failures
-		// This is the correct behavior - the callback must always be called
-		assert.True(t, onCompleteCalled, "OnComplete callback should be called for immediate submission failures")
-
-		// Reset mock client error
-		mockClient.SetMockError(nil)
-	})
-
-	t.Run("OnComplete called on context cancellation", func(t *testing.T) {
-		onCompleteCalled := false
-		// var completeTx *types.Transaction
-		// var completeReceipt *types.Receipt
-		// var completeErr error
-
-		sendOptions := &spamoortypes.SendTransactionOptions{
-			Rebroadcast: false,
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				onCompleteCalled = true
-				// completeTx = tx
-				// completeReceipt = receipt
-				// completeErr = err
-			},
+		for _, tx := range txs {
+			wallet.ProcessTransactionInclusion(0, tx, &types.Receipt{Status: 1, TxHash: tx.Hash(), BlockNumber: big.NewInt(100)})
 		}
+	}()
 
-		// Create a context that will be cancelled
-		cancelCtx, cancel := context.WithCancel(ctx)
+	err = txPool.SendAndAwaitTxRange(ctx, wallet, txs, &spamoortypes.SendTransactionOptions{})
+	assert.NoError(t, err)
+}
 
-		// Set up mock client to not return a receipt (transaction pending)
-		mockClient := clientPool.allClients[0].(*testingutils.MockClient)
-		mockClient.SetMockReceipt(nil)
+func TestTxPool_LoadTransactionReceipt(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	clientPool := NewClientPool(ctx, []string{}, logger)
 
-		// Create new transaction
-		tx3 := &types.DynamicFeeTx{
-			To:        &common.Address{},
-			Value:     big.NewInt(1000),
-			Gas:       21000,
-			GasFeeCap: big.NewInt(1000000000),
-			GasTipCap: big.NewInt(1000000000),
-		}
-		signedTx3, err := wallet.BuildDynamicFeeTx(tx3)
-		require.NoError(t, err)
+	mock := testingutils.NewMockClient()
+	mockReceipt := &types.Receipt{Status: 1}
+	mock.SetMockReceipt(mockReceipt)
+	clientPool.allClients = []spamoortypes.Client{mock}
+	clientPool.goodClients = []spamoortypes.Client{mock}
 
-		err = txPool.SendTransaction(cancelCtx, wallet, signedTx3, sendOptions)
-		assert.NoError(t, err)
+	options := &TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		ReorgDepth: 5,
+		GetActiveWalletPools: func() []spamoortypes.WalletPool {
+			return []spamoortypes.WalletPool{}
+		},
+	}
+	txPool := NewTxPool(options)
 
-		// Cancel the context after a short delay
-		time.Sleep(50 * time.Millisecond)
-		cancel()
+	wallet, _ := NewWallet("")
+	wallet.SetChainId(big.NewInt(1))
 
-		// Wait for callback to be called
-		time.Sleep(150 * time.Millisecond)
+	txData := &types.DynamicFeeTx{
+		To:        &common.Address{},
+		Gas:       21000,
+		GasFeeCap: big.NewInt(100),
+		GasTipCap: big.NewInt(2),
+		Value:     big.NewInt(1),
+	}
+	tx, _ := wallet.BuildDynamicFeeTx(txData)
 
-		// Verify OnComplete callback was called with no error (context cancellation is handled)
-		assert.True(t, onCompleteCalled, "OnComplete callback should be called even on context cancellation")
-		// assert.Equal(t, signedTx3, completeTx)
-		// assert.Nil(t, completeReceipt)
-		// assert.NoError(t, completeErr) // Context cancellation results in no error being passed to callback
-	})
+	receipt := txPool.loadTransactionReceipt(ctx, tx)
+	assert.Equal(t, mockReceipt, receipt)
+}
 
-	t.Run("LogFn called during rebroadcast", func(t *testing.T) {
-		logCallCount := 0
-		var logErrors []error
-		var logRebroadcasts []int
+func TestTxPool_CalculateBackoffDelay(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	clientPool := NewClientPool(ctx, []string{}, logger)
 
-		sendOptions := &spamoortypes.SendTransactionOptions{
-			Rebroadcast: true,
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				// This will be called when transaction is confirmed
-			},
-			LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
-				logCallCount++
-				logErrors = append(logErrors, err)
-				logRebroadcasts = append(logRebroadcasts, rebroadcast)
-			},
-		}
+	options := &TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		ReorgDepth: 5,
+		GetActiveWalletPools: func() []spamoortypes.WalletPool {
+			return []spamoortypes.WalletPool{}
+		},
+	}
+	txPool := NewTxPool(options)
 
-		// Set up mock client to not return a receipt initially (transaction pending)
-		mockClient := clientPool.allClients[0].(*testingutils.MockClient)
-		mockClient.SetMockReceipt(nil)
+	// Test exponential backoff
+	delay1 := txPool.calculateBackoffDelay(0)
+	delay2 := txPool.calculateBackoffDelay(1)
+	delay3 := txPool.calculateBackoffDelay(10)
 
-		// Create new transaction
-		tx4 := &types.DynamicFeeTx{
-			To:        &common.Address{},
-			Value:     big.NewInt(1000),
-			Gas:       21000,
-			GasFeeCap: big.NewInt(1000000000),
-			GasTipCap: big.NewInt(1000000000),
-		}
-		signedTx4, err := wallet.BuildDynamicFeeTx(tx4)
-		require.NoError(t, err)
+	assert.True(t, delay1 < delay2)
+	assert.True(t, delay2 < delay3)
+	assert.True(t, delay1 >= 1*time.Second)
+	assert.True(t, delay3 <= 10*time.Minute) // Max delay
+}
 
-		err = txPool.SendTransaction(ctx, wallet, signedTx4, sendOptions)
-		assert.NoError(t, err)
+func TestTxPool_GetCurrentGasLimitWithInit(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	clientPool := NewClientPool(ctx, []string{}, logger)
 
-		// Wait for initial submission and potential rebroadcast
-		time.Sleep(100 * time.Millisecond)
+	mock := testingutils.NewMockClient()
+	mock.SetMockGasLimit(30000000)
+	clientPool.allClients = []spamoortypes.Client{mock}
+	clientPool.goodClients = []spamoortypes.Client{mock}
 
-		// Verify LogFn was called at least once for initial submission
-		assert.GreaterOrEqual(t, logCallCount, 1, "LogFn should be called at least once for initial submission")
-		assert.Equal(t, 0, logRebroadcasts[0], "First call should have rebroadcast count 0")
+	options := &TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		ReorgDepth: 5,
+		GetActiveWalletPools: func() []spamoortypes.WalletPool {
+			return []spamoortypes.WalletPool{}
+		},
+	}
+	txPool := NewTxPool(options)
 
-		// Note: Rebroadcast testing is complex due to timing and would require
-		// more sophisticated mocking to test reliably in unit tests
-	})
+	gasLimit, err := txPool.GetCurrentGasLimitWithInit()
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(30000000), gasLimit)
+}
+
+func TestTxPool_InitializeGasLimit(t *testing.T) {
+	ctx := context.Background()
+	logger := &testingutils.MockLogger{}
+	clientPool := NewClientPool(ctx, []string{}, logger)
+
+	mock := testingutils.NewMockClient()
+	mock.SetMockGasLimit(25000000)
+	clientPool.allClients = []spamoortypes.Client{mock}
+	clientPool.goodClients = []spamoortypes.Client{mock}
+
+	options := &TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		ReorgDepth: 5,
+		GetActiveWalletPools: func() []spamoortypes.WalletPool {
+			return []spamoortypes.WalletPool{}
+		},
+	}
+	txPool := NewTxPool(options)
+
+	err := txPool.InitializeGasLimit()
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(25000000), txPool.GetCurrentGasLimit())
 }

@@ -435,6 +435,8 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet spamoortyp
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 
+	var submitErr error
+
 	go func() {
 		var receipt *types.Receipt
 		var err error
@@ -466,7 +468,7 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet spamoortyp
 
 		receipt, err = pool.awaitTransaction(confirmCtx, wallet, tx, wg)
 		if confirmCtx.Err() != nil {
-			err = nil
+			err = submitErr
 		}
 
 		if receipt != nil {
@@ -517,14 +519,8 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet spamoortyp
 	}
 
 	if err != nil {
-		if confirmCancel != nil {
-			confirmCancel()
-		}
-
-		// Call OnConfirm callback immediately for submission failures
-		if options.OnConfirm != nil {
-			options.OnConfirm(tx, nil, err)
-		}
+		submitErr = err
+		confirmCancel()
 
 		// Track initial transaction submission failure for metrics
 		walletPools := pool.options.GetActiveWalletPools()

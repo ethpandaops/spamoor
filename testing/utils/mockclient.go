@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/holiman/uint256"
 
 	"github.com/ethpandaops/spamoor/spamoortypes"
 )
@@ -269,4 +270,77 @@ func (m *MockClient) SetMockBlockReceipts(receipts []*types.Receipt) {
 // SetMockGasLimit sets the mock gas limit
 func (m *MockClient) SetMockGasLimit(gasLimit uint64) {
 	m.gasLimit = gasLimit
+}
+
+// SetMockClientVersion sets the mock client version
+func (m *MockClient) SetMockClientVersion(version string) {
+	m.clientVersion = version
+}
+
+// MockWalletPool is a mock implementation of WalletPool for testing
+type MockWalletPool struct {
+	wallets map[common.Address]spamoortypes.Wallet
+}
+
+// NewMockWalletPool creates a new mock wallet pool
+func NewMockWalletPool() *MockWalletPool {
+	return &MockWalletPool{
+		wallets: make(map[common.Address]spamoortypes.Wallet),
+	}
+}
+
+// SetWallets sets the wallets in the mock pool
+func (m *MockWalletPool) SetWallets(wallets map[common.Address]spamoortypes.Wallet) {
+	m.wallets = wallets
+}
+
+// CollectPoolWallets implements the WalletPool interface
+func (m *MockWalletPool) CollectPoolWallets(walletMap map[common.Address]spamoortypes.Wallet) {
+	for addr, wallet := range m.wallets {
+		walletMap[addr] = wallet
+	}
+}
+
+// GetChainId implements the WalletPool interface
+func (m *MockWalletPool) GetChainId() *big.Int {
+	return big.NewInt(1)
+}
+
+// Minimal WalletPool interface implementation - just the methods needed for testing
+func (m *MockWalletPool) GetContext() context.Context            { return context.Background() }
+func (m *MockWalletPool) GetTxPool() spamoortypes.TxPool         { return nil }
+func (m *MockWalletPool) GetClientPool() spamoortypes.ClientPool { return nil }
+func (m *MockWalletPool) GetRootWallet() spamoortypes.Wallet     { return nil }
+func (m *MockWalletPool) WithRootWalletLock(ctx context.Context, txCount int, lockedLogFn func(), lockedFn func() error) error {
+	return nil
+}
+func (m *MockWalletPool) LoadConfig(configYaml string) error                            { return nil }
+func (m *MockWalletPool) MarshalConfig() (string, error)                                { return "", nil }
+func (m *MockWalletPool) SetWalletCount(count uint64)                                   {}
+func (m *MockWalletPool) SetRunFundings(runFundings bool)                               {}
+func (m *MockWalletPool) AddWellKnownWallet(config *spamoortypes.WellKnownWalletConfig) {}
+func (m *MockWalletPool) SetRefillAmount(amount *uint256.Int)                           {}
+func (m *MockWalletPool) SetRefillBalance(balance *uint256.Int)                         {}
+func (m *MockWalletPool) SetWalletSeed(seed string)                                     {}
+func (m *MockWalletPool) SetRefillInterval(interval uint64)                             {}
+func (m *MockWalletPool) SetTransactionTracker(tracker func(err error))                 {}
+func (m *MockWalletPool) GetTransactionTracker() func(err error)                        { return nil }
+func (m *MockWalletPool) GetClient(mode spamoortypes.ClientSelectionMode, input int, group string) spamoortypes.Client {
+	return nil
+}
+func (m *MockWalletPool) GetWallet(mode spamoortypes.WalletSelectionMode, input int) spamoortypes.Wallet {
+	return nil
+}
+func (m *MockWalletPool) GetWellKnownWallet(name string) spamoortypes.Wallet { return nil }
+func (m *MockWalletPool) GetVeryWellKnownWalletAddress(name string) common.Address {
+	return common.Address{}
+}
+func (m *MockWalletPool) GetWalletName(address common.Address) string                   { return "" }
+func (m *MockWalletPool) GetAllWallets() []spamoortypes.Wallet                          { return nil }
+func (m *MockWalletPool) GetConfiguredWalletCount() uint64                              { return 0 }
+func (m *MockWalletPool) GetWalletCount() uint64                                        { return 0 }
+func (m *MockWalletPool) PrepareWallets() error                                         { return nil }
+func (m *MockWalletPool) CheckChildWalletBalance(childWallet spamoortypes.Wallet) error { return nil }
+func (m *MockWalletPool) ReclaimFunds(ctx context.Context, client spamoortypes.Client) error {
+	return nil
 }
