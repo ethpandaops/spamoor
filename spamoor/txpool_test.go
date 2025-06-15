@@ -17,38 +17,6 @@ import (
 	testingutils "github.com/ethpandaops/spamoor/testing/utils"
 )
 
-// mockWalletPool is a mock implementation of WalletPool for testing
-type mockWalletPool struct {
-	wallets            map[common.Address]*Wallet
-	transactionTracker func(error)
-}
-
-func newMockWalletPool() *mockWalletPool {
-	return &mockWalletPool{
-		wallets: make(map[common.Address]*Wallet),
-	}
-}
-
-func (m *mockWalletPool) AddWallet(wallet *Wallet) {
-	m.wallets[wallet.GetAddress()] = wallet
-}
-
-func (m *mockWalletPool) GetAllWallets() []*Wallet {
-	wallets := make([]*Wallet, 0, len(m.wallets))
-	for _, wallet := range m.wallets {
-		wallets = append(wallets, wallet)
-	}
-	return wallets
-}
-
-func (m *mockWalletPool) GetTransactionTracker() func(error) {
-	return m.transactionTracker
-}
-
-func (m *mockWalletPool) SetTransactionTracker(tracker func(error)) {
-	m.transactionTracker = tracker
-}
-
 // TestTxPoolCreation tests TxPool creation and initialization
 func TestTxPoolCreation(t *testing.T) {
 	ctx := context.Background()
@@ -539,9 +507,8 @@ func TestTxPoolContextCancellation(t *testing.T) {
 		Rebroadcast: false,
 	}
 
-	// This should still work as the transaction sending doesn't immediately check context
 	err = txPool.SendTransaction(ctx, wallet, tx, sendOptions)
-	// The error might or might not occur depending on timing
+	assert.Error(t, err)
 }
 
 // TestTxPoolCallbackBehavior tests that OnComplete and OnLog callbacks are always called

@@ -488,6 +488,10 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet spamoortyp
 	var err error
 
 	submitTx := func(client spamoortypes.Client) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		if options.TransactionBytes != nil {
 			return client.SendRawTransaction(ctx, options.TransactionBytes)
 		}
