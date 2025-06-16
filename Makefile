@@ -5,12 +5,15 @@ GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildVersion="$(VERSION)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildTime="$(BUILDTIME)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildRelease="$(RELEASE)"'
 
-.PHONY: all docs build test clean
+.PHONY: all docs build test test-load clean
 
 all: docs build
 
 test:
 	go test ./...
+
+test-load:
+	go test -tags=loadtest -timeout 15m ./testing/load/...
 
 build:
 	@echo version: $(VERSION)
