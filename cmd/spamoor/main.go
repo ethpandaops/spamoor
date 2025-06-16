@@ -14,6 +14,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/spamoortypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -121,7 +122,7 @@ func main() {
 	}
 
 	// init root wallet
-	client := clientPool.GetClient(spamoor.SelectClientRandom, 0, "")
+	client := clientPool.GetClient(spamoortypes.SelectClientRandom, 0, "")
 	if client == nil {
 		panic(fmt.Errorf("no client available"))
 	}
@@ -132,13 +133,13 @@ func main() {
 	}
 
 	// prepare txpool
-	var walletPool *spamoor.WalletPool
+	var walletPool spamoortypes.WalletPool
 
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
 		Context:    ctx,
 		ClientPool: clientPool,
-		GetActiveWalletPools: func() []*spamoor.WalletPool {
-			return []*spamoor.WalletPool{walletPool}
+		GetActiveWalletPools: func() []spamoortypes.WalletPool {
+			return []spamoortypes.WalletPool{walletPool}
 		},
 	})
 

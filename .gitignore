@@ -4,6 +4,7 @@
 .hack/devnet/custom-**
 tmp-*
 bin
+ai_plans
 spamoor.db*
 go.lib.mod
 go.lib.sum

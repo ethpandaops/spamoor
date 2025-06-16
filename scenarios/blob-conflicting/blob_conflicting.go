@@ -9,16 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"gopkg.in/yaml.v3"
 
 	"github.com/ethpandaops/spamoor/scenariotypes"
-	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/spamoortypes"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
@@ -43,7 +42,7 @@ type ScenarioOptions struct {
 type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
-	walletPool *spamoor.WalletPool
+	walletPool spamoortypes.WalletPool
 
 	pendingWGroup sync.WaitGroup
 }
@@ -200,10 +199,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
-	client2 := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, spamoortypes.Client, spamoortypes.Wallet, uint8, error) {
+	client := s.walletPool.GetClient(spamoortypes.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
+	client2 := s.walletPool.GetClient(spamoortypes.SelectClientRandom, 0, s.options.ClientGroup)
+	wallet := s.walletPool.GetWallet(spamoortypes.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 
 	defer func() {
@@ -271,7 +270,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		}
 	}
 
-	toAddr := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
+	toAddr := s.walletPool.GetWallet(spamoortypes.SelectWalletByIndex, int(txIdx)+1).GetAddress()
 	blobTx, err := txbuilder.BuildBlobTx(&txbuilder.TxMetadata{
 		GasFeeCap:  uint256.MustFromBig(feeCap),
 		GasTipCap:  uint256.MustFromBig(tipCap),
@@ -337,7 +336,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	var err1, err2 error
 	s.pendingWGroup.Add(2)
 	go func() {
-		err1 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx1, &spamoor.SendTransactionOptions{
+		err1 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx1, &spamoortypes.SendTransactionOptions{
 			Client:      client,
 			Rebroadcast: s.options.Rebroadcast > 0,
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -355,7 +354,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 					s.processTxReceipt(txIdx, tx, receipt, client, wallet, "blob")
 				}
 			},
-			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
+			LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
 				logger := s.logger.WithField("rpc", client.GetName())
 				if retry > 0 {
 					logger = logger.WithField("retry", retry)
@@ -369,7 +368,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 					logger.Debugf("successfully sent blob tx %6d.0", txIdx+1)
 				}
 			},
-			OnRebroadcast: func(tx *types.Transaction, options *spamoor.SendTransactionOptions, client *spamoor.Client) {
+			OnRebroadcast: func(tx *types.Transaction, options *spamoortypes.SendTransactionOptions, client spamoortypes.Client) {
 				// we might need to switch to v1 after fulu activation
 				txBytes, _ := getTxBytes()
 				options.TransactionBytes = txBytes
@@ -384,7 +383,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	go func() {
 		delay := time.Duration(rand.Int63n(500)) * time.Millisecond
 		time.Sleep(delay)
-		err2 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx2, &spamoor.SendTransactionOptions{
+		err2 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx2, &spamoortypes.SendTransactionOptions{
 			Client:      client2,
 			Rebroadcast: s.options.Rebroadcast > 0,
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -401,7 +400,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 					s.processTxReceipt(txIdx, tx, receipt, client, wallet, "dynfee")
 				}
 			},
-			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
+			LogFn: func(client spamoortypes.Client, retry int, rebroadcast int, err error) {
 				logger := s.logger.WithField("rpc", client.GetName())
 				if retry == 0 && rebroadcast > 0 {
 					logger.Infof("rebroadcasting blob tx %6d", txIdx+1)
@@ -444,7 +443,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	return tx1, client, wallet, txVersion, nil
 }
 
-func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *spamoor.Client, wallet *spamoor.Wallet, txLabel string) {
+func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client spamoortypes.Client, wallet spamoortypes.Wallet, txLabel string) {
 	effectiveGasPrice := receipt.EffectiveGasPrice
 	if effectiveGasPrice == nil {
 		effectiveGasPrice = big.NewInt(0)

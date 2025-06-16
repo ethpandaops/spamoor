@@ -1,14 +1,16 @@
 participants_matrix:
   el:
     - el_type: geth
+    - el_type: geth
+    - el_type: reth
     - el_type: reth
   cl:
     - cl_type: lighthouse
 network_params:
   electra_fork_epoch: 0
   preset: mainnet
-  gas_limit: 60000000
-  genesis_gaslimit: 60000000
+  gas_limit: 100000000
+  genesis_gaslimit: 100000000
 additional_services:
   - dora
   - blockscout

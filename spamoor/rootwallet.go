@@ -7,6 +7,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 
+	"github.com/ethpandaops/spamoor/spamoortypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -14,7 +15,7 @@ import (
 // It wraps a standard Wallet with a semaphore-based transaction limiter and optional transaction batcher
 // for managing high-volume transaction scenarios.
 type RootWallet struct {
-	wallet      *Wallet
+	wallet      spamoortypes.Wallet
 	txbatcher   *TxBatcher
 	txSemMutex  sync.Mutex
 	txSemaphore chan struct{}
@@ -25,7 +26,7 @@ type RootWallet struct {
 // It creates the underlying wallet, updates its state from the blockchain,
 // and sets up transaction rate limiting with a default limit of 200 concurrent transactions.
 // Returns the initialized RootWallet and logs wallet information if logger is provided.
-func InitRootWallet(ctx context.Context, privkey string, client *Client, logger logrus.FieldLogger) (*RootWallet, error) {
+func InitRootWallet(ctx context.Context, privkey string, client spamoortypes.Client, logger logrus.FieldLogger) (*RootWallet, error) {
 	rootWallet, err := NewWallet(privkey)
 	if err != nil {
 		return nil, err
@@ -53,7 +54,7 @@ func InitRootWallet(ctx context.Context, privkey string, client *Client, logger 
 }
 
 // GetWallet returns the underlying Wallet instance.
-func (wallet *RootWallet) GetWallet() *Wallet {
+func (wallet *RootWallet) GetWallet() spamoortypes.Wallet {
 	return wallet.wallet
 }
 
