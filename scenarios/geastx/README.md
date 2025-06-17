@@ -42,6 +42,7 @@ spamoor geastx [flags]
 
 ### Debug options
 - `-v, --verbose` Verbose log output
+- `--log-txs` - Log all submitted transactions
 - `--trace`     Full trace log output
 
 ## Examples

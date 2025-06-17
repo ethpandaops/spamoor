@@ -44,6 +44,7 @@ spamoor uniswap-swaps [flags]
 
 ### Debug Options
 - `-v, --verbose` - Enable verbose output
+- `--log-txs` - Log all submitted transactions
 - `--trace` - Enable tracing output
 
 ## Example

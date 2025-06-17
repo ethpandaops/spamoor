@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -42,6 +43,23 @@ type TxInfo struct {
 	Options    *SendTransactionOptions
 }
 
+// BlockStatsCallback is called when a block is processed with statistics for a specific wallet pool
+type BlockStatsCallback func(blockNumber uint64, walletPoolStats WalletPoolBlockStats)
+
+// WalletPoolBlockStats contains transaction statistics for a wallet pool in a specific block
+type WalletPoolBlockStats struct {
+	ConfirmedTxCount uint64
+	TotalTxFees      *big.Int
+	AffectedWallets  int
+}
+
+// BlockSubscription represents a subscription to block updates for a specific wallet pool
+type BlockSubscription struct {
+	ID         uint64
+	WalletPool *WalletPool
+	Callback   BlockStatsCallback
+}
+
 // TxPool manages transaction submission, confirmation tracking, and chain reorganization handling.
 // It monitors blockchain blocks, tracks transaction confirmations, handles reorgs by re-submitting
 // affected transactions, and provides transaction awaiting functionality with automatic rebroadcasting.
@@ -62,6 +80,11 @@ type TxPool struct {
 	// Current block gas limit tracking
 	currentGasLimit uint64
 	gasLimitMutex   sync.RWMutex
+
+	// Block update subscriptions
+	subscriptionsMutex sync.RWMutex
+	subscriptions      map[uint64]*BlockSubscription
+	nextSubscriptionID atomic.Uint64
 }
 
 // TxPoolOptions contains configuration options for the transaction pool.
@@ -110,6 +133,7 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 		blocks:           map[uint64]*BlockInfo{},
 		confirmedTxs:     map[uint64][]*TxInfo{},
 		reorgDepth:       10, // Default value
+		subscriptions:    map[uint64]*BlockSubscription{},
 	}
 
 	if options.Context == nil {
@@ -361,6 +385,15 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 
 	logrus.Infof("processed block %v:  %v total tx, %v tx confirmed from %v wallets (%v, %v)", blockNumber, txCount, confirmCount, len(affectedWalletMap), loadingTime, time.Since(t1))
 
+	// Notify block subscribers with wallet-specific stats
+	pool.txsMutex.RLock()
+	blockConfirmedTxs := pool.confirmedTxs[blockNumber]
+	pool.txsMutex.RUnlock()
+
+	if len(blockConfirmedTxs) > 0 {
+		pool.notifyBlockSubscribers(blockNumber, blockConfirmedTxs)
+	}
+
 	return nil
 }
 
@@ -445,6 +478,76 @@ func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockN
 	}
 
 	return nil, receiptErr
+}
+
+// SubscribeToBlockUpdates subscribes to block update notifications for a specific wallet pool.
+// Returns a unique subscription ID that can be used to unsubscribe later.
+func (pool *TxPool) SubscribeToBlockUpdates(walletPool *WalletPool, callback BlockStatsCallback) uint64 {
+	pool.subscriptionsMutex.Lock()
+	defer pool.subscriptionsMutex.Unlock()
+
+	// Generate unique subscription ID
+	id := pool.nextSubscriptionID.Add(1)
+
+	pool.subscriptions[id] = &BlockSubscription{
+		ID:         id,
+		WalletPool: walletPool,
+		Callback:   callback,
+	}
+
+	return id
+}
+
+// UnsubscribeFromBlockUpdates removes a block update subscription.
+func (pool *TxPool) UnsubscribeFromBlockUpdates(id uint64) {
+	pool.subscriptionsMutex.Lock()
+	defer pool.subscriptionsMutex.Unlock()
+
+	delete(pool.subscriptions, id)
+}
+
+// notifyBlockSubscribers notifies all subscribers about a processed block with wallet-specific stats.
+func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, confirmedTxs []*TxInfo) {
+	pool.subscriptionsMutex.RLock()
+	subscriptions := make(map[uint64]*BlockSubscription, len(pool.subscriptions))
+	for id, sub := range pool.subscriptions {
+		subscriptions[id] = sub
+	}
+	pool.subscriptionsMutex.RUnlock()
+
+	for _, subscription := range subscriptions {
+		stats := pool.calculateWalletPoolStats(subscription.WalletPool, confirmedTxs)
+		subscription.Callback(blockNumber, stats)
+	}
+}
+
+// calculateWalletPoolStats calculates transaction statistics for a specific wallet pool.
+func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTxs []*TxInfo) WalletPoolBlockStats {
+	stats := WalletPoolBlockStats{
+		TotalTxFees: big.NewInt(0),
+	}
+
+	affectedWallets := make(map[common.Address]bool)
+	allWallets := walletPool.GetAllWallets()
+	walletSet := make(map[common.Address]bool)
+
+	for _, wallet := range allWallets {
+		walletSet[wallet.GetAddress()] = true
+	}
+
+	for _, txInfo := range confirmedTxs {
+		if txInfo.FromWallet != nil && walletSet[txInfo.FromWallet.GetAddress()] {
+			stats.ConfirmedTxCount++
+			if txInfo.TxFees != nil {
+				totalFee := new(big.Int).Add(&txInfo.TxFees.FeeAmount, &txInfo.TxFees.BlobFeeAmount)
+				stats.TotalTxFees.Add(stats.TotalTxFees, totalFee)
+			}
+			affectedWallets[txInfo.FromWallet.GetAddress()] = true
+		}
+	}
+
+	stats.AffectedWallets = len(affectedWallets)
+	return stats
 }
 
 // SendTransaction submits a transaction to the network with the specified options.
@@ -972,7 +1075,7 @@ func (pool *TxPool) InitializeGasLimit() error {
 // Uses 30s base delay, 1.5x multiplier, with 10min maximum delay.
 func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
 	const (
-		baseDelay  = 30 * time.Second
+		baseDelay  = 120 * time.Second
 		multiplier = 1.5
 		maxDelay   = 10 * time.Minute
 	)

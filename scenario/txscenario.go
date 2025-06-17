@@ -1,4 +1,4 @@
-package utils
+package scenario
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/utils"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
@@ -19,6 +21,7 @@ type TransactionScenarioOptions struct {
 	MaxPending                  uint64
 	ThroughputIncrementInterval uint64
 	Timeout                     time.Duration // Maximum duration for scenario execution (0 = no timeout)
+	WalletPool                  *spamoor.WalletPool
 
 	// Logger for scenario execution information
 	Logger *logrus.Entry
@@ -47,6 +50,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	txIdxCounter := uint64(0)
 	pendingCount := atomic.Int64{}
 	txCount := atomic.Uint64{}
+	throughputTracker := newThroughputTracker()
 
 	// Apply timeout if specified
 	if options.Timeout > 0 {
@@ -72,6 +76,33 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 		initialRate = rate.Inf
 	}
 	limiter := rate.NewLimiter(initialRate, 1)
+
+	// Subscribe to block updates for stats reporting
+	var lastSubmittedCount uint64
+	if options.WalletPool != nil && options.WalletPool.GetTxPool() != nil {
+		txPool := options.WalletPool.GetTxPool()
+		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats spamoor.WalletPoolBlockStats) {
+			currentSubmitted := txCount.Load()
+			submittedThisBlock := currentSubmitted - lastSubmittedCount
+			lastSubmittedCount = currentSubmitted
+			pending := pendingCount.Load()
+
+			// Record confirmed transactions for this block
+			throughputTracker.recordCompletion(blockNumber, walletPoolStats.ConfirmedTxCount)
+
+			// Calculate average transactions per block over different ranges
+			throughput5B := throughputTracker.getAverageThroughput(5, blockNumber)
+			throughput20B := throughputTracker.getAverageThroughput(20, blockNumber)
+			throughput60B := throughputTracker.getAverageThroughput(60, blockNumber)
+
+			options.Logger.WithField("wallets", walletPoolStats.AffectedWallets).Infof(
+				"block %d: submitted=%d, pending=%d, confirmed=%d, throughput: 5B=%.2f tx/B, 20B=%.2f tx/B, 60B=%.2f tx/B",
+				blockNumber, submittedThisBlock, pending, walletPoolStats.ConfirmedTxCount, throughput5B, throughput20B, throughput60B,
+			)
+		})
+
+		defer txPool.UnsubscribeFromBlockUpdates(subscriptionID)
+	}
 
 	if options.ThroughputIncrementInterval != 0 {
 		// Calculate the ratio between MaxPending and Throughput
@@ -134,7 +165,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 
 		go func(txIdx uint64, lastChan, currentChan chan bool) {
 			defer func() {
-				RecoverPanic(options.Logger, "scenario.processNextTxFn")
+				utils.RecoverPanic(options.Logger, "scenario.processNextTxFn")
 				currentChan <- true
 			}()
 
