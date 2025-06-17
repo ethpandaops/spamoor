@@ -203,7 +203,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	client2 := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
 	transactionSubmitted := false
 
 	defer func() {
@@ -445,18 +445,6 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 }
 
 func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *spamoor.Client, txLabel string) {
-	effectiveGasPrice := receipt.EffectiveGasPrice
-	if effectiveGasPrice == nil {
-		effectiveGasPrice = big.NewInt(0)
-	}
-	blobGasPrice := receipt.BlobGasPrice
-	if blobGasPrice == nil {
-		blobGasPrice = big.NewInt(0)
-	}
-	feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-	gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
-	gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
-	gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
-
-	s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d/%v confirmed in block #%v. total fee: %v gwei (base: %v, blob: %v)", txIdx+1, txLabel, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
+	txFees := utils.GetTransactionFees(tx, receipt)
+	s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d/%v confirmed in block #%v. total fee: %v gwei (tx: %v/%v, blob: %v/%v)", txIdx+1, txLabel, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxFeeGwei(), txFees.TxBaseFeeGwei(), txFees.BlobFeeGwei(), txFees.BlobBaseFeeGwei())
 }

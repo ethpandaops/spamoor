@@ -364,18 +364,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 				return
 			}
 
-			effectiveGasPrice := receipt.EffectiveGasPrice
-			if effectiveGasPrice == nil {
-				effectiveGasPrice = big.NewInt(0)
-			}
-			feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-			totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
-			wallet.SubBalance(totalAmount)
-
-			gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
-			gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
-
-			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, len(receipt.Logs))
+			txFees := utils.GetTransactionFees(tx, receipt)
+			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei(), len(receipt.Logs))
 		},
 		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())

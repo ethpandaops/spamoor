@@ -232,19 +232,19 @@ func (pool *WalletPool) GetWallet(mode WalletSelectionMode, input int) *Wallet {
 			pool.rrWalletIdx = 0
 		}
 	case SelectWalletByPendingTxCount:
-		eligibleWallets := []*Wallet{}
 		minPendingCount := uint64(math.MaxUint64)
-		for _, wallet := range pool.childWallets {
+		minPendingIndexes := []int{}
+		for i, wallet := range pool.childWallets {
 			pendingCount := wallet.GetNonce() - wallet.GetConfirmedNonce()
 			if pendingCount < minPendingCount {
 				minPendingCount = pendingCount
-				eligibleWallets = []*Wallet{wallet}
+				minPendingIndexes = []int{i}
 			} else if pendingCount == minPendingCount {
-				eligibleWallets = append(eligibleWallets, wallet)
+				minPendingIndexes = append(minPendingIndexes, i)
 			}
 		}
-		input = rand.Intn(len(eligibleWallets))
-		return eligibleWallets[input]
+		input = input % len(minPendingIndexes)
+		input = minPendingIndexes[input]
 	}
 	return pool.childWallets[input]
 }
