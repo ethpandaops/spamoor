@@ -545,19 +545,21 @@ func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) 
 
 // ClientEntry represents a client in the API response
 type ClientEntry struct {
-	Index       int    `json:"index"`
-	Name        string `json:"name"`
-	Group       string `json:"group"`
-	Version     string `json:"version"`
-	BlockHeight uint64 `json:"block_height"`
-	IsReady     bool   `json:"ready"`
-	RpcHost     string `json:"rpc_host"`
-	Enabled     bool   `json:"enabled"`
+	Index       int      `json:"index"`
+	Name        string   `json:"name"`
+	Group       string   `json:"group"`  // First group for backward compatibility
+	Groups      []string `json:"groups"` // All groups
+	Version     string   `json:"version"`
+	BlockHeight uint64   `json:"block_height"`
+	IsReady     bool     `json:"ready"`
+	RpcHost     string   `json:"rpc_host"`
+	Enabled     bool     `json:"enabled"`
 }
 
 // UpdateClientGroupRequest represents the request body for updating a client group
 type UpdateClientGroupRequest struct {
-	Group string `json:"group"`
+	Group  string   `json:"group,omitempty"`  // Single group for backward compatibility
+	Groups []string `json:"groups,omitempty"` // Multiple groups
 }
 
 // UpdateClientEnabledRequest represents the request body for updating a client's enabled state
@@ -592,6 +594,7 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 			Index:       i,
 			Name:        client.GetName(),
 			Group:       client.GetClientGroup(),
+			Groups:      client.GetClientGroups(),
 			Version:     version,
 			BlockHeight: blockHeight,
 			IsReady:     slices.Contains(goodClients, client),
@@ -608,10 +611,10 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 // @Id updateClientGroup
 // @Summary Update client group
 // @Tags Client
-// @Description Updates the group for a specific client
+// @Description Updates the group(s) for a specific client. Supports both single group (backward compatibility) and multiple groups.
 // @Accept json
 // @Param index path int true "Client index"
-// @Param request body UpdateClientGroupRequest true "New group name"
+// @Param request body UpdateClientGroupRequest true "New group name(s)"
 // @Success 200 {object} Response "Success"
 // @Failure 400 {object} Response "Invalid client index"
 // @Failure 404 {object} Response "Client not found"
@@ -637,7 +640,16 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 	}
 
 	client := allClients[index]
-	client.SetClientGroup(req.Group)
+
+	// Handle both single group (backward compatibility) and multiple groups
+	if len(req.Groups) > 0 {
+		client.SetClientGroups(req.Groups)
+	} else if req.Group != "" {
+		client.SetClientGroups([]string{req.Group})
+	} else {
+		http.Error(w, "Either 'group' or 'groups' must be provided", http.StatusBadRequest)
+		return
+	}
 
 	w.WriteHeader(http.StatusOK)
 }
