@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
-	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"gopkg.in/yaml.v3"
 )
@@ -368,7 +368,7 @@ func (d *Daemon) spammerExistsByScenarioAndName(scenario, name string) bool {
 }
 
 // mergeConfiguration merges scenario defaults with imported configuration
-func (d *Daemon) mergeConfiguration(scenario *scenariotypes.ScenarioDescriptor, importedConfig map[string]interface{}) (string, error) {
+func (d *Daemon) mergeConfiguration(scenario *scenario.Descriptor, importedConfig map[string]interface{}) (string, error) {
 	// Get default configurations
 	defaultYaml, err := yaml.Marshal(scenario.DefaultOptions)
 	if err != nil {

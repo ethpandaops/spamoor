@@ -11,8 +11,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
-	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
 )
@@ -59,7 +59,7 @@ func main() {
 	// load scenario
 	invalidScenario := false
 	var scenarioName string
-	var scenarioDescriptior *scenariotypes.ScenarioDescriptor
+	var scenarioDescriptior *scenario.Descriptor
 	if flags.NArg() < 2 {
 		invalidScenario = true
 	} else {
@@ -82,13 +82,13 @@ func main() {
 		return
 	}
 
-	scenario := scenarioDescriptior.NewScenario(logger)
-	if scenario == nil {
+	newScenario := scenarioDescriptior.NewScenario(logger)
+	if newScenario == nil {
 		panic("could not create scenario instance")
 	}
 
 	flags.Init(fmt.Sprintf("%v %v", flags.Args()[0], scenarioName), pflag.ExitOnError)
-	scenario.Flags(flags)
+	newScenario.Flags(flags)
 	cliArgs.rpchosts = nil
 	flags.Parse(os.Args)
 
@@ -151,7 +151,7 @@ func main() {
 	walletPool.SetWalletSeed(cliArgs.seed)
 
 	// init scenario
-	err = scenario.Init(&scenariotypes.ScenarioOptions{
+	err = newScenario.Init(&scenario.Options{
 		WalletPool: walletPool,
 	})
 	if err != nil {
@@ -165,7 +165,7 @@ func main() {
 	}
 
 	// start scenario
-	err = scenario.Run(ctx)
+	err = newScenario.Run(ctx)
 	if err != nil {
 		panic(err)
 	}
