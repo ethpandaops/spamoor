@@ -182,22 +182,23 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 	clientCandidates := make([]*Client, 0)
 
 	if group == "" {
+		// Empty group means default group
 		for _, client := range pool.goodClients {
-			if client.IsEnabled() && client.GetClientGroup() == "default" {
+			if client.IsEnabled() && client.HasGroup("default") {
 				clientCandidates = append(clientCandidates, client)
 			}
 		}
 	} else if group == "*" {
+		// Wildcard means any group
 		for _, client := range pool.goodClients {
 			if client.IsEnabled() {
 				clientCandidates = append(clientCandidates, client)
 			}
 		}
-	}
-
-	if len(clientCandidates) == 0 {
+	} else {
+		// Specific group name
 		for _, client := range pool.goodClients {
-			if client.IsEnabled() && (group == "" || client.GetClientGroup() == group) {
+			if client.IsEnabled() && client.HasGroup(group) {
 				clientCandidates = append(clientCandidates, client)
 			}
 		}

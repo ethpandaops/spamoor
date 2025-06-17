@@ -26,8 +26,8 @@ type Client struct {
 	rpcClient *rpc.Client
 	logger    *logrus.Entry
 
-	clientGroup string
-	enabled     bool
+	clientGroups []string
+	enabled      bool
 
 	gasSuggestionMutex sync.Mutex
 	lastGasSuggestion  time.Time
@@ -45,12 +45,14 @@ type Client struct {
 // NewClient creates a new Client instance with the specified RPC host URL.
 // The rpchost parameter supports special prefixes:
 //   - headers(key:value|key2:value2) - sets custom HTTP headers
-//   - group(name) - assigns the client to a named group
+//   - group(name) - assigns the client to a named group (can be used multiple times)
+//   - group(name1,name2,name3) - assigns the client to multiple groups (comma-separated)
 //
-// Example: "headers(Authorization:Bearer token|User-Agent:MyApp)group(mainnet)http://localhost:8545"
+// Example: "headers(Authorization:Bearer token|User-Agent:MyApp)group(mainnet)group(primary)http://localhost:8545"
+// Example: "group(mainnet,primary,backup)http://localhost:8545"
 func NewClient(rpchost string) (*Client, error) {
 	headers := map[string]string{}
-	clientGroup := "default"
+	clientGroups := []string{"default"}
 
 	for {
 		if strings.HasPrefix(rpchost, "headers(") {
@@ -67,7 +69,24 @@ func NewClient(rpchost string) (*Client, error) {
 			groupEnd := strings.Index(rpchost, ")")
 			groupStr := rpchost[6:groupEnd]
 			rpchost = rpchost[groupEnd+1:]
-			clientGroup = groupStr
+
+			// Parse comma-separated groups
+			for _, group := range strings.Split(groupStr, ",") {
+				group = strings.TrimSpace(group)
+				if group != "" {
+					// Check if group already exists to avoid duplicates
+					exists := false
+					for _, existing := range clientGroups {
+						if existing == group {
+							exists = true
+							break
+						}
+					}
+					if !exists {
+						clientGroups = append(clientGroups, group)
+					}
+				}
+			}
 		} else {
 			break
 		}
@@ -84,12 +103,12 @@ func NewClient(rpchost string) (*Client, error) {
 	}
 
 	return &Client{
-		client:      ethclient.NewClient(rpcClient),
-		rpcClient:   rpcClient,
-		rpchost:     rpchost,
-		logger:      logrus.WithField("rpc", rpchost),
-		clientGroup: clientGroup,
-		enabled:     true,
+		client:       ethclient.NewClient(rpcClient),
+		rpcClient:    rpcClient,
+		rpchost:      rpchost,
+		logger:       logrus.WithField("rpc", rpchost),
+		clientGroups: clientGroups,
+		enabled:      true,
 	}, nil
 }
 
@@ -101,10 +120,34 @@ func (client *Client) GetName() string {
 	return name
 }
 
-// GetClientGroup returns the client group name assigned during initialization.
-// Defaults to "default" if no group was specified.
+// GetClientGroup returns the first client group name assigned during initialization.
+// Defaults to "default" if no group was specified. For multiple groups, use GetClientGroups().
 func (client *Client) GetClientGroup() string {
-	return client.clientGroup
+	if len(client.clientGroups) > 0 {
+		return client.clientGroups[0]
+	}
+	return "default"
+}
+
+// GetClientGroups returns all client group names assigned to this client.
+func (client *Client) GetClientGroups() []string {
+	if len(client.clientGroups) == 0 {
+		return []string{"default"}
+	}
+	return client.clientGroups
+}
+
+// HasGroup checks if the client belongs to the specified group.
+func (client *Client) HasGroup(group string) bool {
+	if group == "" {
+		group = "default"
+	}
+	for _, clientGroup := range client.clientGroups {
+		if clientGroup == group {
+			return true
+		}
+	}
+	return false
 }
 
 // GetEthClient returns the underlying go-ethereum ethclient.Client instance.
@@ -143,10 +186,28 @@ func (client *Client) UpdateWallet(ctx context.Context, wallet *Wallet) error {
 	return nil
 }
 
-// SetClientGroup sets the client group name for the client.
-// This is used to group clients together and target them with specific scenarios.
-func (client *Client) SetClientGroup(group string) {
-	client.clientGroup = group
+// SetClientGroups sets multiple client group names for the client, replacing all existing groups.
+func (client *Client) SetClientGroups(groups []string) {
+	// Remove duplicates and empty strings
+	uniqueGroups := []string{}
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		exists := false
+		for _, existing := range uniqueGroups {
+			if existing == group {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			uniqueGroups = append(uniqueGroups, group)
+		}
+	}
+
+	client.clientGroups = uniqueGroups
 }
 
 // IsEnabled returns whether the client is enabled for selection.
