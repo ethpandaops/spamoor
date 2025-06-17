@@ -8,8 +8,8 @@ import (
 
 	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/daemon/logscope"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
-	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/holiman/uint256"
 	"github.com/jmoiron/sqlx"
@@ -252,14 +252,14 @@ func (s *Spammer) runScenario() {
 
 	s.walletPool = spamoor.NewWalletPool(s.scenarioCtx, s.logger, s.daemon.rootWallet, s.daemon.clientPool, s.daemon.txpool)
 	s.walletPool.SetTransactionTracker(s.TrackTransactionResult)
-	scenarioOptions := &scenariotypes.ScenarioOptions{
+	options := &scenario.Options{
 		WalletPool: s.walletPool,
 		Config:     s.dbEntity.Config,
 		GlobalCfg:  s.daemon.GetGlobalCfg(),
 	}
 	scenario := scenarioDescriptor.NewScenario(s.logger)
 
-	err := scenario.Init(scenarioOptions)
+	err := scenario.Init(options)
 	if err != nil {
 		scenarioErr = fmt.Errorf("failed to init scenario: %w", err)
 		return

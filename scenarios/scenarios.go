@@ -1,7 +1,7 @@
 package scenarios
 
 import (
-	"github.com/ethpandaops/spamoor/scenariotypes"
+	"github.com/ethpandaops/spamoor/scenario"
 
 	blobcombined "github.com/ethpandaops/spamoor/scenarios/blob-combined"
 	blobconflicting "github.com/ethpandaops/spamoor/scenarios/blob-conflicting"
@@ -24,7 +24,7 @@ import (
 // ScenarioDescriptors contains all available scenario descriptors for the spamoor tool.
 // This registry includes scenarios for testing various Ethereum transaction types and patterns.
 // Each descriptor defines the configuration, constructor, and metadata for a specific test scenario.
-var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
+var ScenarioDescriptors = []*scenario.Descriptor{
 	&blobcombined.ScenarioDescriptor,
 	&blobconflicting.ScenarioDescriptor,
 	&blobs.ScenarioDescriptor,
@@ -46,7 +46,7 @@ var ScenarioDescriptors = []*scenariotypes.ScenarioDescriptor{
 // GetScenario finds and returns a scenario descriptor by name.
 // It performs a linear search through all registered scenarios and returns
 // the matching descriptor, or nil if no scenario with the given name exists.
-func GetScenario(name string) *scenariotypes.ScenarioDescriptor {
+func GetScenario(name string) *scenario.Descriptor {
 	for _, scenario := range ScenarioDescriptors {
 		if scenario.Name == name {
 			return scenario

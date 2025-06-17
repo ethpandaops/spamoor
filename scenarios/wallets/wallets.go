@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ethpandaops/spamoor/scenariotypes"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
 )
@@ -30,14 +30,14 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Wallets: 0,
 	Reclaim: false,
 }
-var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
+var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
 	Description:    "Show wallet balances",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
 
-func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
+func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 	return &Scenario{
 		options: ScenarioDefaultOptions,
 		logger:  logger.WithField("scenario", ScenarioName),
@@ -50,7 +50,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	return nil
 }
 
-func (s *Scenario) Init(options *scenariotypes.ScenarioOptions) error {
+func (s *Scenario) Init(options *scenario.Options) error {
 	s.walletPool = options.WalletPool
 
 	if options.Config != "" {

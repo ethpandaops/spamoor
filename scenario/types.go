@@ -1,4 +1,4 @@
-package scenariotypes
+package scenario
 
 import (
 	"context"
@@ -8,26 +8,26 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// ScenarioDescriptor describes a scenario.
-type ScenarioDescriptor struct {
+// Descriptor describes a scenario.
+type Descriptor struct {
 	Name           string
 	Description    string
-	DefaultOptions interface{}
+	DefaultOptions any
 	NewScenario    func(logger logrus.FieldLogger) Scenario
 }
 
-// ScenarioOptions contains the options for the scenario initialization.
-type ScenarioOptions struct {
+// Options contains the options for the scenario initialization.
+type Options struct {
 	WalletPool *spamoor.WalletPool
 	Config     string
-	GlobalCfg  map[string]interface{}
+	GlobalCfg  map[string]any
 }
 
 type Scenario interface {
 	// Flags registers the scenario's flags with the given flag set.
 	Flags(flags *pflag.FlagSet) error
 	// Init initializes the scenario with the given options.
-	Init(options *ScenarioOptions) error
+	Init(options *Options) error
 	// Run runs the scenario.
 	Run(ctx context.Context) error
 }
