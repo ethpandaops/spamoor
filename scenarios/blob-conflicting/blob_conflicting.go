@@ -352,11 +352,11 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 				}
 
 				if receipt != nil {
-					s.processTxReceipt(txIdx, tx, receipt, client, wallet, "blob")
+					s.processTxReceipt(txIdx, tx, receipt, client, "blob")
 				}
 			},
 			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-				logger := s.logger.WithField("rpc", client.GetName())
+				logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx1.Nonce())
 				if retry > 0 {
 					logger = logger.WithField("retry", retry)
 				}
@@ -398,11 +398,11 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 				}
 
 				if receipt != nil {
-					s.processTxReceipt(txIdx, tx, receipt, client, wallet, "dynfee")
+					s.processTxReceipt(txIdx, tx, receipt, client, "dynfee")
 				}
 			},
 			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-				logger := s.logger.WithField("rpc", client.GetName())
+				logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx2.Nonce())
 				if retry == 0 && rebroadcast > 0 {
 					logger.Infof("rebroadcasting blob tx %6d", txIdx+1)
 				}
@@ -444,7 +444,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	return tx1, client, wallet, txVersion, nil
 }
 
-func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *spamoor.Client, wallet *spamoor.Wallet, txLabel string) {
+func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *spamoor.Client, txLabel string) {
 	effectiveGasPrice := receipt.EffectiveGasPrice
 	if effectiveGasPrice == nil {
 		effectiveGasPrice = big.NewInt(0)
@@ -454,11 +454,6 @@ func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt
 		blobGasPrice = big.NewInt(0)
 	}
 	feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-	blobFeeAmount := new(big.Int).Mul(blobGasPrice, big.NewInt(int64(receipt.BlobGasUsed)))
-	totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
-	totalAmount = new(big.Int).Add(totalAmount, blobFeeAmount)
-	wallet.SubBalance(totalAmount)
-
 	gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
 	gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
 	gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))

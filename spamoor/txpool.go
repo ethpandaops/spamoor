@@ -35,9 +35,17 @@ type TxInfo struct {
 	From       common.Address
 	To         *common.Address
 	Tx         *types.Transaction
+	TxFees     TxFees
 	FromWallet *Wallet
 	ToWallet   *Wallet
 	Options    *SendTransactionOptions
+}
+
+// TxFees represents the fees associated with a transaction including
+// the fee amount and blob fee amount.
+type TxFees struct {
+	FeeAmount     big.Int
+	BlobFeeAmount big.Int
 }
 
 // TxPool manages transaction submission, confirmation tracking, and chain reorganization handling.
@@ -139,21 +147,30 @@ func (pool *TxPool) runTxPoolLoop() {
 	for {
 		newHighestBlockNumber, clients := pool.getHighestBlockNumber()
 		if newHighestBlockNumber > highestBlockNumber {
-			if highestBlockNumber > 0 || newHighestBlockNumber < 10 {
-				blockNumber := highestBlockNumber + 1
+			// Skip processing historical blocks on startup unless blockchain is young (< 10 blocks)
+			// This prevents processing millions of blocks when connecting to a long running chain
+			if highestBlockNumber == 0 && newHighestBlockNumber > 10 {
+				highestBlockNumber = newHighestBlockNumber - 1
+			}
+
+			for blockNumber := highestBlockNumber + 1; blockNumber <= newHighestBlockNumber; blockNumber++ {
+				processedBlock := false
 				for _, client := range clients {
-					for ; blockNumber <= newHighestBlockNumber; blockNumber++ {
-						err := pool.processBlock(pool.options.Context, client, blockNumber)
-						if err != nil {
-							logrus.WithError(err).Errorf("error processing block %v", blockNumber)
-						}
+					err := pool.processBlock(pool.options.Context, client, blockNumber)
+					if err != nil {
+						logrus.WithError(err).Errorf("error processing block %v", blockNumber)
+						continue
 					}
-					if blockNumber == newHighestBlockNumber {
-						break
-					}
+
+					highestBlockNumber = blockNumber
+					processedBlock = true
+					break
+				}
+
+				if !processedBlock {
+					logrus.Errorf("failed to process block %v", blockNumber)
 				}
 			}
-			highestBlockNumber = newHighestBlockNumber
 
 			select {
 			case <-pool.options.Context.Done():
@@ -303,6 +320,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		}
 
 		txHash := tx.Hash()
+		txFees := pool.getTransactionFees(tx, receipt)
 		fromWallet := walletMap[txFrom]
 		toAddr := tx.To()
 		toWallet := (*Wallet)(nil)
@@ -317,6 +335,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 				From:       txFrom,
 				To:         tx.To(),
 				Tx:         tx,
+				TxFees:     txFees,
 				FromWallet: fromWallet,
 				ToWallet:   toWallet,
 			})
@@ -326,11 +345,11 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		if fromWallet != nil {
 			confirmCount++
 			affectedWalletMap[txFrom] = true
-			pool.processTransactionInclusion(blockNumber, fromWallet, tx, receipt)
+			pool.processTransactionInclusion(blockNumber, fromWallet, tx, receipt, txFees)
 		}
 
 		if toWallet != nil {
-			pool.processTransactionReceival(toWallet, tx)
+			toWallet.AddBalance(tx.Value())
 		}
 	}
 
@@ -662,19 +681,23 @@ func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet *Wallet, txs
 // processTransactionInclusion handles the confirmation of a transaction from a tracked wallet.
 // It updates the wallet's nonce state, signals any waiting confirmation channels,
 // and cleans up completed nonce channels. Updates the wallet's confirmation tracking.
-func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wallet, tx *types.Transaction, receipt *types.Receipt) {
-	nonce := tx.Nonce()
+// Also updates the wallet's balance by subtracting the transaction fee and blob fee.
+func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wallet, tx *types.Transaction, receipt *types.Receipt, txFees TxFees) {
+	totalAmount := new(big.Int).Add(tx.Value(), &txFees.FeeAmount)
+	totalAmount = new(big.Int).Add(totalAmount, &txFees.BlobFeeAmount)
+	wallet.SubBalance(totalAmount)
 
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
+	nonce := tx.Nonce()
 	if nonceChan := wallet.txNonceChans[nonce]; nonceChan != nil {
 		nonceChan.receipt = receipt
 	}
 
-	wallet.confirmedNonce = nonce + 1
-	if nonce+1 > wallet.pendingNonce.Load() {
-		wallet.pendingNonce.Store(nonce + 1)
+	wallet.confirmedTxCount = nonce + 1
+	if nonce+1 > wallet.pendingTxCount.Load() {
+		wallet.pendingTxCount.Store(nonce + 1)
 	}
 	if blockNumber > wallet.lastConfirmation {
 		wallet.lastConfirmation = blockNumber
@@ -711,13 +734,17 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 			}
 		}
 
+		if lastNonce == wallet.confirmedTxCount {
+			return
+		}
+
 		pendingNonce := 0
 		for n := range wallet.txNonceChans {
 			pendingNonce = int(n)
 			break
 		}
 
-		logrus.Debugf("recovering %v stale transactions for %v (current nonce %v, cache nonce %v, first pending nonce: %v)", len(wallet.txNonceChans), wallet.address.String(), lastNonce, wallet.confirmedNonce, pendingNonce)
+		logrus.Debugf("recovering stale transactions for %v (tx count: %v, current nonce %v, cache nonce %v, first pending nonce: %v)", wallet.address.String(), len(wallet.txNonceChans), lastNonce, wallet.confirmedTxCount, pendingNonce)
 
 		wallet.txNonceMutex.Lock()
 		defer wallet.txNonceMutex.Unlock()
@@ -730,12 +757,6 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 			}
 		}
 	}
-}
-
-// processTransactionReceival handles incoming transactions to tracked wallets.
-// It updates the wallet's balance by adding the received transaction value.
-func (pool *TxPool) processTransactionReceival(wallet *Wallet, tx *types.Transaction) {
-	wallet.balance = wallet.balance.Add(wallet.balance, tx.Value())
 }
 
 // loadTransactionReceipt attempts to load a transaction receipt from multiple clients.
@@ -855,9 +876,13 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 				resetWallets[tx.From] = true
 
 				tx.FromWallet.txNonceMutex.Lock()
-				tx.FromWallet.confirmedNonce = tx.Tx.Nonce()
+				tx.FromWallet.confirmedTxCount = tx.Tx.Nonce()
 				tx.FromWallet.txNonceMutex.Unlock()
 			}
+
+			totalAmount := new(big.Int).Add(tx.Tx.Value(), &tx.TxFees.FeeAmount)
+			totalAmount = new(big.Int).Add(totalAmount, &tx.TxFees.BlobFeeAmount)
+			tx.FromWallet.AddBalance(totalAmount)
 
 			// add tx as pending tx
 			txOptions := &SendTransactionOptions{
@@ -884,7 +909,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 
 		if tx.ToWallet != nil {
 			// reverse processTransactionReceival
-			tx.ToWallet.balance = tx.ToWallet.balance.Sub(tx.ToWallet.balance, tx.Tx.Value())
+			tx.ToWallet.SubBalance(tx.Tx.Value())
 		}
 	}
 
@@ -895,6 +920,24 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	}
 
 	return nil
+}
+
+func (pool *TxPool) getTransactionFees(tx *types.Transaction, receipt *types.Receipt) TxFees {
+	effectiveGasPrice := receipt.EffectiveGasPrice
+	if effectiveGasPrice == nil {
+		effectiveGasPrice = big.NewInt(0)
+	}
+	blobGasPrice := receipt.BlobGasPrice
+	if blobGasPrice == nil {
+		blobGasPrice = big.NewInt(0)
+	}
+
+	txFees := TxFees{}
+
+	txFees.FeeAmount.Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+	txFees.BlobFeeAmount.Mul(blobGasPrice, big.NewInt(int64(receipt.BlobGasUsed)))
+
+	return txFees
 }
 
 // GetCurrentGasLimit returns the current gas limit of the transaction pool.
@@ -972,7 +1015,7 @@ func (pool *TxPool) isTransactionBlocking(wallet *Wallet, txNonce uint64) bool {
 	defer wallet.txNonceMutex.Unlock()
 
 	// This transaction is the next one that needs to be included
-	return txNonce == wallet.confirmedNonce
+	return txNonce <= wallet.confirmedTxCount
 }
 
 // startReliableRebroadcast starts a reliable rebroadcast goroutine for a transaction.

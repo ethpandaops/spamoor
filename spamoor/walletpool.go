@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/big"
 	"math/rand"
 	"sync"
@@ -31,6 +32,8 @@ var (
 	SelectWalletRandom WalletSelectionMode = 1
 	// SelectWalletRoundRobin selects wallets in round-robin fashion.
 	SelectWalletRoundRobin WalletSelectionMode = 2
+	// SelectWalletByPendingTxCount selects a wallet by pending tx count (lowest pending tx count first).
+	SelectWalletByPendingTxCount WalletSelectionMode = 3
 )
 
 // WalletPoolConfig contains configuration settings for the wallet pool including
@@ -228,6 +231,20 @@ func (pool *WalletPool) GetWallet(mode WalletSelectionMode, input int) *Wallet {
 		if pool.rrWalletIdx >= len(pool.childWallets) {
 			pool.rrWalletIdx = 0
 		}
+	case SelectWalletByPendingTxCount:
+		eligibleWallets := []*Wallet{}
+		minPendingCount := uint64(math.MaxUint64)
+		for _, wallet := range pool.childWallets {
+			pendingCount := wallet.GetNonce() - wallet.GetConfirmedNonce()
+			if pendingCount < minPendingCount {
+				minPendingCount = pendingCount
+				eligibleWallets = []*Wallet{wallet}
+			} else if pendingCount == minPendingCount {
+				eligibleWallets = append(eligibleWallets, wallet)
+			}
+		}
+		input = rand.Intn(len(eligibleWallets))
+		return eligibleWallets[input]
 	}
 	return pool.childWallets[input]
 }
@@ -662,6 +679,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		pool.logger.Infof("root wallet is locked, waiting for other funding txs to finish...")
 	}, func() error {
 		txList := make([]*types.Transaction, 0, batchTxCount)
+		batchTxMap := map[common.Hash][]*FundingRequest{}
 		if batcher != nil {
 			for txIdx := 0; txIdx < reqTxCount; txIdx += BatcherTxLimit {
 				batch := fundingReqs[txIdx:min(txIdx+BatcherTxLimit, reqTxCount)]
@@ -670,6 +688,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 					return err
 				}
 				txList = append(txList, tx)
+				batchTxMap[tx.Hash()] = batch
 			}
 		} else {
 			for _, req := range fundingReqs {
@@ -695,6 +714,13 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 					if err != nil {
 						pool.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
+					}
+
+					batch, ok := batchTxMap[tx.Hash()]
+					if ok {
+						for _, req := range batch {
+							req.Wallet.AddBalance(req.Amount.ToBig())
+						}
 					}
 				},
 			})

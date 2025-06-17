@@ -442,7 +442,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 				txIdx+1, receipt.BlockNumber.String(), deployedAddr.String(), gweiTotalFee, gweiBaseFee)
 		},
 		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-			logger := s.logger.WithField("rpc", client.GetName())
+			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())
 			if retry == 0 && rebroadcast > 0 {
 				logger.Infof("rebroadcasting tx %6d", txIdx+1)
 			}

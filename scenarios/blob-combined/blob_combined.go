@@ -370,11 +370,6 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 				blobGasPrice = big.NewInt(0)
 			}
 			feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-			blobFeeAmount := new(big.Int).Mul(blobGasPrice, big.NewInt(int64(receipt.BlobGasUsed)))
-			totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
-			totalAmount = new(big.Int).Add(totalAmount, blobFeeAmount)
-			wallet.SubBalance(totalAmount)
-
 			gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
 			gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
 			gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
@@ -382,7 +377,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 			s.logger.WithField("rpc", client.GetName()).Debugf("blob tx %6d.%v confirmed in block #%v!  total fee: %v gwei (base: %v, blob: %v)", txIdx+1, replacementIdx, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
 		},
 		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-			logger := s.logger.WithField("rpc", client.GetName())
+			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())
 			if retry == 0 && rebroadcast > 0 {
 				logger.Infof("rebroadcasting blob tx %6d.%v", txIdx+1, replacementIdx)
 			}

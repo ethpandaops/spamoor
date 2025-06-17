@@ -23,14 +23,14 @@ import (
 // nonce management, and balance updates. The wallet automatically handles nonce
 // sequencing and provides confirmation tracking for submitted transactions.
 type Wallet struct {
-	nonceMutex     sync.Mutex
-	balanceMutex   sync.RWMutex
-	privkey        *ecdsa.PrivateKey
-	address        common.Address
-	chainid        *big.Int
-	pendingNonce   atomic.Uint64
-	confirmedNonce uint64
-	balance        *big.Int
+	nonceMutex       sync.Mutex
+	balanceMutex     sync.RWMutex
+	privkey          *ecdsa.PrivateKey
+	address          common.Address
+	chainid          *big.Int
+	pendingTxCount   atomic.Uint64
+	confirmedTxCount uint64
+	balance          *big.Int
 
 	txNonceChans     map[uint64]*nonceStatus
 	txNonceMutex     sync.Mutex
@@ -116,13 +116,13 @@ func (wallet *Wallet) GetChainId() *big.Int {
 // This nonce is the next nonce that should be used for the next transaction, but it is for informational purposes only.
 // To actually use a nonce, you need to call GetNextNonce() which will increment the nonce and return the next nonce.
 func (wallet *Wallet) GetNonce() uint64 {
-	return wallet.pendingNonce.Load()
+	return wallet.pendingTxCount.Load()
 }
 
 // GetConfirmedNonce returns the last confirmed nonce for this wallet.
 // This represents the highest nonce that has been confirmed on-chain.
 func (wallet *Wallet) GetConfirmedNonce() uint64 {
-	return wallet.confirmedNonce
+	return wallet.confirmedTxCount
 }
 
 // GetBalance returns the current balance of the wallet.
@@ -145,12 +145,12 @@ func (wallet *Wallet) SetNonce(nonce uint64) {
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
 
-	pendingNonce := wallet.pendingNonce.Load()
+	pendingNonce := wallet.pendingTxCount.Load()
 	if nonce > pendingNonce {
-		wallet.pendingNonce.Store(nonce)
+		wallet.pendingTxCount.Store(nonce)
 	}
 
-	wallet.confirmedNonce = nonce
+	wallet.confirmedTxCount = nonce
 }
 
 // GetNextNonce atomically increments and returns the next available nonce.
@@ -158,7 +158,7 @@ func (wallet *Wallet) SetNonce(nonce uint64) {
 func (wallet *Wallet) GetNextNonce() uint64 {
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
-	return wallet.pendingNonce.Add(1) - 1
+	return wallet.pendingTxCount.Add(1) - 1
 }
 
 // SetBalance sets the wallet's balance to the specified amount.
@@ -223,7 +223,7 @@ func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMeta
 
 	transactor.Context = ctx
 	transactor.From = wallet.address
-	nonce := wallet.pendingNonce.Add(1) - 1
+	nonce := wallet.pendingTxCount.Add(1) - 1
 	transactor.Nonce = big.NewInt(0).SetUint64(nonce)
 
 	transactor.GasTipCap = txData.GasTipCap.ToBig()
@@ -234,7 +234,7 @@ func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMeta
 
 	tx, err := buildFn(transactor)
 	if err != nil {
-		wallet.pendingNonce.Store(nonce)
+		wallet.pendingTxCount.Store(nonce)
 		return nil, err
 	}
 
@@ -265,13 +265,14 @@ func (wallet *Wallet) ResetPendingNonce(ctx context.Context, client *Client) {
 	defer wallet.nonceMutex.Unlock()
 
 	nonce, err := client.GetPendingNonceAt(ctx, wallet.address)
-	if nonce < wallet.confirmedNonce {
-		nonce = wallet.confirmedNonce
+	if err == nil && nonce < wallet.confirmedTxCount {
+		logrus.Errorf("Resyncing confirmed nonce for %v from %d to %d (this should never happen)", wallet.address.String(), wallet.confirmedTxCount, nonce)
+		wallet.confirmedTxCount = nonce
 	}
 
-	if err == nil && wallet.pendingNonce.Load() != nonce {
-		logrus.Warnf("Resyncing pending nonce for %v from %d to %d", wallet.address.String(), wallet.pendingNonce.Load(), nonce)
-		wallet.pendingNonce.Store(nonce)
+	if err == nil && wallet.pendingTxCount.Load() != nonce {
+		logrus.Warnf("Resyncing pending nonce for %v from %d to %d", wallet.address.String(), wallet.pendingTxCount.Load(), nonce)
+		wallet.pendingTxCount.Store(nonce)
 	}
 }
 
@@ -295,7 +296,7 @@ func (wallet *Wallet) getTxNonceChan(targetNonce uint64) (*nonceStatus, bool) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
-	if wallet.confirmedNonce > targetNonce {
+	if wallet.confirmedTxCount > targetNonce {
 		return nil, false
 	}
 
