@@ -145,7 +145,7 @@ assert.True(t, result.AverageTPS > expectedMinTPS)
 ### Running Load Tests
 
 ```bash
-# Run all load tests (includes 15-minute timeout)
+# Run all load tests (includes verbose output and 15-minute timeout)
 make test-load
 
 # Run specific test
@@ -157,6 +157,26 @@ go test -tags=loadtest -v ./testing/load -timeout 15m
 # Run specific scenario
 go test -tags=loadtest -v ./testing/load/scenarios -run TestLowLoadDynamicFee
 ```
+
+### Live Progress Output
+
+The framework provides real-time progress indicators:
+
+```
+=== RUN   TestBasicLoadTest
+    load_test.go:82: 🚀 Starting basic load test...
+time="..." level=info msg="Starting warmup phase" duration=5s
+time="..." level=info msg="Starting main load test phase"
+time="..." level=info msg="Test progress" elapsed=10s phase="Main Load Test" progress="50.0%" remaining=10s
+time="..." level=info msg="Transaction progress" pending=0 recent_tps=29.9 total_sent=449
+    load_test.go:108: Basic Load Test: 24.00 TPS, 600 transactions, 0.00% errors, 195.902µs latency
+--- PASS: TestBasicLoadTest (25.00s)
+```
+
+**Progress Indicators:**
+- **Test Phase Progress**: Shows elapsed time, remaining time, and percentage complete
+- **Transaction Progress**: Reports transaction count, pending transactions, and recent TPS
+- **Hardware Comparison**: Logs final performance metrics for cross-hardware comparison
 
 ## Available Test Scenarios
 
@@ -271,6 +291,7 @@ type LoadTestConfig struct {
 - Reduce `Duration` or `TargetTPS` in config
 - Use `make test-load` (includes 15-minute timeout) or increase test timeout: `go test -timeout 15m`
 - Note: Some scaling tests may take several minutes to complete
+- Progress indicators show test advancement every 10-15 seconds
 
 **Want to reduce logging verbosity:**
 - Individual transaction errors are logged at Debug level

@@ -91,6 +91,12 @@ func (e *LoadTestEngine) RunLoadTest(ctx context.Context) (*LoadTestResult, erro
 	// Warmup phase
 	if e.config.WarmupDuration > 0 {
 		e.logger.WithField("duration", e.config.WarmupDuration).Info("Starting warmup phase")
+		
+		// Start progress indicator for warmup
+		warmupCtx, warmupCancel := context.WithTimeout(testCtx, e.config.WarmupDuration)
+		defer warmupCancel()
+		go e.logProgress(warmupCtx, "Warmup", e.config.WarmupDuration)
+		
 		if err := e.runWarmup(testCtx); err != nil {
 			return nil, fmt.Errorf("warmup failed: %w", err)
 		}
@@ -98,6 +104,12 @@ func (e *LoadTestEngine) RunLoadTest(ctx context.Context) (*LoadTestResult, erro
 	
 	// Main load test phase
 	e.logger.Info("Starting main load test phase")
+	
+	// Start progress indicator for main phase
+	mainCtx, mainCancel := context.WithTimeout(testCtx, e.config.Duration)
+	defer mainCancel()
+	go e.logProgress(mainCtx, "Main Load Test", e.config.Duration)
+	
 	if err := e.runMainPhase(testCtx); err != nil {
 		return nil, fmt.Errorf("main phase failed: %w", err)
 	}
@@ -155,6 +167,32 @@ func (e *LoadTestEngine) runTransactionLoad(ctx context.Context, targetTPS int, 
 	
 	txCount := uint64(0)
 	pendingCount := int64(0)
+	
+	// Track transaction counts for progress reporting
+	var lastTxCount uint64
+	progressTicker := time.NewTicker(15 * time.Second) // Report every 15 seconds
+	defer progressTicker.Stop()
+	
+	// Start transaction progress reporting
+	if recordMetrics {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-progressTicker.C:
+					currentCount := txCount
+					txRate := float64(currentCount-lastTxCount) / 15.0 // TPS over last 15 seconds
+					e.logger.WithFields(logrus.Fields{
+						"total_sent":    currentCount,
+						"pending":       pendingCount,
+						"recent_tps":    fmt.Sprintf("%.1f", txRate),
+					}).Info("Transaction progress")
+					lastTxCount = currentCount
+				}
+			}
+		}()
+	}
 	
 	for {
 		select {
@@ -387,4 +425,37 @@ func (e *LoadTestEngine) IsRunning() bool {
 	defer e.mutex.RUnlock()
 	
 	return e.running
+}
+
+// logProgress logs periodic progress updates during test phases
+func (e *LoadTestEngine) logProgress(ctx context.Context, phase string, duration time.Duration) {
+	ticker := time.NewTicker(10 * time.Second) // Progress every 10 seconds
+	defer ticker.Stop()
+	
+	start := time.Now()
+	
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			elapsed := time.Since(start)
+			remaining := duration - elapsed
+			if remaining < 0 {
+				remaining = 0
+			}
+			
+			progress := float64(elapsed) / float64(duration) * 100
+			if progress > 100 {
+				progress = 100
+			}
+			
+			e.logger.WithFields(logrus.Fields{
+				"phase":     phase,
+				"elapsed":   elapsed.Round(time.Second),
+				"remaining": remaining.Round(time.Second),
+				"progress":  fmt.Sprintf("%.1f%%", progress),
+			}).Info("Test progress")
+		}
+	}
 }

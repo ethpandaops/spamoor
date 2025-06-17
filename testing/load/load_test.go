@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"os"
 	"testing"
 	"time"
 
@@ -30,8 +31,10 @@ type LoadTestSuite struct {
 
 // SetupLoadTestSuite creates a comprehensive load test environment
 func SetupLoadTestSuite(t *testing.T, clientCount, walletCount int) (*LoadTestSuite, func()) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.InfoLevel)
+	log := logrus.New()
+	log.SetLevel(logrus.InfoLevel)
+	log.SetOutput(os.Stderr) // Force output to stderr for immediate display
+	logger := logrus.NewEntry(log)
 	
 	// Start mock RPC server
 	server := testingutils.NewMockRPCServer()
@@ -79,6 +82,7 @@ func SetupLoadTestSuite(t *testing.T, clientCount, walletCount int) (*LoadTestSu
 
 // TestBasicLoadTest tests basic load testing functionality
 func TestBasicLoadTest(t *testing.T) {
+	t.Log("🚀 Starting basic load test...")
 	suite, cleanup := SetupLoadTestSuite(t, 2, 10)
 	defer cleanup()
 	
@@ -121,6 +125,7 @@ func TestBasicLoadTest(t *testing.T) {
 
 // TestTransactionTypes tests different transaction types under load
 func TestTransactionTypes(t *testing.T) {
+	t.Log("🔧 Starting transaction types test...")
 	suite, cleanup := SetupLoadTestSuite(t, 3, 15)
 	defer cleanup()
 	
@@ -128,6 +133,7 @@ func TestTransactionTypes(t *testing.T) {
 	
 	for _, txType := range transactionTypes {
 		t.Run(fmt.Sprintf("TransactionType_%s", txType), func(t *testing.T) {
+			t.Logf("  📊 Testing transaction type: %s", txType)
 			// Reset validator for each test
 			suite.validator.Reset()
 			

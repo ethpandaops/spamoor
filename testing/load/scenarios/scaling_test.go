@@ -257,6 +257,7 @@ func TestWalletScaling(t *testing.T) {
 
 // TestCombinedScaling tests performance with varying both clients and wallets
 func TestCombinedScaling(t *testing.T) {
+	t.Log("📈 Starting combined scaling test...")
 	suite, cleanup := setupScalingTest(t)
 	defer cleanup()
 	
@@ -274,6 +275,8 @@ func TestCombinedScaling(t *testing.T) {
 	
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
+			t.Logf("  🔄 Testing scenario: %s (%d clients, %d wallets, %d TPS)", 
+				scenario.name, scenario.clientCount, scenario.walletCount, scenario.targetTPS)
 			// Reset validator for each test
 			suite.validator.Reset()
 			

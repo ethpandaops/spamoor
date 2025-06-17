@@ -30,8 +30,10 @@ type ThroughputTestSuite struct {
 
 // setupThroughputTest sets up the test environment for throughput testing
 func setupThroughputTest(t *testing.T) (*ThroughputTestSuite, func()) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.InfoLevel)
+	log := logrus.New()
+	log.SetLevel(logrus.InfoLevel)
+	log.SetOutput(os.Stderr) // Force output to stderr for immediate display
+	logger := logrus.NewEntry(log)
 	
 	// Start mock RPC server
 	server := testingutils.NewMockRPCServer()
@@ -81,6 +83,7 @@ func setupThroughputTest(t *testing.T) (*ThroughputTestSuite, func()) {
 
 // TestLowLoadDynamicFee tests low load throughput with dynamic fee transactions
 func TestLowLoadDynamicFee(t *testing.T) {
+	t.Log("⚡ Starting low load dynamic fee test...")
 	suite, cleanup := setupThroughputTest(t)
 	defer cleanup()
 	
@@ -139,6 +142,7 @@ func TestLowLoadDynamicFee(t *testing.T) {
 
 // TestMediumLoadBlobTransactions tests medium load throughput with blob transactions
 func TestMediumLoadBlobTransactions(t *testing.T) {
+	t.Log("💾 Starting medium load blob transactions test...")
 	suite, cleanup := setupThroughputTest(t)
 	defer cleanup()
 	
@@ -197,6 +201,7 @@ func TestMediumLoadBlobTransactions(t *testing.T) {
 
 // TestHighLoadMixedTransactions tests high load throughput with mixed transaction types
 func TestHighLoadMixedTransactions(t *testing.T) {
+	t.Log("🔥 Starting high load mixed transactions test...")
 	suite, cleanup := setupThroughputTest(t)
 	defer cleanup()
 	
@@ -262,6 +267,7 @@ func TestSustainedLoad(t *testing.T) {
 		t.Skip("Skipping sustained load test in short mode")
 	}
 	
+	t.Log("⏰ Starting sustained load test...")
 	suite, cleanup := setupThroughputTest(t)
 	defer cleanup()
 	
