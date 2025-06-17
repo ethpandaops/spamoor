@@ -22,8 +22,8 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy/contract"
-	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 )
 
@@ -116,14 +116,14 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TipFee:          1, // Priority fee (1 gwei)
 	MaxTransactions: 0,
 }
-var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
+var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
 	Description:    "Deploy contracts to create state bloat",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
 
-func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
+func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 	return &Scenario{
 		logger:     logger.WithField("scenario", ScenarioName),
 		pendingTxs: make(map[common.Hash]*PendingTransaction),
@@ -138,22 +138,22 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	return nil
 }
 
-func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
-	s.walletPool = walletPool
+func (s *Scenario) Init(options *scenario.Options) error {
+	s.walletPool = options.WalletPool
 
-	if config != "" {
-		err := yaml.Unmarshal([]byte(config), &s.options)
+	if options.Config != "" {
+		err := yaml.Unmarshal([]byte(options.Config), &s.options)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal config: %w", err)
 		}
 	}
 
 	if s.options.MaxWallets > 0 {
-		walletPool.SetWalletCount(s.options.MaxWallets)
+		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else {
 		// Use only root wallet by default for better efficiency
 		// This avoids child wallet funding overhead
-		walletPool.SetWalletCount(0)
+		s.walletPool.SetWalletCount(0)
 	}
 
 	// Initialize default max pending for manual mode
@@ -663,14 +663,14 @@ func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt
 	}
 
 	// Get current nonce for this wallet
-	addr := crypto.PubkeyToAddress(wallet.GetPrivateKey().PublicKey)
+	addr := crypto.PubkeyToAddress(wallet.GetWallet().GetPrivateKey().PublicKey)
 	nonce, err := client.GetEthClient().PendingNonceAt(ctx, addr)
 	if err != nil {
 		return fmt.Errorf("failed to get nonce for %s: %w", addr.Hex(), err)
 	}
 
 	// Create transaction auth
-	auth, err := bind.NewKeyedTransactorWithChainID(wallet.GetPrivateKey(), chainID)
+	auth, err := bind.NewKeyedTransactorWithChainID(wallet.GetWallet().GetPrivateKey(), chainID)
 	if err != nil {
 		return fmt.Errorf("failed to create auth: %w", err)
 	}
@@ -709,7 +709,7 @@ func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt
 	// Track pending transaction
 	pendingTx := &PendingTransaction{
 		TxHash:     tx.Hash(),
-		PrivateKey: wallet.GetPrivateKey(),
+		PrivateKey: wallet.GetWallet().GetPrivateKey(),
 		Timestamp:  time.Now(),
 	}
 

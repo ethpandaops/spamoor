@@ -21,9 +21,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/ethpandaops/spamoor/scenariotypes"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/utils"
 )
 
 // EIP-7702 gas cost constants
@@ -120,14 +121,14 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TipFee:   2,
 	CodeAddr: "",
 }
-var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
+var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
 	Description:    "Maximum state bloating via EIP-7702 EOA delegations",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
 
-func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
+func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 	return &Scenario{
 		logger: logger.WithField("scenario", ScenarioName),
 	}
@@ -140,11 +141,11 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	return nil
 }
 
-func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
-	s.walletPool = walletPool
+func (s *Scenario) Init(options *scenario.Options) error {
+	s.walletPool = options.WalletPool
 
-	if config != "" {
-		err := yaml.Unmarshal([]byte(config), &s.options)
+	if options.Config != "" {
+		err := yaml.Unmarshal([]byte(options.Config), &s.options)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal config: %w", err)
 		}
@@ -176,7 +177,7 @@ func (s *Scenario) Config() string {
 
 // getNetworkBlockGasLimit retrieves the current block gas limit from the network
 // It waits for a new block to be mined (with timeout) to ensure fresh data
-func (s *Scenario) getNetworkBlockGasLimit(ctx context.Context, client *txbuilder.Client) uint64 {
+func (s *Scenario) getNetworkBlockGasLimit(ctx context.Context, client *spamoor.Client) uint64 {
 	// Create a timeout context for the entire operation
 	timeoutCtx, cancel := context.WithTimeout(ctx, BlockMiningTimeout)
 	defer cancel()
@@ -232,11 +233,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return s.runMaxBloatingMode(ctx)
 }
 
-func (s *Scenario) prepareDelegator(delegatorIndex uint64) (*txbuilder.Wallet, error) {
+func (s *Scenario) prepareDelegator(delegatorIndex uint64) (*spamoor.Wallet, error) {
 	idxBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(idxBytes, delegatorIndex)
-	childKey := sha256.Sum256(append(common.FromHex(s.walletPool.GetRootWallet().GetAddress().Hex()), idxBytes...))
-	return txbuilder.NewWallet(fmt.Sprintf("%x", childKey))
+	childKey := sha256.Sum256(append(common.FromHex(s.walletPool.GetRootWallet().GetWallet().GetAddress().Hex()), idxBytes...))
+	return spamoor.NewWallet(fmt.Sprintf("%x", childKey))
 }
 
 func (s *Scenario) buildMaxBloatingAuthorizations(targetCount int, iteration int) []types.SetCodeAuthorization {
@@ -254,7 +255,7 @@ func (s *Scenario) buildMaxBloatingAuthorizations(targetCount int, iteration int
 		codeAddr = common.HexToAddress("0x0000000000000000000000000000000000000001")
 	}
 
-	chainId := s.walletPool.GetRootWallet().GetChainId().Uint64()
+	chainId := s.walletPool.GetChainId().Uint64()
 
 	for i := 0; i < targetCount; i++ {
 		// Create a unique delegator for each authorization
@@ -496,7 +497,7 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 			continue
 		}
 
-		tx, err := wallet.BuildDynamicFeeTx(txData)
+		tx, err := wallet.GetWallet().BuildDynamicFeeTx(txData)
 		if err != nil {
 			s.logger.Errorf("failed to build funding transaction for delegator %d: %v", delegatorIndex, err)
 			delegatorIndex++
@@ -504,9 +505,9 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 		}
 
 		// Send funding transaction with no retries to avoid duplicates
-		err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
-			Client:          client,
-			MaxRebroadcasts: 0, // No retries to avoid duplicates
+		err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet.GetWallet(), tx, &spamoor.SendTransactionOptions{
+			Client:      client,
+			Rebroadcast: false, // No retries to avoid duplicates
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				if err != nil {
 					return // Don't log individual failures
@@ -520,7 +521,7 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 					// No progress logging - only log when target is reached
 				}
 			},
-			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
+			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 				// Only log actual send failures, not confirmation failures
 				if err != nil {
 					s.logger.Debugf("funding tx send failed: %v", err)
@@ -654,7 +655,7 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 	amount := uint256.NewInt(0) // No value transfer needed
 
 	// Target address - use our own wallet for simplicity
-	toAddr := wallet.GetAddress()
+	toAddr := wallet.GetWallet().GetAddress()
 
 	// No call data for max bloating transactions
 	txCallData := []byte{}
@@ -667,15 +668,15 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 
 	if len(batches) == 1 {
 		// Single transaction - use existing logic
-		return s.sendSingleMaxBloatingTransaction(ctx, batches[0], txCallData, feeCap, tipCap, amount, toAddr, targetGasLimit, wallet, client)
+		return s.sendSingleMaxBloatingTransaction(ctx, batches[0], txCallData, feeCap, tipCap, amount, toAddr, targetGasLimit, wallet.GetWallet(), client)
 	} else {
 		// Multiple transactions needed - send them as a batch
-		return s.sendBatchedMaxBloatingTransactions(ctx, batches, txCallData, feeCap, tipCap, amount, toAddr, targetGasLimit, wallet, client)
+		return s.sendBatchedMaxBloatingTransactions(ctx, batches, txCallData, feeCap, tipCap, amount, toAddr, targetGasLimit, wallet.GetWallet(), client)
 	}
 }
 
 // sendSingleMaxBloatingTransaction sends a single transaction (original logic)
-func (s *Scenario) sendSingleMaxBloatingTransaction(ctx context.Context, authorizations []types.SetCodeAuthorization, txCallData []byte, feeCap, tipCap *big.Int, amount *uint256.Int, toAddr common.Address, targetGasLimit uint64, wallet *txbuilder.Wallet, client *txbuilder.Client) (uint64, string, int, float64, float64, string, error) {
+func (s *Scenario) sendSingleMaxBloatingTransaction(ctx context.Context, authorizations []types.SetCodeAuthorization, txCallData []byte, feeCap, tipCap *big.Int, amount *uint256.Int, toAddr common.Address, targetGasLimit uint64, wallet *spamoor.Wallet, client *spamoor.Client) (uint64, string, int, float64, float64, string, error) {
 	txData, err := txbuilder.SetCodeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
@@ -718,10 +719,9 @@ func (s *Scenario) sendSingleMaxBloatingTransaction(ctx context.Context, authori
 	}, 1)
 
 	// Send the transaction
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
-		Client:              client,
-		MaxRebroadcasts:     10,
-		RebroadcastInterval: 120 * time.Second, // Default rebroadcast interval
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+		Client:      client,
+		Rebroadcast: true,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			if err != nil {
 				s.logger.WithField("rpc", client.GetName()).Errorf("max bloating tx failed: %v", err)
@@ -778,7 +778,7 @@ func (s *Scenario) sendSingleMaxBloatingTransaction(ctx context.Context, authori
 				gasPerByte,
 				gweiTotalFee.String(), nil}
 		},
-		LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
+		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName())
 			if retry > 0 {
 				logger = logger.WithField("retry", retry)
@@ -805,7 +805,7 @@ func (s *Scenario) sendSingleMaxBloatingTransaction(ctx context.Context, authori
 }
 
 // sendBatchedMaxBloatingTransactions sends multiple transactions when size limit is exceeded
-func (s *Scenario) sendBatchedMaxBloatingTransactions(ctx context.Context, batches [][]types.SetCodeAuthorization, txCallData []byte, feeCap, tipCap *big.Int, amount *uint256.Int, toAddr common.Address, targetGasLimit uint64, wallet *txbuilder.Wallet, client *txbuilder.Client) (uint64, string, int, float64, float64, string, error) {
+func (s *Scenario) sendBatchedMaxBloatingTransactions(ctx context.Context, batches [][]types.SetCodeAuthorization, txCallData []byte, feeCap, tipCap *big.Int, amount *uint256.Int, toAddr common.Address, targetGasLimit uint64, wallet *spamoor.Wallet, client *spamoor.Client) (uint64, string, int, float64, float64, string, error) {
 	// Aggregate results
 	var totalGasUsed uint64
 	var totalAuthCount int
@@ -863,10 +863,9 @@ func (s *Scenario) sendBatchedMaxBloatingTransactions(ctx context.Context, batch
 
 		// Send the transaction immediately without waiting for confirmation
 		resultChan := resultChans[batchIndex]
-		err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
-			Client:              client,
-			MaxRebroadcasts:     MaxRebroadcasts,
-			RebroadcastInterval: 120 * time.Second, // Default rebroadcast interval
+		err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+			Client:      client,
+			Rebroadcast: true,
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				if err != nil {
 					s.logger.WithField("rpc", client.GetName()).Errorf("batch %d tx failed: %v", batchIndex+1, err)
@@ -890,15 +889,8 @@ func (s *Scenario) sendBatchedMaxBloatingTransactions(ctx context.Context, batch
 					return
 				}
 
-				effectiveGasPrice := receipt.EffectiveGasPrice
-				if effectiveGasPrice == nil {
-					effectiveGasPrice = big.NewInt(0)
-				}
-				feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-				totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
-				wallet.SubBalance(totalAmount)
-
-				gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(GweiPerEth))
+				txFee := utils.GetTransactionFees(tx, receipt)
+				totalFee := txFee.TotalFeeGwei()
 
 				resultChan <- struct {
 					gasUsed      uint64
@@ -906,9 +898,9 @@ func (s *Scenario) sendBatchedMaxBloatingTransactions(ctx context.Context, batch
 					authCount    int
 					gweiTotalFee string
 					err          error
-				}{receipt.GasUsed, receipt.BlockNumber.String(), len(batch), gweiTotalFee.String(), nil}
+				}{receipt.GasUsed, receipt.BlockNumber.String(), len(batch), totalFee.String(), nil}
 			},
-			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
+			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 				logger := s.logger.WithField("rpc", client.GetName())
 				if err != nil {
 					logger.Errorf("failed sending batch %d tx: %v", batchIndex+1, err)

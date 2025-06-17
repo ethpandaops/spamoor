@@ -4,6 +4,144 @@
         "contact": {}
     },
     "paths": {
+        "/api/client/{index}/enabled": {
+            "put": {
+                "description": "Updates the enabled state for a specific client",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Update client enabled state",
+                "operationId": "updateClientEnabled",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Client index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New enabled state",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.UpdateClientEnabledRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid client index",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Client not found",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/client/{index}/group": {
+            "put": {
+                "description": "Updates the group(s) for a specific client. Supports both single group (backward compatibility) and multiple groups.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Update client group",
+                "operationId": "updateClientGroup",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Client index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New group name(s)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.UpdateClientGroupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid client index",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Client not found",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/clients": {
+            "get": {
+                "description": "Returns a list of all clients with their details",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Get all clients",
+                "operationId": "getClients",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/api.ClientEntry"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/api/scenarios": {
             "get": {
                 "description": "Returns a list of all scenarios",
@@ -461,6 +599,51 @@
                 }
             }
         },
+        "/api/spammer/{id}/reclaim": {
+            "post": {
+                "description": "Reclaims funds from a spammer's wallet pool back to the root wallet",
+                "tags": [
+                    "Spammer"
+                ],
+                "summary": "Reclaim funds from a spammer",
+                "operationId": "reclaimFunds",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Spammer ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid spammer ID",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Spammer not found",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/spammer/{id}/start": {
             "post": {
                 "description": "Starts a specific spammer",
@@ -541,9 +724,151 @@
                     }
                 }
             }
+        },
+        "/api/spammers/export": {
+            "post": {
+                "description": "Exports specified spammers or all spammers to YAML format",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "Spammer"
+                ],
+                "summary": "Export spammers to YAML",
+                "operationId": "exportSpammers",
+                "parameters": [
+                    {
+                        "description": "Spammer IDs to export (optional)",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/api.ExportSpammersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "YAML configuration",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/spammers/import": {
+            "post": {
+                "description": "Imports spammers from YAML data or URL with validation and deduplication",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Spammer"
+                ],
+                "summary": "Import spammers from YAML data or URL",
+                "operationId": "importSpammers",
+                "parameters": [
+                    {
+                        "description": "Import configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.ImportSpammersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/daemon.ImportResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
+        "api.ClientEntry": {
+            "type": "object",
+            "properties": {
+                "block_height": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "group": {
+                    "description": "First group for backward compatibility",
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "All groups",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "index": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "ready": {
+                    "type": "boolean"
+                },
+                "rpc_host": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
         "api.CreateSpammerRequest": {
             "type": "object",
             "properties": {
@@ -561,6 +886,27 @@
                 },
                 "startImmediately": {
                     "type": "boolean"
+                }
+            }
+        },
+        "api.ExportSpammersRequest": {
+            "type": "object",
+            "properties": {
+                "spammer_ids": {
+                    "description": "If empty, exports all spammers",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "api.ImportSpammersRequest": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "description": "Can be YAML data or a URL",
+                    "type": "string"
                 }
             }
         },
@@ -651,6 +997,30 @@
                 }
             }
         },
+        "api.UpdateClientEnabledRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "api.UpdateClientGroupRequest": {
+            "type": "object",
+            "properties": {
+                "group": {
+                    "description": "Single group for backward compatibility",
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Multiple groups",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "api.UpdateSpammerRequest": {
             "type": "object",
             "properties": {
@@ -662,6 +1032,107 @@
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "daemon.ImportResult": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "imported": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/daemon.ImportedSpammerInfo"
+                    }
+                },
+                "imported_count": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "validation": {
+                    "$ref": "#/definitions/daemon.ImportValidationResult"
+                },
+                "warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "daemon.ImportValidationResult": {
+            "type": "object",
+            "properties": {
+                "duplicates": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "invalid_scenarios": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "spammers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/daemon.SpammerValidationInfo"
+                    }
+                },
+                "total_spammers": {
+                    "type": "integer"
+                },
+                "valid_spammers": {
+                    "type": "integer"
+                }
+            }
+        },
+        "daemon.ImportedSpammerInfo": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "scenario": {
+                    "type": "string"
+                }
+            }
+        },
+        "daemon.SpammerValidationInfo": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "scenario": {
+                    "type": "string"
+                },
+                "valid": {
+                    "type": "boolean"
                 }
             }
         }
