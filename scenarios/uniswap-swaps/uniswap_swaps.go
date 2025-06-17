@@ -39,6 +39,7 @@ type ScenarioOptions struct {
 	SellThreshold string `yaml:"sell_threshold"`
 	Timeout       string `yaml:"timeout"`
 	ClientGroup   string `yaml:"client_group"`
+	LogTxs        bool   `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -69,6 +70,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	SellThreshold: "100000000000000000000000", // 10000 DAI
 	Timeout:       "",
 	ClientGroup:   "",
+	LogTxs:        false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -100,6 +102,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.SellThreshold, "sell-threshold", ScenarioDefaultOptions.SellThreshold, "DAI balance threshold to force sell (in wei)")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
 }
 
@@ -211,12 +214,13 @@ func (s *Scenario) Run(ctx context.Context) error {
 		s.logger.Infof("Timeout set to %v", timeout)
 	}
 
-	err = utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
+	err = scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
 		TotalCount:                  s.options.TotalCount,
 		Throughput:                  s.options.Throughput,
 		MaxPending:                  maxPending,
 		ThroughputIncrementInterval: 0,
 		Timeout:                     timeout,
+		WalletPool:                  s.walletPool,
 
 		Logger: s.logger,
 		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
@@ -235,8 +239,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 			return func() {
 				if err != nil {
 					logger.Warnf("could not send transaction: %v", err)
-				} else {
+				} else if s.options.LogTxs {
 					logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+				} else {
+					logger.Debugf("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
 				}
 			}, err
 		},

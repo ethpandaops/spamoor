@@ -40,6 +40,7 @@ type ScenarioOptions struct {
 	RandomTarget bool   `yaml:"random_target"`
 	SelfTxOnly   bool   `yaml:"self_tx_only"`
 	ClientGroup  string `yaml:"client_group"`
+	LogTxs       bool   `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -68,6 +69,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	RandomTarget: false,
 	SelfTxOnly:   false,
 	ClientGroup:  "",
+	LogTxs:       false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -100,6 +102,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
 	flags.BoolVar(&s.options.SelfTxOnly, "self-tx-only", ScenarioDefaultOptions.SelfTxOnly, "Only send transactions to self")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
 }
 
@@ -162,12 +165,13 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
-	err := utils.RunTransactionScenario(ctx, utils.TransactionScenarioOptions{
+	err := scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
 		TotalCount:                  s.options.TotalCount,
 		Throughput:                  s.options.Throughput,
 		MaxPending:                  maxPending,
 		ThroughputIncrementInterval: 0,
 		Timeout:                     timeout,
+		WalletPool:                  s.walletPool,
 
 		Logger: s.logger,
 		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
@@ -186,8 +190,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 			return func() {
 				if err != nil {
 					logger.Warnf("could not send transaction: %v", err)
-				} else {
+				} else if s.options.LogTxs {
 					logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+				} else {
+					logger.Debugf("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
 				}
 			}, err
 		},
