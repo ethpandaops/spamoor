@@ -1075,7 +1075,7 @@ func (pool *TxPool) InitializeGasLimit() error {
 // Uses 30s base delay, 1.5x multiplier, with 10min maximum delay.
 func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
 	const (
-		baseDelay  = 30 * time.Second
+		baseDelay  = 120 * time.Second
 		multiplier = 1.5
 		maxDelay   = 10 * time.Minute
 	)
