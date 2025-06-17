@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethpandaops/spamoor/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -35,17 +36,10 @@ type TxInfo struct {
 	From       common.Address
 	To         *common.Address
 	Tx         *types.Transaction
-	TxFees     TxFees
+	TxFees     *utils.TxFees
 	FromWallet *Wallet
 	ToWallet   *Wallet
 	Options    *SendTransactionOptions
-}
-
-// TxFees represents the fees associated with a transaction including
-// the fee amount and blob fee amount.
-type TxFees struct {
-	FeeAmount     big.Int
-	BlobFeeAmount big.Int
 }
 
 // TxPool manages transaction submission, confirmation tracking, and chain reorganization handling.
@@ -320,7 +314,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		}
 
 		txHash := tx.Hash()
-		txFees := pool.getTransactionFees(tx, receipt)
+		txFees := utils.GetTransactionFees(tx, receipt)
 		fromWallet := walletMap[txFrom]
 		toAddr := tx.To()
 		toWallet := (*Wallet)(nil)
@@ -682,7 +676,7 @@ func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet *Wallet, txs
 // It updates the wallet's nonce state, signals any waiting confirmation channels,
 // and cleans up completed nonce channels. Updates the wallet's confirmation tracking.
 // Also updates the wallet's balance by subtracting the transaction fee and blob fee.
-func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wallet, tx *types.Transaction, receipt *types.Receipt, txFees TxFees) {
+func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wallet, tx *types.Transaction, receipt *types.Receipt, txFees *utils.TxFees) {
 	totalAmount := new(big.Int).Add(tx.Value(), &txFees.FeeAmount)
 	totalAmount = new(big.Int).Add(totalAmount, &txFees.BlobFeeAmount)
 	wallet.SubBalance(totalAmount)
@@ -920,24 +914,6 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	}
 
 	return nil
-}
-
-func (pool *TxPool) getTransactionFees(tx *types.Transaction, receipt *types.Receipt) TxFees {
-	effectiveGasPrice := receipt.EffectiveGasPrice
-	if effectiveGasPrice == nil {
-		effectiveGasPrice = big.NewInt(0)
-	}
-	blobGasPrice := receipt.BlobGasPrice
-	if blobGasPrice == nil {
-		blobGasPrice = big.NewInt(0)
-	}
-
-	txFees := TxFees{}
-
-	txFees.FeeAmount.Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-	txFees.BlobFeeAmount.Mul(blobGasPrice, big.NewInt(int64(receipt.BlobGasUsed)))
-
-	return txFees
 }
 
 // GetCurrentGasLimit returns the current gas limit of the transaction pool.

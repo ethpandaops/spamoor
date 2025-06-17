@@ -335,23 +335,8 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 				return
 			}
 
-			effectiveGasPrice := receipt.EffectiveGasPrice
-			if effectiveGasPrice == nil {
-				effectiveGasPrice = big.NewInt(0)
-			}
-			blobGasPrice := receipt.BlobGasPrice
-			if blobGasPrice == nil {
-				blobGasPrice = big.NewInt(0)
-			}
-			feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-			totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
-			wallet.SubBalance(totalAmount)
-
-			gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
-			gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
-			gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
-
-			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v, blob: %v)", txIdx+1, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
+			txFees := utils.GetTransactionFees(tx, receipt)
+			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (tx: %v/%v, blob: %v/%v)", txIdx+1, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxFeeGwei(), txFees.TxBaseFeeGwei(), txFees.BlobFeeGwei(), txFees.BlobBaseFeeGwei())
 		},
 		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())
