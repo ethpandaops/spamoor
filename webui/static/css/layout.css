@@ -44,4 +44,9 @@ nav .theme-selector .theme-navicon {
     display: inline;
     height: 40px;
 }
-  
+
+@media (min-width: 1650px) {
+    .container, .container-lg, .container-md, .container-sm, .container-xl, .container-xxl {
+        max-width: 1520px;
+    }
+}

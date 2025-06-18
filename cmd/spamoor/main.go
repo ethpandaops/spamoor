@@ -11,10 +11,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
-	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -60,7 +59,7 @@ func main() {
 	// load scenario
 	invalidScenario := false
 	var scenarioName string
-	var scenarioDescriptior *scenariotypes.ScenarioDescriptor
+	var scenarioDescriptior *scenario.Descriptor
 	if flags.NArg() < 2 {
 		invalidScenario = true
 	} else {
@@ -83,13 +82,13 @@ func main() {
 		return
 	}
 
-	scenario := scenarioDescriptior.NewScenario(logger)
-	if scenario == nil {
+	newScenario := scenarioDescriptior.NewScenario(logger)
+	if newScenario == nil {
 		panic("could not create scenario instance")
 	}
 
 	flags.Init(fmt.Sprintf("%v %v", flags.Args()[0], scenarioName), pflag.ExitOnError)
-	scenario.Flags(flags)
+	newScenario.Flags(flags)
 	cliArgs.rpchosts = nil
 	flags.Parse(os.Args)
 
@@ -133,22 +132,18 @@ func main() {
 	}
 
 	// prepare txpool
-	txpool := txbuilder.NewTxPool(&txbuilder.TxPoolOptions{
-		GetClientFn: func(index int, random bool) *txbuilder.Client {
-			mode := spamoor.SelectClientByIndex
-			if random {
-				mode = spamoor.SelectClientRandom
-			}
+	var walletPool *spamoor.WalletPool
 
-			return clientPool.GetClient(mode, index, "")
-		},
-		GetClientCountFn: func() int {
-			return len(clientPool.GetAllClients())
+	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		GetActiveWalletPools: func() []*spamoor.WalletPool {
+			return []*spamoor.WalletPool{walletPool}
 		},
 	})
 
 	// init wallet pool
-	walletPool := spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
+	walletPool = spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
 	walletPool.SetWalletCount(100)
 	walletPool.SetRefillAmount(utils.EtherToWei(uint256.NewInt(cliArgs.refillAmount)))
 	walletPool.SetRefillBalance(utils.EtherToWei(uint256.NewInt(cliArgs.refillBalance)))
@@ -156,19 +151,21 @@ func main() {
 	walletPool.SetWalletSeed(cliArgs.seed)
 
 	// init scenario
-	err = scenario.Init(walletPool, "")
+	err = newScenario.Init(&scenario.Options{
+		WalletPool: walletPool,
+	})
 	if err != nil {
 		panic(err)
 	}
 
 	// prepare wallet pool
-	err = walletPool.PrepareWallets(true)
+	err = walletPool.PrepareWallets()
 	if err != nil {
 		panic(fmt.Errorf("failed to prepare wallets: %v", err))
 	}
 
 	// start scenario
-	err = scenario.Run(ctx)
+	err = newScenario.Run(ctx)
 	if err != nil {
 		panic(err)
 	}

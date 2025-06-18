@@ -52,7 +52,7 @@ jobs:
 
     # setup global dependencies
     - name: Set up go
-      uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+      uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
       with:
         go-version: 1.24.x
     
@@ -85,7 +85,7 @@ jobs:
 
     # setup global dependencies
     - name: Set up go
-      uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+      uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
       with:
         go-version: 1.24.x
 
@@ -124,7 +124,7 @@ jobs:
 
     # setup global dependencies
     - name: Set up go
-      uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+      uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
       with:
         go-version: 1.24.x
 
@@ -157,7 +157,7 @@ jobs:
 
     # setup global dependencies
     - name: Set up go
-      uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+      uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
       with:
         go-version: 1.24.x
 
@@ -190,7 +190,7 @@ jobs:
 
     # setup global dependencies
     - name: Set up go
-      uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+      uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
       with:
         go-version: 1.24.x
 
@@ -238,7 +238,7 @@ jobs:
 
     # download build artifacts
     - name: Download build artifacts
-      uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: spamoor_linux_amd64
         path: ./bin
@@ -287,7 +287,7 @@ jobs:
 
     # download build artifacts
     - name: Download build artifacts
-      uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: spamoor_linux_arm64
         path: ./bin

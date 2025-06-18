@@ -51,10 +51,10 @@ func (fh *FrontendHandler) getWalletsPageData() (*WalletsPage, error) {
 		return nil, fmt.Errorf("root wallet not found")
 	}
 
-	rootAddr := rootWallet.GetAddress()
-	rootBalance := rootWallet.GetBalance()
-	rootPendingNonce := rootWallet.GetNonce()
-	rootConfirmedNonce := rootWallet.GetConfirmedNonce()
+	rootAddr := rootWallet.GetWallet().GetAddress()
+	rootBalance := rootWallet.GetWallet().GetBalance()
+	rootPendingNonce := rootWallet.GetWallet().GetNonce()
+	rootConfirmedNonce := rootWallet.GetWallet().GetConfirmedNonce()
 
 	data := &WalletsPage{
 		RootWallet: &WalletInfo{

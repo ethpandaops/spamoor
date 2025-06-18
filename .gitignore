@@ -1,5 +1,8 @@
 .vscode
 .note*
+.hack/devnet/generated-**
+.hack/devnet/custom-**
+ai_plans/
 tmp-*
 bin
 spamoor.db*

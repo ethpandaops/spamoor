@@ -8,8 +8,8 @@
         <tr>
           <th>Address</th>
           <th>Balance</th>
-          <th>Pending Nonce</th>
-          <th>Confirmed Nonce</th>
+          <th>Nonces</th>
+          <th>Pending TXs</th>
           <th>Used By</th>
         </tr>
       </thead>
@@ -18,8 +18,8 @@
         <tr class="align-middle">
           <td class="font-monospace">{{ .RootWallet.Address }}</td>
           <td>{{ .RootWallet.Balance }} ETH</td>
-          <td>{{ .RootWallet.PendingNonce }}</td>
-          <td>{{ .RootWallet.ConfirmedNonce }}</td>
+          <td>{{ .RootWallet.PendingNonce }} / {{ .RootWallet.ConfirmedNonce }}</td>
+          <td>{{ subUI64 .RootWallet.PendingNonce .RootWallet.ConfirmedNonce }}</td>
           <td><span class="badge bg-primary">Root Wallet</span></td>
         </tr>
         
@@ -28,8 +28,8 @@
         <tr class="align-middle">
           <td class="font-monospace">{{ .Address }}</td>
           <td>{{ .Balance }} ETH</td>
-          <td>{{ .PendingNonce }}</td>
-          <td>{{ .ConfirmedNonce }}</td>
+          <td>{{ .PendingNonce }} / {{ .ConfirmedNonce }}</td>
+          <td>{{ subUI64 .PendingNonce .ConfirmedNonce }}</td>
           <td class="d-flex align-items-center gap-2">
             <a href="/" class="text-decoration-none">
               #{{ .SpammerID }}

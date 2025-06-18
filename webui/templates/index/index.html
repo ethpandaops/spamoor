@@ -2,16 +2,52 @@
   <div class="container mt-2">
     <h2 class="py-2">Spamoor Dashboard</h2>
     
-    <div class="d-flex justify-content-end mb-3">
-      <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newSpammerModal">
-        <i class="fas fa-plus"></i> New Spammer
-      </button>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div class="d-flex align-items-center gap-3">
+        <!-- Mass actions controls -->
+        <div id="massActionsControls" class="d-none d-flex align-items-center gap-2">
+          <span class="text-muted" id="selectedCount">0 selected</span>
+          <div class="dropdown">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+              Mass Actions
+            </button>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="#" onclick="massExport()">
+                <i class="fas fa-download me-2"></i>Export Selected
+              </a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="#" onclick="massStart()">
+                <i class="fas fa-play me-2"></i>Start Selected
+              </a></li>
+              <li><a class="dropdown-item" href="#" onclick="massStop()">
+                <i class="fas fa-stop me-2"></i>Stop Selected
+              </a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item text-danger" href="#" onclick="massDelete()">
+                <i class="fas fa-trash me-2"></i>Delete Selected
+              </a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#importSpammersModal">
+          <i class="fas fa-upload"></i> Import Spammers
+        </button>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newSpammerModal">
+          <i class="fas fa-plus"></i> New Spammer
+        </button>
+      </div>
     </div>
 
     <div class="table-responsive">
       <table class="table">
         <thead>
           <tr>
+            <th style="width: 40px">
+              <input type="checkbox" class="form-check-input" id="selectAll" onchange="toggleSelectAll(this)">
+            </th>
             <th style="width: 100px">ID</th>
             <th>Name</th>
             <th style="min-width: 100px; width: 10%">Scenario</th>
@@ -22,6 +58,10 @@
         <tbody>
           {{ range .Spammers }}
           <tr class="align-middle">
+            <td>
+              <input type="checkbox" class="form-check-input spammer-checkbox" data-spammer-id="{{ .ID }}" 
+                     onchange="updateMassActions()">
+            </td>
             <td>{{ .ID }}</td>
             <td>
               {{ .Name }}
@@ -30,7 +70,7 @@
               {{ end }}
             </td>
             <td>{{ .Scenario }}</td>
-            <td>
+            <td class="status-cell">
               {{ if eq .Status 0 }}
                 <span class="badge bg-info">Paused</span>
               {{ else if eq .Status 1 }}
@@ -56,8 +96,11 @@
                       <i class="fas fa-pause"></i>
                     </button>
                   {{ end }}
-                  <button class="btn btn-sm btn-info" onclick="editSpammer({{ .ID }})" title="Edit Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+                  <button class="btn btn-sm btn-primary" onclick="editSpammer({{ .ID }})" title="Edit Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                     <i class="fas fa-edit"></i>
+                  </button>
+                  <button class="btn btn-sm btn-info spammer-reclaim-btn" {{ if eq .Status 1 }}disabled="disabled"{{ end }} onclick="reclaimFunds({{ .ID }})" title="Reclaim Funds" data-bs-toggle="tooltip" data-bs-placement="top">
+                    <i class="fas fa-money-bill-wave"></i>
                   </button>
                   <button class="btn btn-sm btn-danger" onclick="deleteSpammer({{ .ID }})" title="Delete Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
                     <i class="fas fa-trash"></i>
@@ -67,8 +110,8 @@
             </td>
           </tr>
           <tr class="d-none log-row" data-spammer-id="{{ .ID }}">
-            <td colspan="5" class="p-0">
-              <div class="log-container bg-dark text-light p-3" style="max-height: 400px; overflow-y: auto;">
+            <td colspan="6" class="p-0">
+              <div class="log-container p-3" style="max-height: 400px; overflow-y: auto;">
                 <div class="logs font-monospace small"></div>
               </div>
             </td>
@@ -173,6 +216,67 @@
       </div>
     </div>
   </div>
+
+  <!-- Import Spammers Modal -->
+  <div class="modal fade" id="importSpammersModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Import Spammers</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>
+            Import spammers from a YAML file or URL. Imported spammers will be created in paused state for safety.
+          </div>
+          
+          <div class="mb-3">
+            <label class="form-label">Import Method</label>
+            <div class="btn-group w-100" role="group">
+              <input type="radio" class="btn-check" name="importMethod" id="importFile" value="file" checked>
+              <label class="btn btn-outline-primary" for="importFile">
+                <i class="fas fa-file me-2"></i>Upload File
+              </label>
+              <input type="radio" class="btn-check" name="importMethod" id="importUrl" value="url">
+              <label class="btn btn-outline-primary" for="importUrl">
+                <i class="fas fa-link me-2"></i>From URL
+              </label>
+            </div>
+          </div>
+
+          <div id="fileImport" class="import-method">
+            <div class="mb-3">
+              <label class="form-label">YAML File</label>
+              <input type="file" class="form-control" id="yamlFile" accept=".yaml,.yml">
+              <div class="form-text">Select a YAML file exported from spamoor or created manually</div>
+            </div>
+          </div>
+
+          <div id="urlImport" class="import-method d-none">
+            <div class="mb-3">
+              <label class="form-label">URL</label>
+              <input type="url" class="form-control" id="yamlUrl" placeholder="https://example.com/spammers.yaml">
+              <div class="form-text">URL pointing to a YAML configuration file</div>
+            </div>
+          </div>
+
+          <div id="importPreview" class="d-none">
+            <label class="form-label">Preview</label>
+            <div class="border rounded yaml-preview" style="max-height: 300px; overflow-y: auto;">
+              <pre id="previewContent" class="mb-0 small p-1"></pre>
+            </div>
+          </div>
+
+          <div id="importResults" class="d-none mt-3"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="importBtn" onclick="performImport()">Import</button>
+        </div>
+      </div>
+    </div>
+  </div>
 {{ end }}
 
 {{ define "js" }}
@@ -187,8 +291,9 @@ async function startSpammer(id) {
     await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
     
     const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
-    const statusCell = row.querySelector('td:nth-child(4)');
+    const statusCell = row.querySelector('.status-cell');
     const toggleButton = row.querySelector('.spammer-toggle-btn');
+    const reclaimButton = row.querySelector('.spammer-reclaim-btn');
     
     statusCell.innerHTML = '<span class="badge bg-success">Running</span>';
     
@@ -196,6 +301,7 @@ async function startSpammer(id) {
     toggleButton.setAttribute('onclick', `pauseSpammer(${id})`);
     toggleButton.setAttribute('title', 'Pause Spammer');
     toggleButton.innerHTML = '<i class="fas fa-pause"></i>';
+    reclaimButton.disabled = true;
 
     const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
     if (tooltip) {
@@ -212,8 +318,9 @@ async function pauseSpammer(id) {
     await fetch(`/api/spammer/${id}/pause`, {method: 'POST'});
     
     const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
-    const statusCell = row.querySelector('td:nth-child(4)');
+    const statusCell = row.querySelector('.status-cell');
     const toggleButton = row.querySelector('.spammer-toggle-btn');
+    const reclaimButton = row.querySelector('.spammer-reclaim-btn');
     
     statusCell.innerHTML = '<span class="badge bg-info">Paused</span>';
     
@@ -221,6 +328,7 @@ async function pauseSpammer(id) {
     toggleButton.setAttribute('onclick', `startSpammer(${id})`);
     toggleButton.setAttribute('title', 'Start Spammer');
     toggleButton.innerHTML = '<i class="fas fa-play"></i>';
+    reclaimButton.disabled = false;
 
     const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
     if (tooltip) {
@@ -236,6 +344,17 @@ async function deleteSpammer(id) {
   if (!confirm('Are you sure you want to delete this spammer?')) return;
   await fetch(`/api/spammer/${id}`, {method: 'DELETE'});
   window.location.reload();
+}
+
+async function reclaimFunds(id) {
+  if (!confirm('Are you sure you want to reclaim funds from this spammer? This will return any remaining funds from the spammer\'s wallet pool back to the root wallet.')) return;
+  
+  try {
+    await fetch(`/api/spammer/${id}/reclaim`, {method: 'POST'});
+    alert('Funds reclaimed successfully');
+  } catch (err) {
+    alert('Failed to reclaim funds: ' + err.message);
+  }
 }
 
 document.getElementById('newSpammerModal').addEventListener('show.bs.modal', async () => {
@@ -502,28 +621,335 @@ document.addEventListener('DOMContentLoaded', () => {
   const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
   tooltipTriggerList.map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
 });
+
+function toggleSelectAll(checkbox) {
+  const checkboxes = document.querySelectorAll('.spammer-checkbox');
+  checkboxes.forEach(cb => cb.checked = checkbox.checked);
+  updateMassActions();
+}
+
+function updateMassActions() {
+  const checkboxes = document.querySelectorAll('.spammer-checkbox:checked');
+  const count = checkboxes.length;
+  const controls = document.getElementById('massActionsControls');
+  const countSpan = document.getElementById('selectedCount');
+  const selectAllCheckbox = document.getElementById('selectAll');
+  
+  if (count > 0) {
+    controls.classList.remove('d-none');
+    countSpan.textContent = `${count} selected`;
+  } else {
+    controls.classList.add('d-none');
+  }
+  
+  const allCheckboxes = document.querySelectorAll('.spammer-checkbox');
+  if (count === 0) {
+    selectAllCheckbox.indeterminate = false;
+    selectAllCheckbox.checked = false;
+  } else if (count === allCheckboxes.length) {
+    selectAllCheckbox.indeterminate = false;
+    selectAllCheckbox.checked = true;
+  } else {
+    selectAllCheckbox.indeterminate = true;
+  }
+}
+
+async function massExport() {
+  const selectedIds = Array.from(document.querySelectorAll('.spammer-checkbox:checked'))
+    .map(cb => parseInt(cb.dataset.spammerId));
+  
+  if (selectedIds.length === 0) return;
+  
+  try {
+    const response = await fetch('/api/spammers/export', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({spammer_ids: selectedIds})
+    });
+    
+    if (!response.ok) throw new Error('Export failed');
+    
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `spammers-export-${new Date().toISOString().slice(0,10)}.yaml`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('Failed to export spammers: ' + err.message);
+  }
+}
+
+async function massStart() {
+  const selectedIds = Array.from(document.querySelectorAll('.spammer-checkbox:checked'))
+    .map(cb => parseInt(cb.dataset.spammerId));
+  
+  if (selectedIds.length === 0) return;
+  if (!confirm(`Start ${selectedIds.length} selected spammers?`)) return;
+  
+  let successCount = 0;
+  for (const id of selectedIds) {
+    try {
+      await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
+      successCount++;
+    } catch (err) {
+      console.error(`Failed to start spammer ${id}:`, err);
+    }
+  }
+  
+  alert(`Started ${successCount} out of ${selectedIds.length} spammers`);
+  window.location.reload();
+}
+
+async function massStop() {
+  const selectedIds = Array.from(document.querySelectorAll('.spammer-checkbox:checked'))
+    .map(cb => parseInt(cb.dataset.spammerId));
+  
+  if (selectedIds.length === 0) return;
+  if (!confirm(`Stop ${selectedIds.length} selected spammers?`)) return;
+  
+  let successCount = 0;
+  for (const id of selectedIds) {
+    try {
+      await fetch(`/api/spammer/${id}/pause`, {method: 'POST'});
+      successCount++;
+    } catch (err) {
+      console.error(`Failed to stop spammer ${id}:`, err);
+    }
+  }
+  
+  alert(`Stopped ${successCount} out of ${selectedIds.length} spammers`);
+  window.location.reload();
+}
+
+async function massDelete() {
+  const selectedIds = Array.from(document.querySelectorAll('.spammer-checkbox:checked'))
+    .map(cb => parseInt(cb.dataset.spammerId));
+  
+  if (selectedIds.length === 0) return;
+  if (!confirm(`Are you sure you want to DELETE ${selectedIds.length} selected spammers?\n\nThis action cannot be undone!`)) return;
+  
+  let successCount = 0;
+  for (const id of selectedIds) {
+    try {
+      await fetch(`/api/spammer/${id}`, {method: 'DELETE'});
+      successCount++;
+    } catch (err) {
+      console.error(`Failed to delete spammer ${id}:`, err);
+    }
+  }
+  
+  alert(`Deleted ${successCount} out of ${selectedIds.length} spammers`);
+  window.location.reload();
+}
+
+document.querySelectorAll('input[name="importMethod"]').forEach(radio => {
+  radio.addEventListener('change', function() {
+    document.querySelectorAll('.import-method').forEach(method => {
+      method.classList.add('d-none');
+    });
+    
+    if (this.value === 'file') {
+      document.getElementById('fileImport').classList.remove('d-none');
+    } else {
+      document.getElementById('urlImport').classList.remove('d-none');
+    }
+    
+    document.getElementById('importPreview').classList.add('d-none');
+    document.getElementById('importResults').classList.add('d-none');
+  });
+});
+
+document.getElementById('yamlFile').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      showPreview(e.target.result);
+    };
+    reader.readAsText(file);
+  }
+});
+
+document.getElementById('yamlUrl').addEventListener('blur', function() {
+  const url = this.value.trim();
+  if (url) {
+    fetchUrlPreview(url);
+  }
+});
+
+function showPreview(yamlContent) {
+  document.getElementById('previewContent').textContent = yamlContent;
+  document.getElementById('importPreview').classList.remove('d-none');
+}
+
+async function fetchUrlPreview(url) {
+  try {
+    showPreview(`# Will fetch from URL: ${url}\n# Preview not available due to CORS restrictions`);
+  } catch (err) {
+    console.error('Failed to fetch URL preview:', err);
+  }
+}
+
+async function performImport() {
+  const method = document.querySelector('input[name="importMethod"]:checked').value;
+  let inputData = '';
+  
+  if (method === 'file') {
+    const file = document.getElementById('yamlFile').files[0];
+    if (!file) {
+      alert('Please select a file');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      await doImport(e.target.result);
+    };
+    reader.readAsText(file);
+    return;
+  } else {
+    const url = document.getElementById('yamlUrl').value.trim();
+    if (!url) {
+      alert('Please enter a URL');
+      return;
+    }
+    await doImport(url);
+  }
+}
+
+async function doImport(input) {
+  const importBtn = document.getElementById('importBtn');
+  const originalText = importBtn.textContent;
+  
+  try {
+    importBtn.textContent = 'Importing...';
+    importBtn.disabled = true;
+    
+    const response = await fetch('/api/spammers/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({input: input})
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(result.error || 'Import failed');
+    }
+    
+    showImportResults(result.data);
+  } catch (err) {
+    showImportError(err.message);
+  } finally {
+    importBtn.textContent = originalText;
+    importBtn.disabled = false;
+  }
+}
+
+function showImportResults(data) {
+  const resultsDiv = document.getElementById('importResults');
+  let html = '';
+  
+  if (data.imported_count > 0) {
+    html += `<div class="alert alert-success">
+      <i class="fas fa-check-circle me-2"></i>
+      Successfully imported ${data.imported_count} spammers!
+    </div>`;
+    
+    if (data.imported && data.imported.length > 0) {
+      html += '<h6>Imported Spammers:</h6><ul class="list-unstyled">';
+      data.imported.forEach(s => {
+        html += `<li><strong>${s.name}</strong> (ID: ${s.id}, Scenario: ${s.scenario})</li>`;
+      });
+      html += '</ul>';
+    }
+  }
+  
+  if (data.errors && data.errors.length > 0) {
+    html += '<div class="alert alert-danger"><h6>Errors:</h6><ul>';
+    data.errors.forEach(error => {
+      html += `<li>${error}</li>`;
+    });
+    html += '</ul></div>';
+  }
+  
+  if (data.warnings && data.warnings.length > 0) {
+    html += '<div class="alert alert-warning"><h6>Warnings:</h6><ul>';
+    data.warnings.forEach(warning => {
+      html += `<li>${warning}</li>`;
+    });
+    html += '</ul></div>';
+  }
+  
+  resultsDiv.innerHTML = html;
+  resultsDiv.classList.remove('d-none');
+  
+  if (data.imported_count > 0) {
+    setTimeout(() => {
+      window.location.reload();
+    }, 3000);
+  }
+}
+
+function showImportError(message) {
+  const resultsDiv = document.getElementById('importResults');
+  resultsDiv.innerHTML = `
+    <div class="alert alert-danger">
+      <i class="fas fa-exclamation-triangle me-2"></i>
+      Import failed: ${message}
+    </div>
+  `;
+  resultsDiv.classList.remove('d-none');
+}
 </script>
 {{ end }}
 
 {{ define "css" }}
 <style>
+/* Log Container - Adapts to theme */
+.log-container {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.375rem;
+}
+
+/* Dark theme specific styles */
+[data-bs-theme="dark"] .log-container {
+  background-color: #1a1d20;
+  border-color: #495057;
+}
+
+/* Light theme specific styles */
+[data-bs-theme="light"] .log-container {
+  background-color: #f8f9fa;
+  border-color: #dee2e6;
+}
+
 .log-entry {
   word-break: break-word;
   margin-bottom: 0.25rem;
   border-left: 3px solid transparent;
   padding-left: 0.5rem;
+  color: var(--bs-body-color);
 }
 
 .log-entry.text-danger {
   border-left-color: var(--bs-danger);
+  color: var(--bs-danger);
 }
 
 .log-entry.text-warning {
   border-left-color: var(--bs-warning);
+  color: var(--bs-warning);
 }
 
 .log-entry.text-info {
   border-left-color: var(--bs-info);
+  color: var(--bs-info);
 }
 
 .message-text {
@@ -543,9 +969,24 @@ document.addEventListener('DOMContentLoaded', () => {
   padding: 0.15em 0.4em;
   font-weight: normal;
   line-height: 1;
-  background-color: #2d3238 !important;
-  color: #adb5bd;
   white-space: nowrap;
+  background-color: var(--bs-secondary) !important;
+  color: var(--bs-body-color);
+  border: 1px solid var(--bs-border-color);
+}
+
+/* Dark theme badge styling */
+[data-bs-theme="dark"] .log-entry .badge {
+  background-color: #2d3238 !important;
+  color: #adb5bd !important;
+  border-color: #495057;
+}
+
+/* Light theme badge styling */
+[data-bs-theme="light"] .log-entry .badge {
+  background-color: #e9ecef !important;
+  color: #495057 !important;
+  border-color: #ced4da;
 }
 
 .log-entry .more-fields {
@@ -556,6 +997,156 @@ document.addEventListener('DOMContentLoaded', () => {
   text-align: left;
   font-family: monospace;
   white-space: pre-line;
+}
+
+/* Status badges - better contrast */
+.badge.bg-info {
+  background-color: var(--bs-info) !important;
+  color: var(--bs-white) !important;
+}
+
+.badge.bg-success {
+  background-color: var(--bs-success) !important;
+  color: var(--bs-white) !important;
+}
+
+.badge.bg-secondary {
+  background-color: var(--bs-secondary) !important;
+  color: var(--bs-white) !important;
+}
+
+.badge.bg-danger {
+  background-color: var(--bs-danger) !important;
+  color: var(--bs-white) !important;
+}
+
+.badge.bg-warning {
+  background-color: var(--bs-warning) !important;
+  color: var(--bs-black) !important;
+}
+
+/* Import modal - proper theme support */
+.yaml-preview {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  border-color: var(--bs-border-color) !important;
+}
+
+.yaml-preview pre {
+  color: inherit;
+  background: transparent;
+}
+
+/* Ensure form controls inherit theme colors */
+.modal-body .form-control {
+  background-color: var(--bs-body-bg);
+  border-color: var(--bs-border-color);
+  color: var(--bs-body-color);
+}
+
+.modal-body .form-control:focus {
+  background-color: var(--bs-body-bg);
+  border-color: var(--bs-primary);
+  color: var(--bs-body-color);
+  box-shadow: 0 0 0 0.25rem rgba(var(--bs-primary-rgb), 0.25);
+}
+
+/* File input styling */
+.modal-body .form-control[type="file"] {
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+.modal-body .form-control[type="file"]::-webkit-file-upload-button {
+  background-color: var(--bs-secondary);
+  border-color: var(--bs-border-color);
+  color: var(--bs-body-color);
+  margin-right: 0.75rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--bs-border-color);
+  padding: 0.25rem 0.5rem;
+}
+
+/* Radio button styling */
+.modal-body .btn-check:checked + .btn-outline-primary {
+  background-color: var(--bs-primary);
+  border-color: var(--bs-primary);
+  color: var(--bs-white);
+}
+
+/* Table improvements for dark mode */
+.table {
+  --bs-table-bg: var(--bs-body-bg);
+  --bs-table-color: var(--bs-body-color);
+}
+
+[data-bs-theme="dark"] .table {
+  --bs-table-striped-bg: rgba(255, 255, 255, 0.05);
+  --bs-table-hover-bg: rgba(255, 255, 255, 0.075);
+}
+
+/* Modal improvements */
+[data-bs-theme="dark"] .modal-content {
+  background-color: var(--bs-dark);
+  border-color: var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .modal-header {
+  border-bottom-color: var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .modal-footer {
+  border-top-color: var(--bs-border-color);
+}
+
+/* Button improvements for better contrast */
+.btn-group .btn {
+  border-color: var(--bs-border-color);
+}
+
+/* Dropdown improvements */
+[data-bs-theme="dark"] .dropdown-menu {
+  background-color: var(--bs-dark);
+  border-color: var(--bs-border-color);
+}
+
+[data-bs-theme="dark"] .dropdown-item {
+  color: var(--bs-body-color);
+}
+
+[data-bs-theme="dark"] .dropdown-item:hover,
+[data-bs-theme="dark"] .dropdown-item:focus {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: var(--bs-body-color);
+}
+
+[data-bs-theme="dark"] .dropdown-divider {
+  border-top-color: var(--bs-border-color);
+}
+
+/* Alert improvements */
+[data-bs-theme="dark"] .alert-info {
+  background-color: rgba(13, 202, 240, 0.1);
+  border-color: rgba(13, 202, 240, 0.2);
+  color: #9ec5fe;
+}
+
+[data-bs-theme="dark"] .alert-warning {
+  background-color: rgba(255, 193, 7, 0.1);
+  border-color: rgba(255, 193, 7, 0.2);
+  color: #ffda6a;
+}
+
+[data-bs-theme="dark"] .alert-success {
+  background-color: rgba(25, 135, 84, 0.1);
+  border-color: rgba(25, 135, 84, 0.2);
+  color: #75b798;
+}
+
+[data-bs-theme="dark"] .alert-danger {
+  background-color: rgba(220, 53, 69, 0.1);
+  border-color: rgba(220, 53, 69, 0.2);
+  color: #f1aeb5;
 }
 </style>
 {{ end }}

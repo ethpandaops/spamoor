@@ -18,6 +18,7 @@ spamoor blob-combined [flags]
 - `-c, --count` - Total number of transactions to send
 - `-t, --throughput` - Transactions to send per slot
 - `--max-pending` - Maximum number of pending transactions
+- `--throughput-increment-interval` - Increment the throughput and pending limit every interval (in seconds). Useful for gradually increasing load over time.
 
 ### Transaction Settings
 - `--basefee` - Max fee per gas in gwei (default: 20)
@@ -42,6 +43,7 @@ spamoor blob-combined [flags]
 
 ### Debug Options
 - `-v, --verbose` - Enable verbose output
+- `--log-txs` - Log all submitted transactions
 - `--trace` - Enable tracing output
 
 ## Example
