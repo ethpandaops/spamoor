@@ -128,13 +128,13 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	// register well known wallets
 	s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
 		Name:          "xen-deployer",
-		RefillAmount:  uint256.NewInt(2000000000000000000), // 2 ETH
-		RefillBalance: uint256.NewInt(1000000000000000000), // 1 ETH
+		RefillAmount:  uint256.NewInt(4000000000000000000), // 4 ETH
+		RefillBalance: uint256.NewInt(2000000000000000000), // 2 ETH
 	})
 	s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
 		Name:          "misc-deployer",
-		RefillAmount:  uint256.NewInt(2000000000000000000), // 2 ETH
-		RefillBalance: uint256.NewInt(1000000000000000000), // 1 ETH
+		RefillAmount:  uint256.NewInt(4000000000000000000), // 4 ETH
+		RefillBalance: uint256.NewInt(2000000000000000000), // 2 ETH
 	})
 
 	return nil

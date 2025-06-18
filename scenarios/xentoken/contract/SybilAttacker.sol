@@ -37,7 +37,7 @@ contract XENSybilAttacker {
             bytes32 salt = bytes32((uint256(seed) << 160) | (uint256(index) << 64) | uint256(uint64(bytes8(blockhash(block.number - 1)))));
             
             // Create minimal proxy bytecode with this contract as implementation
-            bytes memory bytecode = getMinimalProxyBytecode(address(this));
+            bytes memory bytecode = getMinimalProxyBytecode(address(this), salt);
             
             // Deploy using CREATE2
             address proxy;
@@ -73,13 +73,14 @@ contract XENSybilAttacker {
     /**
      * @dev Creates minimal proxy bytecode for given implementation
      */
-    function getMinimalProxyBytecode(address implementation) internal pure returns (bytes memory) {
+    function getMinimalProxyBytecode(address implementation, bytes32 salt) internal pure returns (bytes memory) {
         // EIP-1167 minimal proxy bytecode with implementation address embedded
         return abi.encodePacked(
             hex"600b380380600b5f395ff3" // init code
             hex"363d3d373d3d3d363d73",
             implementation,
-            hex"5af43d82803e903d91602b57fd5bf3"
+            hex"5af43d82803e903d91602b57fd5bf3",
+            salt
         );
     }
     
@@ -88,7 +89,7 @@ contract XENSybilAttacker {
      */
     function predictProxyAddress(uint256 seed, uint256 index) external view returns (address) {
         bytes32 salt = bytes32((uint256(seed) << 128) | uint256(index));
-        bytes memory bytecode = getMinimalProxyBytecode(address(this));
+        bytes memory bytecode = getMinimalProxyBytecode(address(this), salt);
         bytes32 hash = keccak256(
             abi.encodePacked(
                 bytes1(0xff),
