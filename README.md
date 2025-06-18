@@ -25,6 +25,30 @@ All scenarios require:
 - `--privkey` - Private key for the sending wallet
 - `--rpchost` - RPC endpoint(s) to send transactions to
 
+### RPC Host Configuration
+
+RPC hosts support additional configuration parameters through URL prefixes:
+
+- `headers(key:value|key2:value2)` - Sets custom HTTP headers
+- `group(name)` - Assigns the client to a named group (can be used multiple times)
+- `group(name1,name2,name3)` - Assigns the client to multiple groups (comma-separated)
+- `name(custom_name)` - Sets a custom display name override for the client
+
+**Examples:**
+```bash
+# Basic RPC endpoint
+--rpchost="http://localhost:8545"
+
+# With custom headers and groups
+--rpchost="headers(Authorization:Bearer token|User-Agent:MyApp)group(mainnet)group(primary)http://localhost:8545"
+
+# With custom name and multiple groups
+--rpchost="group(mainnet,primary,backup)name(MainNet Primary)http://localhost:8545"
+
+# Full configuration example
+--rpchost="headers(Authorization:Bearer token)group(mainnet)name(My Custom Node)http://localhost:8545"
+```
+
 ## Scenarios
 
 Spamoor provides multiple scenarios for different transaction types:
@@ -75,8 +99,14 @@ The web interface runs on `http://localhost:8080` by default and provides:
 - Start/pause/delete functionality
 
 ### API
-The daemon exposes a REST API for programmatic control.
-See the API Documentation in the spamoor web interface for details.
+The daemon exposes a REST API for programmatic control, including:
+
+- **Client Management**: Get client information, update client groups, enable/disable clients
+- **Client Name Override**: Set custom display names for RPC clients via `PUT /api/client/{index}/name`
+- **Spammer Control**: Create, start, pause, and delete spammers
+- **Export/Import**: Export and import spammer configurations
+
+See the API Documentation in the spamoor web interface for complete details.
 
 ### Export/Import Functionality
 Spamoor supports exporting and importing spammer configurations as YAML files:
