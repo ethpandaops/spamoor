@@ -1,8 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.22;
 
+struct MintInfo {
+    address user;
+    uint256 term;
+    uint256 maturityTs;
+    uint256 rank;
+    uint256 amplifier;
+    uint256 eaaRate;
+}
+
 interface IXENCrypto {
     function claimRank(uint256 term) external;
+    function userMints(address user) external view returns (MintInfo memory);
 }
 
 contract XENSybilAttacker {
@@ -15,6 +25,12 @@ contract XENSybilAttacker {
     function sybilAttack(address xenContract, uint256 seed, uint256 term) public {
         uint256 gasBuffer = 100000; // Buffer to ensure we don't run out of gas
         uint256 index = 0;
+
+        // do 20 userMints static calls for previous addresses
+        for (uint256 i = 0; i < 20; i++) {
+            uint160 salt = uint160((uint256(seed) << 90) | (uint256(i) << 64) | uint256(uint64(bytes8(blockhash(block.number - 1)))));
+            IXENCrypto(xenContract).userMints(address(uint160(uint256(salt))));
+        }
         
         while (gasleft() > gasBuffer) {
             // Create salt for CREATE2 - pack seed, index and blockhash as uint96, uint96, and uint64 each
