@@ -13,8 +13,11 @@ import (
 	"github.com/ethpandaops/spamoor/webui/server"
 	"github.com/ethpandaops/spamoor/webui/types"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/negroni"
+
+	_ "net/http/pprof"
 )
 
 var (
@@ -26,6 +29,14 @@ var (
 )
 
 func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
+	// Initialize metrics collector
+	err := daemon.InitializeMetrics()
+	if err != nil {
+		logrus.Errorf("failed to initialize metrics: %v", err)
+	} else {
+		logrus.Info("metrics endpoint available at /metrics")
+	}
+
 	// init router
 	router := mux.NewRouter()
 
@@ -37,7 +48,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	// register frontend routes
 	frontendHandler := handlers.NewFrontendHandler(daemon)
 	router.HandleFunc("/", frontendHandler.Index).Methods("GET")
-	router.HandleFunc("/health", frontendHandler.Health).Methods("GET")
+	router.HandleFunc("/clients", frontendHandler.Clients).Methods("GET")
 	router.HandleFunc("/wallets", frontendHandler.Wallets).Methods("GET")
 
 	// API routes
@@ -49,21 +60,32 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/spammer", apiHandler.CreateSpammer).Methods("POST")
 	apiRouter.HandleFunc("/spammer/{id}/start", apiHandler.StartSpammer).Methods("POST")
 	apiRouter.HandleFunc("/spammer/{id}/pause", apiHandler.PauseSpammer).Methods("POST")
+	apiRouter.HandleFunc("/spammer/{id}/reclaim", apiHandler.ReclaimFunds).Methods("POST")
 	apiRouter.HandleFunc("/spammer/{id}", apiHandler.DeleteSpammer).Methods("DELETE")
 	apiRouter.HandleFunc("/spammer/{id}/logs", apiHandler.GetSpammerLogs).Methods("GET")
 	apiRouter.HandleFunc("/spammer/{id}", apiHandler.GetSpammerDetails).Methods("GET")
 	apiRouter.HandleFunc("/spammer/{id}", apiHandler.UpdateSpammer).Methods("PUT")
 	apiRouter.HandleFunc("/spammer/{id}/logs/stream", apiHandler.StreamSpammerLogs).Methods("GET")
+	apiRouter.HandleFunc("/clients", apiHandler.GetClients).Methods("GET")
+	apiRouter.HandleFunc("/client/{index}/group", apiHandler.UpdateClientGroup).Methods("PUT")
+	apiRouter.HandleFunc("/client/{index}/enabled", apiHandler.UpdateClientEnabled).Methods("PUT")
+
+	// Export/Import routes
+	apiRouter.HandleFunc("/spammers/export", apiHandler.ExportSpammers).Methods("POST")
+	apiRouter.HandleFunc("/spammers/import", apiHandler.ImportSpammers).Methods("POST")
+
+	// metrics endpoint
+	router.Handle("/metrics", promhttp.Handler()).Methods("GET")
 
 	// swagger
 	router.PathPrefix("/docs/").Handler(docs.GetSwaggerHandler(logrus.StandardLogger()))
-
-	router.PathPrefix("/").Handler(frontend)
 
 	if config.Pprof {
 		// add pprof handler
 		router.PathPrefix("/debug/pprof/").Handler(http.DefaultServeMux)
 	}
+
+	router.PathPrefix("/").Handler(frontend)
 
 	n := negroni.New()
 	n.Use(negroni.NewRecovery())

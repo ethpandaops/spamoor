@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -176,7 +175,7 @@ func (u *Uniswap) UpdateTokenBalance(walletAddr common.Address, tokenAddr common
 	u.tokenBalances[walletAddr][tokenAddr] = newBalance
 }
 
-func (u *Uniswap) getTxFee(ctx context.Context, client *txbuilder.Client) (*big.Int, *big.Int, error) {
+func (u *Uniswap) getTxFee(ctx context.Context, client *spamoor.Client) (*big.Int, *big.Int, error) {
 	var feeCap *big.Int
 	var tipCap *big.Int
 
@@ -228,7 +227,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 	// Track all approval transactions
 	var approvalTxs []*types.Transaction
-	var approvalWallets []*txbuilder.Wallet
+	var approvalWallets []*spamoor.Wallet
 
 	// For each wallet and token pair
 	for _, wallet := range wallets {
@@ -371,8 +370,8 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 			wg.Add(1)
 
-			go func(tx *types.Transaction, client *txbuilder.Client, wallet *txbuilder.Wallet) {
-				err := u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &txbuilder.SendTransactionOptions{
+			go func(tx *types.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
+				err := u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &spamoor.SendTransactionOptions{
 					Client: client,
 					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 						if err != nil {
@@ -380,8 +379,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 						}
 						wg.Done()
 					},
-					MaxRebroadcasts:     10,
-					RebroadcastInterval: 30 * time.Second,
+					Rebroadcast: true,
 				})
 				if err != nil {
 					u.logger.Errorf("failed to send approval tx: %v", err)

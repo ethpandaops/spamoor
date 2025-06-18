@@ -16,6 +16,10 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
+// BuildBlobTx constructs a blob transaction (EIP-4844) with the specified transaction metadata and blob references.
+// It processes multiple blob references, each containing data that will be committed to the blob sidecar.
+// The transaction must have a valid 'To' address as blob transactions cannot be contract deployments.
+// Returns a complete BlobTx with all blobs, commitments, proofs, and versioned hashes.
 func BuildBlobTx(txData *TxMetadata, blobRefs [][]string) (*types.BlobTx, error) {
 	if txData.To == nil {
 		return nil, fmt.Errorf("to cannot be nil for blob transaction")
@@ -47,6 +51,16 @@ func BuildBlobTx(txData *TxMetadata, blobRefs [][]string) (*types.BlobTx, error)
 	return &tx, nil
 }
 
+// ParseBlobRefsBytes parses an array of blob references and returns the concatenated blob data as bytes.
+// Blob references support multiple formats:
+//   - "0x..." - hex-encoded data
+//   - "file:path" - data from file
+//   - "url:http://..." - data from HTTP URL
+//   - "repeat:0xdata:count" - repeat hex data count times
+//   - "random" or "random:size" - generate random data of specified or random size
+//   - "copy:index" - copy data from existing blob at index (only for blob transactions)
+//
+// The tx parameter is used for the "copy" reference type and can be nil for other types.
 func ParseBlobRefsBytes(blobRefs []string, tx *types.BlobTx) ([]byte, error) {
 	var err error
 	var blobBytes []byte
@@ -128,6 +142,9 @@ func ParseBlobRefsBytes(blobRefs []string, tx *types.BlobTx) ([]byte, error) {
 	return blobBytes, nil
 }
 
+// parseBlobRefs processes a single blob reference array and adds the resulting blob to the transaction.
+// It parses the blob data using ParseBlobRefsBytes, encodes it into a KZG commitment,
+// and appends the blob, commitment, proof, and versioned hash to the transaction sidecar.
 func parseBlobRefs(tx *types.BlobTx, blobRefs []string) error {
 	blobBytes, err := ParseBlobRefsBytes(blobRefs, tx)
 	if err != nil {
@@ -146,6 +163,9 @@ func parseBlobRefs(tx *types.BlobTx, blobRefs []string) error {
 	return nil
 }
 
+// loadUrlRef fetches blob data from an HTTP URL.
+// It performs a GET request and reads the entire response body.
+// Returns an error if the HTTP status is not 200 or if the request fails.
 func loadUrlRef(url string) ([]byte, error) {
 	response, err := http.Get(url)
 	if err != nil {
@@ -159,6 +179,9 @@ func loadUrlRef(url string) ([]byte, error) {
 	return io.ReadAll(response.Body)
 }
 
+// randomBlobData generates cryptographically secure random blob data of the specified size.
+// Uses crypto/rand for secure random number generation.
+// Returns an error if the random data generation fails or doesn't produce the requested size.
 func randomBlobData(size int) ([]byte, error) {
 	data := make([]byte, size)
 	n, err := rand.Read(data)
@@ -171,12 +194,31 @@ func randomBlobData(size int) ([]byte, error) {
 	return data, nil
 }
 
-var blobV1Marshaller func(tx *types.Transaction) ([]byte, error)
+// GenerateCellProofs generates cell proofs for blob v1 transactions (experimental feature).
+// This function requires blob-v1 support to be initialized, otherwise returns an error.
+// Used for advanced blob transaction types that require cell-level proofs.
+func GenerateCellProofs(sidecar *types.BlobTxSidecar) ([]kzg4844.Proof, error) {
+	if blobV1GenerateCellProof == nil {
+		return nil, fmt.Errorf("blob-v1 not supported when using spamoor as library")
+	}
+	return blobV1GenerateCellProof(sidecar)
+}
 
-func MarshalBlobV1Tx(tx *types.Transaction) ([]byte, error) {
+// MarshalBlobV1Tx marshals a blob v1 transaction with cell proofs into bytes.
+// This function requires blob-v1 support to be initialized, otherwise returns an error.
+// Used for encoding experimental blob v1 transaction format with cell proofs.
+func MarshalBlobV1Tx(tx *types.Transaction, cellProofs []kzg4844.Proof) ([]byte, error) {
 	if blobV1Marshaller == nil {
-		return nil, fmt.Errorf("blob-v1 not supported when using assertoor as library")
+		return nil, fmt.Errorf("blob-v1 not supported when using spamoor as library")
 	}
 
-	return blobV1Marshaller(tx)
+	return blobV1Marshaller(tx, cellProofs)
 }
+
+// blobV1GenerateCellProof is a function pointer for generating cell proofs in blob v1 transactions.
+// This is set externally when blob-v1 support is available and remains nil when used as a library.
+var blobV1GenerateCellProof func(tx *types.BlobTxSidecar) ([]kzg4844.Proof, error)
+
+// blobV1Marshaller is a function pointer for marshaling blob v1 transactions with cell proofs.
+// This is set externally when blob-v1 support is available and remains nil when used as a library.
+var blobV1Marshaller func(tx *types.Transaction, cellProofs []kzg4844.Proof) ([]byte, error)
