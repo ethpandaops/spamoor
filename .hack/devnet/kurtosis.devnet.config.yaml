@@ -7,11 +7,14 @@ participants_matrix:
 network_params:
   electra_fork_epoch: 0
   preset: mainnet
-  gas_limit: 60000000
-  genesis_gaslimit: 60000000
+  gas_limit: 100000000
+  genesis_gaslimit: 100000000
 additional_services:
+  - spamoor # required for config extraction
   - dora
   - blockscout
+spamoor_params:
+  image: ethpandaops/spamoor:master
 port_publisher:
   additional_services:
     enabled: true

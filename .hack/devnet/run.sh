@@ -17,32 +17,16 @@ else
   --image-download always \
   --enclave "$ENCLAVE_NAME" \
   --args-file "${config_file}"
+
+  # Stop spamoor instance within ethereum-package if running
+  kurtosis service stop "$ENCLAVE_NAME" spamoor > /dev/null || true
 fi
 
 # Get chain config
 kurtosis files inspect "$ENCLAVE_NAME" el_cl_genesis_data ./config.yaml | tail -n +2 > "${__dir}/generated-chain-config.yaml"
 
-# Get validator ranges
-kurtosis files inspect "$ENCLAVE_NAME" validator-ranges validator-ranges.yaml | tail -n +2 > "${__dir}/generated-validator-ranges.yaml"
-
-## Generate spamoor config
-ENCLAVE_UUID=$(kurtosis enclave inspect "$ENCLAVE_NAME" --full-uuids | grep 'UUID:' | awk '{print $2}')
-
-EXECUTION_NODES=$(docker ps -aq -f "label=kurtosis_enclave_uuid=$ENCLAVE_UUID" \
-              -f "label=com.kurtosistech.app-id=kurtosis" \
-              -f "label=com.kurtosistech.custom.ethereum-package.client-type=execution" | tac)
-
-cat <<EOF > "${__dir}/generated-hosts.txt"
-$(for node in $EXECUTION_NODES; do
-    name=$(docker inspect -f "{{ with index .Config.Labels \"com.kurtosistech.id\"}}{{.}}{{end}}" $node)
-    ip=$(echo '127.0.0.1')
-    port=$(docker inspect --format='{{ (index (index .NetworkSettings.Ports "8545/tcp") 0).HostPort }}' $node)
-    if [ -z "$port" ]; then
-      port="65535"
-    fi
-    echo "http://$ip:$port"
-done)
-EOF
+# Get spamoor hosts
+kurtosis files inspect "$ENCLAVE_NAME" spamoor-config rpc-hosts.txt | tail -n +2 > "${__dir}/generated-hosts.txt"
 
 
 cat <<EOF
