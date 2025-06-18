@@ -5,3 +5,5 @@ bin
 spamoor.db*
 go.lib.mod
 go.lib.sum
+*.abi
+*.bin
