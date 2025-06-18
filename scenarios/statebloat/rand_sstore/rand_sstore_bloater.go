@@ -1,4 +1,4 @@
-package randsstorebloater
+package sbrandsstore
 
 import (
 	"context"
@@ -14,20 +14,17 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ethpandaops/spamoor/scenarios/statebloat/rand_sstore_bloater/contract"
-	"github.com/ethpandaops/spamoor/scenariotypes"
+	"github.com/ethpandaops/spamoor/scenario"
+	"github.com/ethpandaops/spamoor/scenarios/statebloat/rand_sstore/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txbuilder"
 )
-
-//go:embed contract/SSTOREStorageBloater.abi
-var contractABIBytes []byte
-
-//go:embed contract/SSTOREStorageBloater.bin
-var contractBytecodeHex []byte
 
 // Constants for SSTORE operations
 const (
@@ -48,9 +45,6 @@ const (
 
 	// Safety margins and multipliers
 	GasLimitSafetyMargin = 0.99 // Use 99% of block gas limit (1% margin for gas price variations)
-	
-	// Deployment tracking file
-	DeploymentFileName = "deployments_sstore_bloating.json"
 )
 
 // BlockInfo stores block information for each storage round
@@ -68,8 +62,9 @@ type DeploymentData struct {
 type DeploymentFile map[string]*DeploymentData // key is contract address
 
 type ScenarioOptions struct {
-	BaseFee uint64 `yaml:"base_fee"`
-	TipFee  uint64 `yaml:"tip_fee"`
+	BaseFee         uint64 `yaml:"base_fee"`
+	TipFee          uint64 `yaml:"tip_fee"`
+	DeploymentsFile string `yaml:"deployments_file"`
 }
 
 type Scenario struct {
@@ -80,38 +75,33 @@ type Scenario struct {
 	// Contract state
 	contractAddress  common.Address
 	contractABI      abi.ABI
-	contractInstance *contract.Contract // Generated contract binding
+	contractInstance *contract.SSTOREStorageBloater // Generated contract binding
 	isDeployed       bool
 	deployMutex      sync.Mutex
 
 	// Scenario state
 	totalSlots  uint64 // Total number of slots created
-	cycleCount  uint64 // Number of complete create/update cycles
 	roundNumber uint64 // Current round number for SSTORE bloating
 
 	// Adaptive gas tracking
 	actualGasPerNewSlotIteration uint64          // Dynamically adjusted based on actual usage
 	successfulSlotCounts         map[uint64]bool // Track successful slot counts to avoid retries
-
-	// Cached values
-	chainID      *big.Int
-	chainIDOnce  sync.Once
-	chainIDError error
 }
 
-var ScenarioName = "rand_sstore_bloater"
+var ScenarioName = "statebloat-rand-sstore"
 var ScenarioDefaultOptions = ScenarioOptions{
-	BaseFee: 10, // 10 gwei default
-	TipFee:  2,  // 2 gwei default
+	BaseFee:         10, // 10 gwei default
+	TipFee:          2,  // 2 gwei default
+	DeploymentsFile: "",
 }
-var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
+var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
 	Description:    "Maximum state bloat via SSTORE operations using curve25519 prime dispersion",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
 
-func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
+func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 	return &Scenario{
 		logger:                       logger.WithField("scenario", ScenarioName),
 		actualGasPerNewSlotIteration: GasPerNewSlotIteration, // Start with estimated values
@@ -122,24 +112,33 @@ func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
+	flags.StringVar(&s.options.DeploymentsFile, "deployments-file", ScenarioDefaultOptions.DeploymentsFile, "Deployments file")
 	return nil
 }
 
-func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
-	s.walletPool = walletPool
+func (s *Scenario) Init(options *scenario.Options) error {
+	s.walletPool = options.WalletPool
 
-	if config != "" {
-		err := yaml.Unmarshal([]byte(config), &s.options)
+	if options.Config != "" {
+		err := yaml.Unmarshal([]byte(options.Config), &s.options)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal config: %w", err)
 		}
 	}
 
-	// Use only root wallet for simplicity
 	s.walletPool.SetWalletCount(1)
+	s.walletPool.SetRefillAmount(uint256.NewInt(0).Mul(uint256.NewInt(20), uint256.NewInt(1000000000000000000)))  // 20 ETH
+	s.walletPool.SetRefillBalance(uint256.NewInt(0).Mul(uint256.NewInt(10), uint256.NewInt(1000000000000000000))) // 10 ETH
+
+	// register well known wallets
+	s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
+		Name:          "deployer",
+		RefillAmount:  uint256.NewInt(2000000000000000000), // 2 ETH
+		RefillBalance: uint256.NewInt(1000000000000000000), // 1 ETH
+	})
 
 	// Parse contract ABI
-	parsedABI, err := abi.JSON(strings.NewReader(string(contractABIBytes)))
+	parsedABI, err := abi.JSON(strings.NewReader(string(contract.SSTOREStorageBloaterMetaData.ABI)))
 	if err != nil {
 		return fmt.Errorf("failed to parse contract ABI: %w", err)
 	}
@@ -154,8 +153,12 @@ func (s *Scenario) Config() string {
 }
 
 // loadDeploymentFile loads the deployment tracking file or creates an empty one
-func loadDeploymentFile() (DeploymentFile, error) {
-	data, err := os.ReadFile(DeploymentFileName)
+func (s *Scenario) loadDeploymentFile() (DeploymentFile, error) {
+	if s.options.DeploymentsFile == "" {
+		return make(DeploymentFile), nil
+	}
+
+	data, err := os.ReadFile(s.options.DeploymentsFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// File doesn't exist, return empty map
@@ -173,29 +176,21 @@ func loadDeploymentFile() (DeploymentFile, error) {
 }
 
 // saveDeploymentFile saves the deployment tracking file
-func saveDeploymentFile(deployments DeploymentFile) error {
+func (s *Scenario) saveDeploymentFile(deployments DeploymentFile) error {
+	if s.options.DeploymentsFile == "" {
+		return nil
+	}
+
 	data, err := json.MarshalIndent(deployments, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal deployment file: %w", err)
 	}
 
-	if err := os.WriteFile(DeploymentFileName, data, 0644); err != nil {
+	if err := os.WriteFile(s.options.DeploymentsFile, data, 0644); err != nil {
 		return fmt.Errorf("failed to write deployment file: %w", err)
 	}
 
 	return nil
-}
-
-func (s *Scenario) getChainID(ctx context.Context) (*big.Int, error) {
-	s.chainIDOnce.Do(func() {
-		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
-		if client == nil {
-			s.chainIDError = fmt.Errorf("no client available for chain ID")
-			return
-		}
-		s.chainID, s.chainIDError = client.GetChainId(ctx)
-	})
-	return s.chainID, s.chainIDError
 }
 
 func (s *Scenario) deployContract(ctx context.Context) error {
@@ -213,67 +208,102 @@ func (s *Scenario) deployContract(ctx context.Context) error {
 		return fmt.Errorf("no client available")
 	}
 
-	wallet := s.walletPool.GetRootWallet()
+	wallet := s.walletPool.GetWellKnownWallet("deployer")
 	if wallet == nil {
 		return fmt.Errorf("no wallet available")
 	}
 
-	chainID, err := s.getChainID(ctx)
+	var feeCap *big.Int
+	var tipCap *big.Int
+
+	if s.options.BaseFee > 0 {
+		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
+	}
+	if s.options.TipFee > 0 {
+		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
+	}
+
+	if feeCap == nil || tipCap == nil {
+		var err error
+		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
+		if err != nil {
+			return nil
+		}
+	}
+
+	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
+		feeCap = big.NewInt(1000000000)
+	}
+	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
+		tipCap = big.NewInt(1000000000)
+	}
+
+	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		GasFeeCap: uint256.MustFromBig(feeCap),
+		GasTipCap: uint256.MustFromBig(tipCap),
+		Gas:       2000000,
+		Value:     uint256.NewInt(0),
+	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+		_, deployTx, _, err := contract.DeploySSTOREStorageBloater(transactOpts, client.GetEthClient())
+		return deployTx, err
+	})
+
 	if err != nil {
 		return err
 	}
 
-	auth, err := bind.NewKeyedTransactorWithChainID(wallet.GetPrivateKey(), chainID)
+	var txReceipt *types.Receipt
+	var txErr error
+	txWg := sync.WaitGroup{}
+	txWg.Add(1)
+
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+		Client:      client,
+		Rebroadcast: true,
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			defer func() {
+				txWg.Done()
+			}()
+
+			txErr = err
+			txReceipt = receipt
+		},
+	})
 	if err != nil {
-		return fmt.Errorf("failed to create transactor: %w", err)
+		return err
 	}
 
-	// Set gas parameters
-	auth.GasLimit = EstimatedDeployGas
-	auth.GasFeeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	auth.GasTipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
+	txWg.Wait()
+	if txErr != nil {
+		return err
+	}
 
-	// Deploy contract using generated bindings
-	address, tx, contractInstance, err := contract.DeployContract(auth, client.GetEthClient())
+	s.contractAddress = txReceipt.ContractAddress
+	s.contractInstance, err = contract.NewSSTOREStorageBloater(s.contractAddress, client.GetEthClient())
 	if err != nil {
-		return fmt.Errorf("failed to deploy contract: %w", err)
+		return err
 	}
-
-	s.logger.WithField("tx", tx.Hash().Hex()).Info("Contract deployment transaction sent")
-
-	// Wait for deployment
-	receipt, err := bind.WaitMined(ctx, client.GetEthClient(), tx)
-	if err != nil {
-		return fmt.Errorf("failed to wait for deployment: %w", err)
-	}
-
-	if receipt.Status != 1 {
-		return fmt.Errorf("contract deployment failed")
-	}
-
-	s.contractAddress = address
-	s.contractInstance = contractInstance
 	s.isDeployed = true
 
 	// No need to reset nonce - the wallet manager handles it automatically
 
 	// Track deployment in JSON file
-	deployments, err := loadDeploymentFile()
+	deployments, err := s.loadDeploymentFile()
 	if err != nil {
 		s.logger.Warnf("failed to load deployment file: %v", err)
 		deployments = make(DeploymentFile)
 	}
 
 	// Initialize deployment data for this contract
-	deployments[address.Hex()] = &DeploymentData{
+	deployments[s.contractAddress.Hex()] = &DeploymentData{
 		StorageRounds: []BlockInfo{},
 	}
 
-	if err := saveDeploymentFile(deployments); err != nil {
+	if err := s.saveDeploymentFile(deployments); err != nil {
 		s.logger.Warnf("failed to save deployment file: %v", err)
 	}
 
-	s.logger.WithField("address", address.Hex()).Info("SSTOREStorageBloater contract deployed successfully")
+	s.logger.WithField("address", s.contractAddress.Hex()).Info("SSTOREStorageBloater contract deployed successfully")
 
 	return nil
 }
@@ -303,15 +333,13 @@ func (s *Scenario) Run(ctx context.Context) error {
 		default:
 		}
 
-		// Get current block gas limit
-		latestBlock, err := client.GetEthClient().BlockByNumber(ctx, nil)
+		blockGasLimit, err := s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
 		if err != nil {
-			s.logger.Warnf("failed to get latest block: %v", err)
+			s.logger.Warnf("failed to get current gas limit: %v", err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
 
-		blockGasLimit := latestBlock.GasLimit()
 		targetGas := uint64(float64(blockGasLimit) * GasLimitSafetyMargin)
 
 		// Never stop spamming SSTORE operations.
@@ -340,18 +368,13 @@ func (s *Scenario) executeCreateSlots(ctx context.Context, targetGas uint64, blo
 		return fmt.Errorf("no client available")
 	}
 
-	wallet := s.walletPool.GetRootWallet()
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 	if wallet == nil {
 		return fmt.Errorf("no wallet available")
 	}
 
 	// Create transaction options
-	chainID, err := s.getChainID(ctx)
-	if err != nil {
-		return err
-	}
-
-	auth, err := bind.NewKeyedTransactorWithChainID(wallet.GetPrivateKey(), chainID)
+	auth, err := bind.NewKeyedTransactorWithChainID(wallet.GetPrivateKey(), s.walletPool.GetChainId())
 	if err != nil {
 		return fmt.Errorf("failed to create transactor: %w", err)
 	}
@@ -402,7 +425,7 @@ func (s *Scenario) executeCreateSlots(ctx context.Context, targetGas uint64, blo
 		s.logger.Warnf("failed to get previous block info: %v", err)
 	} else {
 		// Track this storage round in deployment file
-		deployments, err := loadDeploymentFile()
+		deployments, err := s.loadDeploymentFile()
 		if err != nil {
 			s.logger.Warnf("failed to load deployment file: %v", err)
 		} else if deployments != nil {
@@ -413,8 +436,8 @@ func (s *Scenario) executeCreateSlots(ctx context.Context, targetGas uint64, blo
 					BlockNumber: prevBlockNumber,
 					Timestamp:   prevBlock.Time(),
 				})
-				
-				if err := saveDeploymentFile(deployments); err != nil {
+
+				if err := s.saveDeploymentFile(deployments); err != nil {
 					s.logger.Warnf("failed to save deployment file: %v", err)
 				}
 			}
@@ -423,7 +446,7 @@ func (s *Scenario) executeCreateSlots(ctx context.Context, targetGas uint64, blo
 
 	// Calculate MB written in this transaction (64 bytes per slot: 32 byte key + 32 byte value)
 	mbWrittenThisTx := float64(slotsToCreate*64) / (1024 * 1024)
-	
+
 	// Calculate block utilization percentage
 	blockUtilization := float64(receipt.GasUsed) / float64(blockGasLimit) * 100
 
