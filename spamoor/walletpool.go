@@ -184,6 +184,11 @@ func (pool *WalletPool) SetRefillBalance(balance *uint256.Int) {
 	pool.config.RefillBalance = balance
 }
 
+// GetWalletSeed returns the seed used for deterministic wallet generation.
+func (pool *WalletPool) GetWalletSeed() string {
+	return pool.config.WalletSeed
+}
+
 // SetWalletSeed sets the seed used for deterministic wallet generation.
 // The same seed will always generate the same set of wallets.
 func (pool *WalletPool) SetWalletSeed(seed string) {
