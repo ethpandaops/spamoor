@@ -23,14 +23,6 @@ The scenario uses deployed StateBloatToken contracts from `deployments.json` to 
 - `--tipfee`: Max tip per gas in gwei (default: 5)
 - `--contract`: Specific contract address to use (default: rotate through all)
 
-### YAML Configuration
-
-```yaml
-basefee: 10
-tipfee: 5
-contract: ""  # Empty string means use all contracts
-```
-
 ## How It Works
 
 1. **Initialization**:
@@ -63,13 +55,6 @@ Each successful transfer creates:
 - Estimated state growth: 100 bytes per transfer
 
 ## Output
-
-The scenario logs detailed metrics for each block:
-- Number of transfers sent and confirmed
-- Unique recipients created
-- Gas usage and block utilization
-- Estimated state growth
-- Cumulative totals
 
 Recipient addresses are saved to `recipients.json` with:
 - Address
