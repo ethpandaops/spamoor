@@ -6,7 +6,13 @@ definitions:
       enabled:
         type: boolean
       group:
+        description: First group for backward compatibility
         type: string
+      groups:
+        description: All groups
+        items:
+          type: string
+        type: array
       index:
         type: integer
       name:
@@ -110,7 +116,13 @@ definitions:
   api.UpdateClientGroupRequest:
     properties:
       group:
+        description: Single group for backward compatibility
         type: string
+      groups:
+        description: Multiple groups
+        items:
+          type: string
+        type: array
     type: object
   api.UpdateSpammerRequest:
     properties:
@@ -228,7 +240,8 @@ paths:
     put:
       consumes:
       - application/json
-      description: Updates the group for a specific client
+      description: Updates the group(s) for a specific client. Supports both single
+        group (backward compatibility) and multiple groups.
       operationId: updateClientGroup
       parameters:
       - description: Client index
@@ -236,7 +249,7 @@ paths:
         name: index
         required: true
         type: integer
-      - description: New group name
+      - description: New group name(s)
         in: body
         name: request
         required: true

@@ -68,7 +68,7 @@ const docTemplate = `{
         },
         "/api/client/{index}/group": {
             "put": {
-                "description": "Updates the group for a specific client",
+                "description": "Updates the group(s) for a specific client. Supports both single group (backward compatibility) and multiple groups.",
                 "consumes": [
                     "application/json"
                 ],
@@ -86,7 +86,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "New group name",
+                        "description": "New group name(s)",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -853,7 +853,15 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "group": {
+                    "description": "First group for backward compatibility",
                     "type": "string"
+                },
+                "groups": {
+                    "description": "All groups",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "index": {
                     "type": "integer"
@@ -1012,7 +1020,15 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "group": {
+                    "description": "Single group for backward compatibility",
                     "type": "string"
+                },
+                "groups": {
+                    "description": "Multiple groups",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
