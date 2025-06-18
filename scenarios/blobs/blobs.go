@@ -253,7 +253,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		blobFee = big.NewInt(1000000000)
 	}
 
-	blobCount := uint64(rand.Int63n(int64(s.options.Sidecars)) + 1)
+	blobCount := s.options.Sidecars
 	blobRefs := make([][]string, blobCount)
 	for i := 0; i < int(blobCount); i++ {
 		blobLabel := fmt.Sprintf("0x1611AA0000%08dFF%02dFF%04dFEED", txIdx, i, 0)
