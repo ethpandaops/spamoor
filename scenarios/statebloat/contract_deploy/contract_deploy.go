@@ -87,9 +87,10 @@ type Scenario struct {
 
 var ScenarioName = "contract-deploy"
 var ScenarioDefaultOptions = ScenarioOptions{
-	MaxWallets:      0, // Use root wallet only by default
-	BaseFee:         5, // Moderate base fee (5 gwei)
-	TipFee:          1, // Priority fee (1 gwei)
+	MaxPending:      100, // Allow up to 100 pending transactions
+	MaxWallets:      0,   // Use root wallet only by default
+	BaseFee:         5,   // Moderate base fee (5 gwei)
+	TipFee:          1,   // Priority fee (1 gwei)
 	MaxTransactions: 0,
 }
 var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
@@ -435,36 +436,39 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	s.logger.Infof("Chain ID: %s", chainID.String())
 
+	// Get client first
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	if client == nil {
+		return fmt.Errorf("no client available")
+	}
+	ethClient := client.GetEthClient()
+
+	// Get current block for initialization
+	currentBlock, err := ethClient.BlockByNumber(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get current block: %w", err)
+	}
+
 	// Calculate rate limiting based on block gas limit if max-transactions is 0
 	var maxTxsPerBlock uint64
 	var useRateLimiting bool
 
 	if s.options.MaxTransactions == 0 {
-		// Get block gas limit from the network
-		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
-		if client == nil {
-			return fmt.Errorf("no client available for gas limit query")
-		}
-
-		latestBlock, err := client.GetEthClient().BlockByNumber(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("failed to get latest block: %w", err)
-		}
-
-		blockGasLimit := latestBlock.GasLimit()
+		blockGasLimit := currentBlock.GasLimit()
 		// TODO: This should be a constant.
 		estimatedGasPerContract := uint64(4949468) // Updated estimate based on contract size reduction
-		maxTxsPerBlock = blockGasLimit / estimatedGasPerContract
+		expectedThroughput := blockGasLimit / estimatedGasPerContract
+		maxTxsPerBlock = expectedThroughput * 2 // Set rate limit to 2x expected throughput
 		useRateLimiting = true
 
-		s.logger.Infof("Rate limiting enabled: block gas limit %d, gas per contract %d, max txs per block %d",
-			blockGasLimit, estimatedGasPerContract, maxTxsPerBlock)
+		s.logger.Infof("Rate limiting enabled: block gas limit %d, gas per contract %d, expected throughput %d, rate limit %d txs/block",
+			blockGasLimit, estimatedGasPerContract, expectedThroughput, maxTxsPerBlock)
 	}
 
 	txIdxCounter := uint64(0)
 	totalTxCount := atomic.Uint64{}
 	blockTxCount := uint64(0)
-	lastBlockTime := time.Now()
+	lastBlockNumber := currentBlock.Number().Uint64()
 
 	for {
 		// Check if we've reached max transactions (if set)
@@ -475,16 +479,20 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 		// Rate limiting logic
 		if useRateLimiting {
-			// If we've sent maxTxsPerBlock transactions, wait for next block interval
-			if blockTxCount >= maxTxsPerBlock {
-				timeSinceLastBlock := time.Since(lastBlockTime)
-				if timeSinceLastBlock < 12*time.Second { // Assume ~12 second block time
-					sleepTime := 12*time.Second - timeSinceLastBlock
-					s.logger.Infof("Rate limit reached (%d txs), waiting %v for next block", maxTxsPerBlock, sleepTime)
-					time.Sleep(sleepTime)
+			// If we've sent expected throughput transactions, wait for next block
+			if blockTxCount >= maxTxsPerBlock/2 { // Send throughput amount, not rate limit amount
+				s.logger.Infof("Sent %d txs, waiting for next block", blockTxCount)
+				
+				// Wait for block number to change
+				for {
+					currentBlock, err := ethClient.BlockByNumber(ctx, nil)
+					if err == nil && currentBlock.Number().Uint64() > lastBlockNumber {
+						lastBlockNumber = currentBlock.Number().Uint64()
+						blockTxCount = 0
+						break
+					}
+					time.Sleep(100 * time.Millisecond)
 				}
-				blockTxCount = 0
-				lastBlockTime = time.Now()
 			}
 		}
 
