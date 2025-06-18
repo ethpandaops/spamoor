@@ -17,8 +17,8 @@ contract XENSybilAttacker {
         uint256 index = 0;
         
         while (gasleft() > gasBuffer) {
-            // Create salt for CREATE2 - pack seed and index as uint128 each
-            bytes32 salt = bytes32((uint256(seed) << 128) | uint256(index));
+            // Create salt for CREATE2 - pack seed, index and blockhash as uint96, uint96, and uint64 each
+            bytes32 salt = bytes32((uint256(seed) << 160) | (uint256(index) << 64) | uint256(uint64(bytes8(blockhash(block.number - 1)))));
             
             // Create minimal proxy bytecode with this contract as implementation
             bytes memory bytecode = getMinimalProxyBytecode(address(this));
