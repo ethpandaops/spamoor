@@ -1,0 +1,34 @@
+;; Init code for generating large dummy contract bytecode
+;; First bytes are seeded with origin + blockhash for uniqueness
+;; Last 10 bytes contain magic number 0xDEADBEEFCAFEBABEDEAD
+
+;; Configuration: 24KB contract with 10-byte magic number and 32-byte seed
+
+;; Generate seed from origin + blockhash
+origin                     ;; [origin]
+push 0                     ;; [0, origin]
+blockhash                  ;; [blockhash, origin]
+xor                        ;; [seed]
+
+;; Store seed at beginning of memory (position 0)
+push 0                     ;; [0, seed]
+mstore                     ;; []
+
+;; contract size
+push 24576                 ;; [contract_size]
+    
+;; Calculate position for magic number (24576 - 32)
+dup1                   ;; [contract_size, contract_size]
+push 32                ;; [32, contract_size, contract_size]
+swap1                  ;; [contract_size, 32, contract_size]
+sub                    ;; [magic_pos, contract_size]
+
+;; Store magic number 0xDEADBEEFCAFEBABEDEAD at the end
+push 0xDEADBEEFCAFEBABEDEAD ;; [magic, magic_pos, contract_size]
+swap1                  ;; [magic_pos, magic, contract_size]
+mstore                 ;; [contract_size]
+
+;; Return the entire contract bytecode
+push 0                 ;; [0, contract_size]
+return                 ;; []
+

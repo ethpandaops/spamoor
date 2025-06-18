@@ -3,21 +3,21 @@ package blobconflicting
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 	"math/rand"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/ethpandaops/spamoor/scenariotypes"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
@@ -36,7 +36,9 @@ type ScenarioOptions struct {
 	BlobV1Percent               uint64                   `yaml:"blob_v1_percent"`
 	FuluActivation              utils.FlexibleJsonUInt64 `yaml:"fulu_activation"`
 	ThroughputIncrementInterval uint64                   `yaml:"throughput_increment_interval"`
+	Timeout                     string                   `yaml:"timeout"`
 	ClientGroup                 string                   `yaml:"client_group"`
+	LogTxs                      bool                     `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -44,36 +46,38 @@ type Scenario struct {
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
 
-	pendingChan   chan bool
 	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "blob-conflicting"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TotalCount:                  0,
-	Throughput:                  0,
+	Throughput:                  6,
 	Sidecars:                    3,
 	MaxPending:                  0,
 	MaxWallets:                  0,
-	Rebroadcast:                 30,
+	Rebroadcast:                 1,
 	BaseFee:                     20,
 	TipFee:                      2,
 	BlobFee:                     20,
-	BlobV1Percent:               50,
-	FuluActivation:              0,
+	BlobV1Percent:               100,
+	FuluActivation:              math.MaxInt64,
 	ThroughputIncrementInterval: 0,
+	Timeout:                     "",
 	ClientGroup:                 "",
+	LogTxs:                      false,
 }
-var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
+var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
 	Description:    "Send conflicting blob transactions",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
 
-func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
+func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 	return &Scenario{
-		logger: logger.WithField("scenario", ScenarioName),
+		options: ScenarioDefaultOptions,
+		logger:  logger.WithField("scenario", ScenarioName),
 	}
 }
 
@@ -83,24 +87,32 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64VarP(&s.options.Sidecars, "sidecars", "b", ScenarioDefaultOptions.Sidecars, "Number of blob sidecars per blob transactions")
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
-	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Number of seconds to wait before re-broadcasting a transaction")
+	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
 	flags.Uint64Var((*uint64)(&s.options.FuluActivation), "fulu-activation", uint64(ScenarioDefaultOptions.FuluActivation), "Unix timestamp of the Fulu activation")
 	flags.Uint64Var(&s.options.ThroughputIncrementInterval, "throughput-increment-interval", ScenarioDefaultOptions.ThroughputIncrementInterval, "Increment the throughput every interval (in sec).")
+	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
 }
 
-func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
-	s.walletPool = walletPool
+func (s *Scenario) Init(options *scenario.Options) error {
+	s.walletPool = options.WalletPool
 
-	if config != "" {
-		err := yaml.Unmarshal([]byte(config), &s.options)
+	if options.Config != "" {
+		err := yaml.Unmarshal([]byte(options.Config), &s.options)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal config: %w", err)
+		}
+	}
+
+	if options.GlobalCfg != nil {
+		if v, ok := options.GlobalCfg["fulu_activation"]; ok && s.options.FuluActivation == ScenarioDefaultOptions.FuluActivation {
+			s.options.FuluActivation = utils.FlexibleJsonUInt64(v.(uint64))
 		}
 	}
 
@@ -124,84 +136,48 @@ func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if s.options.MaxPending > 0 {
-		s.pendingChan = make(chan bool, s.options.MaxPending)
-	}
-
 	return nil
 }
 
-func (s *Scenario) Config() string {
-	yamlBytes, _ := yaml.Marshal(&s.options)
-	return string(yamlBytes)
-}
-
 func (s *Scenario) Run(ctx context.Context) error {
-	txIdxCounter := uint64(0)
-	pendingCount := atomic.Int64{}
-	txCount := atomic.Uint64{}
-	var lastChan chan bool
-
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
-	initialRate := rate.Limit(float64(s.options.Throughput) / float64(utils.SecondsPerSlot))
-	if initialRate == 0 {
-		initialRate = rate.Inf
-	}
-	limiter := rate.NewLimiter(initialRate, 1)
-
-	if s.options.ThroughputIncrementInterval != 0 {
-		go func() {
-			ticker := time.NewTicker(time.Duration(s.options.ThroughputIncrementInterval) * time.Second)
-			for {
-				select {
-				case <-ticker.C:
-					throughput := limiter.Limit() * 12
-					newThroughput := throughput + 1
-					s.logger.Infof("Increasing throughput from %.3f to %.3f", throughput, newThroughput)
-					limiter.SetLimit(rate.Limit(float64(newThroughput) / float64(utils.SecondsPerSlot)))
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-
-	for {
-		if err := limiter.Wait(ctx); err != nil {
-			if ctx.Err() != nil {
-				break
-			}
-
-			s.logger.Debugf("rate limited: %s", err.Error())
-			time.Sleep(100 * time.Millisecond)
-			continue
+	maxPending := s.options.MaxPending
+	if maxPending == 0 {
+		maxPending = s.options.Throughput * 3
+		if maxPending == 0 {
+			maxPending = 1000
 		}
 
-		txIdx := txIdxCounter
-		txIdxCounter++
-
-		if s.pendingChan != nil {
-			// await pending transactions
-			s.pendingChan <- true
+		if maxPending > s.walletPool.GetConfiguredWalletCount()*2 {
+			maxPending = s.walletPool.GetConfiguredWalletCount() * 2
 		}
-		pendingCount.Add(1)
-		currentChan := make(chan bool, 1)
+	}
 
-		go func(txIdx uint64, lastChan, currentChan chan bool) {
-			defer func() {
-				pendingCount.Add(-1)
-				currentChan <- true
-			}()
+	// Parse timeout
+	var timeout time.Duration
+	if s.options.Timeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(s.options.Timeout)
+		if err != nil {
+			return fmt.Errorf("invalid timeout value: %v", err)
+		}
+		s.logger.Infof("Timeout set to %v", timeout)
+	}
 
+	err := scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
+		TotalCount:                  s.options.TotalCount,
+		Throughput:                  s.options.Throughput,
+		MaxPending:                  maxPending,
+		ThroughputIncrementInterval: s.options.ThroughputIncrementInterval,
+		Timeout:                     timeout,
+		WalletPool:                  s.walletPool,
+
+		Logger: s.logger,
+		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
 			logger := s.logger
-			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, func() {
-				if s.pendingChan != nil {
-					time.Sleep(100 * time.Millisecond)
-					<-s.pendingChan
-				}
-			})
+			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, onComplete)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -211,39 +187,29 @@ func (s *Scenario) Run(ctx context.Context) error {
 			if wallet != nil {
 				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 			}
-			if lastChan != nil {
-				<-lastChan
-				close(lastChan)
-			}
-			if err != nil {
-				logger.Warnf("could not send blob transaction: %v", err)
-				return
-			}
 
-			txCount.Add(1)
-			logger.Infof("sent blob tx #%6d: %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
-		}(txIdx, lastChan, currentChan)
-
-		lastChan = currentChan
-
-		count := txCount.Load() + uint64(pendingCount.Load())
-		if s.options.TotalCount > 0 && count >= s.options.TotalCount {
-			break
-		}
-	}
-	<-lastChan
-	close(lastChan)
+			return func() {
+				if err != nil {
+					logger.Warnf("could not send blob transaction: %v", err)
+				} else if s.options.LogTxs {
+					logger.Infof("sent blob tx #%6d: %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+				} else {
+					logger.Debugf("sent blob tx #%6d: %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+				}
+			}, err
+		},
+	})
 
 	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
 	s.pendingWGroup.Wait()
 
-	return nil
+	return err
 }
 
-func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *txbuilder.Client, *txbuilder.Wallet, uint8, error) {
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	client2 := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
 	transactionSubmitted := false
 
 	defer func() {
@@ -288,7 +254,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		blobFee = big.NewInt(1000000000)
 	}
 
-	blobCount := uint64(rand.Int63n(int64(s.options.Sidecars)) + 1)
+	blobCount := s.options.Sidecars
 	blobRefs := make([][]string, blobCount)
 	for i := 0; i < int(blobCount); i++ {
 		blobLabel := fmt.Sprintf("0x1611AA0000%08dFF%02dFF%04dFEED", txIdx, i, 0)
@@ -343,22 +309,32 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		return nil, nil, wallet, 0, err
 	}
 
-	rebroadcast := 0
-	if s.options.Rebroadcast > 0 {
-		rebroadcast = 10
-	}
+	var blobCellProofs []kzg4844.Proof
 
-	var txBytes []byte
-	txVersion := uint8(0)
-	sendAsV1 := time.Now().Unix() > int64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
-	if sendAsV1 {
-		txBytes, err = txbuilder.MarshalBlobV1Tx(tx1)
+	if s.options.BlobV1Percent > 0 {
+		// generate cell proofs here to avoid heavy recomputation on each submission
+		blobCellProofs, err = txbuilder.GenerateCellProofs(tx1.BlobTxSidecar())
 		if err != nil {
-			s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
-		} else {
-			txVersion = 1
+			s.logger.Warnf("failed to generate cell proofs: %v", err)
 		}
 	}
+
+	getTxBytes := func() ([]byte, uint8) {
+		var txBytes []byte
+		txVersion := uint8(0)
+		sendAsV1 := time.Now().Unix() > int64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
+		if sendAsV1 {
+			txBytes, err = txbuilder.MarshalBlobV1Tx(tx1, blobCellProofs)
+			if err != nil {
+				s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
+			} else {
+				txVersion = 1
+			}
+		}
+		return txBytes, txVersion
+	}
+
+	txBytes, txVersion := getTxBytes()
 
 	// send both tx at exactly the same time
 	wg := sync.WaitGroup{}
@@ -367,10 +343,9 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	var err1, err2 error
 	s.pendingWGroup.Add(2)
 	go func() {
-		err1 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx1, &txbuilder.SendTransactionOptions{
-			Client:              client,
-			MaxRebroadcasts:     rebroadcast,
-			RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
+		err1 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx1, &spamoor.SendTransactionOptions{
+			Client:      client,
+			Rebroadcast: s.options.Rebroadcast > 0,
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				defer func() {
 					onComplete()
@@ -383,11 +358,11 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 				}
 
 				if receipt != nil {
-					s.processTxReceipt(txIdx, tx, receipt, client, wallet, "blob")
+					s.processTxReceipt(txIdx, tx, receipt, client, "blob")
 				}
 			},
-			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
-				logger := s.logger.WithField("rpc", client.GetName())
+			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
+				logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx1.Nonce())
 				if retry > 0 {
 					logger = logger.WithField("retry", retry)
 				}
@@ -400,6 +375,11 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 					logger.Debugf("successfully sent blob tx %6d.0", txIdx+1)
 				}
 			},
+			OnRebroadcast: func(tx *types.Transaction, options *spamoor.SendTransactionOptions, client *spamoor.Client) {
+				// we might need to switch to v1 after fulu activation
+				txBytes, _ := getTxBytes()
+				options.TransactionBytes = txBytes
+			},
 			TransactionBytes: txBytes,
 		})
 		if err1 != nil {
@@ -410,10 +390,9 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	go func() {
 		delay := time.Duration(rand.Int63n(500)) * time.Millisecond
 		time.Sleep(delay)
-		err2 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx2, &txbuilder.SendTransactionOptions{
-			Client:              client2,
-			MaxRebroadcasts:     rebroadcast,
-			RebroadcastInterval: time.Duration(s.options.Rebroadcast) * time.Second,
+		err2 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx2, &spamoor.SendTransactionOptions{
+			Client:      client2,
+			Rebroadcast: s.options.Rebroadcast > 0,
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				defer func() {
 					s.pendingWGroup.Done()
@@ -425,11 +404,14 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 				}
 
 				if receipt != nil {
-					s.processTxReceipt(txIdx, tx, receipt, client, wallet, "dynfee")
+					s.processTxReceipt(txIdx, tx, receipt, client, "dynfee")
 				}
 			},
-			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
-				logger := s.logger.WithField("rpc", client.GetName())
+			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
+				logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx2.Nonce())
+				if retry == 0 && rebroadcast > 0 {
+					logger.Infof("rebroadcasting blob tx %6d", txIdx+1)
+				}
 				if retry > 0 {
 					logger = logger.WithField("retry", retry)
 				}
@@ -468,24 +450,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	return tx1, client, wallet, txVersion, nil
 }
 
-func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *txbuilder.Client, wallet *txbuilder.Wallet, txLabel string) {
-	effectiveGasPrice := receipt.EffectiveGasPrice
-	if effectiveGasPrice == nil {
-		effectiveGasPrice = big.NewInt(0)
-	}
-	blobGasPrice := receipt.BlobGasPrice
-	if blobGasPrice == nil {
-		blobGasPrice = big.NewInt(0)
-	}
-	feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-	blobFeeAmount := new(big.Int).Mul(blobGasPrice, big.NewInt(int64(receipt.BlobGasUsed)))
-	totalAmount := new(big.Int).Add(tx.Value(), feeAmount)
-	totalAmount = new(big.Int).Add(totalAmount, blobFeeAmount)
-	wallet.SubBalance(totalAmount)
-
-	gweiTotalFee := new(big.Int).Div(feeAmount, big.NewInt(1000000000))
-	gweiBaseFee := new(big.Int).Div(effectiveGasPrice, big.NewInt(1000000000))
-	gweiBlobFee := new(big.Int).Div(blobGasPrice, big.NewInt(1000000000))
-
-	s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d/%v confirmed in block #%v. total fee: %v gwei (base: %v, blob: %v)", txIdx+1, txLabel, receipt.BlockNumber.String(), gweiTotalFee, gweiBaseFee, gweiBlobFee)
+func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *spamoor.Client, txLabel string) {
+	txFees := utils.GetTransactionFees(tx, receipt)
+	s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d/%v confirmed in block #%v. total fee: %v gwei (tx: %v/%v, blob: %v/%v)", txIdx+1, txLabel, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxFeeGwei(), txFees.TxBaseFeeGwei(), txFees.BlobFeeGwei(), txFees.BlobBaseFeeGwei())
 }

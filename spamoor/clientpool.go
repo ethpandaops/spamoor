@@ -8,29 +8,37 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/sirupsen/logrus"
 )
 
+// ClientSelectionMode defines how clients are selected from the pool.
 type ClientSelectionMode uint8
 
 var (
-	SelectClientByIndex    ClientSelectionMode = 0
-	SelectClientRandom     ClientSelectionMode = 1
+	// SelectClientByIndex selects a client by index (modulo pool size).
+	SelectClientByIndex ClientSelectionMode = 0
+	// SelectClientRandom selects a random client from the pool.
+	SelectClientRandom ClientSelectionMode = 1
+	// SelectClientRoundRobin selects clients in round-robin fashion.
 	SelectClientRoundRobin ClientSelectionMode = 2
 )
 
+// ClientPool manages a pool of Ethereum RPC clients with health monitoring and selection strategies.
+// It automatically monitors client health by checking block heights and maintains a list of "good" clients
+// that are within 2 blocks of the highest observed block height.
 type ClientPool struct {
 	ctx            context.Context
 	rpcHosts       []string
 	logger         logrus.FieldLogger
-	allClients     []*txbuilder.Client
-	goodClients    []*txbuilder.Client
+	allClients     []*Client
+	goodClients    []*Client
 	chainId        *big.Int
 	selectionMutex sync.Mutex
 	rrClientIdx    int
 }
 
+// NewClientPool creates a new ClientPool with the specified RPC hosts and logger.
+// The pool must be initialized with PrepareClients() before use.
 func NewClientPool(ctx context.Context, rpcHosts []string, logger logrus.FieldLogger) *ClientPool {
 	return &ClientPool{
 		ctx:      ctx,
@@ -39,47 +47,45 @@ func NewClientPool(ctx context.Context, rpcHosts []string, logger logrus.FieldLo
 	}
 }
 
+// PrepareClients initializes all clients in the pool and starts health monitoring.
+// It creates Client instances for each RPC host, determines the chain ID,
+// and begins periodic health checks. Returns an error if no usable clients are found.
 func (pool *ClientPool) PrepareClients() error {
-	pool.allClients = make([]*txbuilder.Client, 0)
-	wg := &sync.WaitGroup{}
-	mtx := sync.Mutex{}
+	pool.allClients = make([]*Client, 0)
 
 	var chainId *big.Int
 	for _, rpcHost := range pool.rpcHosts {
-		wg.Add(1)
+		client, err := NewClient(rpcHost)
+		if err != nil {
+			pool.logger.Errorf("failed creating client for '%v': %v", client.GetRPCHost(), err.Error())
+			continue
+		}
 
-		go func(rpcHost string) {
-			defer wg.Done()
+		pool.allClients = append(pool.allClients, client)
 
-			client, err := txbuilder.NewClient(rpcHost)
-			if err != nil {
-				pool.logger.Errorf("failed creating client for '%v': %v", client.GetRPCHost(), err.Error())
-				return
-			}
+		if chainId == nil {
 			client.Timeout = 10 * time.Second
 			cliChainId, err := client.GetChainId(pool.ctx)
 			if err != nil {
 				pool.logger.Errorf("failed getting chainid from '%v': %v", client.GetRPCHost(), err.Error())
-				return
+				continue
 			}
-			if chainId == nil {
-				chainId = cliChainId
-			} else if cliChainId.Cmp(chainId) != 0 {
-				pool.logger.Errorf("chainid missmatch from %v (chain ids: %v, %v)", client.GetRPCHost(), cliChainId, chainId)
-				return
-			}
-			client.Timeout = 30 * time.Second
-			mtx.Lock()
-			pool.allClients = append(pool.allClients, client)
-			mtx.Unlock()
-		}(rpcHost)
+			chainId = cliChainId
+		}
+		client.Timeout = 30 * time.Second
 	}
 
-	wg.Wait()
-	pool.chainId = chainId
 	if len(pool.allClients) == 0 {
+		return fmt.Errorf("no rpc hosts provided")
+	}
+
+	if chainId == nil {
 		return fmt.Errorf("no useable clients")
 	}
+
+	pool.chainId = chainId
+
+	pool.logger.Infof("initialized client pool with %v clients (chain id: %v)", len(pool.allClients), pool.chainId)
 
 	err := pool.watchClientStatus()
 	if err != nil {
@@ -91,6 +97,9 @@ func (pool *ClientPool) PrepareClients() error {
 	return nil
 }
 
+// watchClientStatusLoop continuously monitors client health in the background.
+// It periodically calls watchClientStatus() to check all clients and update the good clients list.
+// Runs every 2 minutes normally, but reduces to 10 seconds on errors. Exits when context is cancelled.
 func (pool *ClientPool) watchClientStatusLoop() {
 	sleepTime := 2 * time.Minute
 	for {
@@ -110,6 +119,9 @@ func (pool *ClientPool) watchClientStatusLoop() {
 	}
 }
 
+// watchClientStatus checks the health of all clients by querying their current block height.
+// It runs concurrent health checks and updates the goodClients list with clients that are
+// within 2 blocks of the highest observed block height. Logs the results of the health check.
 func (pool *ClientPool) watchClientStatus() error {
 	wg := &sync.WaitGroup{}
 	mtx := sync.Mutex{}
@@ -118,7 +130,7 @@ func (pool *ClientPool) watchClientStatus() error {
 
 	for idx, client := range pool.allClients {
 		wg.Add(1)
-		go func(idx int, client *txbuilder.Client) {
+		go func(idx int, client *Client) {
 			defer wg.Done()
 
 			blockHeight, err := client.GetBlockHeight(pool.ctx)
@@ -136,7 +148,7 @@ func (pool *ClientPool) watchClientStatus() error {
 	}
 	wg.Wait()
 
-	goodClients := make([]*txbuilder.Client, 0)
+	goodClients := make([]*Client, 0)
 	goodHead := highestHead
 	if goodHead > 2 {
 		goodHead -= 2
@@ -152,7 +164,14 @@ func (pool *ClientPool) watchClientStatus() error {
 	return nil
 }
 
-func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group string) *txbuilder.Client {
+// GetClient returns a client from the pool based on the specified selection mode.
+// Parameters:
+//   - mode: how to select the client (by index, random, or round-robin)
+//   - input: used as index when mode is SelectClientByIndex
+//   - group: client group filter ("" for default, "*" for any, or specific group name)
+//
+// Returns nil if no suitable clients are available.
+func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group string) *Client {
 	pool.selectionMutex.Lock()
 	defer pool.selectionMutex.Unlock()
 
@@ -160,21 +179,26 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 		return nil
 	}
 
-	clientCandidates := make([]*txbuilder.Client, 0)
+	clientCandidates := make([]*Client, 0)
 
 	if group == "" {
+		// Empty group means default group
 		for _, client := range pool.goodClients {
-			if client.GetClientGroup() == "default" {
+			if client.IsEnabled() && client.HasGroup("default") {
 				clientCandidates = append(clientCandidates, client)
 			}
 		}
 	} else if group == "*" {
-		clientCandidates = pool.goodClients
-	}
-
-	if len(clientCandidates) == 0 {
+		// Wildcard means any group
 		for _, client := range pool.goodClients {
-			if group == "" || client.GetClientGroup() == group {
+			if client.IsEnabled() {
+				clientCandidates = append(clientCandidates, client)
+			}
+		}
+	} else {
+		// Specific group name
+		for _, client := range pool.goodClients {
+			if client.IsEnabled() && client.HasGroup(group) {
 				clientCandidates = append(clientCandidates, client)
 			}
 		}
@@ -199,14 +223,17 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 	return clientCandidates[input]
 }
 
-func (pool *ClientPool) GetAllClients() []*txbuilder.Client {
-	clients := make([]*txbuilder.Client, len(pool.allClients))
+// GetAllClients returns a copy of all clients in the pool, regardless of their health status.
+func (pool *ClientPool) GetAllClients() []*Client {
+	clients := make([]*Client, len(pool.allClients))
 	copy(clients, pool.allClients)
 	return clients
 }
 
-func (pool *ClientPool) GetAllGoodClients() []*txbuilder.Client {
-	clients := make([]*txbuilder.Client, len(pool.goodClients))
+// GetAllGoodClients returns a copy of all clients currently considered healthy
+// (within 2 blocks of the highest observed block height).
+func (pool *ClientPool) GetAllGoodClients() []*Client {
+	clients := make([]*Client, len(pool.goodClients))
 	copy(clients, pool.goodClients)
 	return clients
 }

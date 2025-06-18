@@ -22,7 +22,7 @@ spamoor gasburnertx [flags]
 ### Transaction Settings
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
-- `--gas-units-to-burn` - Number of gas units for each transaction to cost (default: 2000000)
+- `--gas-units-to-burn` - Number of gas units for each transaction to cost (default: 2000000). Set to 0 to burn all available block gas.
 - `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
 
 ### Wallet Management
@@ -36,6 +36,7 @@ spamoor gasburnertx [flags]
 
 ### Debug Options
 - `-v, --verbose` - Enable verbose output
+- `--log-txs` - Log all submitted transactions
 - `--trace` - Enable tracing output
 
 ## Example
@@ -48,4 +49,9 @@ spamoor gasburnertx -p "<PRIVKEY>" -h http://rpc-host:8545 -c 100 --gas-units-to
 Send 2 transactions per slot burning 1M gas each:
 ```bash
 spamoor gasburnertx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 2 --gas-units-to-burn 1000000
+```
+
+Send transactions that burn all available block gas:
+```bash
+spamoor gasburnertx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 1 --gas-units-to-burn 0
 ``` 
