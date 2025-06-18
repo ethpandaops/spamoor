@@ -19,6 +19,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
+	"github.com/ethpandaops/spamoor/scenarios/xentoken"
 )
 
 // ScenarioDescriptors contains all available scenario descriptors for the spamoor tool.
@@ -41,6 +42,7 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&storagespam.ScenarioDescriptor,
 	&uniswapswaps.ScenarioDescriptor,
 	&wallets.ScenarioDescriptor,
+	&xentoken.ScenarioDescriptor,
 }
 
 // GetScenario finds and returns a scenario descriptor by name.
