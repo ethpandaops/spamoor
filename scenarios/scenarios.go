@@ -17,6 +17,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/geastx"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	sbeoadelegation "github.com/ethpandaops/spamoor/scenarios/statebloat/eoa_delegation"
+	sbrandsstore "github.com/ethpandaops/spamoor/scenarios/statebloat/rand_sstore"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
@@ -41,6 +42,7 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&geastx.ScenarioDescriptor,
 	&setcodetx.ScenarioDescriptor,
 	&sbeoadelegation.ScenarioDescriptor,
+	&sbrandsstore.ScenarioDescriptor,
 	&storagespam.ScenarioDescriptor,
 	&uniswapswaps.ScenarioDescriptor,
 	&wallets.ScenarioDescriptor,
