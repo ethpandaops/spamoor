@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -329,6 +330,34 @@ func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// ReclaimFunds godoc
+// @Id reclaimFunds
+// @Summary Reclaim funds from a spammer
+// @Tags Spammer
+// @Description Reclaims funds from a spammer's wallet pool back to the root wallet
+// @Param id path int true "Spammer ID"
+// @Success 200 {object} Response "Success"
+// @Failure 400 {object} Response "Invalid spammer ID"
+// @Failure 404 {object} Response "Spammer not found"
+// @Failure 500 {object} Response "Server Error"
+// @Router /api/spammer/{id}/reclaim [post]
+func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid spammer ID", http.StatusBadRequest)
+		return
+	}
+
+	err = ah.daemon.ReclaimSpammer(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // GetSpammerDetails godoc
 // @Id getSpammerDetails
 // @Summary Get spammer details
@@ -512,4 +541,227 @@ func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) 
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
+}
+
+// ClientEntry represents a client in the API response
+type ClientEntry struct {
+	Index       int      `json:"index"`
+	Name        string   `json:"name"`
+	Group       string   `json:"group"`  // First group for backward compatibility
+	Groups      []string `json:"groups"` // All groups
+	Version     string   `json:"version"`
+	BlockHeight uint64   `json:"block_height"`
+	IsReady     bool     `json:"ready"`
+	RpcHost     string   `json:"rpc_host"`
+	Enabled     bool     `json:"enabled"`
+}
+
+// UpdateClientGroupRequest represents the request body for updating a client group
+type UpdateClientGroupRequest struct {
+	Group  string   `json:"group,omitempty"`  // Single group for backward compatibility
+	Groups []string `json:"groups,omitempty"` // Multiple groups
+}
+
+// UpdateClientEnabledRequest represents the request body for updating a client's enabled state
+type UpdateClientEnabledRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// GetClients godoc
+// @Id getClients
+// @Summary Get all clients
+// @Tags Client
+// @Description Returns a list of all clients with their details
+// @Produce json
+// @Success 200 {object} Response{data=[]ClientEntry} "Success"
+// @Router /api/clients [get]
+func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	goodClients := ah.daemon.GetClientPool().GetAllGoodClients()
+	allClients := ah.daemon.GetClientPool().GetAllClients()
+
+	response := make([]ClientEntry, len(allClients))
+
+	for i, client := range allClients {
+		blockHeight, _ := client.GetLastBlockHeight()
+
+		version, err := client.GetClientVersion(ctx)
+		if err != nil {
+			version = "Unknown"
+		}
+
+		response[i] = ClientEntry{
+			Index:       i,
+			Name:        client.GetName(),
+			Group:       client.GetClientGroup(),
+			Groups:      client.GetClientGroups(),
+			Version:     version,
+			BlockHeight: blockHeight,
+			IsReady:     slices.Contains(goodClients, client),
+			RpcHost:     client.GetRPCHost(),
+			Enabled:     client.IsEnabled(),
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// UpdateClientGroup godoc
+// @Id updateClientGroup
+// @Summary Update client group
+// @Tags Client
+// @Description Updates the group(s) for a specific client. Supports both single group (backward compatibility) and multiple groups.
+// @Accept json
+// @Param index path int true "Client index"
+// @Param request body UpdateClientGroupRequest true "New group name(s)"
+// @Success 200 {object} Response "Success"
+// @Failure 400 {object} Response "Invalid client index"
+// @Failure 404 {object} Response "Client not found"
+// @Router /api/client/{index}/group [put]
+func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	index, err := strconv.Atoi(vars["index"])
+	if err != nil {
+		http.Error(w, "Invalid client index", http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateClientGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	allClients := ah.daemon.GetClientPool().GetAllClients()
+	if index < 0 || index >= len(allClients) {
+		http.Error(w, "Client not found", http.StatusNotFound)
+		return
+	}
+
+	client := allClients[index]
+
+	// Handle both single group (backward compatibility) and multiple groups
+	if len(req.Groups) > 0 {
+		client.SetClientGroups(req.Groups)
+	} else if req.Group != "" {
+		client.SetClientGroups([]string{req.Group})
+	} else {
+		http.Error(w, "Either 'group' or 'groups' must be provided", http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// UpdateClientEnabled godoc
+// @Id updateClientEnabled
+// @Summary Update client enabled state
+// @Tags Client
+// @Description Updates the enabled state for a specific client
+// @Accept json
+// @Param index path int true "Client index"
+// @Param request body UpdateClientEnabledRequest true "New enabled state"
+// @Success 200 {object} Response "Success"
+// @Failure 400 {object} Response "Invalid client index"
+// @Failure 404 {object} Response "Client not found"
+// @Router /api/client/{index}/enabled [put]
+func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	index, err := strconv.Atoi(vars["index"])
+	if err != nil {
+		http.Error(w, "Invalid client index", http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateClientEnabledRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	allClients := ah.daemon.GetClientPool().GetAllClients()
+	if index < 0 || index >= len(allClients) {
+		http.Error(w, "Client not found", http.StatusNotFound)
+		return
+	}
+
+	client := allClients[index]
+	client.SetEnabled(req.Enabled)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// ExportSpammersRequest represents the request body for exporting spammers
+type ExportSpammersRequest struct {
+	SpammerIDs []int64 `json:"spammer_ids,omitempty"` // If empty, exports all spammers
+}
+
+// ImportSpammersRequest represents the request body for importing spammers
+type ImportSpammersRequest struct {
+	Input string `json:"input"` // Can be YAML data or a URL
+}
+
+// ExportSpammers godoc
+// @Id exportSpammers
+// @Summary Export spammers to YAML
+// @Tags Spammer
+// @Description Exports specified spammers or all spammers to YAML format
+// @Accept json
+// @Produce text/plain
+// @Param request body ExportSpammersRequest false "Spammer IDs to export (optional)"
+// @Success 200 {string} string "YAML configuration"
+// @Failure 400 {object} Response "Invalid request"
+// @Failure 500 {object} Response "Server Error"
+// @Router /api/spammers/export [post]
+func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
+	var req ExportSpammersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	yamlData, err := ah.daemon.ExportSpammers(req.SpammerIDs...)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-yaml")
+	w.Header().Set("Content-Disposition", "attachment; filename=spammers-export.yaml")
+	w.Write([]byte(yamlData))
+}
+
+// ImportSpammers godoc
+// @Id importSpammers
+// @Summary Import spammers from YAML data or URL
+// @Tags Spammer
+// @Description Imports spammers from YAML data or URL with validation and deduplication
+// @Accept json
+// @Produce json
+// @Param request body ImportSpammersRequest true "Import configuration"
+// @Success 200 {object} Response{data=daemon.ImportResult} "Success"
+// @Failure 400 {object} Response "Invalid request"
+// @Failure 500 {object} Response "Server Error"
+// @Router /api/spammers/import [post]
+func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
+	var req ImportSpammersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Input == "" {
+		http.Error(w, "input is required", http.StatusBadRequest)
+		return
+	}
+
+	result, err := ah.daemon.ImportSpammers(req.Input)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(Response{Data: result})
 }

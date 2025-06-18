@@ -13,7 +13,6 @@ import (
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/ethpandaops/spamoor/webui"
 	"github.com/ethpandaops/spamoor/webui/types"
@@ -29,6 +28,8 @@ type CliArgs struct {
 	port           int
 	dbFile         string
 	startupSpammer string
+	fuluActivation uint64
+	withoutBatcher bool
 }
 
 func main() {
@@ -43,8 +44,9 @@ func main() {
 	flags.StringVarP(&cliArgs.privkey, "privkey", "p", "", "The private key of the wallet to send funds from.")
 	flags.IntVarP(&cliArgs.port, "port", "P", 8080, "The port to run the webui on.")
 	flags.StringVarP(&cliArgs.dbFile, "db", "d", "spamoor.db", "The file to store the database in.")
-	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file with startup spammers configuration")
-
+	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file or URL with startup spammers configuration")
+	flags.Uint64Var(&cliArgs.fuluActivation, "fulu-activation", 0, "The unix timestamp of the Fulu activation (if activated)")
+	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -112,22 +114,32 @@ func main() {
 	}
 
 	// prepare txpool
-	txpool := txbuilder.NewTxPool(&txbuilder.TxPoolOptions{
-		GetClientFn: func(index int, random bool) *txbuilder.Client {
-			mode := spamoor.SelectClientByIndex
-			if random {
-				mode = spamoor.SelectClientRandom
-			}
+	var spamoorDaemon *daemon.Daemon
 
-			return clientPool.GetClient(mode, index, "")
-		},
-		GetClientCountFn: func() int {
-			return len(clientPool.GetAllClients())
+	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
+		Context:    ctx,
+		ClientPool: clientPool,
+		GetActiveWalletPools: func() []*spamoor.WalletPool {
+			walletPools := make([]*spamoor.WalletPool, 0)
+			for _, sp := range spamoorDaemon.GetAllSpammers() {
+				walletPool := sp.GetWalletPool()
+				if walletPool != nil {
+					walletPools = append(walletPools, walletPool)
+				}
+			}
+			return walletPools
 		},
 	})
 
+	if !cliArgs.withoutBatcher {
+		rootWallet.InitTxBatcher(ctx, txpool)
+	}
+
 	// init daemon
-	daemon := daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, rootWallet, txpool, database)
+	spamoorDaemon = daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, rootWallet, txpool, database)
+	if cliArgs.fuluActivation > 0 {
+		spamoorDaemon.SetGlobalCfg("fulu_activation", cliArgs.fuluActivation)
+	}
 
 	// start frontend
 	webui.StartHttpServer(&types.FrontendConfig{
@@ -135,27 +147,21 @@ func main() {
 		Port:     cliArgs.port,
 		SiteName: "Spamoor",
 		Debug:    cliArgs.debug,
-		Pprof:    cliArgs.debug,
+		Pprof:    true,
 		Minify:   true,
-	}, daemon)
+	}, spamoorDaemon)
 
 	// start daemon
-	firstLaunch, err := daemon.Run()
+	firstLaunch, err := spamoorDaemon.Run()
 	if err != nil {
 		panic(err)
 	}
 
 	// load startup spammers if configured
 	if firstLaunch && cliArgs.startupSpammer != "" {
-		startupSpammers, err := daemon.LoadStartupSpammers(cliArgs.startupSpammer, logger.WithField("module", "startup"))
+		err := spamoorDaemon.ImportSpammersOnStartup(cliArgs.startupSpammer, logger.WithField("module", "startup"))
 		if err != nil {
-			logger.Errorf("failed to load startup spammers: %v", err)
-		} else if len(startupSpammers) > 0 {
-			logger.Infof("adding %d startup spammers", len(startupSpammers))
-			err = daemon.AddStartupSpammers(startupSpammers)
-			if err != nil {
-				logger.Errorf("failed to add startup spammers: %v", err)
-			}
+			logger.Errorf("failed to import startup spammers: %v", err)
 		}
 	}
 
@@ -164,5 +170,5 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	<-c
 
-	daemon.Shutdown()
+	spamoorDaemon.Shutdown()
 }

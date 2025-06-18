@@ -1,4 +1,23 @@
 definitions:
+  api.ClientEntry:
+    properties:
+      block_height:
+        type: integer
+      enabled:
+        type: boolean
+      group:
+        type: string
+      index:
+        type: integer
+      name:
+        type: string
+      ready:
+        type: boolean
+      rpc_host:
+        type: string
+      version:
+        type: string
+    type: object
   api.CreateSpammerRequest:
     properties:
       config:
@@ -11,6 +30,20 @@ definitions:
         type: string
       startImmediately:
         type: boolean
+    type: object
+  api.ExportSpammersRequest:
+    properties:
+      spammer_ids:
+        description: If empty, exports all spammers
+        items:
+          type: integer
+        type: array
+    type: object
+  api.ImportSpammersRequest:
+    properties:
+      input:
+        description: Can be YAML data or a URL
+        type: string
     type: object
   api.LogEntry:
     properties:
@@ -69,6 +102,16 @@ definitions:
       status:
         type: integer
     type: object
+  api.UpdateClientEnabledRequest:
+    properties:
+      enabled:
+        type: boolean
+    type: object
+  api.UpdateClientGroupRequest:
+    properties:
+      group:
+        type: string
+    type: object
   api.UpdateSpammerRequest:
     properties:
       config:
@@ -78,9 +121,164 @@ definitions:
       name:
         type: string
     type: object
+  daemon.ImportResult:
+    properties:
+      errors:
+        items:
+          type: string
+        type: array
+      imported:
+        items:
+          $ref: '#/definitions/daemon.ImportedSpammerInfo'
+        type: array
+      imported_count:
+        type: integer
+      message:
+        type: string
+      validation:
+        $ref: '#/definitions/daemon.ImportValidationResult'
+      warnings:
+        items:
+          type: string
+        type: array
+    type: object
+  daemon.ImportValidationResult:
+    properties:
+      duplicates:
+        items:
+          type: string
+        type: array
+      invalid_scenarios:
+        items:
+          type: string
+        type: array
+      spammers:
+        items:
+          $ref: '#/definitions/daemon.SpammerValidationInfo'
+        type: array
+      total_spammers:
+        type: integer
+      valid_spammers:
+        type: integer
+    type: object
+  daemon.ImportedSpammerInfo:
+    properties:
+      description:
+        type: string
+      id:
+        type: integer
+      name:
+        type: string
+      scenario:
+        type: string
+    type: object
+  daemon.SpammerValidationInfo:
+    properties:
+      description:
+        type: string
+      issues:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      scenario:
+        type: string
+      valid:
+        type: boolean
+    type: object
 info:
   contact: {}
 paths:
+  /api/client/{index}/enabled:
+    put:
+      consumes:
+      - application/json
+      description: Updates the enabled state for a specific client
+      operationId: updateClientEnabled
+      parameters:
+      - description: Client index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: New enabled state
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateClientEnabledRequest'
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid client index
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Client not found
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Update client enabled state
+      tags:
+      - Client
+  /api/client/{index}/group:
+    put:
+      consumes:
+      - application/json
+      description: Updates the group for a specific client
+      operationId: updateClientGroup
+      parameters:
+      - description: Client index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: New group name
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateClientGroupRequest'
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid client index
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Client not found
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Update client group
+      tags:
+      - Client
+  /api/clients:
+    get:
+      description: Returns a list of all clients with their details
+      operationId: getClients
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/api.ClientEntry'
+                  type: array
+              type: object
+      summary: Get all clients
+      tags:
+      - Client
   /api/scenarios:
     get:
       description: Returns a list of all scenarios
@@ -374,6 +572,36 @@ paths:
       summary: Pause a spammer
       tags:
       - Spammer
+  /api/spammer/{id}/reclaim:
+    post:
+      description: Reclaims funds from a spammer's wallet pool back to the root wallet
+      operationId: reclaimFunds
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid spammer ID
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Spammer not found
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Reclaim funds from a spammer
+      tags:
+      - Spammer
   /api/spammer/{id}/start:
     post:
       description: Starts a specific spammer
@@ -423,6 +651,72 @@ paths:
                   type: array
               type: object
       summary: Get all spammers
+      tags:
+      - Spammer
+  /api/spammers/export:
+    post:
+      consumes:
+      - application/json
+      description: Exports specified spammers or all spammers to YAML format
+      operationId: exportSpammers
+      parameters:
+      - description: Spammer IDs to export (optional)
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/api.ExportSpammersRequest'
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: YAML configuration
+          schema:
+            type: string
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Export spammers to YAML
+      tags:
+      - Spammer
+  /api/spammers/import:
+    post:
+      consumes:
+      - application/json
+      description: Imports spammers from YAML data or URL with validation and deduplication
+      operationId: importSpammers
+      parameters:
+      - description: Import configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.ImportSpammersRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/daemon.ImportResult'
+              type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/api.Response'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Import spammers from YAML data or URL
       tags:
       - Spammer
 swagger: "2.0"

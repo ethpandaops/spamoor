@@ -9,13 +9,14 @@ import (
 	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 
-	"github.com/ethpandaops/spamoor/scenariotypes"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
 type ScenarioOptions struct {
 	Wallets uint64 `yaml:"wallets"`
+	Reclaim bool   `yaml:"reclaim"`
 }
 
 type Scenario struct {
@@ -27,56 +28,65 @@ type Scenario struct {
 var ScenarioName = "wallets"
 var ScenarioDefaultOptions = ScenarioOptions{
 	Wallets: 0,
+	Reclaim: false,
 }
-var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
+var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
 	Description:    "Show wallet balances",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
 
-func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
+func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 	return &Scenario{
-		logger: logger.WithField("scenario", ScenarioName),
+		options: ScenarioDefaultOptions,
+		logger:  logger.WithField("scenario", ScenarioName),
 	}
 }
 
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64VarP(&s.options.Wallets, "max-wallets", "w", ScenarioDefaultOptions.Wallets, "Maximum number of child wallets to use")
+	flags.BoolVarP(&s.options.Reclaim, "reclaim", "r", ScenarioDefaultOptions.Reclaim, "Reclaim funds from wallets")
 	return nil
 }
 
-func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
-	s.walletPool = walletPool
+func (s *Scenario) Init(options *scenario.Options) error {
+	s.walletPool = options.WalletPool
 
-	if config != "" {
-		err := yaml.Unmarshal([]byte(config), &s.options)
+	if options.Config != "" {
+		err := yaml.Unmarshal([]byte(options.Config), &s.options)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal config: %w", err)
 		}
 	}
 
 	if s.options.Wallets > 0 {
-		walletPool.SetWalletCount(s.options.Wallets)
+		s.walletPool.SetWalletCount(s.options.Wallets)
 	} else {
-		walletPool.SetWalletCount(1000)
+		s.walletPool.SetWalletCount(1000)
 	}
+
+	// skip funding for this scenario
+	s.walletPool.SetRunFundings(false)
 
 	return nil
 }
 
-func (s *Scenario) Config() string {
-	yamlBytes, _ := yaml.Marshal(&s.options)
-	return string(yamlBytes)
-}
-
 func (s *Scenario) Run(ctx context.Context) error {
-	wallet := s.walletPool.GetRootWallet()
+	wallet := s.walletPool.GetRootWallet().GetWallet()
 	s.logger.Infof("Root Wallet  %v  nonce: %6d  balance: %v ETH", wallet.GetAddress().String(), wallet.GetNonce(), utils.WeiToEther(uint256.MustFromBig(wallet.GetBalance())))
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
 
 	if client == nil {
 		return fmt.Errorf("no client available")
+	}
+
+	if s.options.Reclaim {
+		s.logger.Infof("Reclaiming funds from wallets")
+		err := s.walletPool.ReclaimFunds(ctx, client)
+		if err != nil {
+			return err
+		}
 	}
 
 	for i := 0; i < int(s.walletPool.GetWalletCount()); i++ {
