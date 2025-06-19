@@ -57,7 +57,7 @@
         },
         "/api/client/{index}/group": {
             "put": {
-                "description": "Updates the group for a specific client",
+                "description": "Updates the group(s) for a specific client. Supports both single group (backward compatibility) and multiple groups.",
                 "consumes": [
                     "application/json"
                 ],
@@ -75,12 +75,63 @@
                         "required": true
                     },
                     {
-                        "description": "New group name",
+                        "description": "New group name(s)",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
                             "$ref": "#/definitions/api.UpdateClientGroupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid client index",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Client not found",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/client/{index}/name": {
+            "put": {
+                "description": "Updates the name override for a specific client",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Update client name override",
+                "operationId": "updateClientName",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Client index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New name override",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.UpdateClientNameRequest"
                         }
                     }
                 ],
@@ -842,12 +893,23 @@
                     "type": "boolean"
                 },
                 "group": {
+                    "description": "First group for backward compatibility",
                     "type": "string"
+                },
+                "groups": {
+                    "description": "All groups",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "index": {
                     "type": "integer"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "name_override": {
                     "type": "string"
                 },
                 "ready": {
@@ -1001,6 +1063,22 @@
             "type": "object",
             "properties": {
                 "group": {
+                    "description": "Single group for backward compatibility",
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Multiple groups",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "api.UpdateClientNameRequest": {
+            "type": "object",
+            "properties": {
+                "name_override": {
                     "type": "string"
                 }
             }

@@ -6,10 +6,18 @@ definitions:
       enabled:
         type: boolean
       group:
+        description: First group for backward compatibility
         type: string
+      groups:
+        description: All groups
+        items:
+          type: string
+        type: array
       index:
         type: integer
       name:
+        type: string
+      name_override:
         type: string
       ready:
         type: boolean
@@ -110,6 +118,17 @@ definitions:
   api.UpdateClientGroupRequest:
     properties:
       group:
+        description: Single group for backward compatibility
+        type: string
+      groups:
+        description: Multiple groups
+        items:
+          type: string
+        type: array
+    type: object
+  api.UpdateClientNameRequest:
+    properties:
+      name_override:
         type: string
     type: object
   api.UpdateSpammerRequest:
@@ -228,7 +247,8 @@ paths:
     put:
       consumes:
       - application/json
-      description: Updates the group for a specific client
+      description: Updates the group(s) for a specific client. Supports both single
+        group (backward compatibility) and multiple groups.
       operationId: updateClientGroup
       parameters:
       - description: Client index
@@ -236,7 +256,7 @@ paths:
         name: index
         required: true
         type: integer
-      - description: New group name
+      - description: New group name(s)
         in: body
         name: request
         required: true
@@ -256,6 +276,40 @@ paths:
           schema:
             $ref: '#/definitions/api.Response'
       summary: Update client group
+      tags:
+      - Client
+  /api/client/{index}/name:
+    put:
+      consumes:
+      - application/json
+      description: Updates the name override for a specific client
+      operationId: updateClientName
+      parameters:
+      - description: Client index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: New name override
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateClientNameRequest'
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.Response'
+        "400":
+          description: Invalid client index
+          schema:
+            $ref: '#/definitions/api.Response'
+        "404":
+          description: Client not found
+          schema:
+            $ref: '#/definitions/api.Response'
+      summary: Update client name override
       tags:
       - Client
   /api/clients:
