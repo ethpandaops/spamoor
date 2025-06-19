@@ -302,30 +302,9 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 	}
 
 	// Get suggested fees for funding transactions
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(GweiPerEth))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(GweiPerEth))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return 0, fmt.Errorf("failed to get suggested fees for funding: %w", err)
-		}
-	}
-
-	// Minimum gas prices
-	if feeCap.Cmp(big.NewInt(GweiPerEth)) < 0 {
-		feeCap = big.NewInt(GweiPerEth)
-	}
-	if tipCap.Cmp(big.NewInt(GweiPerEth)) < 0 {
-		tipCap = big.NewInt(GweiPerEth)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get suggested fees for funding: %w", err)
 	}
 
 	// Fund with 1 wei as requested by user
@@ -469,30 +448,9 @@ func (s *Scenario) sendMaxBloatingTransaction(ctx context.Context, targetAuthori
 	}
 
 	// Get suggested fees or use configured values
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(GweiPerEth))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(GweiPerEth))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return 0, "", 0, 0, 0, "", fmt.Errorf("failed to get suggested fees: %w", err)
-		}
-	}
-
-	// Ensure minimum gas prices for inclusion
-	if feeCap.Cmp(big.NewInt(GweiPerEth)) < 0 {
-		feeCap = big.NewInt(GweiPerEth)
-	}
-	if tipCap.Cmp(big.NewInt(GweiPerEth)) < 0 {
-		tipCap = big.NewInt(GweiPerEth)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return 0, "", 0, 0, 0, "", fmt.Errorf("failed to get suggested fees for max bloating: %w", err)
 	}
 
 	// Use minimal amount for max bloating (focus on authorizations, not value transfer)
