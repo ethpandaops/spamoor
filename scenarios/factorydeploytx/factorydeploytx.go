@@ -124,11 +124,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.TotalCount > 0 {
-		if s.options.TotalCount < 1000 {
-			s.walletPool.SetWalletCount(s.options.TotalCount)
-		} else {
-			s.walletPool.SetWalletCount(1000)
+		maxWallets := s.options.TotalCount / 50
+		if maxWallets < 10 {
+			maxWallets = 10
+		} else if maxWallets > 1000 {
+			maxWallets = 1000
 		}
+
+		s.walletPool.SetWalletCount(maxWallets)
 	} else {
 		if s.options.Throughput*10 < 1000 {
 			s.walletPool.SetWalletCount(s.options.Throughput * 10)
@@ -366,8 +369,14 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			}
 
 			txFees := utils.GetTransactionFees(tx, receipt)
-			s.logger.WithField("rpc", client.GetName()).Debugf("deployment tx %d confirmed in block #%v. deployed at: %v, total fee: %v gwei (base: %v)",
-				txIdx+1, receipt.BlockNumber.String(), deployedAddr.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei())
+			s.logger.WithField("rpc", client.GetName()).Debugf(
+				"deployment tx %d confirmed in block #%v. deployed at: %v, total fee: %v gwei (base: %v)",
+				txIdx+1,
+				receipt.BlockNumber.String(),
+				deployedAddr.String(),
+				txFees.TotalFeeGweiString(),
+				txFees.TxBaseFeeGweiString(),
+			)
 		},
 		LogFn: spamoor.GetDefaultLogFn(s.logger, "", fmt.Sprintf("%6d", txIdx+1), tx),
 	})

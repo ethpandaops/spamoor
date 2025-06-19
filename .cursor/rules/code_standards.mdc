@@ -1,0 +1,120 @@
+---
+description: Spamoor Code Standards and Conventions
+alwaysApply: false
+---
+
+# Spamoor Code Standards
+
+## Go Language Standards
+
+### Naming Conventions
+- **Package names**: lowercase, no underscores (e.g., `spamoor`, `txbuilder`)
+- **Types**: PascalCase for exported, camelCase for unexported
+- **Functions/Methods**: PascalCase for exported, camelCase for unexported
+- **Variables**: camelCase for local, PascalCase for exported package-level
+- **Constants**: PascalCase for exported, camelCase for unexported
+- **Scenario names**: lowercase with hyphens (e.g., `deploy-destruct`)
+
+### File Organization
+- One main type per file when possible
+- Group related functionality in the same file
+- Use descriptive filenames that match primary functionality
+- Scenario directories: `scenarios/<scenario-name>/`
+- Each scenario has its own package named after the scenario
+
+### Code Structure Patterns
+
+#### Scenario Implementation
+```go
+// Standard scenario structure
+type ScenarioOptions struct {
+    // Common fields present in most scenarios
+    TotalCount   uint64 `yaml:"total_count"`
+    Throughput   uint64 `yaml:"throughput"`
+    MaxPending   uint64 `yaml:"max_pending"`
+    // Scenario-specific fields
+}
+
+type Scenario struct {
+    options    ScenarioOptions
+    logger     *logrus.Entry
+    walletPool *spamoor.WalletPool
+}
+
+var ScenarioName = "scenario-name"
+```
+
+#### Error Handling
+- Use explicit error returns: `func() (ReturnType, error)`
+- Wrap errors with context: `fmt.Errorf("operation failed: %w", err)`
+- Log errors at appropriate levels (Error, Warn, Info, Debug)
+- Use structured logging with logrus
+
+#### Configuration
+- Use YAML tags for all configuration structs
+- Support both command-line flags and YAML configuration
+- Use spf13/pflag for command-line parsing
+- Provide sensible defaults for all options
+
+### Documentation Standards
+- Public functions/types must have godoc comments
+- Comments should explain WHY, not just WHAT
+- Each scenario must have a comprehensive README.md
+- Use examples in documentation when helpful
+- API endpoints must be documented with Swagger annotations
+
+### Import Organization
+```go
+// Standard library imports first
+import (
+    "context"
+    "fmt"
+    "time"
+)
+
+// Third-party imports second (grouped by organization)
+import (
+    "github.com/ethereum/go-ethereum/common"
+    "github.com/ethereum/go-ethereum/core/types"
+    
+    "github.com/sirupsen/logrus"
+    "github.com/spf13/pflag"
+    
+    "gopkg.in/yaml.v3"
+)
+
+// Local imports last
+import (
+    "github.com/ethpandaops/spamoor/scenario"
+    "github.com/ethpandaops/spamoor/spamoor"
+)
+```
+
+### Logging Standards
+- Use structured logging with logrus
+- Create named loggers: `logger := logrus.WithField("component", "scenario-name")`
+- Log levels:
+  - **Error**: System failures, critical issues
+  - **Warn**: Recoverable problems, deprecated usage
+  - **Info**: Important operations, scenario lifecycle
+  - **Debug**: Detailed operational information
+  - **Trace**: Very detailed debugging information
+
+### Testing Patterns
+- Unit tests for utility functions
+- Integration tests for scenario functionality
+- Use table-driven tests when appropriate
+- Mock external dependencies (RPC clients, etc.)
+- Test files: `*_test.go`
+
+### Concurrency Patterns
+- Use context.Context for cancellation and timeouts
+- Protect shared state with mutexes
+- Use channels for communication between goroutines
+- Follow Go concurrency best practices (share memory by communicating)
+
+### Constants and Configuration
+- Define magic numbers as named constants
+- Group related constants in const blocks
+- Use iota for enumerated values
+- Configuration should be environment-aware
