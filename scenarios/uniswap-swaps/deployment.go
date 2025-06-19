@@ -48,7 +48,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	deployerWallet := u.walletPool.GetWellKnownWallet("deployer")
 	ownerWallet := u.walletPool.GetWellKnownWallet("owner")
 
-	feeCap, tipCap, err := u.getTxFee(u.ctx, client)
+	feeCap, tipCap, err := u.walletPool.GetTxPool().GetSuggestedFees(client, u.options.BaseFee, u.options.TipFee)
 	if err != nil {
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}

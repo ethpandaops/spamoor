@@ -69,6 +69,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/clients", apiHandler.GetClients).Methods("GET")
 	apiRouter.HandleFunc("/client/{index}/group", apiHandler.UpdateClientGroup).Methods("PUT")
 	apiRouter.HandleFunc("/client/{index}/enabled", apiHandler.UpdateClientEnabled).Methods("PUT")
+	apiRouter.HandleFunc("/client/{index}/name", apiHandler.UpdateClientName).Methods("PUT")
 
 	// Export/Import routes
 	apiRouter.HandleFunc("/spammers/export", apiHandler.ExportSpammers).Methods("POST")
