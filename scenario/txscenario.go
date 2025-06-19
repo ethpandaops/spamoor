@@ -81,7 +81,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	var lastSubmittedCount uint64
 	if options.WalletPool != nil && options.WalletPool.GetTxPool() != nil {
 		txPool := options.WalletPool.GetTxPool()
-		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats spamoor.WalletPoolBlockStats) {
+		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats *spamoor.WalletPoolBlockStats) {
 			currentSubmitted := txCount.Load()
 			submittedThisBlock := currentSubmitted - lastSubmittedCount
 			lastSubmittedCount = currentSubmitted
