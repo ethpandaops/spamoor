@@ -44,13 +44,15 @@ type TxInfo struct {
 }
 
 // BlockStatsCallback is called when a block is processed with statistics for a specific wallet pool
-type BlockStatsCallback func(blockNumber uint64, walletPoolStats WalletPoolBlockStats)
+type BlockStatsCallback func(blockNumber uint64, walletPoolStats *WalletPoolBlockStats)
 
 // WalletPoolBlockStats contains transaction statistics for a wallet pool in a specific block
 type WalletPoolBlockStats struct {
 	ConfirmedTxCount uint64
 	TotalTxFees      *big.Int
 	AffectedWallets  int
+	Block            *types.Block
+	Receipts         []*types.Receipt
 }
 
 // BlockSubscription represents a subscription to block updates for a specific wallet pool
@@ -79,7 +81,8 @@ type TxPool struct {
 
 	// Current block gas limit tracking
 	currentGasLimit uint64
-	gasLimitMutex   sync.RWMutex
+	currentBaseFee  *big.Int
+	blockStatsMutex sync.RWMutex
 
 	// Block update subscriptions
 	subscriptionsMutex sync.RWMutex
@@ -265,9 +268,10 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 
 	// Update current gas limit
-	pool.gasLimitMutex.Lock()
+	pool.blockStatsMutex.Lock()
 	pool.currentGasLimit = blockBody.GasLimit()
-	pool.gasLimitMutex.Unlock()
+	pool.currentBaseFee = blockBody.BaseFee()
+	pool.blockStatsMutex.Unlock()
 
 	// Clean up old blocks
 	if blockNumber > uint64(pool.reorgDepth) {
@@ -363,9 +367,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 	blockConfirmedTxs := pool.confirmedTxs[blockNumber]
 	pool.txsMutex.RUnlock()
 
-	if len(blockConfirmedTxs) > 0 {
-		pool.notifyBlockSubscribers(blockNumber, blockConfirmedTxs)
-	}
+	pool.notifyBlockSubscribers(blockNumber, blockConfirmedTxs, blockBody, receipts)
 
 	return nil
 }
@@ -480,7 +482,7 @@ func (pool *TxPool) UnsubscribeFromBlockUpdates(id uint64) {
 }
 
 // notifyBlockSubscribers notifies all subscribers about a processed block with wallet-specific stats.
-func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, confirmedTxs []*TxInfo) {
+func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, confirmedTxs []*TxInfo, block *types.Block, receipts []*types.Receipt) {
 	pool.subscriptionsMutex.RLock()
 	subscriptions := make(map[uint64]*BlockSubscription, len(pool.subscriptions))
 	for id, sub := range pool.subscriptions {
@@ -489,15 +491,17 @@ func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, confirmedTxs []*T
 	pool.subscriptionsMutex.RUnlock()
 
 	for _, subscription := range subscriptions {
-		stats := pool.calculateWalletPoolStats(subscription.WalletPool, confirmedTxs)
+		stats := pool.calculateWalletPoolStats(subscription.WalletPool, confirmedTxs, block, receipts)
 		subscription.Callback(blockNumber, stats)
 	}
 }
 
 // calculateWalletPoolStats calculates transaction statistics for a specific wallet pool.
-func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTxs []*TxInfo) WalletPoolBlockStats {
-	stats := WalletPoolBlockStats{
+func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTxs []*TxInfo, block *types.Block, receipts []*types.Receipt) *WalletPoolBlockStats {
+	stats := &WalletPoolBlockStats{
 		TotalTxFees: big.NewInt(0),
+		Block:       block,
+		Receipts:    receipts,
 	}
 
 	affectedWallets := make(map[common.Address]bool)
@@ -939,11 +943,18 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	return nil
 }
 
-// GetCurrentGasLimit returns the current gas limit of the transaction pool.
+// GetCurrentGasLimit returns the current gas limit of the chain.
 func (pool *TxPool) GetCurrentGasLimit() uint64 {
-	pool.gasLimitMutex.RLock()
-	defer pool.gasLimitMutex.RUnlock()
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
 	return pool.currentGasLimit
+}
+
+// GetCurrentBaseFee returns the current base fee of the chain.
+func (pool *TxPool) GetCurrentBaseFee() *big.Int {
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
+	return pool.currentBaseFee
 }
 
 // GetCurrentGasLimitWithInit returns the current gas limit, initializing it from RPC if needed.
@@ -951,7 +962,7 @@ func (pool *TxPool) GetCurrentGasLimit() uint64 {
 func (pool *TxPool) GetCurrentGasLimitWithInit() (uint64, error) {
 	gasLimit := pool.GetCurrentGasLimit()
 	if gasLimit == 0 {
-		if err := pool.InitializeGasLimit(); err != nil {
+		if err := pool.initBlockStats(); err != nil {
 			return 0, err
 		}
 		gasLimit = pool.GetCurrentGasLimit()
@@ -959,14 +970,25 @@ func (pool *TxPool) GetCurrentGasLimitWithInit() (uint64, error) {
 	return gasLimit, nil
 }
 
-// InitializeGasLimit fetches the current block gas limit from the network if not already set.
+// GetCurrentBaseFeeWithInit returns the current base fee, initializing it from RPC if needed.
+func (pool *TxPool) GetCurrentBaseFeeWithInit() (*big.Int, error) {
+	baseFee := pool.GetCurrentBaseFee()
+	if baseFee == nil {
+		if err := pool.initBlockStats(); err != nil {
+			return nil, err
+		}
+	}
+	return baseFee, nil
+}
+
+// initBlockStats fetches the current block stats from the network if not already set.
 // This is useful during startup when the pool hasn't processed any blocks yet.
-func (pool *TxPool) InitializeGasLimit() error {
-	pool.gasLimitMutex.Lock()
-	defer pool.gasLimitMutex.Unlock()
+func (pool *TxPool) initBlockStats() error {
+	pool.blockStatsMutex.Lock()
+	defer pool.blockStatsMutex.Unlock()
 
 	// If we already have a gas limit, don't fetch it again
-	if pool.currentGasLimit > 0 {
+	if pool.currentGasLimit > 0 && pool.currentBaseFee != nil {
 		return nil
 	}
 
@@ -986,7 +1008,8 @@ func (pool *TxPool) InitializeGasLimit() error {
 	}
 
 	pool.currentGasLimit = latestBlock.GasLimit()
-	logrus.Infof("initialized gas limit from latest block: %v", pool.currentGasLimit)
+	pool.currentBaseFee = latestBlock.BaseFee()
+	logrus.Infof("initialized block stats from latest block: %v, %v", pool.currentGasLimit, pool.currentBaseFee)
 
 	return nil
 }
