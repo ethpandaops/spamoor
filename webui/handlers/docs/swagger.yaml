@@ -130,6 +130,11 @@ definitions:
     properties:
       name_override:
         type: string
+      groups:
+        description: Multiple groups
+        items:
+          type: string
+        type: array
     type: object
   api.UpdateSpammerRequest:
     properties:
