@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -46,8 +45,6 @@ type Scenario struct {
 	walletPool *spamoor.WalletPool
 
 	bytecodes [][]byte
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "deploytx"
@@ -217,9 +214,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.pendingWGroup.Wait()
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-
 	return err
 }
 
@@ -278,14 +272,12 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, nil, wallet, err
 	}
 
-	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			onComplete()
-			s.pendingWGroup.Done()
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			if receipt != nil {

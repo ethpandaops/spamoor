@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -46,8 +45,6 @@ type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "eoatx"
@@ -198,9 +195,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-	s.pendingWGroup.Wait()
-
 	return err
 }
 
@@ -277,7 +271,6 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, nil, wallet, err
 	}
 
-	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
 
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
@@ -285,7 +278,6 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			onComplete()
-			s.pendingWGroup.Done()
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			if receipt != nil {

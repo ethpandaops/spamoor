@@ -45,8 +45,6 @@ type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "blob-conflicting"
@@ -200,9 +198,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-	s.pendingWGroup.Wait()
-
 	return err
 }
 
@@ -321,14 +316,12 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	wg.Add(2)
 	transactionSubmitted = true
 	var err1, err2 error
-	s.pendingWGroup.Add(2)
 	go func() {
 		err1 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx1, &spamoor.SendTransactionOptions{
 			Client:      client,
 			Rebroadcast: s.options.Rebroadcast > 0,
 			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				onComplete()
-				s.pendingWGroup.Done()
 			},
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 				if receipt != nil {
@@ -352,9 +345,6 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		err2 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx2, &spamoor.SendTransactionOptions{
 			Client:      client2,
 			Rebroadcast: s.options.Rebroadcast > 0,
-			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				s.pendingWGroup.Done()
-			},
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 				if receipt != nil {
 					s.processTxReceipt(txIdx, tx, receipt, client, "dynfee")

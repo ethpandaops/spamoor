@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -47,8 +46,6 @@ type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "blob-replacements"
@@ -206,9 +203,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-	s.pendingWGroup.Wait()
-
 	return err
 }
 
@@ -328,14 +322,12 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 
 	var awaitConfirmation bool = true
 	transactionSubmitted = true
-	s.pendingWGroup.Add(1)
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			awaitConfirmation = false
 			onComplete()
-			s.pendingWGroup.Done()
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			if receipt != nil {
