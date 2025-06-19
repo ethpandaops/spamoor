@@ -117,6 +117,57 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/client/{index}/name": {
+            "put": {
+                "description": "Updates the name override for a specific client",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Update client name override",
+                "operationId": "updateClientName",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Client index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New name override",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.UpdateClientNameRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid client index",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Client not found",
+                        "schema": {
+                            "$ref": "#/definitions/api.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/clients": {
             "get": {
                 "description": "Returns a list of all clients with their details",
@@ -869,6 +920,9 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "name_override": {
+                    "type": "string"
+                },
                 "ready": {
                     "type": "boolean"
                 },
@@ -1021,6 +1075,21 @@ const docTemplate = `{
             "properties": {
                 "group": {
                     "description": "Single group for backward compatibility",
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Multiple groups",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "api.UpdateClientNameRequest": {
+            "type": "object",
+            "properties": {
+                "name_override": {
                     "type": "string"
                 },
                 "groups": {

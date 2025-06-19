@@ -545,15 +545,16 @@ func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) 
 
 // ClientEntry represents a client in the API response
 type ClientEntry struct {
-	Index       int      `json:"index"`
-	Name        string   `json:"name"`
-	Group       string   `json:"group"`  // First group for backward compatibility
-	Groups      []string `json:"groups"` // All groups
-	Version     string   `json:"version"`
-	BlockHeight uint64   `json:"block_height"`
-	IsReady     bool     `json:"ready"`
-	RpcHost     string   `json:"rpc_host"`
-	Enabled     bool     `json:"enabled"`
+	Index        int      `json:"index"`
+	Name         string   `json:"name"`
+	Group        string   `json:"group"`  // First group for backward compatibility
+	Groups       []string `json:"groups"` // All groups
+	Version      string   `json:"version"`
+	BlockHeight  uint64   `json:"block_height"`
+	IsReady      bool     `json:"ready"`
+	RpcHost      string   `json:"rpc_host"`
+	Enabled      bool     `json:"enabled"`
+	NameOverride string   `json:"name_override,omitempty"`
 }
 
 // UpdateClientGroupRequest represents the request body for updating a client group
@@ -565,6 +566,11 @@ type UpdateClientGroupRequest struct {
 // UpdateClientEnabledRequest represents the request body for updating a client's enabled state
 type UpdateClientEnabledRequest struct {
 	Enabled bool `json:"enabled"`
+}
+
+// UpdateClientNameRequest represents the request body for updating a client's name override
+type UpdateClientNameRequest struct {
+	NameOverride string `json:"name_override"`
 }
 
 // GetClients godoc
@@ -591,15 +597,16 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 		}
 
 		response[i] = ClientEntry{
-			Index:       i,
-			Name:        client.GetName(),
-			Group:       client.GetClientGroup(),
-			Groups:      client.GetClientGroups(),
-			Version:     version,
-			BlockHeight: blockHeight,
-			IsReady:     slices.Contains(goodClients, client),
-			RpcHost:     client.GetRPCHost(),
-			Enabled:     client.IsEnabled(),
+			Index:        i,
+			Name:         client.GetName(),
+			Group:        client.GetClientGroup(),
+			Groups:       client.GetClientGroups(),
+			Version:      version,
+			BlockHeight:  blockHeight,
+			IsReady:      slices.Contains(goodClients, client),
+			RpcHost:      client.GetRPCHost(),
+			Enabled:      client.IsEnabled(),
+			NameOverride: client.GetNameOverride(),
 		}
 	}
 
@@ -688,6 +695,44 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 
 	client := allClients[index]
 	client.SetEnabled(req.Enabled)
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// UpdateClientName godoc
+// @Id updateClientName
+// @Summary Update client name override
+// @Tags Client
+// @Description Updates the name override for a specific client
+// @Accept json
+// @Param index path int true "Client index"
+// @Param request body UpdateClientNameRequest true "New name override"
+// @Success 200 {object} Response "Success"
+// @Failure 400 {object} Response "Invalid client index"
+// @Failure 404 {object} Response "Client not found"
+// @Router /api/client/{index}/name [put]
+func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	index, err := strconv.Atoi(vars["index"])
+	if err != nil {
+		http.Error(w, "Invalid client index", http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateClientNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	allClients := ah.daemon.GetClientPool().GetAllClients()
+	if index < 0 || index >= len(allClients) {
+		http.Error(w, "Client not found", http.StatusNotFound)
+		return
+	}
+
+	client := allClients[index]
+	client.SetNameOverride(req.NameOverride)
 
 	w.WriteHeader(http.StatusOK)
 }

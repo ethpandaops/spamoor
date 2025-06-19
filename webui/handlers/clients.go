@@ -16,14 +16,15 @@ type ClientsPage struct {
 }
 
 type ClientsPageClient struct {
-	Index       int      `json:"index"`
-	Name        string   `json:"name"`
-	Group       string   `json:"group"`  // First group for backward compatibility
-	Groups      []string `json:"groups"` // All groups
-	Version     string   `json:"version"`
-	BlockHeight uint64   `json:"block_height"`
-	IsReady     bool     `json:"ready"`
-	Enabled     bool     `json:"enabled"`
+	Index        int      `json:"index"`
+	Name         string   `json:"name"`
+	Group        string   `json:"group"`  // First group for backward compatibility
+	Groups       []string `json:"groups"` // All groups
+	Version      string   `json:"version"`
+	BlockHeight  uint64   `json:"block_height"`
+	IsReady      bool     `json:"ready"`
+	Enabled      bool     `json:"enabled"`
+	NameOverride string   `json:"name_override,omitempty"`
 }
 
 // Clients will return the "clients" page using a go template
@@ -64,13 +65,14 @@ func (fh *FrontendHandler) getClientsPageData(ctx context.Context) (*ClientsPage
 		blockHeight, _ := client.GetLastBlockHeight()
 
 		clientData := &ClientsPageClient{
-			Index:       idx,
-			Name:        client.GetName(),
-			Group:       client.GetClientGroup(),
-			Groups:      client.GetClientGroups(),
-			BlockHeight: blockHeight,
-			IsReady:     slices.Contains(goodClients, client),
-			Enabled:     client.IsEnabled(),
+			Index:        idx,
+			Name:         client.GetName(),
+			Group:        client.GetClientGroup(),
+			Groups:       client.GetClientGroups(),
+			BlockHeight:  blockHeight,
+			IsReady:      slices.Contains(goodClients, client),
+			Enabled:      client.IsEnabled(),
+			NameOverride: client.GetNameOverride(),
 		}
 
 		wg.Add(1)
