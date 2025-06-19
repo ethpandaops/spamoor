@@ -194,13 +194,6 @@ func (u *Uniswap) getTxFee(ctx context.Context, client *spamoor.Client) (*big.In
 		}
 	}
 
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
-	}
-
 	return feeCap, tipCap, nil
 }
 
