@@ -233,33 +233,15 @@ func (s *Scenario) deployContract(ctx context.Context) error {
 		return err
 	}
 
-	var txReceipt *types.Receipt
-	var txErr error
-	txWg := sync.WaitGroup{}
-	txWg.Add(1)
-
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	txreceipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer func() {
-				txWg.Done()
-			}()
-
-			txErr = err
-			txReceipt = receipt
-		},
 	})
 	if err != nil {
 		return err
 	}
 
-	txWg.Wait()
-	if txErr != nil {
-		return err
-	}
-
-	s.contractAddress = txReceipt.ContractAddress
+	s.contractAddress = txreceipt.ContractAddress
 	s.contractInstance, err = contract.NewSSTOREStorageBloater(s.contractAddress, client.GetEthClient())
 	if err != nil {
 		return err
@@ -372,59 +354,25 @@ func (s *Scenario) executeCreateSlots(ctx context.Context, targetGas uint64, blo
 		return err
 	}
 
-	var txReceipt *types.Receipt
-	var txErr error
-	txWg := sync.WaitGroup{}
-	txWg.Add(1)
-
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	txreceipt, txerr := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			if receipt != nil {
-				txFees := utils.GetTransactionFees(tx, receipt)
-				s.logger.WithField("rpc", client.GetName()).Debugf(" transaction confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei(), len(receipt.Logs))
-			}
-			txErr = err
-			txReceipt = receipt
-			txWg.Done()
-		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())
-			if retry == 0 && rebroadcast > 0 {
-				logger.Infof("rebroadcasting tx")
-			}
-			if retry > 0 {
-				logger = logger.WithField("retry", retry)
-			}
-			if rebroadcast > 0 {
-				logger = logger.WithField("rebroadcast", rebroadcast)
-			}
-			if err != nil {
-				logger.Debugf("failed sending tx: %v", err)
-			} else if retry > 0 || rebroadcast > 0 {
-				logger.Debugf("successfully sent tx")
-			}
-		},
+		LogFn:       spamoor.GetDefaultLogFn(s.logger, "rand-sstore", "", tx),
 	})
-	if err != nil {
-		// reset nonce if tx was not sent
-		wallet.ResetPendingNonce(ctx, client)
 
-		return err
+	if txerr != nil {
+		return fmt.Errorf("transaction failed: %w", txerr)
 	}
 
-	txWg.Wait()
-	if txErr != nil {
-		return fmt.Errorf("transaction failed: %w", txErr)
-	}
-
-	if txReceipt == nil || txReceipt.Status != 1 {
+	if txreceipt == nil || txreceipt.Status != 1 {
 		// Increase our gas estimate by 10%
 		s.actualGasPerNewSlotIteration = uint64(float64(s.actualGasPerNewSlotIteration) * 1.1)
 
 		return fmt.Errorf("transaction rejected")
 	}
+
+	txFees := utils.GetTransactionFees(tx, txreceipt)
+	s.logger.WithField("rpc", client.GetName()).Debugf(" transaction confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txreceipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei(), len(txreceipt.Logs))
 
 	// Mark this slot count as successful
 	s.successfulSlotCounts[slotsToCreate] = true
@@ -432,14 +380,14 @@ func (s *Scenario) executeCreateSlots(ctx context.Context, targetGas uint64, blo
 	// Update metrics and adaptive gas tracking
 	s.totalSlots += slotsToCreate
 	totalOverhead := BaseTxCost + FunctionCallOverhead
-	actualGasPerSlotIteration := (txReceipt.GasUsed - totalOverhead) / slotsToCreate
+	actualGasPerSlotIteration := (txreceipt.GasUsed - totalOverhead) / slotsToCreate
 
 	// Update our gas estimate using exponential moving average
 	// New estimate = 0.7 * old estimate + 0.3 * actual
 	s.actualGasPerNewSlotIteration = uint64(float64(s.actualGasPerNewSlotIteration)*0.7 + float64(actualGasPerSlotIteration)*0.3)
 
 	// Get previous block info for tracking
-	prevBlockNumber := txReceipt.BlockNumber.Uint64() - 1
+	prevBlockNumber := txreceipt.BlockNumber.Uint64() - 1
 
 	prevBlock, err := client.GetEthClient().BlockByNumber(ctx, big.NewInt(int64(prevBlockNumber)))
 	if err != nil {
@@ -469,11 +417,11 @@ func (s *Scenario) executeCreateSlots(ctx context.Context, targetGas uint64, blo
 	mbWrittenThisTx := float64(slotsToCreate*64) / (1024 * 1024)
 
 	// Calculate block utilization percentage
-	blockUtilization := float64(txReceipt.GasUsed) / float64(blockGasLimit) * 100
+	blockUtilization := float64(txreceipt.GasUsed) / float64(blockGasLimit) * 100
 
 	s.logger.WithFields(logrus.Fields{
-		"block_number":      txReceipt.BlockNumber,
-		"gas_used":          txReceipt.GasUsed,
+		"block_number":      txreceipt.BlockNumber,
+		"gas_used":          txreceipt.GasUsed,
 		"slots_created":     slotsToCreate,
 		"gas_per_slot":      actualGasPerSlotIteration,
 		"total_slots":       s.totalSlots,

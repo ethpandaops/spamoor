@@ -368,7 +368,7 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 		err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 			Client:      client,
 			Rebroadcast: false, // No retries to avoid duplicates
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				defer wg.Done()
 				defer onComplete()
 
@@ -611,44 +611,12 @@ func (s *Scenario) sendSingleMaxBloatingTransaction(ctx context.Context, authori
 	s.logger.WithField("scenario", "eoa-delegation").Infof("MAX BLOATING TX SIZE: %d bytes (%.2f KiB) | Limit: %d bytes (%.1f KiB) | %d authorizations | Exceeds limit: %v",
 		txSize, sizeKiB, MaxTransactionSize, limitKiB, len(authorizations), exceedsLimit)
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	var txreceipt *types.Receipt
-	var txerr error
-
 	// Send the transaction
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	txreceipt, txerr := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			txreceipt = receipt
-			txerr = err
-			wg.Done()
-		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-			logger := s.logger.WithField("rpc", client.GetName())
-			if retry > 0 {
-				logger = logger.WithField("retry", retry)
-			}
-			if rebroadcast > 0 {
-				logger = logger.WithField("rebroadcast", rebroadcast)
-			}
-			if err != nil {
-				logger.Errorf("failed sending max bloating tx: %v", err)
-			} else if retry > 0 || rebroadcast > 0 {
-				logger.Infof("successfully sent max bloating tx")
-			}
-		},
+		LogFn:       spamoor.GetDefaultLogFn(s.logger, "max bloating", "", tx),
 	})
-
-	if err != nil {
-		wallet.ResetPendingNonce(ctx, client)
-		return 0, "", 0, 0, 0, "", fmt.Errorf("failed to send max bloating transaction: %w", err)
-	}
-
-	// Wait for transaction confirmation
-	wg.Wait()
 
 	if txerr != nil {
 		return 0, "", 0, 0, 0, "", fmt.Errorf("failed to send max bloating transaction: %w", txerr)
@@ -728,7 +696,7 @@ func (s *Scenario) sendBatchedMaxBloatingTransactions(ctx context.Context, batch
 			err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 				Client:      client,
 				Rebroadcast: true,
-				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 					txreceipts[batchIndex] = receipt
 					txerrs[batchIndex] = err
 					wg.Done()

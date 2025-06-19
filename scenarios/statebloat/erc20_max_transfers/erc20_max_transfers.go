@@ -697,7 +697,7 @@ func (s *Scenario) sendTransferBatch(ctx context.Context, wallet *spamoor.Wallet
 		err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 			Client:      client,
 			Rebroadcast: false, // No retries to avoid duplicates
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				if err != nil {
 					return // Don't log individual failures
 				}

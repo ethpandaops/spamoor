@@ -499,7 +499,7 @@ func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			defer func() {
 				mu.Lock()
 				defer mu.Unlock()
