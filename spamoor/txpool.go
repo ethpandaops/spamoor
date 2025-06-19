@@ -1071,6 +1071,31 @@ func (pool *TxPool) InitializeGasLimit() error {
 	return nil
 }
 
+func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeGwei uint64, tipFeeGwei uint64) (feeCap *big.Int, tipCap *big.Int, err error) {
+	if baseFeeGwei > 0 {
+		feeCap = new(big.Int).Mul(big.NewInt(int64(baseFeeGwei)), big.NewInt(1000000000))
+	}
+	if tipFeeGwei > 0 {
+		tipCap = new(big.Int).Mul(big.NewInt(int64(tipFeeGwei)), big.NewInt(1000000000))
+	}
+
+	if feeCap == nil || tipCap == nil {
+		feeCap, tipCap, err = client.GetSuggestedFee(pool.options.Context)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
+		feeCap = big.NewInt(1000000000)
+	}
+	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
+		tipCap = big.NewInt(1000000000)
+	}
+
+	return feeCap, tipCap, nil
+}
+
 // calculateBackoffDelay calculates the exponential backoff delay for rebroadcast attempts.
 // Uses 30s base delay, 1.5x multiplier, with 10min maximum delay.
 func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
