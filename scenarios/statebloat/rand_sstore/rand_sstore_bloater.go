@@ -401,8 +401,10 @@ func (s *Scenario) executeCreateSlots(ctx context.Context, targetGas uint64, blo
 		Client:      client,
 		Rebroadcast: true,
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			txFees := utils.GetTransactionFees(tx, receipt)
-			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei(), len(receipt.Logs))
+			if receipt != nil {
+				txFees := utils.GetTransactionFees(tx, receipt)
+				s.logger.WithField("rpc", client.GetName()).Debugf(" transaction confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei(), len(receipt.Logs))
+			}
 			txErr = err
 			txReceipt = receipt
 			txWg.Done()
