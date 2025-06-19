@@ -311,7 +311,6 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 	fundingAmount := uint256.NewInt(1)
 
 	var confirmedCount int64
-	wg := sync.WaitGroup{}
 
 	delegatorIndexBase := uint64(iteration * FundingIterationOffset) // Large offset per iteration to avoid conflicts
 
@@ -364,12 +363,10 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 
 		// Send funding transaction with no retries to avoid duplicates
 		transactionSubmitted = true
-		wg.Add(1)
 		err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 			Client:      client,
 			Rebroadcast: false, // No retries to avoid duplicates
 			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				defer wg.Done()
 				defer onComplete()
 
 				if err != nil {
@@ -430,7 +427,6 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 	})
 
 	// Return the confirmed count
-	wg.Wait()
 	confirmed := atomic.LoadInt64(&confirmedCount)
 	return confirmed, nil
 }
