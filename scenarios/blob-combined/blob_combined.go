@@ -376,9 +376,18 @@ func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.T
 		s.logger.WithField("rpc", client.GetName()).Warnf("blob tx %6d.%v replacement failed: %v", txIdx+1, replacementIdx+1, err)
 		return
 	}
-	s.logger.WithFields(logrus.Fields{
-		"rpc":    client.GetName(),
-		"wallet": s.walletPool.GetWalletName(wallet.GetAddress()),
-		"nonce":  tx.Nonce(),
-	}).Infof("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+
+	if s.options.LogTxs {
+		s.logger.WithFields(logrus.Fields{
+			"rpc":    client.GetName(),
+			"wallet": s.walletPool.GetWalletName(wallet.GetAddress()),
+			"nonce":  tx.Nonce(),
+		}).Infof("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+	} else {
+		s.logger.WithFields(logrus.Fields{
+			"rpc":    client.GetName(),
+			"wallet": s.walletPool.GetWalletName(wallet.GetAddress()),
+			"nonce":  tx.Nonce(),
+		}).Debugf("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+	}
 }

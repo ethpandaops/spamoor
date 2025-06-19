@@ -160,7 +160,7 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 					if endIdx > len(txs) {
 						endIdx = len(txs)
 					}
-					_, err := s.walletPool.GetTxPool().SendBatch(ctx, deployerWallet, txs[txIdx:endIdx], &spamoor.BatchOptions{
+					_, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, deployerWallet, txs[txIdx:endIdx], &spamoor.BatchOptions{
 						SendTransactionOptions: spamoor.SendTransactionOptions{
 							Client: client,
 						},

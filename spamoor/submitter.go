@@ -92,11 +92,11 @@ func (p *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *types.
 // Await waits for a transaction to be confirmed and returns its receipt.
 // It monitors the blockchain for the transaction and handles reorgs by continuing
 // to wait if the transaction gets reorged out of the chain.
-func (p *TxPool) Await(ctx context.Context, wallet *Wallet, tx *types.Transaction) (*types.Receipt, error) {
+func (p *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction) (*types.Receipt, error) {
 	return p.awaitTransaction(ctx, wallet, tx, nil)
 }
 
-// SendAndAwait submits a transaction with custom options and waits for confirmation.
+// SendAndAwaitTransaction submits a transaction with custom options and waits for confirmation.
 // Allows specifying client preferences, rebroadcast settings, etc.
 //
 // Example:
@@ -105,8 +105,8 @@ func (p *TxPool) Await(ctx context.Context, wallet *Wallet, tx *types.Transactio
 //	    Client: specificClient,
 //	    Rebroadcast: true,
 //	}
-//	receipt, err := submitter.SendAndAwait(ctx, wallet, tx, options)
-func (p *TxPool) SendAndAwait(ctx context.Context, wallet *Wallet, tx *types.Transaction, opts *SendTransactionOptions) (*types.Receipt, error) {
+//	receipt, err := submitter.SendAndAwaitTransaction(ctx, wallet, tx, options)
+func (p *TxPool) SendAndAwaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, opts *SendTransactionOptions) (*types.Receipt, error) {
 	if opts == nil {
 		opts = &SendTransactionOptions{Rebroadcast: true}
 	}
@@ -160,7 +160,7 @@ func (p *TxPool) SendAndAwait(ctx context.Context, wallet *Wallet, tx *types.Tra
 //	    PendingLimit: 100,
 //	}
 //	receipts, err := submitter.SendBatchWithOptions(ctx, wallet, txs, options)
-func (p *TxPool) SendBatch(ctx context.Context, wallet *Wallet, txs []*types.Transaction, opts *BatchOptions) ([]*types.Receipt, error) {
+func (p *TxPool) SendTransactionBatch(ctx context.Context, wallet *Wallet, txs []*types.Transaction, opts *BatchOptions) ([]*types.Receipt, error) {
 	if len(txs) == 0 {
 		return nil, nil
 	}

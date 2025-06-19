@@ -393,7 +393,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, contractCode []byte) (*
 		return nil, nil, err
 	}
 
-	receipt, err := s.walletPool.GetTxPool().SendAndAwait(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
 	})

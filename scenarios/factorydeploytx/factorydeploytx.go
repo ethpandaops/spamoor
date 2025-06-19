@@ -287,7 +287,7 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		return common.Address{}, err
 	}
 
-	receipt, err := s.walletPool.GetTxPool().SendAndAwait(ctx, factoryWallet, tx, &spamoor.SendTransactionOptions{
+	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, factoryWallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
 	})

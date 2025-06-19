@@ -709,7 +709,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 			if endIdx > len(txList) {
 				endIdx = len(txList)
 			}
-			_, err := pool.txpool.SendBatch(pool.ctx, pool.rootWallet.wallet, txList[txIdx:endIdx], &BatchOptions{
+			_, err := pool.txpool.SendTransactionBatch(pool.ctx, pool.rootWallet.wallet, txList[txIdx:endIdx], &BatchOptions{
 				SendTransactionOptions: SendTransactionOptions{
 					Client: client,
 					OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {

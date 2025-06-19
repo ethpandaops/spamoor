@@ -385,5 +385,10 @@ func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.T
 		logger.WithField("rpc", client.GetName()).Warnf("blob tx %6d.%v replacement failed: %v", txIdx+1, replacementIdx+1, err)
 		return
 	}
-	logger.WithField("rpc", client.GetName()).Infof("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+
+	if s.options.LogTxs {
+		logger.WithField("rpc", client.GetName()).Infof("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+	} else {
+		logger.WithField("rpc", client.GetName()).Debugf("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+	}
 }
