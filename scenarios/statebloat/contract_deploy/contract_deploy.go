@@ -1,4 +1,4 @@
-package contractdeploy
+package sbcontractdeploy
 
 import (
 	"context"
@@ -18,13 +18,15 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy/contract"
-	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txbuilder"
 )
 
 type ScenarioOptions struct {
@@ -42,13 +44,6 @@ type ContractDeployment struct {
 	PrivateKey      string `json:"private_key"`
 }
 
-// PendingTransaction tracks a transaction until it's mined
-type PendingTransaction struct {
-	TxHash     common.Hash
-	PrivateKey *ecdsa.PrivateKey
-	Timestamp  time.Time
-}
-
 // BlockDeploymentStats tracks deployment statistics per block
 type BlockDeploymentStats struct {
 	BlockNumber       uint64
@@ -62,15 +57,6 @@ type Scenario struct {
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
 
-	// Cached chain ID to avoid repeated RPC calls
-	chainID      *big.Int
-	chainIDOnce  sync.Once
-	chainIDError error
-
-	// Transaction tracking
-	pendingTxs      map[common.Hash]*PendingTransaction
-	pendingTxsMutex sync.RWMutex
-
 	// Results tracking
 	deployedContracts []ContractDeployment
 	contractsMutex    sync.Mutex
@@ -79,30 +65,25 @@ type Scenario struct {
 	blockStats      map[uint64]*BlockDeploymentStats
 	blockStatsMutex sync.Mutex
 	lastLoggedBlock uint64
-
-	// Block monitoring for real-time logging
-	blockMonitorCancel context.CancelFunc
-	blockMonitorDone   chan struct{}
 }
 
-var ScenarioName = "contract-deploy"
+var ScenarioName = "statebloat-contract-deploy"
 var ScenarioDefaultOptions = ScenarioOptions{
 	MaxWallets:      0, // Use root wallet only by default
 	BaseFee:         5, // Moderate base fee (5 gwei)
 	TipFee:          1, // Priority fee (1 gwei)
 	MaxTransactions: 0,
 }
-var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
+var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
 	Description:    "Deploy contracts to create state bloat",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
 
-func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
+func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 	return &Scenario{
-		logger:     logger.WithField("scenario", ScenarioName),
-		pendingTxs: make(map[common.Hash]*PendingTransaction),
+		logger: logger.WithField("scenario", ScenarioName),
 	}
 }
 
@@ -116,130 +97,23 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	return nil
 }
 
-func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
-	s.walletPool = walletPool
+func (s *Scenario) Init(options *scenario.Options) error {
+	s.walletPool = options.WalletPool
 
-	if config != "" {
-		err := yaml.Unmarshal([]byte(config), &s.options)
+	if options.Config != "" {
+		err := yaml.Unmarshal([]byte(options.Config), &s.options)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal config: %w", err)
 		}
 	}
 
 	if s.options.MaxWallets > 0 {
-		walletPool.SetWalletCount(s.options.MaxWallets)
+		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else {
-		// Use only root wallet by default for better efficiency
-		// This avoids child wallet funding overhead
-		walletPool.SetWalletCount(0)
+		s.walletPool.SetWalletCount(10)
 	}
 
 	return nil
-}
-
-func (s *Scenario) Config() string {
-	yamlBytes, _ := yaml.Marshal(&s.options)
-	return string(yamlBytes)
-}
-
-// getChainID caches the chain ID to avoid repeated RPC calls
-func (s *Scenario) getChainID(ctx context.Context) (*big.Int, error) {
-	s.chainIDOnce.Do(func() {
-		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
-		if client == nil {
-			s.chainIDError = fmt.Errorf("no client available for chain ID")
-			return
-		}
-		s.chainID, s.chainIDError = client.GetChainId(ctx)
-	})
-	return s.chainID, s.chainIDError
-}
-
-// waitForPendingTxSlot waits until we have capacity for another transaction
-func (s *Scenario) waitForPendingTxSlot(ctx context.Context) {
-	for {
-		s.pendingTxsMutex.RLock()
-		count := len(s.pendingTxs)
-		s.pendingTxsMutex.RUnlock()
-
-		if count < int(s.options.MaxPending) {
-			return
-		}
-
-		// Check and clean up confirmed transactions
-		s.processPendingTransactions(ctx)
-		time.Sleep(1 * time.Second)
-	}
-}
-
-// processPendingTransactions checks for transaction confirmations and updates state
-func (s *Scenario) processPendingTransactions(ctx context.Context) {
-	s.pendingTxsMutex.Lock()
-
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
-	if client == nil {
-		s.pendingTxsMutex.Unlock()
-		return
-	}
-
-	ethClient := client.GetEthClient()
-	var confirmedTxs []common.Hash
-	var timedOutTxs []common.Hash
-	var successfulDeployments []struct {
-		ContractAddress common.Address
-		PrivateKey      *ecdsa.PrivateKey
-		Receipt         *types.Receipt
-		TxHash          common.Hash
-	}
-
-	for txHash, pendingTx := range s.pendingTxs {
-		// Check if transaction is too old (1 minute timeout)
-		if time.Since(pendingTx.Timestamp) > 1*time.Minute {
-			s.logger.Warnf("Transaction %s timed out after 1 minute, removing from pending", txHash.Hex())
-			timedOutTxs = append(timedOutTxs, txHash)
-			continue
-		}
-
-		receipt, err := ethClient.TransactionReceipt(ctx, txHash)
-		if err != nil {
-			// Transaction still pending or error retrieving receipt
-			continue
-		}
-
-		confirmedTxs = append(confirmedTxs, txHash)
-
-		// Process successful deployment
-		if receipt.Status == 1 && receipt.ContractAddress != (common.Address{}) {
-			successfulDeployments = append(successfulDeployments, struct {
-				ContractAddress common.Address
-				PrivateKey      *ecdsa.PrivateKey
-				Receipt         *types.Receipt
-				TxHash          common.Hash
-			}{
-				ContractAddress: receipt.ContractAddress,
-				PrivateKey:      pendingTx.PrivateKey,
-				Receipt:         receipt,
-				TxHash:          txHash,
-			})
-		}
-	}
-
-	// Remove confirmed transactions from pending map
-	for _, txHash := range confirmedTxs {
-		delete(s.pendingTxs, txHash)
-	}
-
-	// Remove timed out transactions from pending map
-	for _, txHash := range timedOutTxs {
-		delete(s.pendingTxs, txHash)
-	}
-
-	s.pendingTxsMutex.Unlock()
-
-	// Process successful deployments after releasing the lock
-	for _, deployment := range successfulDeployments {
-		s.recordDeployedContract(deployment.ContractAddress, deployment.PrivateKey, deployment.Receipt, deployment.TxHash)
-	}
 }
 
 // recordDeployedContract records a successfully deployed contract
@@ -350,13 +224,7 @@ func (s *Scenario) saveDeploymentsMapping() error {
 // startBlockMonitor starts a background goroutine that monitors for new blocks
 // and logs block deployment summaries immediately when blocks are mined
 func (s *Scenario) startBlockMonitor(ctx context.Context) {
-	monitorCtx, cancel := context.WithCancel(ctx)
-	s.blockMonitorCancel = cancel
-	s.blockMonitorDone = make(chan struct{})
-
 	go func() {
-		defer close(s.blockMonitorDone)
-
 		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 		if client == nil {
 			s.logger.Warn("No client available for block monitoring")
@@ -369,11 +237,11 @@ func (s *Scenario) startBlockMonitor(ctx context.Context) {
 
 		for {
 			select {
-			case <-monitorCtx.Done():
+			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				// Get current block number
-				latestBlock, err := ethClient.BlockByNumber(monitorCtx, nil)
+				latestBlock, err := ethClient.BlockByNumber(ctx, nil)
 				if err != nil {
 					s.logger.WithError(err).Debug("Failed to get latest block for monitoring")
 					continue
@@ -409,35 +277,17 @@ func (s *Scenario) startBlockMonitor(ctx context.Context) {
 	}()
 }
 
-// stopBlockMonitor stops the block monitoring goroutine
-func (s *Scenario) stopBlockMonitor() {
-	if s.blockMonitorCancel != nil {
-		s.blockMonitorCancel()
-	}
-	if s.blockMonitorDone != nil {
-		<-s.blockMonitorDone // Wait for goroutine to finish
-	}
-}
-
 func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
 	// Start block monitoring for real-time logging
 	s.startBlockMonitor(ctx)
-	defer s.stopBlockMonitor()
-
-	// Cache chain ID at startup
-	chainID, err := s.getChainID(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get chain ID: %w", err)
-	}
-
-	s.logger.Infof("Chain ID: %s", chainID.String())
 
 	// Calculate rate limiting based on block gas limit if max-transactions is 0
 	var maxTxsPerBlock uint64
-	var useRateLimiting bool
+	var maxPending uint64 = 100
+	var totalTxCount uint64 = 0
 
 	if s.options.MaxTransactions == 0 {
 		// Get block gas limit from the network
@@ -455,88 +305,37 @@ func (s *Scenario) Run(ctx context.Context) error {
 		// TODO: This should be a constant.
 		estimatedGasPerContract := uint64(4949468) // Updated estimate based on contract size reduction
 		maxTxsPerBlock = blockGasLimit / estimatedGasPerContract
-		useRateLimiting = true
 
 		s.logger.Infof("Rate limiting enabled: block gas limit %d, gas per contract %d, max txs per block %d",
 			blockGasLimit, estimatedGasPerContract, maxTxsPerBlock)
 	}
 
-	txIdxCounter := uint64(0)
-	totalTxCount := atomic.Uint64{}
-	blockTxCount := uint64(0)
-	lastBlockTime := time.Now()
+	if s.options.MaxPending > 0 {
+		maxPending = s.options.MaxPending
+	}
 
-	for {
-		// Check if we've reached max transactions (if set)
-		if s.options.MaxTransactions > 0 && txIdxCounter >= s.options.MaxTransactions {
-			s.logger.Infof("reached maximum number of transactions (%d)", s.options.MaxTransactions)
-			break
-		}
+	err := scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
+		TotalCount: s.options.MaxTransactions,
+		Throughput: maxTxsPerBlock,
+		MaxPending: maxPending,
+		WalletPool: s.walletPool,
 
-		// Rate limiting logic
-		if useRateLimiting {
-			// If we've sent maxTxsPerBlock transactions, wait for next block interval
-			if blockTxCount >= maxTxsPerBlock {
-				timeSinceLastBlock := time.Since(lastBlockTime)
-				if timeSinceLastBlock < 12*time.Second { // Assume ~12 second block time
-					sleepTime := 12*time.Second - timeSinceLastBlock
-					s.logger.Infof("Rate limit reached (%d txs), waiting %v for next block", maxTxsPerBlock, sleepTime)
-					time.Sleep(sleepTime)
+		Logger: s.logger,
+		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
+			logger := s.logger
+			tx, err := s.sendTransaction(ctx, txIdx, onComplete)
+
+			atomic.AddUint64(&totalTxCount, 1)
+
+			return func() {
+				if err != nil {
+					logger.Warnf("could not send transaction: %v", err)
+				} else {
+					logger.Debugf("sent deployment tx #%6d: %v", txIdx+1, tx.Hash().String())
 				}
-				blockTxCount = 0
-				lastBlockTime = time.Now()
-			}
-		}
-
-		// Wait for available slot
-		s.waitForPendingTxSlot(ctx)
-
-		// Send a single transaction
-		err := s.sendTransaction(ctx, txIdxCounter)
-		if err != nil {
-			s.logger.Warnf("failed to send transaction %d: %v", txIdxCounter, err)
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		txIdxCounter++
-		totalTxCount.Add(1)
-		blockTxCount++
-
-		// Process pending transactions periodically with 1 second intervals
-		if txIdxCounter%10 == 0 {
-			s.processPendingTransactions(ctx)
-
-			s.contractsMutex.Lock()
-			contractCount := len(s.deployedContracts)
-			s.contractsMutex.Unlock()
-
-			s.logger.Infof("Progress: sent %d txs, deployed %d contracts", txIdxCounter, contractCount)
-		}
-
-		// Small delay to prevent overwhelming the RPC
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	// Wait for all pending transactions to complete with 1 second intervals
-	s.logger.Info("Waiting for remaining transactions to complete...")
-	for {
-		s.processPendingTransactions(ctx)
-
-		s.pendingTxsMutex.RLock()
-		pendingCount := len(s.pendingTxs)
-		s.pendingTxsMutex.RUnlock()
-
-		if pendingCount == 0 {
-			break
-		}
-
-		s.logger.Infof("Waiting for %d pending transactions...", pendingCount)
-		time.Sleep(1 * time.Second) // Changed from 2 seconds to 1 second
-	}
-
-	// Stop block monitoring before final cleanup
-	s.stopBlockMonitor()
+			}, err
+		},
+	})
 
 	// Log any remaining unlogged blocks (final blocks) - keep this as final safety net
 	s.blockStatsMutex.Lock()
@@ -562,21 +361,21 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.contractsMutex.Unlock()
 
 	s.logger.WithFields(logrus.Fields{
-		"total_txs":       totalTxCount.Load(),
+		"total_txs":       totalTxCount,
 		"total_contracts": totalContracts,
 	}).Info("All transactions completed")
 
-	return nil
+	return err
 }
 
 // sendTransaction sends a single contract deployment transaction
-func (s *Scenario) sendTransaction(ctx context.Context, txIdx uint64) error {
+func (s *Scenario) sendTransaction(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, error) {
 	maxRetries := 3
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		err := s.attemptTransaction(ctx, txIdx, attempt)
+		tx, err := s.attemptTransaction(ctx, txIdx, attempt, onComplete)
 		if err == nil {
-			return nil
+			return tx, nil
 		}
 
 		// Check if it's a base fee error
@@ -594,10 +393,10 @@ func (s *Scenario) sendTransaction(ctx context.Context, txIdx uint64) error {
 		}
 
 		// For other errors, return immediately
-		return err
+		return nil, err
 	}
 
-	return fmt.Errorf("failed to send transaction after %d attempts", maxRetries)
+	return nil, fmt.Errorf("failed to send transaction after %d attempts", maxRetries)
 }
 
 // updateDynamicFees queries the network and updates base fee and tip fee
@@ -638,78 +437,81 @@ func (s *Scenario) updateDynamicFees(ctx context.Context) error {
 }
 
 // attemptTransaction makes a single attempt to send a transaction
-func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt int) error {
+func (s *Scenario) attemptTransaction(ctx context.Context, txIdx uint64, attempt int, onComplete func()) (*types.Transaction, error) {
 	// Get client and wallet
 	client := s.walletPool.GetClient(spamoor.SelectClientRoundRobin, 0, "")
-	wallet := s.walletPool.GetRootWallet()
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 
 	if client == nil {
-		return fmt.Errorf("no client available")
+		return nil, fmt.Errorf("no client available")
 	}
 	if wallet == nil {
-		return fmt.Errorf("no wallet available")
+		return nil, fmt.Errorf("no wallet available")
 	}
-
-	// Get cached chain ID
-	chainID, err := s.getChainID(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get chain ID: %w", err)
-	}
-
-	// Get current nonce for this wallet
-	addr := crypto.PubkeyToAddress(wallet.GetPrivateKey().PublicKey)
-	nonce, err := client.GetEthClient().PendingNonceAt(ctx, addr)
-	if err != nil {
-		return fmt.Errorf("failed to get nonce for %s: %w", addr.Hex(), err)
-	}
-
-	// Create transaction auth
-	auth, err := bind.NewKeyedTransactorWithChainID(wallet.GetPrivateKey(), chainID)
-	if err != nil {
-		return fmt.Errorf("failed to create auth: %w", err)
-	}
-
-	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = big.NewInt(0)
-	auth.GasLimit = 5200000 // Fixed gas limit for contract deployment
 
 	// Set EIP-1559 fee parameters
-	if s.options.BaseFee > 0 {
-		auth.GasFeeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		auth.GasTipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
 
 	// Generate random salt for unique contract
 	salt := make([]byte, 32)
 	_, err = rand.Read(salt)
 	if err != nil {
-		return fmt.Errorf("failed to generate salt: %w", err)
+		return nil, fmt.Errorf("failed to generate salt: %w", err)
 	}
 	saltInt := new(big.Int).SetBytes(salt)
 
 	// Deploy the contract
 	ethClient := client.GetEthClient()
 	if ethClient == nil {
-		return fmt.Errorf("failed to get eth client")
+		return nil, fmt.Errorf("failed to get eth client")
 	}
 
-	_, tx, _, err := contract.DeployContract(auth, ethClient, saltInt)
+	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		GasFeeCap: uint256.MustFromBig(feeCap),
+		GasTipCap: uint256.MustFromBig(tipCap),
+		Gas:       5200000,
+		Value:     uint256.NewInt(0),
+	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+		_, deployTx, _, err := contract.DeployStateBloatToken(transactOpts, client.GetEthClient(), saltInt)
+		return deployTx, err
+	})
+
 	if err != nil {
-		return fmt.Errorf("failed to deploy contract: %w", err)
+		return nil, fmt.Errorf("failed to create deployment transaction: %w", err)
 	}
 
-	// Track pending transaction
-	pendingTx := &PendingTransaction{
-		TxHash:     tx.Hash(),
-		PrivateKey: wallet.GetPrivateKey(),
-		Timestamp:  time.Now(),
+	mu := sync.Mutex{}
+	mu.Lock()
+	defer mu.Unlock()
+
+	var callOnComplete bool
+
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+		Client:      client,
+		Rebroadcast: true,
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			defer func() {
+				mu.Lock()
+				defer mu.Unlock()
+
+				if callOnComplete {
+					onComplete()
+				}
+			}()
+
+			if receipt != nil {
+				s.recordDeployedContract(receipt.ContractAddress, wallet.GetPrivateKey(), receipt, tx.Hash())
+			}
+		},
+	})
+
+	callOnComplete = err == nil
+	if err != nil {
+		return nil, err
 	}
 
-	s.pendingTxsMutex.Lock()
-	s.pendingTxs[tx.Hash()] = pendingTx
-	s.pendingTxsMutex.Unlock()
-
-	return nil
+	return tx, nil
 }
