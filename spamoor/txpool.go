@@ -1017,7 +1017,7 @@ func (pool *TxPool) initBlockStats() error {
 // GetSuggestedFees returns the suggested fees for a transaction.
 // If baseFeeGwei and tipFeeGwei are provided, they are used as the base fee and tip fee.
 // If not provided, the fees are fetched from the client. The fees are returned in wei.
-func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeGwei uint64, tipFeeGwei uint64) (feeCap *big.Int, tipCap *big.Int, err error) {
+func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeGwei float64, tipFeeGwei float64) (feeCap *big.Int, tipCap *big.Int, err error) {
 	if baseFeeGwei > 0 {
 		feeCap = new(big.Int).Mul(big.NewInt(int64(baseFeeGwei)), big.NewInt(1000000000))
 	}

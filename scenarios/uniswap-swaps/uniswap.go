@@ -17,8 +17,8 @@ import (
 )
 
 type UniswapOptions struct {
-	BaseFee             uint64
-	TipFee              uint64
+	BaseFee             float64
+	TipFee              float64
 	DaiPairs            uint64
 	EthLiquidityPerPair *uint256.Int
 	DaiLiquidityFactor  uint64

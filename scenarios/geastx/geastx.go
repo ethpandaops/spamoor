@@ -26,21 +26,21 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount     uint64 `yaml:"total_count"`
-	Throughput     uint64 `yaml:"throughput"`
-	MaxPending     uint64 `yaml:"max_pending"`
-	MaxWallets     uint64 `yaml:"max_wallets"`
-	Rebroadcast    uint64 `yaml:"rebroadcast"`
-	Amount         uint64 `yaml:"amount"`
-	BaseFee        uint64 `yaml:"base_fee"`
-	TipFee         uint64 `yaml:"tip_fee"`
-	GasLimit       uint64 `yaml:"gas_limit"`
-	DeployGasLimit uint64 `yaml:"deploy_gas_limit"`
-	GeasFile       string `yaml:"geas_file"`
-	GeasCode       string `yaml:"geas_code"`
-	ClientGroup    string `yaml:"client_group"`
-	Timeout        string `yaml:"timeout"`
-	LogTxs         bool   `yaml:"log_txs"`
+	TotalCount     uint64  `yaml:"total_count"`
+	Throughput     uint64  `yaml:"throughput"`
+	MaxPending     uint64  `yaml:"max_pending"`
+	MaxWallets     uint64  `yaml:"max_wallets"`
+	Rebroadcast    uint64  `yaml:"rebroadcast"`
+	Amount         uint64  `yaml:"amount"`
+	BaseFee        float64 `yaml:"base_fee"`
+	TipFee         float64 `yaml:"tip_fee"`
+	GasLimit       uint64  `yaml:"gas_limit"`
+	DeployGasLimit uint64  `yaml:"deploy_gas_limit"`
+	GeasFile       string  `yaml:"geas_file"`
+	GeasCode       string  `yaml:"geas_code"`
+	ClientGroup    string  `yaml:"client_group"`
+	Timeout        string  `yaml:"timeout"`
+	LogTxs         bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -90,8 +90,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Amount to send in geas transactions")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in geas transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in geas transactions (in gwei)")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in geas transactions (in gwei)")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in geas transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasLimit, "gaslimit", ScenarioDefaultOptions.GasLimit, "Max gas limit to use in geas transactions")
 	flags.Uint64Var(&s.options.DeployGasLimit, "deploy-gaslimit", ScenarioDefaultOptions.GasLimit, "Max gas limit to use in deployment transaction")
 	flags.StringVar(&s.options.GeasFile, "geasfile", "", "Path to the geas file to use for execution")

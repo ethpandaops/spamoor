@@ -23,17 +23,17 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount     uint64 `yaml:"total_count"`
-	Throughput     uint64 `yaml:"throughput"`
-	MaxPending     uint64 `yaml:"max_pending"`
-	MaxWallets     uint64 `yaml:"max_wallets"`
-	Rebroadcast    uint64 `yaml:"rebroadcast"`
-	BaseFee        uint64 `yaml:"base_fee"`
-	TipFee         uint64 `yaml:"tip_fee"`
-	GasUnitsToBurn uint64 `yaml:"gas_units_to_burn"`
-	Timeout        string `yaml:"timeout"`
-	ClientGroup    string `yaml:"client_group"`
-	LogTxs         bool   `yaml:"log_txs"`
+	TotalCount     uint64  `yaml:"total_count"`
+	Throughput     uint64  `yaml:"throughput"`
+	MaxPending     uint64  `yaml:"max_pending"`
+	MaxWallets     uint64  `yaml:"max_wallets"`
+	Rebroadcast    uint64  `yaml:"rebroadcast"`
+	BaseFee        float64 `yaml:"base_fee"`
+	TipFee         float64 `yaml:"tip_fee"`
+	GasUnitsToBurn uint64  `yaml:"gas_units_to_burn"`
+	Timeout        string  `yaml:"timeout"`
+	ClientGroup    string  `yaml:"client_group"`
+	LogTxs         bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -78,8 +78,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in gasburner transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in gasburner transactions (in gwei)")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in gasburner transactions (in gwei)")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in gasburner transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasUnitsToBurn, "gas-units-to-burn", ScenarioDefaultOptions.GasUnitsToBurn, "The number of gas units for each tx to cost")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")

@@ -28,32 +28,32 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount       uint64 `yaml:"total_count"`
-	Throughput       uint64 `yaml:"throughput"`
-	MaxPending       uint64 `yaml:"max_pending"`
-	MaxWallets       uint64 `yaml:"max_wallets"`
-	Rebroadcast      uint64 `yaml:"rebroadcast"`
-	BaseFee          uint64 `yaml:"base_fee"`
-	TipFee           uint64 `yaml:"tip_fee"`
-	DeployGasLimit   uint64 `yaml:"deploy_gas_limit"`
-	GasLimit         uint64 `yaml:"gas_limit"`
-	Amount           uint64 `yaml:"amount"`
-	RandomAmount     bool   `yaml:"random_amount"`
-	RandomTarget     bool   `yaml:"random_target"`
-	ContractCode     string `yaml:"contract_code"`
-	ContractFile     string `yaml:"contract_file"`
-	ContractAddress  string `yaml:"contract_address"`
-	ContractArgs     string `yaml:"contract_args"`
-	ContractAddrPath string `yaml:"contract_addr_path"`
-	CallData         string `yaml:"call_data"`
-	CallABI          string `yaml:"call_abi"`
-	CallABIFile      string `yaml:"call_abi_file"`
-	CallFnName       string `yaml:"call_fn_name"`
-	CallFnSig        string `yaml:"call_fn_sig"`
-	CallArgs         string `yaml:"call_args"`
-	Timeout          string `yaml:"timeout"`
-	ClientGroup      string `yaml:"client_group"`
-	LogTxs           bool   `yaml:"log_txs"`
+	TotalCount       uint64  `yaml:"total_count"`
+	Throughput       uint64  `yaml:"throughput"`
+	MaxPending       uint64  `yaml:"max_pending"`
+	MaxWallets       uint64  `yaml:"max_wallets"`
+	Rebroadcast      uint64  `yaml:"rebroadcast"`
+	BaseFee          float64 `yaml:"base_fee"`
+	TipFee           float64 `yaml:"tip_fee"`
+	DeployGasLimit   uint64  `yaml:"deploy_gas_limit"`
+	GasLimit         uint64  `yaml:"gas_limit"`
+	Amount           uint64  `yaml:"amount"`
+	RandomAmount     bool    `yaml:"random_amount"`
+	RandomTarget     bool    `yaml:"random_target"`
+	ContractCode     string  `yaml:"contract_code"`
+	ContractFile     string  `yaml:"contract_file"`
+	ContractAddress  string  `yaml:"contract_address"`
+	ContractArgs     string  `yaml:"contract_args"`
+	ContractAddrPath string  `yaml:"contract_addr_path"`
+	CallData         string  `yaml:"call_data"`
+	CallABI          string  `yaml:"call_abi"`
+	CallABIFile      string  `yaml:"call_abi_file"`
+	CallFnName       string  `yaml:"call_fn_name"`
+	CallFnSig        string  `yaml:"call_fn_sig"`
+	CallArgs         string  `yaml:"call_args"`
+	Timeout          string  `yaml:"timeout"`
+	ClientGroup      string  `yaml:"client_group"`
+	LogTxs           bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -114,8 +114,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast with unlimited retries and exponential backoff")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in call and deployment transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in call and deployment transactions (in gwei)")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in call and deployment transactions (in gwei)")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in call and deployment transactions (in gwei)")
 	flags.Uint64Var(&s.options.DeployGasLimit, "deploy-gas-limit", ScenarioDefaultOptions.DeployGasLimit, "Gas limit to use for deployment transaction")
 	flags.Uint64Var(&s.options.GasLimit, "gas-limit", ScenarioDefaultOptions.GasLimit, "Gas limit to use for call transactions")
 	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (in gwei)")
