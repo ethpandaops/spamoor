@@ -326,7 +326,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			if endIdx > len(deploymentTxs) {
 				endIdx = len(deploymentTxs)
 			}
-			_, err := u.walletPool.GetSubmitter().SendBatch(u.ctx, deployerWallet, deploymentTxs[txIdx:endIdx], &spamoor.BatchOptions{
+			_, err := u.walletPool.GetTxPool().SendBatch(u.ctx, deployerWallet, deploymentTxs[txIdx:endIdx], &spamoor.BatchOptions{
 				SendTransactionOptions: spamoor.SendTransactionOptions{
 					Client: client,
 				},
@@ -372,7 +372,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 				if endIdx > len(liquidityTxs) {
 					endIdx = len(liquidityTxs)
 				}
-				_, err := u.walletPool.GetSubmitter().SendBatch(u.ctx, rootWallet.GetWallet(), liquidityTxs[txIdx:endIdx], &spamoor.BatchOptions{
+				_, err := u.walletPool.GetTxPool().SendBatch(u.ctx, rootWallet.GetWallet(), liquidityTxs[txIdx:endIdx], &spamoor.BatchOptions{
 					SendTransactionOptions: spamoor.SendTransactionOptions{
 						Client: client,
 					},

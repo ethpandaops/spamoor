@@ -10,19 +10,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// TxSubmitter provides simplified transaction submission interfaces.
-// It wraps the complex TxPool.SendTransaction method with easier-to-use abstractions.
-type TxSubmitter struct {
-	txPool *TxPool
-}
-
-// NewSubmitter creates a new Submitter that wraps the given TxPool.
-func NewSubmitter(txPool *TxPool) *TxSubmitter {
-	return &TxSubmitter{
-		txPool: txPool,
-	}
-}
-
 // TxConfirmFn is a callback function called when a transaction is confirmed or fails.
 // It receives the transaction, receipt (if successful), and any error that occurred.
 type TxConfirmFn func(tx *types.Transaction, receipt *types.Receipt)
@@ -96,17 +83,17 @@ func GetDefaultLogFn(logger logrus.FieldLogger, txTypeName string, txIdx string,
 	}
 }
 
-// Send submits a single transaction with the given options.
+// SendTransaction submits a single transaction with the given options.
 // This is a lower-level interface that provides access to all callback options.
-func (s *TxSubmitter) Send(ctx context.Context, wallet *Wallet, tx *types.Transaction, opts *SendTransactionOptions) error {
-	return s.txPool.submitTransaction(ctx, wallet, tx, opts, true)
+func (p *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, opts *SendTransactionOptions) error {
+	return p.submitTransaction(ctx, wallet, tx, opts, true)
 }
 
 // Await waits for a transaction to be confirmed and returns its receipt.
 // It monitors the blockchain for the transaction and handles reorgs by continuing
 // to wait if the transaction gets reorged out of the chain.
-func (s *TxSubmitter) Await(ctx context.Context, wallet *Wallet, tx *types.Transaction) (*types.Receipt, error) {
-	return s.txPool.awaitTransaction(ctx, wallet, tx, nil)
+func (p *TxPool) Await(ctx context.Context, wallet *Wallet, tx *types.Transaction) (*types.Receipt, error) {
+	return p.awaitTransaction(ctx, wallet, tx, nil)
 }
 
 // SendAndAwait submits a transaction with custom options and waits for confirmation.
@@ -119,7 +106,7 @@ func (s *TxSubmitter) Await(ctx context.Context, wallet *Wallet, tx *types.Trans
 //	    Rebroadcast: true,
 //	}
 //	receipt, err := submitter.SendAndAwait(ctx, wallet, tx, options)
-func (s *TxSubmitter) SendAndAwait(ctx context.Context, wallet *Wallet, tx *types.Transaction, opts *SendTransactionOptions) (*types.Receipt, error) {
+func (p *TxPool) SendAndAwait(ctx context.Context, wallet *Wallet, tx *types.Transaction, opts *SendTransactionOptions) (*types.Receipt, error) {
 	if opts == nil {
 		opts = &SendTransactionOptions{Rebroadcast: true}
 	}
@@ -148,7 +135,7 @@ func (s *TxSubmitter) SendAndAwait(ctx context.Context, wallet *Wallet, tx *type
 	}
 
 	// Submit the transaction
-	err := s.Send(ctx, wallet, tx, &sendOpts)
+	err := p.SendTransaction(ctx, wallet, tx, &sendOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit transaction: %w", err)
 	}
@@ -173,7 +160,7 @@ func (s *TxSubmitter) SendAndAwait(ctx context.Context, wallet *Wallet, tx *type
 //	    PendingLimit: 100,
 //	}
 //	receipts, err := submitter.SendBatchWithOptions(ctx, wallet, txs, options)
-func (s *TxSubmitter) SendBatch(ctx context.Context, wallet *Wallet, txs []*types.Transaction, opts *BatchOptions) ([]*types.Receipt, error) {
+func (p *TxPool) SendBatch(ctx context.Context, wallet *Wallet, txs []*types.Transaction, opts *BatchOptions) ([]*types.Receipt, error) {
 	if len(txs) == 0 {
 		return nil, nil
 	}
@@ -240,7 +227,7 @@ func (s *TxSubmitter) SendBatch(ctx context.Context, wallet *Wallet, txs []*type
 			}
 
 			// Submit transaction
-			s.Send(ctx, wallet, transaction, &sendOpts)
+			p.SendTransaction(ctx, wallet, transaction, &sendOpts)
 		}(i, tx)
 	}
 

@@ -323,7 +323,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	var err1, err2 error
 	s.pendingWGroup.Add(2)
 	go func() {
-		err1 = s.walletPool.GetSubmitter().Send(ctx, wallet, tx1, &spamoor.SendTransactionOptions{
+		err1 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx1, &spamoor.SendTransactionOptions{
 			Client:      client,
 			Rebroadcast: s.options.Rebroadcast > 0,
 			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -349,7 +349,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	go func() {
 		delay := time.Duration(rand.Int63n(500)) * time.Millisecond
 		time.Sleep(delay)
-		err2 = s.walletPool.GetSubmitter().Send(ctx, wallet, tx2, &spamoor.SendTransactionOptions{
+		err2 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx2, &spamoor.SendTransactionOptions{
 			Client:      client2,
 			Rebroadcast: s.options.Rebroadcast > 0,
 			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {

@@ -65,7 +65,6 @@ type BlockSubscription struct {
 // affected transactions, and provides transaction awaiting functionality with automatic rebroadcasting.
 type TxPool struct {
 	options          *TxPoolOptions
-	submitter        *TxSubmitter
 	processStaleChan chan uint64
 	lastBlockNumber  uint64
 
@@ -109,8 +108,6 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 		reorgDepth:       10, // Default value
 		subscriptions:    map[uint64]*BlockSubscription{},
 	}
-
-	pool.submitter = NewSubmitter(pool)
 
 	if options.Context == nil {
 		options.Context = context.Background()

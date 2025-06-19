@@ -371,7 +371,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			wg.Add(1)
 
 			go func(tx *types.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
-				u.walletPool.GetSubmitter().Send(u.ctx, wallet, tx, &spamoor.SendTransactionOptions{
+				u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &spamoor.SendTransactionOptions{
 					Client:      client,
 					Rebroadcast: true,
 					OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {

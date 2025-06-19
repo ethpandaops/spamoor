@@ -287,7 +287,7 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		return common.Address{}, err
 	}
 
-	receipt, err := s.walletPool.GetSubmitter().SendAndAwait(ctx, factoryWallet, tx, &spamoor.SendTransactionOptions{
+	receipt, err := s.walletPool.GetTxPool().SendAndAwait(ctx, factoryWallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
 	})
@@ -349,7 +349,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
-	err = s.walletPool.GetSubmitter().Send(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {

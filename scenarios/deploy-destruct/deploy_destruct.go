@@ -237,7 +237,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 		return nil, nil, err
 	}
 
-	receipt, err := s.walletPool.GetSubmitter().SendAndAwait(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	receipt, err := s.walletPool.GetTxPool().SendAndAwait(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
 	})
@@ -296,7 +296,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 
 	transactionSubmitted = true
 	s.pendingWGroup.Add(1)
-	err = s.walletPool.GetSubmitter().Send(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {

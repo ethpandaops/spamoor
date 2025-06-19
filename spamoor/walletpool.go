@@ -122,11 +122,6 @@ func (pool *WalletPool) GetTxPool() *TxPool {
 	return pool.txpool
 }
 
-// GetSubmitter returns the transaction submitter used by this wallet pool.
-func (pool *WalletPool) GetSubmitter() *TxSubmitter {
-	return pool.txpool.submitter
-}
-
 // GetClientPool returns the client pool used for blockchain interactions.
 func (pool *WalletPool) GetClientPool() *ClientPool {
 	return pool.clientPool
@@ -714,7 +709,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 			if endIdx > len(txList) {
 				endIdx = len(txList)
 			}
-			_, err := pool.txpool.submitter.SendBatch(pool.ctx, pool.rootWallet.wallet, txList[txIdx:endIdx], &BatchOptions{
+			_, err := pool.txpool.SendBatch(pool.ctx, pool.rootWallet.wallet, txList[txIdx:endIdx], &BatchOptions{
 				SendTransactionOptions: SendTransactionOptions{
 					Client: client,
 					OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
@@ -1001,7 +996,7 @@ func (pool *WalletPool) ReclaimFunds(ctx context.Context, client *Client) error 
 		for _, tx := range reclaimTxs {
 			go func(tx *reclaimTx) {
 				pool.logger.Infof("sending reclaim tx %v (%v)", tx.tx.Hash().String(), utils.ReadableAmount(uint256.MustFromBig(tx.tx.Value())))
-				pool.txpool.submitter.Send(ctx, tx.wallet, tx.tx, &SendTransactionOptions{
+				pool.txpool.SendTransaction(ctx, tx.wallet, tx.tx, &SendTransactionOptions{
 					Client: client,
 					OnComplete: func(_ *types.Transaction, receipt *types.Receipt, err error) {
 						wg.Done()
