@@ -36,6 +36,7 @@ type ScenarioOptions struct {
 	TipFee          uint64 `yaml:"tip_fee"`
 	ClientGroup     string `yaml:"client_group"`
 	MaxTransactions uint64 `yaml:"max_transactions"`
+	DeploymentsFile string `yaml:"deployments_file"`
 }
 
 // ContractDeployment tracks a deployed contract with its deployer info
@@ -73,6 +74,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:         5, // Moderate base fee (5 gwei)
 	TipFee:          1, // Priority fee (1 gwei)
 	MaxTransactions: 0,
+	DeploymentsFile: "deployments.json",
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -94,6 +96,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.Uint64Var(&s.options.MaxTransactions, "max-transactions", ScenarioDefaultOptions.MaxTransactions, "Maximum number of transactions to send (0 = use rate limiting based on block gas limit)")
+	flags.StringVar(&s.options.DeploymentsFile, "deployments-file", ScenarioDefaultOptions.DeploymentsFile, "File to save deployments to")
 	return nil
 }
 
@@ -194,6 +197,10 @@ func max(a, b int) int {
 
 // saveDeploymentsMapping creates/updates deployments.json with private key to contract address mapping
 func (s *Scenario) saveDeploymentsMapping() error {
+	if s.options.DeploymentsFile == "" {
+		return nil
+	}
+
 	// Create a map from private key to array of contract addresses
 	deploymentMap := make(map[string][]string)
 
@@ -204,9 +211,9 @@ func (s *Scenario) saveDeploymentsMapping() error {
 	}
 
 	// Create or overwrite the deployments.json file
-	deploymentsFile, err := os.Create("deployments.json")
+	deploymentsFile, err := os.Create(s.options.DeploymentsFile)
 	if err != nil {
-		return fmt.Errorf("failed to create deployments.json file: %w", err)
+		return fmt.Errorf("failed to create %v file: %w", s.options.DeploymentsFile, err)
 	}
 	defer deploymentsFile.Close()
 
@@ -215,7 +222,7 @@ func (s *Scenario) saveDeploymentsMapping() error {
 	encoder.SetIndent("", "  ")
 	err = encoder.Encode(deploymentMap)
 	if err != nil {
-		return fmt.Errorf("failed to write deployments.json: %w", err)
+		return fmt.Errorf("failed to write %v: %w", s.options.DeploymentsFile, err)
 	}
 
 	return nil

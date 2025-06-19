@@ -1,4 +1,4 @@
-package erc20maxtransfers
+package sberc20maxtransfers
 
 import (
 	"context"
@@ -24,8 +24,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
+	"github.com/ethpandaops/spamoor/scenario"
 	contract "github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy/contract"
-	"github.com/ethpandaops/spamoor/scenariotypes"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
 )
@@ -76,9 +76,10 @@ const (
 
 // ScenarioOptions defines the configuration options for the scenario
 type ScenarioOptions struct {
-	BaseFee  uint64 `yaml:"base_fee"`
-	TipFee   uint64 `yaml:"tip_fee"`
-	Contract string `yaml:"contract"`
+	BaseFee         uint64 `yaml:"base_fee"`
+	TipFee          uint64 `yaml:"tip_fee"`
+	Contract        string `yaml:"contract"`
+	DeploymentsFile string `yaml:"deployments_file"`
 }
 
 // DeploymentEntry represents a contract deployment from deployments.json
@@ -106,7 +107,7 @@ type Scenario struct {
 	// Deployed contracts and private key
 	deployerPrivateKey   string
 	deployerAddress      common.Address
-	deployerWallet       *txbuilder.Wallet // Store the wallet instance
+	deployerWallet       *spamoor.Wallet // Store the wallet instance
 	deployedContracts    []common.Address
 	currentRoundContract common.Address // Contract being used for current round
 	contractsLock        sync.Mutex
@@ -124,20 +125,21 @@ type Scenario struct {
 	contractStatsLock sync.Mutex
 }
 
-var ScenarioName = "erc20-max-transfers"
+var ScenarioName = "statebloat-erc20-max-transfers"
 var ScenarioDefaultOptions = ScenarioOptions{
-	BaseFee:  DefaultBaseFeeGwei,
-	TipFee:   DefaultTipFeeGwei,
-	Contract: "",
+	BaseFee:         DefaultBaseFeeGwei,
+	TipFee:          DefaultTipFeeGwei,
+	Contract:        "",
+	DeploymentsFile: "deployments.json",
 }
-var ScenarioDescriptor = scenariotypes.ScenarioDescriptor{
+var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
 	Description:    "Maximum ERC20 transfers per block to unique addresses",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
 
-func newScenario(logger logrus.FieldLogger) scenariotypes.Scenario {
+func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 	return &Scenario{
 		logger:        logger.WithField("scenario", ScenarioName),
 		usedAddresses: make(map[common.Address]bool),
@@ -149,14 +151,15 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
 	flags.StringVar(&s.options.Contract, "contract", ScenarioDefaultOptions.Contract, "Specific contract address to use (default: rotate through all)")
+	flags.StringVar(&s.options.DeploymentsFile, "deployments-file", ScenarioDefaultOptions.DeploymentsFile, "File to save deployments to")
 	return nil
 }
 
-func (s *Scenario) Init(walletPool *spamoor.WalletPool, config string) error {
-	s.walletPool = walletPool
+func (s *Scenario) Init(options *scenario.Options) error {
+	s.walletPool = options.WalletPool
 
-	if config != "" {
-		err := yaml.Unmarshal([]byte(config), &s.options)
+	if options.Config != "" {
+		err := yaml.Unmarshal([]byte(options.Config), &s.options)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal config: %w", err)
 		}
@@ -187,9 +190,13 @@ func (s *Scenario) Config() string {
 
 // loadDeployedContracts loads contract addresses and private key from deployments.json
 func (s *Scenario) loadDeployedContracts() error {
-	data, err := os.ReadFile("deployments.json")
+	if s.options.DeploymentsFile == "" {
+		return fmt.Errorf("deployments file is not set")
+	}
+
+	data, err := os.ReadFile(s.options.DeploymentsFile)
 	if err != nil {
-		return fmt.Errorf("failed to read deployments.json: %w", err)
+		return fmt.Errorf("failed to read %v: %w", s.options.DeploymentsFile, err)
 	}
 
 	var deployments DeploymentEntry
@@ -201,9 +208,8 @@ func (s *Scenario) loadDeployedContracts() error {
 	// Get the first (and only) entry
 	for privateKey, addresses := range deployments {
 		// Trim 0x prefix if present
-		if strings.HasPrefix(privateKey, "0x") {
-			privateKey = privateKey[2:]
-		}
+		privateKey = strings.TrimPrefix(privateKey, "0x")
+
 		s.deployerPrivateKey = privateKey
 		s.deployedContracts = make([]common.Address, len(addresses))
 		for i, addr := range addresses {
@@ -248,7 +254,7 @@ func (s *Scenario) loadDeployedContracts() error {
 // loadTransferABI loads the transfer function ABI from the contract
 func (s *Scenario) loadTransferABI() error {
 	// Parse the contract ABI to get the transfer method
-	contractABI, err := abi.JSON(strings.NewReader(contract.ContractMetaData.ABI))
+	contractABI, err := abi.JSON(strings.NewReader(contract.StateBloatTokenMetaData.ABI))
 	if err != nil {
 		return fmt.Errorf("failed to parse contract ABI: %w", err)
 	}
@@ -265,7 +271,7 @@ func (s *Scenario) loadTransferABI() error {
 
 // getNetworkBlockGasLimit retrieves the current block gas limit from the network
 // It waits for a new block to be mined (with timeout) to ensure fresh data
-func (s *Scenario) getNetworkBlockGasLimit(ctx context.Context, client *txbuilder.Client) uint64 {
+func (s *Scenario) getNetworkBlockGasLimit(ctx context.Context, client *spamoor.Client) uint64 {
 	// Create a timeout context for the entire operation
 	timeoutCtx, cancel := context.WithTimeout(ctx, BlockMiningTimeout)
 	defer cancel()
@@ -481,7 +487,7 @@ func (s *Scenario) runMaxTransfersMode(ctx context.Context) error {
 	// Prepare the deployer wallet if not already done
 	if s.deployerWallet == nil {
 		// Create wallet from deployer private key
-		deployerWallet, err := txbuilder.NewWallet(s.deployerPrivateKey)
+		deployerWallet, err := spamoor.NewWallet(s.deployerPrivateKey)
 		if err != nil {
 			return fmt.Errorf("failed to create deployer wallet: %w", err)
 		}
@@ -584,7 +590,7 @@ func (s *Scenario) runMaxTransfersMode(ctx context.Context) error {
 	}
 }
 
-func (s *Scenario) sendMaxTransfers(ctx context.Context, deployerWallet *txbuilder.Wallet, targetTransfers int, targetGasLimit uint64, blockCounter int, client *txbuilder.Client) (uint64, string, int, float64, int, error) {
+func (s *Scenario) sendMaxTransfers(ctx context.Context, deployerWallet *spamoor.Wallet, targetTransfers int, targetGasLimit uint64, blockCounter int, client *spamoor.Client) (uint64, string, int, float64, int, error) {
 	// Select a random contract for this round
 	contractForRound, err := s.selectRandomContract()
 	if err != nil {
@@ -599,40 +605,16 @@ func (s *Scenario) sendMaxTransfers(ctx context.Context, deployerWallet *txbuild
 	s.logger.Infof("Selected contract for round #%d: %s", blockCounter, contractForRound.Hex())
 
 	// Get suggested fees or use configured values
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(GweiPerEth))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(GweiPerEth))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return 0, "", 0, 0, 0, fmt.Errorf("failed to get suggested fees: %w", err)
-		}
-	}
-
-	// Ensure minimum gas prices for inclusion
-	minFeeCap := new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(GweiPerEth))
-	minTipCap := new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(GweiPerEth))
-
-	if feeCap.Cmp(minFeeCap) < 0 {
-		feeCap = minFeeCap
-	}
-	if tipCap.Cmp(minTipCap) < 0 {
-		tipCap = minTipCap
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return 0, "", 0, 0, 0, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
 
 	// Send transfers in batches
 	return s.sendTransferBatch(ctx, deployerWallet, targetTransfers, targetGasLimit, blockCounter, client, feeCap, tipCap)
 }
 
-func (s *Scenario) sendTransferBatch(ctx context.Context, wallet *txbuilder.Wallet, targetTransfers int, targetGasLimit uint64, iteration int, client *txbuilder.Client, feeCap, tipCap *big.Int) (uint64, string, int, float64, int, error) {
+func (s *Scenario) sendTransferBatch(ctx context.Context, wallet *spamoor.Wallet, targetTransfers int, targetGasLimit uint64, iteration int, client *spamoor.Client, feeCap, tipCap *big.Int) (uint64, string, int, float64, int, error) {
 	var confirmedCount int64
 	var uniqueRecipientsCount int64
 	var totalGasUsed uint64
@@ -712,9 +694,9 @@ func (s *Scenario) sendTransferBatch(ctx context.Context, wallet *txbuilder.Wall
 		capturedContract := contractAddr
 
 		// Send transaction
-		err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &txbuilder.SendTransactionOptions{
-			Client:          client,
-			MaxRebroadcasts: 0, // No retries to avoid duplicates
+		err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+			Client:      client,
+			Rebroadcast: false, // No retries to avoid duplicates
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 				if err != nil {
 					return // Don't log individual failures
@@ -735,7 +717,7 @@ func (s *Scenario) sendTransferBatch(ctx context.Context, wallet *txbuilder.Wall
 					}
 				}
 			},
-			LogFn: func(client *txbuilder.Client, retry int, rebroadcast int, err error) {
+			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 				// Only log actual send failures
 				if err != nil {
 					s.logger.Debugf("transfer tx send failed: %v", err)
