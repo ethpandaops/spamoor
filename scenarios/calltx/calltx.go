@@ -10,7 +10,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -64,8 +63,6 @@ type Scenario struct {
 
 	contractAddr   common.Address
 	abiCallBuilder *utils.ABICallDataBuilder
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "calltx"
@@ -349,9 +346,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-	s.pendingWGroup.Wait()
-
 	return err
 }
 
@@ -393,32 +387,15 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, contractCode []byte) (*
 		return nil, nil, err
 	}
 
-	var txReceipt *types.Receipt
-	var txErr error
-	txWg := sync.WaitGroup{}
-	txWg.Add(1)
-
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer func() {
-				txWg.Done()
-			}()
-
-			txErr = err
-			txReceipt = receipt
-		},
 	})
 	if err != nil {
 		return nil, client, err
 	}
 
-	txWg.Wait()
-	if txErr != nil {
-		return nil, client, txErr
-	}
-	return txReceipt, client, nil
+	return receipt, client, nil
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
@@ -503,45 +480,20 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, nil, wallet, err
 	}
 
-	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer func() {
-				onComplete()
-				s.pendingWGroup.Done()
-			}()
-
-			if err != nil {
-				s.logger.WithField("rpc", client.GetName()).Warnf("tx %6d: await receipt failed: %v", txIdx+1, err)
-				return
-			}
-			if receipt == nil {
-				return
-			}
-
-			txFees := utils.GetTransactionFees(tx, receipt)
-			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei(), len(receipt.Logs))
+		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			onComplete()
 		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())
-			if retry == 0 && rebroadcast > 0 {
-				logger.Infof("rebroadcasting tx %6d", txIdx+1)
-			}
-			if retry > 0 {
-				logger = logger.WithField("retry", retry)
-			}
-			if rebroadcast > 0 {
-				logger = logger.WithField("rebroadcast", rebroadcast)
-			}
-			if err != nil {
-				logger.Debugf("failed sending tx %6d: %v", txIdx+1, err)
-			} else if retry > 0 || rebroadcast > 0 {
-				logger.Debugf("successfully sent tx %6d", txIdx+1)
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+			if receipt != nil {
+				txFees := utils.GetTransactionFees(tx, receipt)
+				s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei(), len(receipt.Logs))
 			}
 		},
+		LogFn: spamoor.GetDefaultLogFn(s.logger, "", fmt.Sprintf("%6d", txIdx+1), tx),
 	})
 	if err != nil {
 		// reset nonce if tx was not sent

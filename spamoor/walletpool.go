@@ -709,19 +709,22 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 			if endIdx > len(txList) {
 				endIdx = len(txList)
 			}
-			err := pool.txpool.SendAndAwaitTxRange(pool.ctx, pool.rootWallet.wallet, txList[txIdx:endIdx], &SendTransactionOptions{
-				Client: client,
-				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-					if err != nil {
-						pool.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
-					}
-
-					batch, ok := batchTxMap[tx.Hash()]
-					if ok {
-						for _, req := range batch {
-							req.Wallet.AddBalance(req.Amount.ToBig())
+			_, err := pool.txpool.SendTransactionBatch(pool.ctx, pool.rootWallet.wallet, txList[txIdx:endIdx], &BatchOptions{
+				SendTransactionOptions: SendTransactionOptions{
+					Client: client,
+					OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+						if err != nil {
+							pool.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
+							return
 						}
-					}
+
+						batch, ok := batchTxMap[tx.Hash()]
+						if ok {
+							for _, req := range batch {
+								req.Wallet.AddBalance(req.Amount.ToBig())
+							}
+						}
+					},
 				},
 			})
 			if err != nil {
@@ -993,27 +996,15 @@ func (pool *WalletPool) ReclaimFunds(ctx context.Context, client *Client) error 
 		for _, tx := range reclaimTxs {
 			go func(tx *reclaimTx) {
 				pool.logger.Infof("sending reclaim tx %v (%v)", tx.tx.Hash().String(), utils.ReadableAmount(uint256.MustFromBig(tx.tx.Value())))
-				err := pool.txpool.SendTransaction(ctx, tx.wallet, tx.tx, &SendTransactionOptions{
+				pool.txpool.SendTransaction(ctx, tx.wallet, tx.tx, &SendTransactionOptions{
 					Client: client,
-					OnConfirm: func(_ *types.Transaction, receipt *types.Receipt, err error) {
-						defer wg.Done()
+					OnComplete: func(_ *types.Transaction, receipt *types.Receipt, err error) {
+						wg.Done()
 						if err != nil {
 							pool.logger.Warnf("reclaim tx %v failed: %v", tx.tx.Hash().String(), err)
-							return
 						}
-
-						effectiveGasPrice := receipt.EffectiveGasPrice
-						if effectiveGasPrice == nil {
-							effectiveGasPrice = big.NewInt(0)
-						}
-						feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-
-						tx.wallet.SubBalance(big.NewInt(0).Add(tx.tx.Value(), feeAmount))
 					},
 				})
-				if err != nil {
-					pool.logger.Warnf("could not send reclaim tx %v: %v", tx.tx.Hash().String(), err)
-				}
 			}(tx)
 		}
 		wg.Wait()

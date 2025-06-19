@@ -22,6 +22,7 @@ type TransactionScenarioOptions struct {
 	ThroughputIncrementInterval uint64
 	Timeout                     time.Duration // Maximum duration for scenario execution (0 = no timeout)
 	WalletPool                  *spamoor.WalletPool
+	AwaitTransactions           bool
 
 	// Logger for scenario execution information
 	Logger *logrus.Entry
@@ -66,6 +67,8 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	var pendingMutex sync.Mutex
 	var pendingCond *sync.Cond
 
+	pendingWg := sync.WaitGroup{}
+
 	if options.MaxPending > 0 {
 		maxPending.Store(options.MaxPending)
 		pendingCond = sync.NewCond(&pendingMutex)
@@ -81,7 +84,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	var lastSubmittedCount uint64
 	if options.WalletPool != nil && options.WalletPool.GetTxPool() != nil {
 		txPool := options.WalletPool.GetTxPool()
-		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats spamoor.WalletPoolBlockStats) {
+		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats *spamoor.WalletPoolBlockStats) {
 			currentSubmitted := txCount.Load()
 			submittedThisBlock := currentSubmitted - lastSubmittedCount
 			lastSubmittedCount = currentSubmitted
@@ -160,6 +163,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			pendingMutex.Unlock()
 		}
 		pendingCount.Add(1)
+		pendingWg.Add(1)
 
 		currentChan := make(chan bool, 1)
 
@@ -169,7 +173,16 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 				currentChan <- true
 			}()
 
+			completed := false
+
 			logcb, err := options.ProcessNextTxFn(ctx, txIdx, func() {
+				if completed {
+					return
+				}
+
+				completed = true
+
+				pendingWg.Done()
 				pendingCount.Add(-1)
 				if pendingCond != nil {
 					pendingCond.Signal()
@@ -201,6 +214,10 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	if lastChan != nil {
 		<-lastChan
 		close(lastChan)
+	}
+
+	if options.AwaitTransactions {
+		pendingWg.Wait()
 	}
 
 	return nil

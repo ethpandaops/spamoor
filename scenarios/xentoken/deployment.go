@@ -160,12 +160,9 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 					if endIdx > len(txs) {
 						endIdx = len(txs)
 					}
-					err := s.walletPool.GetTxPool().SendAndAwaitTxRange(ctx, deployerWallet, txs[txIdx:endIdx], &spamoor.SendTransactionOptions{
-						Client: client,
-						OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-							if err != nil {
-								s.logger.Warnf("could not send deployment tx %v: %v", tx.Hash().String(), err)
-							}
+					_, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, deployerWallet, txs[txIdx:endIdx], &spamoor.BatchOptions{
+						SendTransactionOptions: spamoor.SendTransactionOptions{
+							Client: client,
 						},
 					})
 					if err != nil {
