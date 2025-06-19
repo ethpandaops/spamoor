@@ -22,7 +22,7 @@ type TransactionScenarioOptions struct {
 	ThroughputIncrementInterval uint64
 	Timeout                     time.Duration // Maximum duration for scenario execution (0 = no timeout)
 	WalletPool                  *spamoor.WalletPool
-	AwaitTransactions           bool
+	NoAwaitTransactions         bool // If true, the scenario will not wait for transactions to be included in a block
 
 	// Logger for scenario execution information
 	Logger *logrus.Entry
@@ -184,6 +184,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 
 				pendingWg.Done()
 				pendingCount.Add(-1)
+				txCount.Add(1)
 				if pendingCond != nil {
 					pendingCond.Signal()
 				}
@@ -194,12 +195,10 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 				close(lastChan)
 			}
 
-			if err == nil {
-				txCount.Add(1)
-			}
-
 			if logcb != nil {
 				logcb()
+			} else if err != nil {
+				options.Logger.Warnf("process next tx failed: %v", err)
 			}
 		}(txIdx, lastChan, currentChan)
 
@@ -216,7 +215,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 		close(lastChan)
 	}
 
-	if options.AwaitTransactions {
+	if !options.NoAwaitTransactions {
 		pendingWg.Wait()
 	}
 
