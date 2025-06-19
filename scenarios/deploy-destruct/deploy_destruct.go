@@ -218,29 +218,9 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 		return nil, nil, fmt.Errorf("no client available")
 	}
 
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return nil, client, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return nil, client, err
 	}
 
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
@@ -300,29 +280,9 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, client, wallet, fmt.Errorf("no client available")
 	}
 
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return nil, client, wallet, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return nil, client, wallet, err
 	}
 
 	amount := uint256.NewInt(s.options.Amount)

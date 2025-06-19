@@ -233,37 +233,16 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 		return nil, client, wallet, 0, fmt.Errorf("no client available")
 	}
 
-	var feeCap *big.Int
-	var tipCap *big.Int
-	var blobFee *big.Int
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return nil, client, wallet, 0, err
+	}
 
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
+	var blobFee *big.Int
 	if s.options.BlobFee > 0 {
 		blobFee = new(big.Int).Mul(big.NewInt(int64(s.options.BlobFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		// get suggested fee from client
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return nil, client, wallet, 0, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
-	}
-	if blobFee == nil {
-		blobFee = big.NewInt(1000000000)
+	} else {
+		blobFee = new(big.Int).Mul(feeCap, big.NewInt(1000000000))
 	}
 
 	for i := 0; i < int(replacementIdx); i++ {
