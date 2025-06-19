@@ -45,8 +45,6 @@ type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "blob-conflicting"
@@ -200,9 +198,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-	s.pendingWGroup.Wait()
-
 	return err
 }
 
@@ -314,53 +309,30 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		return txBytes, txVersion
 	}
 
-	txBytes, txVersion := getTxBytes()
+	_, txVersion := getTxBytes()
 
 	// send both tx at exactly the same time
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	transactionSubmitted = true
 	var err1, err2 error
-	s.pendingWGroup.Add(2)
 	go func() {
 		err1 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx1, &spamoor.SendTransactionOptions{
 			Client:      client,
 			Rebroadcast: s.options.Rebroadcast > 0,
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				defer func() {
-					onComplete()
-					s.pendingWGroup.Done()
-				}()
-
-				if err != nil {
-					s.logger.WithField("rpc", client.GetName()).Warnf("error while awaiting tx receipt: %v", err)
-					return
-				}
-
+			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				onComplete()
+			},
+			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 				if receipt != nil {
 					s.processTxReceipt(txIdx, tx, receipt, client, "blob")
 				}
 			},
-			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-				logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx1.Nonce())
-				if retry > 0 {
-					logger = logger.WithField("retry", retry)
-				}
-				if rebroadcast > 0 {
-					logger = logger.WithField("rebroadcast", rebroadcast)
-				}
-				if err != nil {
-					logger.Debugf("failed sending blob tx %6d.0: %v", txIdx+1, err)
-				} else if retry > 0 || rebroadcast > 0 {
-					logger.Debugf("successfully sent blob tx %6d.0", txIdx+1)
-				}
-			},
-			OnRebroadcast: func(tx *types.Transaction, options *spamoor.SendTransactionOptions, client *spamoor.Client) {
-				// we might need to switch to v1 after fulu activation
+			LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.0", txIdx+1), tx1),
+			OnEncode: func(tx *types.Transaction) ([]byte, error) {
 				txBytes, _ := getTxBytes()
-				options.TransactionBytes = txBytes
+				return txBytes, nil
 			},
-			TransactionBytes: txBytes,
 		})
 		if err1 != nil {
 			s.logger.WithField("rpc", client.GetName()).Warnf("error while sending blob tx %v: %v", txIdx, err1)
@@ -373,37 +345,12 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		err2 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx2, &spamoor.SendTransactionOptions{
 			Client:      client2,
 			Rebroadcast: s.options.Rebroadcast > 0,
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				defer func() {
-					s.pendingWGroup.Done()
-				}()
-
-				if err != nil {
-					s.logger.WithField("rpc", client.GetName()).Warnf("error while awaiting tx receipt: %v", err)
-					return
-				}
-
+			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 				if receipt != nil {
 					s.processTxReceipt(txIdx, tx, receipt, client, "dynfee")
 				}
 			},
-			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-				logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx2.Nonce())
-				if retry == 0 && rebroadcast > 0 {
-					logger.Infof("rebroadcasting blob tx %6d", txIdx+1)
-				}
-				if retry > 0 {
-					logger = logger.WithField("retry", retry)
-				}
-				if rebroadcast > 0 {
-					logger = logger.WithField("rebroadcast", rebroadcast)
-				}
-				if err != nil {
-					logger.Debugf("failed sending blob tx %6d.1: %v", txIdx+1, err)
-				} else if retry > 0 || rebroadcast > 0 {
-					logger.Debugf("successfully sent blob tx %6d.1", txIdx+1)
-				}
-			},
+			LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.1", txIdx+1), tx2),
 		})
 		if err2 != nil {
 			s.logger.WithField("rpc", client2.GetName()).Warnf("error while sending dynfee tx %v: %v", txIdx, err2)
