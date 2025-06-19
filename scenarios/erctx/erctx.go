@@ -229,7 +229,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 		Gas:       2000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		_, deployTx, _, err := contract.DeployContract(transactOpts, client.GetEthClient())
+		_, deployTx, _, err := contract.DeployTestToken(transactOpts, client.GetEthClient())
 		return deployTx, err
 	})
 
@@ -284,7 +284,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		toAddr = common.Address(addrBytes)
 	}
 
-	testToken, err := contract.NewContract(s.contractAddr, client.GetEthClient())
+	testToken, err := contract.NewTestToken(s.contractAddr, client.GetEthClient())
 	if err != nil {
 		return nil, nil, wallet, err
 	}

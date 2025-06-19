@@ -122,17 +122,31 @@ http://host2:8545
 
 ### Wallet Management
 
-Spamoor uses a hierarchical wallet system:
+Spamoor uses a sophisticated wallet management system designed for isolation, automation, and high-throughput operations:
 
-- **Root Wallet**: Funded wallet specified by `--privkey`
-- **Child Wallets**: Automatically generated and funded from the root wallet
-- **Wallet Pool**: Manages multiple child wallets for concurrent transaction sending
+#### Wallet Architecture
 
-The tool automatically:
-- Generates child wallets using derived private keys
-- Funds child wallets from the root wallet
-- Monitors balances and refills when needed
-- Distributes transactions across wallets
+- **Root Wallet**: Your funded wallet specified by `--privkey` (never used directly for transactions)
+- **Scenario Wallets**: Each scenario gets its own unique set of wallets derived from root + scenario seed
+- **Numbered Wallets**: Pool of wallets for mass transaction operations (accessed by index)
+- **Named Wallets**: Special-purpose wallets for deployments, admin roles, etc. (accessed by name)
+
+#### Automatic Management
+
+The tool automatically handles all wallet operations:
+
+- **Derivation**: Generates deterministic wallets using root private key + scenario seed
+- **Funding**: Continuously monitors and refills wallets when balances drop below thresholds
+- **Distribution**: Spreads transactions across multiple wallets to respect client limits
+- **Isolation**: Each scenario's wallets are completely separate from other scenarios
+- **Recovery**: Can reclaim leftover funds back to root wallet after execution
+
+#### Key Benefits
+
+- **High Throughput**: Multiple wallets bypass per-sender transaction limits (64-1000 pending tx per wallet)
+- **Scenario Isolation**: No wallet conflicts between different running scenarios
+- **Deterministic**: Same scenario always uses same wallet addresses for reproducible testing
+- **Automated**: No manual wallet management required - funding and distribution handled automatically
 
 ## Daemon Mode
 
@@ -227,7 +241,7 @@ Most scenarios support these common flags:
 | `--gaslimit` | Gas limit per transaction |
 | `--max-wallets` | Maximum child wallets to use |
 
-## Configuration
+## Common Configuration
 
 ### Transaction Fees
 
@@ -292,26 +306,45 @@ spamoor blobs \
 
 ### Example 3: Contract Deployments with Multiple RPC Hosts
 
-Deploy contracts using multiple RPC endpoints:
+Deploy contracts using multiple RPC endpoints with bytecode:
 ```bash
+# Deploy simple storage contracts (stores a uint256 value)
 spamoor deploytx \
   --privkey "0x1234567890abcdef..." \
   --rpchost "http://host1:8545,http://host2:8545" \
   --count 100 \
   --basefee 50 \
-  --max-wallets 10
+  --max-wallets 10 \
+  --bytecodes "0x608060405234801561001057600080fd5b50600080819055506101ac806100276000396000f3fe608060405234801561001057600080fd5b50600436106100415760003560e01c80632e64cec11461004657806360fe47b1146100645780636057361d14610080575b600080fd5b61004e61009c565b60405161005b919061013a565b60405180910390f35b61006c6100a5565b60405161007991906101125b60405180910390f35b61009a600480360381019061009591906100ef565b6100ab565b005b60008054905090565b60005481565b8060008190555050565b6000813590506100c481610165565b92915050565b6000602082840312156100dc57600080fd5b60006100ea848285016100b5565b91505092915050565b61010281610155565b82525050565b600060208201905061011d60008301846100f9565b92915050565b61012c81610155565b811461013757600080fd5b50565b600060208201905061014f60008301846100f9565b92915050565b6000819050919050565b61016e81610155565b811461017957600080fd5b5056fea264697066735822beefdeadbeef5634"
+
+# Deploy from a file with multiple bytecodes
+echo "0x608060405234801561001057600080fd5b50600080819055506101ac806100276000396000f3fe..." > contracts.txt
+echo "0x6080604052348015600f57600080fd5b50603f80601d6000396000f3fe6080604052600080..." >> contracts.txt
+
+spamoor deploytx \
+  --privkey "0x1234567890abcdef..." \
+  --rpchost "http://host1:8545,http://host2:8545" \
+  --count 100 \
+  --bytecodes-file contracts.txt
 ```
 
 ### Example 4: ERC-20 Token Transfers
 
-Send ERC-20 transfers to deployed token contracts:
+Send ERC-20 transfers using automatically deployed token contract:
 ```bash
 spamoor erctx \
   --privkey "0x1234567890abcdef..." \
   --rpchost "http://localhost:8545" \
   --throughput 8 \
-  --contract-address "0x742d35cc6639c0532fea001e77e0e4d64e7dd8a7"
+  --amount 100 \
+  --random-amount \
+  --random-target
 ```
+
+The `erctx` scenario automatically:
+1. **Deploys an ERC-20 token contract** at startup
+2. **Mints tokens** to sender wallets as needed
+3. **Sends transfers** between wallets using the deployed contract
 
 ### Example 5: Docker with Custom Configuration
 
