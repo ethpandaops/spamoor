@@ -65,6 +65,7 @@ type BlockSubscription struct {
 // affected transactions, and provides transaction awaiting functionality with automatic rebroadcasting.
 type TxPool struct {
 	options          *TxPoolOptions
+	submitter        *TxSubmitter
 	processStaleChan chan uint64
 	lastBlockNumber  uint64
 
@@ -95,33 +96,6 @@ type TxPoolOptions struct {
 	GetActiveWalletPools func() []*WalletPool
 }
 
-// TxConfirmFn is a callback function called when a transaction is confirmed or fails.
-// It receives the transaction, receipt (if successful), and any error that occurred.
-type TxConfirmFn func(tx *types.Transaction, receipt *types.Receipt, err error)
-
-// TxLogFn is a callback function for logging transaction submission attempts.
-// It receives the client used, retry count, rebroadcast count, and any error.
-type TxLogFn func(client *Client, retry int, rebroadcast int, err error)
-
-// TxRebroadcastFn is a callback function called before each transaction rebroadcast.
-// It receives the transaction, send options, and the client being used for rebroadcast.
-type TxRebroadcastFn func(tx *types.Transaction, options *SendTransactionOptions, client *Client)
-
-// SendTransactionOptions contains options for transaction submission including
-// client selection, confirmation callbacks, rebroadcast settings, and logging.
-type SendTransactionOptions struct {
-	Client             *Client
-	ClientGroup        string
-	ClientsStartOffset int
-
-	OnConfirm     TxConfirmFn
-	LogFn         TxLogFn
-	OnRebroadcast TxRebroadcastFn
-
-	Rebroadcast      bool
-	TransactionBytes []byte
-}
-
 // NewTxPool creates a new transaction pool with the specified options.
 // It starts background goroutines for block processing and stale transaction handling.
 // The pool automatically begins monitoring the blockchain for new blocks and managing
@@ -135,6 +109,8 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 		reorgDepth:       10, // Default value
 		subscriptions:    map[uint64]*BlockSubscription{},
 	}
+
+	pool.submitter = NewSubmitter(pool)
 
 	if options.Context == nil {
 		options.Context = context.Background()
@@ -550,21 +526,16 @@ func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTx
 	return stats
 }
 
-// SendTransaction submits a transaction to the network with the specified options.
-// It handles client selection, rebroadcasting, confirmation tracking, and error handling.
-// The transaction is automatically rebroadcast according to the options until confirmed.
-func (pool *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions) error {
-	return pool.addPendingTransaction(ctx, wallet, tx, options, true)
-}
-
-// addPendingTransaction handles the core transaction submission logic.
+// submitTransaction handles the core transaction submission logic.
 // It starts a confirmation tracking goroutine, submits the transaction to clients,
 // and optionally sets up automatic rebroadcasting. The submitNow parameter controls
 // whether to immediately submit or just set up confirmation tracking.
-func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, submitNow bool) error {
+func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, submitNow bool) error {
 	confirmCtx, confirmCancel := context.WithCancel(ctx)
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
+
+	submissionComplete := make(chan error, 1)
 
 	go func() {
 		var receipt *types.Receipt
@@ -573,11 +544,18 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 
 		defer confirmCancel()
 
-		if options.OnConfirm != nil {
-			defer func() {
-				options.OnConfirm(tx, receipt, err)
-			}()
-		}
+		defer func() {
+			submissionError := <-submissionComplete
+			if submissionError != nil {
+				err = submissionError
+			} else if options.OnConfirm != nil {
+				options.OnConfirm(tx, receipt)
+			}
+
+			if options.OnComplete != nil {
+				options.OnComplete(tx, receipt, err)
+			}
+		}()
 
 		// Track transaction result for metrics
 		defer func() {
@@ -618,8 +596,15 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 	var err error
 
 	submitTx := func(client *Client) error {
-		if options.TransactionBytes != nil {
-			return client.SendRawTransaction(ctx, options.TransactionBytes)
+		if options.OnEncode != nil {
+			txBytes, err := options.OnEncode(tx)
+			if err != nil {
+				return fmt.Errorf("failed to encode transaction: %w", err)
+			}
+
+			if txBytes != nil {
+				return client.SendRawTransaction(ctx, txBytes)
+			}
 		}
 
 		return client.SendTransaction(ctx, tx)
@@ -648,10 +633,10 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 		}
 	}
 
+	submissionComplete <- err
+
 	if err != nil {
-		if confirmCancel != nil {
-			confirmCancel()
-		}
+		confirmCancel()
 
 		// Track initial transaction submission failure for metrics
 		walletPools := pool.options.GetActiveWalletPools()
@@ -677,13 +662,6 @@ func (pool *TxPool) addPendingTransaction(ctx context.Context, wallet *Wallet, t
 	}
 
 	return nil
-}
-
-// AwaitTransaction waits for a transaction to be confirmed and returns its receipt.
-// It monitors the blockchain for the transaction and handles reorgs by continuing
-// to wait if the transaction gets reorged out of the chain.
-func (pool *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction) (*types.Receipt, error) {
-	return pool.awaitTransaction(ctx, wallet, tx, nil)
 }
 
 // awaitTransaction waits for a specific transaction to be confirmed.
@@ -720,59 +698,6 @@ func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *ty
 	}
 
 	return pool.loadTransactionReceipt(ctx, tx), nil
-}
-
-// SendAndAwaitTxRange sends multiple transactions and waits for all of them to be confirmed.
-// It automatically handles fee calculation, balance updates, and provides confirmation
-// callbacks for each transaction. All transactions are processed concurrently.
-func (pool *TxPool) SendAndAwaitTxRange(ctx context.Context, wallet *Wallet, txs []*types.Transaction, options *SendTransactionOptions) error {
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	for idx := range txs {
-		err := func(idx int) error {
-			tx := txs[idx]
-
-			return pool.SendTransaction(ctx, wallet, tx, &SendTransactionOptions{
-				Client:      options.Client,
-				Rebroadcast: true,
-				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-					defer wg.Done()
-
-					if err != nil {
-						if options.OnConfirm != nil {
-							options.OnConfirm(tx, receipt, err)
-						}
-						return
-					}
-
-					feeAmount := big.NewInt(0)
-					if receipt != nil {
-						effectiveGasPrice := receipt.EffectiveGasPrice
-						if effectiveGasPrice == nil {
-							effectiveGasPrice = big.NewInt(0)
-						}
-						feeAmount = feeAmount.Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-					}
-
-					totalAmount := big.NewInt(0).Add(tx.Value(), feeAmount)
-					wallet.SubBalance(totalAmount)
-
-					if options.OnConfirm != nil {
-						options.OnConfirm(tx, receipt, nil)
-					}
-				},
-			})
-		}(idx)
-
-		if err != nil {
-			return err
-		}
-		wg.Add(1)
-	}
-
-	wg.Done()
-	wg.Wait()
-	return nil
 }
 
 // processTransactionInclusion handles the confirmation of a transaction from a tracked wallet.
@@ -985,10 +910,8 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 			txOptions := &SendTransactionOptions{
 				Client:      client,
 				Rebroadcast: true,
-				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-					if err != nil {
-						logrus.WithError(err).Errorf("error confirming reorged out tx %v", tx.Hash())
-					} else {
+				OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+					if err == nil {
 						logrus.Infof("reorged out tx %v confirmed", tx.Hash())
 					}
 				},
@@ -998,7 +921,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 				txOptions.LogFn = tx.Options.LogFn
 			}
 
-			err := pool.addPendingTransaction(ctx, tx.FromWallet, tx.Tx, txOptions, false)
+			err := pool.submitTransaction(ctx, tx.FromWallet, tx.Tx, txOptions, false)
 			if err != nil {
 				logrus.WithError(err).Errorf("error adding pending transaction for reorged out tx %v", tx.Tx.Hash())
 			}
@@ -1103,7 +1026,7 @@ func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeGwei uint64, tipFeeG
 // Uses 30s base delay, 1.5x multiplier, with 10min maximum delay.
 func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
 	const (
-		baseDelay  = 120 * time.Second
+		baseDelay  = 30 * time.Second
 		multiplier = 1.5
 		maxDelay   = 10 * time.Minute
 	)
@@ -1159,8 +1082,12 @@ func (pool *TxPool) startReliableRebroadcast(ctx context.Context, confirmCtx con
 func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transaction, options *SendTransactionOptions, retryCount uint64) {
 	submitTx := func(client *Client) error {
 		var err error
-		if options.TransactionBytes != nil {
-			err = client.SendRawTransaction(ctx, options.TransactionBytes)
+		if options.OnEncode != nil {
+			txBytes, encodeErr := options.OnEncode(tx)
+			if encodeErr != nil {
+				return fmt.Errorf("failed to encode transaction: %w", encodeErr)
+			}
+			err = client.SendRawTransaction(ctx, txBytes)
 		} else {
 			err = client.SendTransaction(ctx, tx)
 		}
@@ -1172,10 +1099,6 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 		client := pool.options.ClientPool.GetClient(SelectClientByIndex, j+options.ClientsStartOffset+1, options.ClientGroup)
 		if client == nil {
 			continue
-		}
-
-		if options.OnRebroadcast != nil {
-			options.OnRebroadcast(tx, options, client)
 		}
 
 		err := submitTx(client)

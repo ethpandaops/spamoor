@@ -371,19 +371,16 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			wg.Add(1)
 
 			go func(tx *types.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
-				err := u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &spamoor.SendTransactionOptions{
-					Client: client,
-					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				u.walletPool.GetSubmitter().Send(u.ctx, wallet, tx, &spamoor.SendTransactionOptions{
+					Client:      client,
+					Rebroadcast: true,
+					OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 						if err != nil {
 							u.logger.Errorf("approval tx failed: %v", err)
 						}
 						wg.Done()
 					},
-					Rebroadcast: true,
 				})
-				if err != nil {
-					u.logger.Errorf("failed to send approval tx: %v", err)
-				}
 			}(tx, txClient, approvalWallets[i])
 		}
 

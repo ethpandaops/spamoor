@@ -299,30 +299,22 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		return txBytes, txVersion
 	}
 
-	txBytes, txVersion := getTxBytes()
+	_, txVersion := getTxBytes()
 
 	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
-		Client:           client,
-		Rebroadcast:      s.options.Rebroadcast > 0,
-		TransactionBytes: txBytes,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer func() {
-				onComplete()
-				s.pendingWGroup.Done()
-			}()
-
-			if err != nil {
-				s.logger.WithField("rpc", client.GetName()).Warnf("blob tx %6d: await receipt failed: %v", txIdx+1, err)
-				return
+	err = s.walletPool.GetSubmitter().Send(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+		Client:      client,
+		Rebroadcast: s.options.Rebroadcast > 0,
+		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			onComplete()
+			s.pendingWGroup.Done()
+		},
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+			if receipt != nil {
+				txFees := utils.GetTransactionFees(tx, receipt)
+				s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (tx: %v/%v, blob: %v/%v)", txIdx+1, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxFeeGwei(), txFees.TxBaseFeeGwei(), txFees.BlobFeeGwei(), txFees.BlobBaseFeeGwei())
 			}
-			if receipt == nil {
-				return
-			}
-
-			txFees := utils.GetTransactionFees(tx, receipt)
-			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (tx: %v/%v, blob: %v/%v)", txIdx+1, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxFeeGwei(), txFees.TxBaseFeeGwei(), txFees.BlobFeeGwei(), txFees.BlobBaseFeeGwei())
 		},
 		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())
@@ -341,10 +333,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 				logger.Debugf("successfully sent blob tx %6d", txIdx+1)
 			}
 		},
-		OnRebroadcast: func(tx *types.Transaction, options *spamoor.SendTransactionOptions, client *spamoor.Client) {
+		OnEncode: func(tx *types.Transaction) ([]byte, error) {
 			// we might need to switch to v1 after fulu activation
 			txBytes, _ := getTxBytes()
-			options.TransactionBytes = txBytes
+			return txBytes, nil
 		},
 	})
 	if err != nil {

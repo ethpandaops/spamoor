@@ -326,12 +326,9 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			if endIdx > len(deploymentTxs) {
 				endIdx = len(deploymentTxs)
 			}
-			err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, deployerWallet, deploymentTxs[txIdx:endIdx], &spamoor.SendTransactionOptions{
-				Client: client,
-				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-					if err != nil {
-						u.logger.Warnf("could not send deployment tx %v: %v", tx.Hash().String(), err)
-					}
+			_, err := u.walletPool.GetSubmitter().SendBatch(u.ctx, deployerWallet, deploymentTxs[txIdx:endIdx], &spamoor.BatchOptions{
+				SendTransactionOptions: spamoor.SendTransactionOptions{
+					Client: client,
 				},
 			})
 			if err != nil {
@@ -375,12 +372,9 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 				if endIdx > len(liquidityTxs) {
 					endIdx = len(liquidityTxs)
 				}
-				err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, rootWallet.GetWallet(), liquidityTxs[txIdx:endIdx], &spamoor.SendTransactionOptions{
-					Client: client,
-					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-						if err != nil {
-							u.logger.Warnf("could not send liquidity tx %v: %v", tx.Hash().String(), err)
-						}
+				_, err := u.walletPool.GetSubmitter().SendBatch(u.ctx, rootWallet.GetWallet(), liquidityTxs[txIdx:endIdx], &spamoor.BatchOptions{
+					SendTransactionOptions: spamoor.SendTransactionOptions{
+						Client: client,
 					},
 				})
 				if err != nil {

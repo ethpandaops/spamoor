@@ -189,7 +189,7 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 		return err
 	}
 
-	err = b.txpool.SendTransaction(ctx, wallet, tx, &SendTransactionOptions{
+	err = b.txpool.submitter.Send(ctx, wallet, tx, &SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
 	})
