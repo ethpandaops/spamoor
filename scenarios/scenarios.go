@@ -16,7 +16,10 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/geastx"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
+	contractdeploy "github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy"
+	eoadelegation "github.com/ethpandaops/spamoor/scenarios/statebloat/eoa_delegation"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
+
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 	"github.com/ethpandaops/spamoor/scenarios/xentoken"
@@ -42,7 +45,10 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&storagespam.ScenarioDescriptor,
 	&uniswapswaps.ScenarioDescriptor,
 	&wallets.ScenarioDescriptor,
+	&contractdeploy.ScenarioDescriptor,
+	&eoadelegation.ScenarioDescriptor,
 	&xentoken.ScenarioDescriptor,
+
 }
 
 // GetScenario finds and returns a scenario descriptor by name.
