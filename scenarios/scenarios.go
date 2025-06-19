@@ -16,6 +16,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/geastx"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
+	sbcontractdeploy "github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy"
 	sbeoadelegation "github.com/ethpandaops/spamoor/scenarios/statebloat/eoa_delegation"
 	sbrandsstore "github.com/ethpandaops/spamoor/scenarios/statebloat/rand_sstore"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
@@ -41,6 +42,7 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&gasburnertx.ScenarioDescriptor,
 	&geastx.ScenarioDescriptor,
 	&setcodetx.ScenarioDescriptor,
+	&sbcontractdeploy.ScenarioDescriptor,
 	&sbeoadelegation.ScenarioDescriptor,
 	&sbrandsstore.ScenarioDescriptor,
 	&storagespam.ScenarioDescriptor,
