@@ -33,7 +33,7 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 		return nil, fmt.Errorf("no client available")
 	}
 
-	feeCap, tipCap, err := s.getTxFee(ctx, client)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
 	if err != nil {
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}

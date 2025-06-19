@@ -1091,13 +1091,6 @@ const docTemplate = `{
             "properties": {
                 "name_override": {
                     "type": "string"
-                },
-                "groups": {
-                    "description": "Multiple groups",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 }
             }
         },
