@@ -352,10 +352,6 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			onComplete()
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-			if receipt == nil {
-				return
-			}
-
 			// Calculate deployed contract address
 			deployedAddr := common.Address{}
 			if len(receipt.Logs) > 0 {

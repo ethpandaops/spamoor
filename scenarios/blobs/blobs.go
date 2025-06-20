@@ -306,19 +306,17 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 			onComplete()
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-			if receipt != nil {
-				txFees := utils.GetTransactionFees(tx, receipt)
-				s.logger.WithField("rpc", client.GetName()).Debugf(
-					" transaction %d confirmed in block #%v. total fee: %v gwei (tx: %v/%v, blob: %v/%v)",
-					txIdx+1,
-					receipt.BlockNumber.String(),
-					txFees.TotalFeeGweiString(),
-					txFees.TxFeeGweiString(),
-					txFees.TxBaseFeeGweiString(),
-					txFees.BlobFeeGweiString(),
-					txFees.BlobBaseFeeGweiString(),
-				)
-			}
+			txFees := utils.GetTransactionFees(tx, receipt)
+			s.logger.WithField("rpc", client.GetName()).Debugf(
+				" transaction %d confirmed in block #%v. total fee: %v gwei (tx: %v/%v, blob: %v/%v)",
+				txIdx+1,
+				receipt.BlockNumber.String(),
+				txFees.TotalFeeGweiString(),
+				txFees.TxFeeGweiString(),
+				txFees.TxBaseFeeGweiString(),
+				txFees.BlobFeeGweiString(),
+				txFees.BlobBaseFeeGweiString(),
+			)
 		},
 		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
 			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())

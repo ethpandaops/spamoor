@@ -332,20 +332,18 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 			onComplete()
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-			if receipt != nil {
-				txFees := utils.GetTransactionFees(tx, receipt)
-				s.logger.WithField("rpc", client.GetName()).Debugf(
-					"blob tx %6d.%v confirmed in block #%v!  total fee: %v gwei (tx: %v/%v, blob: %v/%v)",
-					txIdx+1,
-					replacementIdx,
-					receipt.BlockNumber.String(),
-					txFees.TotalFeeGweiString(),
-					txFees.TxFeeGweiString(),
-					txFees.TxBaseFeeGweiString(),
-					txFees.BlobFeeGweiString(),
-					txFees.BlobBaseFeeGweiString(),
-				)
-			}
+			txFees := utils.GetTransactionFees(tx, receipt)
+			s.logger.WithField("rpc", client.GetName()).Debugf(
+				"blob tx %6d.%v confirmed in block #%v!  total fee: %v gwei (tx: %v/%v, blob: %v/%v)",
+				txIdx+1,
+				replacementIdx,
+				receipt.BlockNumber.String(),
+				txFees.TotalFeeGweiString(),
+				txFees.TxFeeGweiString(),
+				txFees.TxBaseFeeGweiString(),
+				txFees.BlobFeeGweiString(),
+				txFees.BlobBaseFeeGweiString(),
+			)
 		},
 		LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.%v", txIdx+1, replacementIdx), tx),
 		OnEncode: func(tx *types.Transaction) ([]byte, error) {

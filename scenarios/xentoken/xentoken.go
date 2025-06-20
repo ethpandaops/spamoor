@@ -264,17 +264,15 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			onComplete()
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-			if receipt != nil {
-				txFees := utils.GetTransactionFees(tx, receipt)
-				s.logger.WithField("rpc", client.GetName()).Debugf(
-					" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v",
-					txIdx+1,
-					receipt.BlockNumber.String(),
-					txFees.TotalFeeGweiString(),
-					txFees.TxBaseFeeGweiString(),
-					len(receipt.Logs),
-				)
-			}
+			txFees := utils.GetTransactionFees(tx, receipt)
+			s.logger.WithField("rpc", client.GetName()).Debugf(
+				" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v",
+				txIdx+1,
+				receipt.BlockNumber.String(),
+				txFees.TotalFeeGweiString(),
+				txFees.TxBaseFeeGweiString(),
+				len(receipt.Logs),
+			)
 		},
 		LogFn: spamoor.GetDefaultLogFn(s.logger, "", fmt.Sprintf("%6d", txIdx+1), tx),
 	})

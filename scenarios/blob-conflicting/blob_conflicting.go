@@ -327,9 +327,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 				onComplete()
 			},
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-				if receipt != nil {
-					s.processTxReceipt(txIdx, tx, receipt, client, "blob")
-				}
+				s.processTxReceipt(txIdx, tx, receipt, client, "blob")
 			},
 			LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.0", txIdx+1), tx1),
 			OnEncode: func(tx *types.Transaction) ([]byte, error) {
@@ -349,9 +347,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 			Client:      client2,
 			Rebroadcast: s.options.Rebroadcast > 0,
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-				if receipt != nil {
-					s.processTxReceipt(txIdx, tx, receipt, client, "dynfee")
-				}
+				s.processTxReceipt(txIdx, tx, receipt, client, "dynfee")
 			},
 			LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.1", txIdx+1), tx2),
 		})

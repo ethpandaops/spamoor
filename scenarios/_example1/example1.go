@@ -366,7 +366,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 			onComplete() // CRITICAL: Signal completion for scenario counting
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-			if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+			if receipt.Status == types.ReceiptStatusSuccessful {
 				// Log successful contract interaction
 				s.logger.WithFields(logrus.Fields{
 					"txHash":    tx.Hash().Hex(),
@@ -377,6 +377,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 				}).Debug("contract interaction confirmed")
 			}
 		},
+		// Use the default log function for useful tx debug logging
 		LogFn: spamoor.GetDefaultLogFn(s.logger, "contract", fmt.Sprintf("%6d", txIdx+1), tx),
 	})
 
