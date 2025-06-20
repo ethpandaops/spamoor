@@ -107,11 +107,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.TotalCount > 0 {
-		if s.options.TotalCount < 1000 {
-			s.walletPool.SetWalletCount(s.options.TotalCount)
-		} else {
-			s.walletPool.SetWalletCount(1000)
+		maxWallets := s.options.TotalCount / 50
+		if maxWallets < 10 {
+			maxWallets = 10
+		} else if maxWallets > 1000 {
+			maxWallets = 1000
 		}
+
+		s.walletPool.SetWalletCount(maxWallets)
 	} else {
 		if s.options.Throughput*10 < 1000 {
 			s.walletPool.SetWalletCount(s.options.Throughput * 10)
@@ -223,7 +226,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 		Gas:       2000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		_, deployTx, _, err := contract.DeployContract(transactOpts, client.GetEthClient())
+		_, deployTx, _, err := contract.DeployDeployTest(transactOpts, client.GetEthClient())
 		return deployTx, err
 	})
 
@@ -271,7 +274,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		}
 	}
 
-	testToken, err := contract.NewContract(s.contractAddr, client.GetEthClient())
+	deployTest, err := contract.NewDeployTest(s.contractAddr, client.GetEthClient())
 	if err != nil {
 		return nil, nil, wallet, err
 	}
@@ -282,7 +285,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		Gas:       s.options.GasLimit,
 		Value:     uint256.MustFromBig(amount.ToBig()),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		return testToken.Test(transactOpts, big.NewInt(0))
+		return deployTest.Test(transactOpts, big.NewInt(0))
 	})
 	if err != nil {
 		return nil, nil, wallet, err
@@ -296,10 +299,15 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			onComplete()
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-			if receipt != nil {
-				txFees := utils.GetTransactionFees(tx, receipt)
-				s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei(), len(receipt.Logs))
-			}
+			txFees := utils.GetTransactionFees(tx, receipt)
+			s.logger.WithField("rpc", client.GetName()).Debugf(
+				" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v",
+				txIdx+1,
+				receipt.BlockNumber.String(),
+				txFees.TotalFeeGweiString(),
+				txFees.TxBaseFeeGweiString(),
+				len(receipt.Logs),
+			)
 		},
 		LogFn: spamoor.GetDefaultLogFn(s.logger, "", fmt.Sprintf("%6d", txIdx+1), tx),
 	})

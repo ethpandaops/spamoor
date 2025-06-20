@@ -549,7 +549,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 			submissionError := <-submissionComplete
 			if submissionError != nil {
 				err = submissionError
-			} else if options.OnConfirm != nil {
+			} else if options.OnConfirm != nil && receipt != nil {
 				options.OnConfirm(tx, receipt)
 			}
 

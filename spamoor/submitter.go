@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/sirupsen/logrus"
@@ -50,9 +49,26 @@ type SendTransactionOptions struct {
 type BatchOptions struct {
 	SendTransactionOptions
 
-	// Maximum number of pending transactions to allow concurrently
-	// If 0, no limit is enforced
+	// Maximum number of pending transactions per wallet
+	// If 0, no limit is enforced per wallet
 	PendingLimit uint64
+
+	// Maximum number of retries for failed submissions
+	// If 0, no retries are attempted
+	MaxRetries int
+
+	// Pool of clients to assign to wallet groups
+	// If set, assigns client 0 to first wallet, client 1 to second wallet, etc.
+	// Cycles through the pool if there are more wallets than clients
+	ClientPool  *ClientPool
+	ClientGroup string // optional client group filter
+
+	// Optional logging callback called after every LogInterval confirmed transactions
+	LogFn func(confirmedCount int, totalCount int)
+
+	// Interval for calling LogFn (number of confirmed transactions)
+	// If 0, LogFn is never called
+	LogInterval int
 }
 
 func GetDefaultLogFn(logger logrus.FieldLogger, txTypeName string, txIdx string, tx *types.Transaction) TxLogFn {
@@ -81,6 +97,14 @@ func GetDefaultLogFn(logger logrus.FieldLogger, txTypeName string, txIdx string,
 			logger.Debugf("successfully sent %stx %s", txTypeName, txIdx)
 		}
 	}
+}
+
+// batchState tracks the state of transaction submission for a single wallet
+type batchState struct {
+	txs          []*types.Transaction
+	sem          chan struct{}
+	completeChan chan int // Signals when a tx at index completes
+	errorChan    chan error
 }
 
 // SendTransaction submits a single transaction with the given options.
@@ -161,84 +185,253 @@ func (p *TxPool) SendAndAwaitTransaction(ctx context.Context, wallet *Wallet, tx
 //	}
 //	receipts, err := submitter.SendBatchWithOptions(ctx, wallet, txs, options)
 func (p *TxPool) SendTransactionBatch(ctx context.Context, wallet *Wallet, txs []*types.Transaction, opts *BatchOptions) ([]*types.Receipt, error) {
-	if len(txs) == 0 {
-		return nil, nil
+	batchMap := make(map[*Wallet][]*types.Transaction)
+	batchMap[wallet] = txs
+	receipts, err := p.SendMultiTransactionBatch(ctx, batchMap, opts)
+	if err != nil {
+		return nil, err
+	}
+	return receipts[wallet], nil
+}
+
+// SendMultiTransactionBatch submits transactions for multiple wallets with sliding window submission.
+// Returns receipts in the same order as input transactions for each wallet.
+// Respects both per-wallet PendingLimit and GlobalPendingLimit to control concurrent submissions.
+// Implements retry logic with MaxRetries for failed submissions.
+//
+// Example:
+//
+//	options := &BatchOptions{
+//	    SendTransactionOptions: SendTransactionOptions{Rebroadcast: true},
+//	    PendingLimit: 50, // 50 pending per wallet
+//	    MaxRetries: 3,    // 3 retries per transaction
+//	}
+//	receipts, err := submitter.SendMultiTransactionBatch(ctx, walletTxs, options)
+func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*Wallet][]*types.Transaction, opts *BatchOptions) (map[*Wallet][]*types.Receipt, error) {
+	if len(walletTxs) == 0 {
+		return make(map[*Wallet][]*types.Receipt), nil
 	}
 
 	if opts == nil {
 		opts = &BatchOptions{
 			SendTransactionOptions: SendTransactionOptions{Rebroadcast: true},
+			MaxRetries:             3,
 		}
 	}
 
-	receipts := make([]*types.Receipt, len(txs))
-	errors := make([]error, len(txs))
+	// Count total transactions and initialize result structures
+	totalTxs := 0
+	resultsMutex := sync.Mutex{}
+	receipts := make(map[*Wallet][]*types.Receipt)
+	errors := make(map[*Wallet][]error)
 
-	// Use semaphore for pending limit if specified
-	var pendingSem chan struct{}
-	if opts.PendingLimit > 0 {
-		pendingSem = make(chan struct{}, opts.PendingLimit)
+	// Global confirmed transaction counter for LogFn callback
+	var confirmedCount int
+
+	for wallet, txs := range walletTxs {
+		totalTxs += len(txs)
+		receipts[wallet] = make([]*types.Receipt, len(txs))
+		errors[wallet] = make([]error, len(txs))
 	}
 
-	var pendingCount int64
-	wg := sync.WaitGroup{}
-	wg.Add(len(txs))
+	if totalTxs == 0 {
+		return make(map[*Wallet][]*types.Receipt), nil
+	}
 
-	// Submit all transactions with potential pending limit
-	for i, tx := range txs {
-		// Acquire semaphore if pending limit is set
-		if pendingSem != nil {
-			select {
-			case pendingSem <- struct{}{}:
-				// Got semaphore, proceed
-			case <-ctx.Done():
-				// Context cancelled while waiting for semaphore
-				errors[i] = ctx.Err()
-				wg.Done()
-				continue
-			}
+	if opts.LogFn != nil {
+		opts.LogFn(0, totalTxs)
+	}
+
+	// Assign clients to wallets if ClientPool is provided
+	walletIndexMap := make(map[*Wallet]int)
+	walletIndex := 0
+	for wallet := range walletTxs {
+		walletIndexMap[wallet] = walletIndex
+		walletIndex++
+	}
+
+	// Set up limits
+	walletLimit := opts.PendingLimit
+	if walletLimit == 0 {
+		walletLimit = 1000000 // Effectively no limit per wallet
+	}
+
+	// Per-wallet state tracking
+	walletStates := make(map[*Wallet]*batchState)
+	for wallet, txs := range walletTxs {
+		walletStates[wallet] = &batchState{
+			txs:          txs,
+			sem:          make(chan struct{}, walletLimit),
+			completeChan: make(chan int, len(txs)),
+			errorChan:    make(chan error, 1),
 		}
+	}
 
-		atomic.AddInt64(&pendingCount, 1)
+	// Error handling
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-		go func(index int, transaction *types.Transaction) {
-			sendOpts := opts.SendTransactionOptions // Copy the options
+	var wg sync.WaitGroup
 
-			// Set up completion callback
-			originalOnComplete := sendOpts.OnComplete
-			sendOpts.OnComplete = func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				defer func() {
-					atomic.AddInt64(&pendingCount, -1)
-					wg.Done()
+	// Start a goroutine for each wallet to manage its sliding window
+	for wallet, state := range walletStates {
+		wg.Add(1)
+		go func(wallet *Wallet, state *batchState) {
+			defer wg.Done()
 
-					// Release semaphore if we're using one
-					if pendingSem != nil {
-						<-pendingSem
+			// Process transactions in order with sliding window
+			for txIndex := 0; txIndex < len(state.txs); txIndex++ {
+				tx := state.txs[txIndex]
+
+				// Wait for semaphore slot
+				select {
+				case state.sem <- struct{}{}:
+					// Got wallet semaphore
+				case <-ctx.Done():
+					return
+				}
+
+				// Submit transaction with retry logic
+				go func(txIndex int, tx *types.Transaction) {
+					defer func() {
+						<-state.sem // Release semaphore
+						state.completeChan <- txIndex
+					}()
+
+					maxRetries := opts.MaxRetries
+					if maxRetries <= 0 {
+						maxRetries = 1
 					}
-				}()
 
-				receipts[index] = receipt
-				errors[index] = err
+					originalOnComplete := opts.SendTransactionOptions.OnComplete
 
-				// Call the original callback if it exists
-				if originalOnComplete != nil {
-					originalOnComplete(tx, receipt, err)
+					var lastErr error
+					var receipt *types.Receipt
+
+				attemptLoop:
+					for attempt := 0; attempt < maxRetries; attempt++ {
+						select {
+						case <-ctx.Done():
+							errors[wallet][txIndex] = ctx.Err()
+							return
+						default:
+						}
+
+						// Create completion callback
+						sendOpts := opts.SendTransactionOptions
+
+						// Override client if assigned
+						if opts.ClientPool != nil {
+							sendOpts.Client = opts.ClientPool.GetClient(SelectClientByIndex, walletIndexMap[wallet]+attempt, opts.ClientGroup)
+						}
+
+						completed := make(chan struct {
+							receipt *types.Receipt
+							err     error
+						}, 1)
+
+						sendOpts.OnComplete = func(tx *types.Transaction, receipt *types.Receipt, err error) {
+							// Send completion signal
+							completed <- struct {
+								receipt *types.Receipt
+								err     error
+							}{receipt, err}
+						}
+
+						// Submit transaction
+						err := p.SendTransaction(ctx, wallet, tx, &sendOpts)
+						if err != nil {
+							lastErr = err
+							if attempt == maxRetries-1 {
+								// Last attempt failed at submission level
+								break attemptLoop
+							}
+							continue attemptLoop // Retry
+						}
+
+						// Wait for transaction completion
+						select {
+						case <-ctx.Done():
+							lastErr = ctx.Err()
+							break attemptLoop
+						case result := <-completed:
+							receipt = result.receipt
+							lastErr = result.err
+
+							// If transaction failed but we have retries left, retry
+							if result.err != nil {
+								if attempt == maxRetries-1 {
+									// Last attempt failed at confirmation level
+									break attemptLoop
+								}
+								continue attemptLoop
+							} else if receipt != nil && sendOpts.OnConfirm != nil {
+								sendOpts.OnConfirm(tx, receipt)
+							}
+
+							break attemptLoop // Success or final failure
+						}
+					}
+
+					var finalErr error
+					if lastErr != nil {
+						finalErr = fmt.Errorf("failed to submit after %d attempts: %w", maxRetries, lastErr)
+						state.errorChan <- lastErr // Signal hard error
+					}
+
+					resultsMutex.Lock()
+					receipts[wallet][txIndex] = receipt
+					errors[wallet][txIndex] = finalErr
+
+					// Track confirmed transactions and call LogFn if needed
+					callLogFn := false
+					if opts.LogFn != nil && opts.LogInterval > 0 {
+						confirmedCount++
+						if confirmedCount%opts.LogInterval == 0 {
+							callLogFn = true
+						}
+					}
+					confirmedCountCopy := confirmedCount
+					resultsMutex.Unlock()
+
+					if callLogFn {
+						opts.LogFn(confirmedCountCopy, totalTxs)
+					}
+
+					if originalOnComplete != nil {
+						originalOnComplete(tx, receipt, lastErr)
+					}
+				}(txIndex, tx)
+			}
+
+			// Wait for all transactions to complete
+			for completedCount := 0; completedCount < len(state.txs); {
+				select {
+				case <-ctx.Done():
+					return
+				case <-state.completeChan:
+					completedCount++
+				case err := <-state.errorChan:
+					// Hard error occurred, cancel everything
+					if err != nil {
+						cancel()
+						return
+					}
 				}
 			}
-
-			// Submit transaction
-			p.SendTransaction(ctx, wallet, transaction, &sendOpts)
-		}(i, tx)
+		}(wallet, state)
 	}
 
-	// Wait for all transactions to complete
+	// Wait for all wallets to complete
 	wg.Wait()
 
-	// Check for any errors
+	// Check for any hard errors and return the first one found
 	var firstError error
-	for i, err := range errors {
-		if err != nil && firstError == nil {
-			firstError = fmt.Errorf("transaction %d failed: %w", i, err)
+	for wallet, walletErrors := range errors {
+		for i, err := range walletErrors {
+			if err != nil && firstError == nil {
+				firstError = fmt.Errorf("wallet %v transaction %d failed: %w", wallet, i, err)
+			}
 		}
 	}
 
