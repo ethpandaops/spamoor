@@ -554,11 +554,11 @@ if receipt.Status == types.ReceiptStatusSuccessful {
 }
 ```
 
-#### SendTransactionBatch - Batch Submission
+#### SendTransactionBatch - Single-Wallet Batch Submission
 
-Efficiently submits multiple transactions with concurrency control:
+Efficiently submits multiple transactions from a single wallet with concurrency control and retry logic:
 
-**Important**: All transactions in a batch must originate from the same sender wallet. For multiple wallets, use separate `SendTransactionBatch` calls per wallet.
+**Important**: All transactions in a batch must originate from the same sender wallet. For multiple wallets, use `SendMultiTransactionBatch` instead.
 
 ```go
 // Prepare batch of transactions from the same wallet
@@ -592,17 +592,69 @@ for i, receipt := range receipts {
 }
 ```
 
-**Multi-Wallet Batching Example**:
+#### SendMultiTransactionBatch - Multi-Wallet Batch Submission
+
+Efficiently submits multiple transactions across multiple wallets with advanced concurrency control and retry logic:
 
 ```go
-// Group transactions by wallet
+// Prepare transactions grouped by wallet
 walletTxs := make(map[*spamoor.Wallet][]*types.Transaction)
 for _, tx := range allTransactions {
     wallet := s.getWalletForTransaction(tx)
     walletTxs[wallet] = append(walletTxs[wallet], tx)
 }
 
-// Send separate batches per wallet
+// Submit all transactions across all wallets simultaneously
+receipts, err := txpool.SendMultiTransactionBatch(ctx, walletTxs, &spamoor.BatchOptions{
+    SendTransactionOptions: spamoor.SendTransactionOptions{
+        Client:      client,
+        Rebroadcast: true,
+        OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+            // Called for each confirmed transaction across all wallets
+            s.logger.Infof("Multi-batch transaction confirmed: %s", tx.Hash().Hex())
+        },
+    },
+    PendingLimit: 50,    // Maximum pending transactions per wallet
+    MaxRetries:   3,     // Retry failed submissions up to 3 times
+    ClientPool:   clientPool, // Optional: assign different clients to different wallets
+    LogFn: func(confirmedCount int, totalCount int) {
+        // Progress logging callback
+        s.logger.Infof("Multi-batch progress: %d/%d transactions confirmed", confirmedCount, totalCount)
+    },
+    LogInterval: 10,     // Call LogFn every 10 confirmed transactions
+})
+
+if err != nil {
+    return fmt.Errorf("multi-wallet batch failed: %w", err)
+}
+
+// Process results - receipts map matches input wallet structure
+for wallet, walletReceipts := range receipts {
+    for i, receipt := range walletReceipts {
+        if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+            s.logger.Infof("Wallet %s transaction %d confirmed in block %d", 
+                wallet.GetAddress().Hex(), i, receipt.BlockNumber.Uint64())
+        } else if receipt != nil {
+            s.logger.Warnf("Wallet %s transaction %d reverted", wallet.GetAddress().Hex(), i)
+        } else {
+            s.logger.Warnf("Wallet %s transaction %d failed or cancelled", wallet.GetAddress().Hex(), i)
+        }
+    }
+}
+```
+
+**Advanced Features**:
+
+- **Per-wallet concurrency control**: `PendingLimit` applies to each wallet individually
+- **Automatic retry logic**: Failed submissions are retried up to `MaxRetries` times
+- **Client pool assignment**: Optionally assign different RPC clients to different wallets for load distribution
+- **Progress tracking**: `LogFn` provides real-time progress updates across all wallets
+- **Sliding window submission**: Maintains optimal throughput while respecting limits
+
+**Single-Wallet Batch (Alternative Approach)**:
+
+```go
+// Alternative: Process wallets individually with separate batch calls
 var allReceipts []*types.Receipt
 for wallet, txs := range walletTxs {
     receipts, err := txpool.SendTransactionBatch(ctx, wallet, txs, &spamoor.BatchOptions{

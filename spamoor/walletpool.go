@@ -700,35 +700,29 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 			}
 		}
 
-		pool.logger.Infof("funding child wallets... (0/%v)", len(txList))
-		for txIdx := 0; txIdx < len(txList); txIdx += 200 {
-			endIdx := txIdx + 200
-			if txIdx > 0 {
-				pool.logger.Infof("funding child wallets... (%v/%v)", txIdx, len(txList))
-			}
-			if endIdx > len(txList) {
-				endIdx = len(txList)
-			}
-			_, err := pool.txpool.SendTransactionBatch(pool.ctx, pool.rootWallet.wallet, txList[txIdx:endIdx], &BatchOptions{
-				SendTransactionOptions: SendTransactionOptions{
-					Client: client,
-					OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-						if err != nil {
-							pool.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
-							return
-						}
+		receipts, err := pool.txpool.SendTransactionBatch(pool.ctx, pool.rootWallet.wallet, txList, &BatchOptions{
+			SendTransactionOptions: SendTransactionOptions{
+				Client: client,
+			},
+			MaxRetries:   3,
+			PendingLimit: 200,
+			LogFn: func(confirmedCount int, totalCount int) {
+				pool.logger.Infof("funding child wallets... (%v/%v)", confirmedCount, totalCount)
+			},
+			LogInterval: 200,
+		})
+		if err != nil {
+			return fmt.Errorf("could not send funding txs: %w", err)
+		}
 
-						batch, ok := batchTxMap[tx.Hash()]
-						if ok {
-							for _, req := range batch {
-								req.Wallet.AddBalance(req.Amount.ToBig())
-							}
-						}
-					},
-				},
-			})
-			if err != nil {
-				return err
+		for _, receipt := range receipts {
+			if receipt.Status == types.ReceiptStatusSuccessful {
+				batch, ok := batchTxMap[receipt.TxHash]
+				if ok {
+					for _, req := range batch {
+						req.Wallet.AddBalance(req.Amount.ToBig())
+					}
+				}
 			}
 		}
 

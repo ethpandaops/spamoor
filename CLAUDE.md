@@ -52,7 +52,8 @@ Comprehensive documentation is available in the `docs/` directory for different 
 ## Transaction Submission Constraints
 When working with transaction submission:
 - **SendTransactionBatch**: All transactions must originate from the same sender wallet
-- **Multi-wallet batching**: Use separate `SendTransactionBatch` calls per wallet
+- **SendMultiTransactionBatch**: Efficiently handles transactions from multiple wallets with advanced concurrency control
+- **Multi-wallet batching**: Use `SendMultiTransactionBatch` for optimal performance across multiple wallets
 - **Rebroadcast mechanism**: Automatic exponential backoff for stuck transactions
 - **Balance management**: Automatic for ETH transfers, manual updates required for internal transfers
 
