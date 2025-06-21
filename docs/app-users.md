@@ -225,7 +225,7 @@ spamoor-daemon \
 
 ## Available Scenarios
 
-Spamoor supports multiple transaction scenarios for different testing needs. For a complete list of available scenarios with detailed descriptions and links to their documentation, see the [main README](../README.md#scenarios).
+Spamoor supports multiple transaction scenarios for different testing needs. For a complete list of available scenarios with detailed descriptions and links to their documentation, see the [main README](../README.md#-transaction-scenarios).
 
 ### Common Scenario Flags
 
