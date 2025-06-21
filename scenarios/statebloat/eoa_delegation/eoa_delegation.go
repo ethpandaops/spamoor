@@ -401,6 +401,7 @@ func (s *Scenario) fundMaxBloatingDelegators(ctx context.Context, targetCount in
 		Throughput: maxTxsPerBlock * 2,
 		MaxPending: maxTxsPerBlock * 2,
 		WalletPool: s.walletPool,
+		Logger:     s.logger,
 		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
 			logger := s.logger
 			tx, client, wallet, err := fundNextDelegator(ctx, txIdx, onComplete)
