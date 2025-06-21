@@ -487,7 +487,6 @@ document.querySelectorAll('#spammerTabs button[data-bs-toggle="tab"]').forEach(t
         primaryButton.style.display = 'block';
         primaryButton.textContent = 'Create';
         primaryButton.onclick = () => {
-          // Switch to create tab when create is clicked from library
           document.querySelector('#spammerTabs button[data-bs-target="#create-pane"]').click();
         };
         primaryButton.className = 'btn btn-outline-primary';
@@ -1594,6 +1593,10 @@ async function importFromLibrary(filename) {
   background-color: rgba(220, 53, 69, 0.1);
   border-color: rgba(220, 53, 69, 0.2);
   color: #f1aeb5;
+}
+
+#spammerTabs {
+  margin: 0 -16px;
 }
 </style>
 {{ end }}

@@ -1,6 +1,6 @@
 # Name: Max block receipt size spammer
 # Description: Tests maximum log emission, targeting maximum receipt size per block (max gas per block)
-# Tags: logs, performance, receipt, spam
+# Tags: logs, performance, receipt, max-gas
 # Min_Version: v1.1.5
 - scenario: gasburnertx
   name: Max block receipt size spammer
