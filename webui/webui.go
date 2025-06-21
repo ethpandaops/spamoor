@@ -57,6 +57,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/spammers", apiHandler.GetSpammerList).Methods("GET")
 	apiRouter.HandleFunc("/scenarios", apiHandler.GetScenarios).Methods("GET")
 	apiRouter.HandleFunc("/scenarios/{name}/config", apiHandler.GetScenarioConfig).Methods("GET")
+	apiRouter.HandleFunc("/version", apiHandler.GetVersion).Methods("GET")
 	apiRouter.HandleFunc("/spammer", apiHandler.CreateSpammer).Methods("POST")
 	apiRouter.HandleFunc("/spammer/{id}/start", apiHandler.StartSpammer).Methods("POST")
 	apiRouter.HandleFunc("/spammer/{id}/pause", apiHandler.PauseSpammer).Methods("POST")
@@ -74,6 +75,8 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	// Export/Import routes
 	apiRouter.HandleFunc("/spammers/export", apiHandler.ExportSpammers).Methods("POST")
 	apiRouter.HandleFunc("/spammers/import", apiHandler.ImportSpammers).Methods("POST")
+	apiRouter.HandleFunc("/spammers/library", apiHandler.GetSpammerLibraryIndex).Methods("GET")
+
 
 	// metrics endpoint
 	router.Handle("/metrics", promhttp.Handler()).Methods("GET")
