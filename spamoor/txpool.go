@@ -62,6 +62,16 @@ type BlockSubscription struct {
 	Callback   BlockStatsCallback
 }
 
+// RebroadcastRequest represents a transaction that needs to be rebroadcast
+type RebroadcastRequest struct {
+	confirmCtx  context.Context
+	fromWallet  *Wallet
+	tx          *types.Transaction
+	options     *SendTransactionOptions
+	retryCount  uint64
+	nextAttempt time.Time
+}
+
 // TxPool manages transaction submission, confirmation tracking, and chain reorganization handling.
 // It monitors blockchain blocks, tracks transaction confirmations, handles reorgs by re-submitting
 // affected transactions, and provides transaction awaiting functionality with automatic rebroadcasting.
@@ -88,6 +98,11 @@ type TxPool struct {
 	subscriptionsMutex sync.RWMutex
 	subscriptions      map[uint64]*BlockSubscription
 	nextSubscriptionID atomic.Uint64
+
+	// Rebroadcast management
+	rebroadcastRequests     []*RebroadcastRequest
+	rebroadcastRequestsChan chan *RebroadcastRequest
+	rebroadcastMutex        sync.RWMutex
 }
 
 // TxPoolOptions contains configuration options for the transaction pool.
@@ -120,8 +135,13 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 		pool.reorgDepth = options.ReorgDepth
 	}
 
+	// Initialize rebroadcast system
+	pool.rebroadcastRequests = []*RebroadcastRequest{}
+	pool.rebroadcastRequestsChan = make(chan *RebroadcastRequest, 100)
+
 	go pool.runTxPoolLoop()
 	go pool.processStaleTransactionsLoop()
+	go pool.runRebroadcastLoop()
 
 	return pool
 }
@@ -659,7 +679,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 
 	// Start reliable rebroadcast if enabled
 	if options.Rebroadcast {
-		pool.startReliableRebroadcast(ctx, confirmCtx, wallet, tx, options)
+		pool.scheduleRebroadcast(confirmCtx, wallet, tx, options)
 	}
 
 	return nil
@@ -977,6 +997,7 @@ func (pool *TxPool) GetCurrentBaseFeeWithInit() (*big.Int, error) {
 		if err := pool.initBlockStats(); err != nil {
 			return nil, err
 		}
+		baseFee = pool.GetCurrentBaseFee()
 	}
 	return baseFee, nil
 }
@@ -1068,35 +1089,6 @@ func (pool *TxPool) isTransactionBlocking(wallet *Wallet, txNonce uint64) bool {
 	return txNonce <= wallet.confirmedTxCount
 }
 
-// startReliableRebroadcast starts a reliable rebroadcast goroutine for a transaction.
-// It uses exponential backoff and unlimited retries, only rebroadcasting when the
-// transaction is blocking wallet progress.
-func (pool *TxPool) startReliableRebroadcast(ctx context.Context, confirmCtx context.Context, fromWallet *Wallet, tx *types.Transaction, options *SendTransactionOptions) {
-	retryCount := uint64(0)
-
-	go func() {
-		for {
-			// Calculate backoff delay
-			backoffDelay := pool.calculateBackoffDelay(retryCount)
-
-			select {
-			case <-confirmCtx.Done():
-				return // Transaction confirmed
-			case <-time.After(backoffDelay):
-				// Check if this transaction is blocking wallet progress
-				if !pool.isTransactionBlocking(fromWallet, tx.Nonce()) {
-					// Transaction is not the next required nonce, stop rebroadcasting
-					continue
-				}
-
-				// Perform rebroadcast using existing logic
-				pool.rebroadcastTransaction(ctx, tx, options, retryCount)
-				retryCount++
-			}
-		}
-	}()
-}
-
 // rebroadcastTransaction performs the actual rebroadcast of a transaction.
 // This method encapsulates the existing rebroadcast logic for reuse.
 func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transaction, options *SendTransactionOptions, retryCount uint64) {
@@ -1130,5 +1122,98 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 		if err == nil || strings.Contains(err.Error(), "already known") {
 			break
 		}
+	}
+}
+
+// runRebroadcastLoop runs the main rebroadcast processing loop
+func (pool *TxPool) runRebroadcastLoop() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-pool.options.Context.Done():
+			return
+		case newRequest := <-pool.rebroadcastRequestsChan:
+			pool.addRebroadcastRequest(newRequest)
+		case <-ticker.C:
+			nextAttempt := pool.processRebroadcastRequests()
+			if !nextAttempt.IsZero() {
+				ticker.Reset(time.Until(nextAttempt))
+			} else {
+				ticker.Reset(10 * time.Second)
+			}
+		}
+	}
+}
+
+// addRebroadcastRequest adds a new rebroadcast request to the queue
+func (pool *TxPool) addRebroadcastRequest(req *RebroadcastRequest) {
+	pool.rebroadcastMutex.Lock()
+	defer pool.rebroadcastMutex.Unlock()
+
+	// Set initial next attempt time
+	backoffDelay := pool.calculateBackoffDelay(req.retryCount)
+	req.nextAttempt = time.Now().Add(backoffDelay)
+
+	pool.rebroadcastRequests = append(pool.rebroadcastRequests, req)
+}
+
+// processRebroadcastRequests processes all pending rebroadcast requests
+func (pool *TxPool) processRebroadcastRequests() time.Time {
+	pool.rebroadcastMutex.Lock()
+	defer pool.rebroadcastMutex.Unlock()
+
+	now := time.Now()
+	activeRequests := make([]*RebroadcastRequest, 0, len(pool.rebroadcastRequests))
+	lowestNextAttempt := time.Time{}
+
+	for _, req := range pool.rebroadcastRequests {
+		select {
+		case <-req.confirmCtx.Done():
+			// Transaction confirmed, remove from queue
+			continue
+		default:
+		}
+
+		// Check if it's time to rebroadcast
+		if now.After(req.nextAttempt) {
+			// Check if this transaction is blocking wallet progress
+			if pool.isTransactionBlocking(req.fromWallet, req.tx.Nonce()) {
+				// Perform rebroadcast
+				pool.rebroadcastTransaction(req.confirmCtx, req.tx, req.options, req.retryCount)
+				req.retryCount++
+
+				// Calculate next attempt time
+				backoffDelay := pool.calculateBackoffDelay(req.retryCount)
+				req.nextAttempt = now.Add(backoffDelay)
+			}
+
+			if lowestNextAttempt.IsZero() || req.nextAttempt.Before(lowestNextAttempt) {
+				lowestNextAttempt = req.nextAttempt
+			}
+		}
+
+		// Keep request in queue for next iteration
+		activeRequests = append(activeRequests, req)
+	}
+
+	pool.rebroadcastRequests = activeRequests
+	return lowestNextAttempt
+}
+
+// scheduleRebroadcast schedules a transaction for rebroadcasting
+func (pool *TxPool) scheduleRebroadcast(confirmCtx context.Context, fromWallet *Wallet, tx *types.Transaction, options *SendTransactionOptions) {
+	req := &RebroadcastRequest{
+		confirmCtx: confirmCtx,
+		fromWallet: fromWallet,
+		tx:         tx,
+		options:    options,
+		retryCount: 0,
+	}
+
+	select {
+	case pool.rebroadcastRequestsChan <- req:
+	case <-pool.options.Context.Done():
 	}
 }
