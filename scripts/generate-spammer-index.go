@@ -32,7 +32,6 @@ type IndexEntry struct {
 	MinVersion   string   `yaml:"min_version,omitempty"`
 }
 
-
 // Index represents the complete spammer index
 type Index struct {
 	Generated time.Time    `yaml:"generated"`
@@ -138,7 +137,7 @@ func processConfigFile(filePath string, index *Index) error {
 			}
 		}
 	}
-	
+
 	// Collect all unique scenarios
 	scenarioMap := make(map[string]bool)
 	for _, config := range configs {
@@ -146,7 +145,7 @@ func processConfigFile(filePath string, index *Index) error {
 			scenarioMap[config.Scenario] = true
 		}
 	}
-	
+
 	var scenarios []string
 	for scenario := range scenarioMap {
 		scenarios = append(scenarios, scenario)
@@ -155,7 +154,7 @@ func processConfigFile(filePath string, index *Index) error {
 
 	// Get filename from path
 	fileName := filepath.Base(filePath)
-	
+
 	// Use header name or first config name
 	name := headerInfo.Name
 	if name == "" {
@@ -194,23 +193,23 @@ func extractHeaderInfo(filePath string) (*HeaderInfo, error) {
 
 	info := &HeaderInfo{}
 	scanner := bufio.NewScanner(file)
-	
+
 	// Look for header comments at the beginning of the file
 	commentRegex := regexp.MustCompile(`^#\s*(\w+):\s*(.+)`)
-	
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Stop processing if we hit non-comment content
 		if line != "" && !strings.HasPrefix(line, "#") {
 			break
 		}
-		
+
 		matches := commentRegex.FindStringSubmatch(line)
 		if len(matches) == 3 {
 			key := strings.ToLower(matches[1])
 			value := strings.TrimSpace(matches[2])
-			
+
 			switch key {
 			case "name":
 				info.Name = value
@@ -226,7 +225,6 @@ func extractHeaderInfo(filePath string) (*HeaderInfo, error) {
 
 	return info, scanner.Err()
 }
-
 
 func writeIndex(index *Index, outputFile string) error {
 	// Sort configs by name for consistent output

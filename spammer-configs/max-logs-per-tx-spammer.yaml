@@ -1,13 +1,13 @@
-# Name: Maximum Log Emission Spammer
-# Description: Tests maximum log emission capabilities and gas consumption patterns
-# Tags: gas-optimization, logs, performance
+# Name: Max block receipt size spammer
+# Description: Tests maximum log emission, targeting maximum receipt size per block (max gas per block)
+# Tags: logs, performance, receipt, max-gas
 # Min_Version: v1.1.5
 - scenario: gasburnertx
-  name: Max log emission spammer
-  description: ""
+  name: Max block receipt size spammer
+  description: "Max block receipt size spammer, max gas per block"
   config:
     # wallet settings
-    seed: gasburnertx-746272 # seed for the wallet
+    seed: max-logs-1 # seed for the wallet
     refill_amount: 5000000000000000000 # refill 5 ETH when
     refill_balance: 1000000000000000000 # balance drops below 1 ETH
     refill_interval: 600 # check every 10 minutes

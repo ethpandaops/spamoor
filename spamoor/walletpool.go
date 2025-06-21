@@ -775,7 +775,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		}
 
 		for _, receipt := range receipts {
-			if receipt.Status == types.ReceiptStatusSuccessful {
+			if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
 				batch, ok := batchTxMap[receipt.TxHash]
 				if ok {
 					for _, req := range batch {
