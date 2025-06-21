@@ -77,7 +77,6 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/spammers/import", apiHandler.ImportSpammers).Methods("POST")
 	apiRouter.HandleFunc("/spammers/library", apiHandler.GetSpammerLibraryIndex).Methods("GET")
 
-
 	// metrics endpoint
 	router.Handle("/metrics", promhttp.Handler()).Methods("GET")
 

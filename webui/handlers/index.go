@@ -62,4 +62,3 @@ func (fh *FrontendHandler) getIndexPageData() (*IndexPage, error) {
 		Spammers: models,
 	}, nil
 }
-
