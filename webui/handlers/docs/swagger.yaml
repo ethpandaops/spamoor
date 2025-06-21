@@ -66,12 +66,6 @@ definitions:
       time:
         type: string
     type: object
-  api.Response:
-    properties:
-      data: {}
-      error:
-        type: string
-    type: object
   api.ScenarioEntries:
     properties:
       description:
@@ -93,6 +87,40 @@ definitions:
         type: string
       status:
         type: integer
+    type: object
+  api.SpammerLibraryEntry:
+    properties:
+      description:
+        type: string
+      file:
+        type: string
+      min_version:
+        type: string
+      name:
+        type: string
+      scenarios:
+        items:
+          type: string
+        type: array
+      spammer_count:
+        type: integer
+      tags:
+        items:
+          type: string
+        type: array
+    type: object
+  api.SpammerLibraryIndex:
+    properties:
+      base_url:
+        type: string
+      cached_at:
+        type: string
+      configs:
+        items:
+          $ref: '#/definitions/api.SpammerLibraryEntry'
+        type: array
+      generated:
+        type: string
     type: object
   api.SpammerListEntry:
     properties:
@@ -138,6 +166,13 @@ definitions:
       description:
         type: string
       name:
+        type: string
+    type: object
+  api.VersionResponse:
+    properties:
+      release:
+        type: string
+      version:
         type: string
     type: object
   daemon.ImportResult:
@@ -230,16 +265,14 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid client index
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Client not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Update client enabled state
       tags:
       - Client
@@ -265,16 +298,14 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid client index
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Client not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Update client group
       tags:
       - Client
@@ -299,16 +330,14 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid client index
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Client not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Update client name override
       tags:
       - Client
@@ -322,14 +351,9 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  items:
-                    $ref: '#/definitions/api.ClientEntry'
-                  type: array
-              type: object
+            items:
+              $ref: '#/definitions/api.ClientEntry'
+            type: array
       summary: Get all clients
       tags:
       - Client
@@ -343,22 +367,17 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  items:
-                    $ref: '#/definitions/api.ScenarioEntries'
-                  type: array
-              type: object
+            items:
+              $ref: '#/definitions/api.ScenarioEntries'
+            type: array
         "400":
           description: Failure
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Get all scenarios
       tags:
       - Scenario
@@ -382,11 +401,11 @@ paths:
         "404":
           description: Scenario not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Get scenario configuration
       tags:
       - Scenario
@@ -409,23 +428,36 @@ paths:
         "200":
           description: Spammer ID
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  type: integer
-              type: object
+            type: integer
         "400":
           description: Invalid request
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Create a new spammer
       tags:
       - Spammer
+  /api/spammer-library/index:
+    get:
+      description: Returns the index of available spammer configurations from GitHub
+      operationId: getSpammerLibraryIndex
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.SpammerLibraryIndex'
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get spammer library index
+      tags:
+      - SpammerLibrary
   /api/spammer/{id}:
     delete:
       description: Deletes a spammer and stops it if running
@@ -439,20 +471,18 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Delete a spammer
       tags:
       - Spammer
@@ -471,20 +501,15 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  $ref: '#/definitions/api.SpammerDetails'
-              type: object
+            $ref: '#/definitions/api.SpammerDetails'
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Get spammer details
       tags:
       - Spammer
@@ -508,20 +533,18 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid request
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Update a spammer
       tags:
       - Spammer
@@ -541,22 +564,17 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  items:
-                    $ref: '#/definitions/api.LogEntry'
-                  type: array
-              type: object
+            items:
+              $ref: '#/definitions/api.LogEntry'
+            type: array
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Get spammer logs
       tags:
       - Spammer
@@ -584,15 +602,15 @@ paths:
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Streaming unsupported
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Stream spammer logs
       tags:
       - Spammer
@@ -609,20 +627,18 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Pause a spammer
       tags:
       - Spammer
@@ -639,20 +655,18 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Reclaim funds from a spammer
       tags:
       - Spammer
@@ -669,20 +683,18 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Start a spammer
       tags:
       - Spammer
@@ -696,14 +708,9 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  items:
-                    $ref: '#/definitions/api.SpammerListEntry'
-                  type: array
-              type: object
+            items:
+              $ref: '#/definitions/api.SpammerListEntry'
+            type: array
       summary: Get all spammers
       tags:
       - Spammer
@@ -729,11 +736,11 @@ paths:
         "400":
           description: Invalid request
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Export spammers to YAML
       tags:
       - Spammer
@@ -756,21 +763,30 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  $ref: '#/definitions/daemon.ImportResult'
-              type: object
+            $ref: '#/definitions/daemon.ImportResult'
         "400":
           description: Invalid request
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Import spammers from YAML data or URL
       tags:
       - Spammer
+  /api/version:
+    get:
+      description: Returns the current spamoor version information
+      operationId: getVersion
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.VersionResponse'
+      summary: Get spamoor version
+      tags:
+      - Version
 swagger: "2.0"

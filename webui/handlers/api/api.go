@@ -290,8 +290,8 @@ func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Param request body UpdateSpammerRequest true "Updated configuration"
 // @Success 200 "Success"
-// @Failure 400 {object} Response "Invalid request"
-// @Failure 404 {object} Response "Spammer not found"
+// @Failure 400 {string} string "Invalid request"
+// @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [put]
 func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
@@ -426,8 +426,8 @@ func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Param id path int true "Spammer ID"
 // @Success 200 {object} SpammerDetails "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
 // @Router /api/spammer/{id} [get]
 func (ah *APIHandler) GetSpammerDetails(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -478,8 +478,8 @@ type LogEntry struct {
 // @Produce json
 // @Param id path int true "Spammer ID"
 // @Success 200 {array} LogEntry "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
 // @Router /api/spammer/{id}/logs [get]
 func (ah *APIHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -527,8 +527,8 @@ func (ah *APIHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Param since query string false "Timestamp to start from (RFC3339Nano)"
 // @Success 200 {string} string "SSE stream of log entries"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Streaming unsupported"
 // @Router /api/spammer/{id}/logs/stream [get]
 func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) {
