@@ -1,3 +1,7 @@
+# Name: Maximum Log Emission Spammer
+# Description: Tests maximum log emission capabilities and gas consumption patterns
+# Tags: gas-optimization, logs, performance
+# Min_Version: v1.1.5
 - scenario: gasburnertx
   name: Max log emission spammer
   description: ""

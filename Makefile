@@ -5,9 +5,9 @@ GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildVersion="$(VERSION)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildTime="$(BUILDTIME)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildRelease="$(RELEASE)"'
 
-.PHONY: all docs build test clean
+.PHONY: all docs build test clean generate-spammer-index
 
-all: docs build
+all: docs build generate-spammer-index
 
 test:
 	go test ./...
@@ -24,6 +24,10 @@ build-lib:
 
 docs:
 	go install github.com/swaggo/swag/cmd/swag@v1.16.3 && swag init -g handler.go -d webui/handlers/api --parseDependency -o webui/handlers/docs
+
+generate-spammer-index:
+	@echo "Generating spammer configuration index..."
+	go run scripts/generate-spammer-index.go
 
 clean:
 	rm -f bin/*

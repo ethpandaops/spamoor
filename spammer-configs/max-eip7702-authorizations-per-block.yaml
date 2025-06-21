@@ -1,3 +1,7 @@
+# Name: EIP-7702 Maximum Authorizations Testing
+# Description: Tests maximum number of EIP-7702 authorizations per block under different gas limits
+# Tags: eip7702, advanced, gas-limits, performance
+# Min_Version: v1.1.5
 - scenario: setcodetx
   name: 'EIP7702: Max authorizations (fill up remainder)'
   description: maximum number of eip7702 authorizations (500k gas / 10 authorizations per tx, lower prio)
