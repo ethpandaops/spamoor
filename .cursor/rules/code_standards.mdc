@@ -1,9 +1,24 @@
 ---
 description: Spamoor Code Standards and Conventions
+globs: 
 alwaysApply: false
 ---
 
 # Spamoor Code Standards
+
+## Critical Development Rules
+
+🚨 **NEVER use the root wallet directly in scenarios** - it's shared across all running scenarios and direct usage will cause nonce conflicts.
+
+🚨 **NEVER use go-ethereum's bound contracts for transactions** - they manage nonces independently and will conflict with Spamoor's nonce tracking. Always use `BuildBoundTx` pattern.
+
+🚨 **ALWAYS spread transactions across multiple wallets** - Ethereum clients have limits on pending transactions per sender (typically 64-1000).
+
+🚨 **ALWAYS respect context cancellation** - scenarios must stop all operations when context is cancelled.
+
+🚨 **ALWAYS call onComplete() in ProcessNextTxFn** - required for scenario.RunTransactionScenario transaction counting.
+
+🚨 **NEVER assume receipt is non-nil in OnComplete** - handle cancellation and replacement transaction scenarios properly.
 
 ## Go Language Standards
 
@@ -14,6 +29,7 @@ alwaysApply: false
 - **Variables**: camelCase for local, PascalCase for exported package-level
 - **Constants**: PascalCase for exported, camelCase for unexported
 - **Scenario names**: lowercase with hyphens (e.g., `deploy-destruct`)
+- **Well-known wallets**: lowercase with hyphens (e.g., `deployer`, `token-owner`)
 
 ### File Organization
 - One main type per file when possible
@@ -21,18 +37,32 @@ alwaysApply: false
 - Use descriptive filenames that match primary functionality
 - Scenario directories: `scenarios/<scenario-name>/`
 - Each scenario has its own package named after the scenario
+- Contract bindings in `contract/` subdirectory
 
 ### Code Structure Patterns
 
 #### Scenario Implementation
 ```go
-// Standard scenario structure
+// Standard scenario structure with all common options
 type ScenarioOptions struct {
-    // Common fields present in most scenarios
-    TotalCount   uint64 `yaml:"total_count"`
-    Throughput   uint64 `yaml:"throughput"`
-    MaxPending   uint64 `yaml:"max_pending"`
-    // Scenario-specific fields
+    // Transaction Control
+    TotalCount  uint64 `yaml:"total_count"`  // Total transactions (0 = unlimited)
+    Throughput  uint64 `yaml:"throughput"`   // Transactions per slot
+    MaxPending  uint64 `yaml:"max_pending"`  // Maximum concurrent pending
+    MaxWallets  uint64 `yaml:"max_wallets"`  // Maximum child wallets
+    
+    // Gas Configuration
+    BaseFee     uint64 `yaml:"base_fee"`     // Base fee in gwei
+    TipFee      uint64 `yaml:"tip_fee"`      // Priority fee in gwei
+    GasLimit    uint64 `yaml:"gas_limit"`    // Gas limit per transaction
+    
+    // Client Control
+    ClientGroup string `yaml:"client_group"` // Preferred client group
+    
+    // Logging
+    LogTxs      bool   `yaml:"log_txs"`      // Log individual transactions
+    
+    // Scenario-specific options...
 }
 
 type Scenario struct {
@@ -42,6 +72,33 @@ type Scenario struct {
 }
 
 var ScenarioName = "scenario-name"
+var ScenarioDefaultOptions = ScenarioOptions{
+    TotalCount:  0,
+    Throughput:  10,
+    MaxPending:  0,
+    MaxWallets:  0,
+    BaseFee:     20,
+    TipFee:      2,
+    GasLimit:    21000,
+    ClientGroup: "",
+    LogTxs:      false,
+}
+```
+
+#### Scenario Registration
+```go
+// In scenarios/scenarios.go
+var ScenarioDescriptors = []*scenario.Descriptor{
+    &myscenario.ScenarioDescriptor,
+}
+
+// In your scenario package
+var ScenarioDescriptor = scenario.Descriptor{
+    Name:           ScenarioName,
+    Description:    "Clear description of scenario purpose",
+    DefaultOptions: ScenarioDefaultOptions,
+    NewScenario:    newScenario,
+}
 ```
 
 #### Error Handling
@@ -49,72 +106,219 @@ var ScenarioName = "scenario-name"
 - Wrap errors with context: `fmt.Errorf("operation failed: %w", err)`
 - Log errors at appropriate levels (Error, Warn, Info, Debug)
 - Use structured logging with logrus
+- Handle nil receipts in transaction callbacks
 
 #### Configuration
 - Use YAML tags for all configuration structs
 - Support both command-line flags and YAML configuration
 - Use spf13/pflag for command-line parsing
 - Provide sensible defaults for all options
+- Validate option combinations in Init()
+
+### Transaction Patterns
+
+#### Contract Interactions (BuildBoundTx)
+```go
+// CORRECT: Use BuildBoundTx for contract calls
+tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+    GasTipCap: uint256.MustFromBig(tipCap),
+    GasFeeCap: uint256.MustFromBig(feeCap),
+    Gas:       gasLimit,
+}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+    return contract.Transfer(transactOpts, toAddr, amount)
+})
+
+// WRONG: Never use bound contracts with a separate transaction context directly
+// tx, err := contract.Transfer(transactOpts, toAddr, amount) // DON'T DO THIS
+```
+
+#### Transaction Building
+```go
+// Always use txbuilder package
+import "github.com/ethpandaops/spamoor/txbuilder"
+
+txData := &txbuilder.TxMetadata{
+    GasTipCap: uint256.NewInt(tipCap),
+    GasFeeCap: uint256.NewInt(feeCap),
+    Gas:       gasLimit,
+    To:        &targetAddr,
+    Value:     uint256.NewInt(amount),
+    Data:      callData,
+}
+
+// Create appropriate transaction type
+dynFeeTx, err := txbuilder.DynFeeTx(txData)  // EIP-1559
+blobTx, err := txbuilder.BlobTx(txData, blobs) // EIP-4844
+```
+
+### Wallet Management Patterns
+
+#### Wallet Pool Configuration
+```go
+func (s *Scenario) Init(options *scenario.Options) error {
+    // Configure child wallets based on throughput
+    if s.options.MaxWallets > 0 {
+        s.walletPool.SetWalletCount(s.options.MaxWallets)
+    } else if s.options.TotalCount > 0 {
+        maxWallets := s.options.TotalCount / 50
+        if maxWallets < 10 {
+            maxWallets = 10
+        } else if maxWallets > 1000 {
+            maxWallets = 1000
+        }
+        s.walletPool.SetWalletCount(maxWallets)
+    } else {
+        walletCount := s.options.Throughput * 2
+        if walletCount > 1000 {
+            walletCount = 1000
+        }
+        s.walletPool.SetWalletCount(walletCount)
+    }
+    
+    // Configure funding
+    s.walletPool.SetRefillAmount(utils.EtherToWei(uint256.NewInt(5)))
+    s.walletPool.SetRefillBalance(utils.EtherToWei(uint256.NewInt(1)))
+    
+    // Add well-known wallets
+    s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
+        Name:          "deployer",
+        RefillAmount:  utils.EtherToWei(uint256.NewInt(50)),
+        RefillBalance: utils.EtherToWei(uint256.NewInt(10)),
+        VeryWellKnown: false, // Scenario-specific
+    })
+    
+    return nil
+}
+```
+
+#### Wallet Selection
+```go
+// For high throughput, use pending-count-based selection
+wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, txIdx)
+
+// For predictable selection
+wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, txIdx)
+
+// For well-known wallets
+deployerWallet := s.walletPool.GetWellKnownWallet("deployer")
+```
+
+### Transaction Submission Patterns
+
+#### Asynchronous Submission
+```go
+err := txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
+    Client:      client,
+    Rebroadcast: true,
+    OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+        // ALWAYS call onComplete when using RunTransactionScenario
+        onComplete()
+        
+        if err != nil {
+            s.logger.Warnf("Transaction error: %v", err)
+            return
+        }
+    },
+    OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+		txFees := utils.GetTransactionFees(tx, receipt)
+        
+        if receipt.Status == types.ReceiptStatusSuccessful {
+            s.handleSuccess(tx, receipt, txFees)
+        } else {
+            s.logger.Warnf("Transaction reverted: %s", tx.Hash().Hex())
+        }
+    },
+})
+```
+
+#### Batch Submission
+```go
+// Single wallet batch
+receipts, err := txpool.SendTransactionBatch(ctx, wallet, transactions, &spamoor.BatchOptions{
+    SendTransactionOptions: spamoor.SendTransactionOptions{
+        Client:      client,
+        Rebroadcast: true,
+    },
+    PendingLimit: 50,
+})
+
+// Multi-wallet batch (preferred for high throughput)
+receipts, err := txpool.SendMultiTransactionBatch(ctx, walletTxs, &spamoor.BatchOptions{
+    SendTransactionOptions: spamoor.SendTransactionOptions{
+        Rebroadcast: true,
+    },
+    PendingLimit: 50,
+})
+```
 
 ### Documentation Standards
 - Public functions/types must have godoc comments
 - Comments should explain WHY, not just WHAT
 - Each scenario must have a comprehensive README.md
 - Use examples in documentation when helpful
-- API endpoints must be documented with Swagger annotations
+- Document scenario-specific options clearly
+- Include troubleshooting section in READMEs
 
 ### Import Organization
 ```go
-// Standard library imports first
 import (
+    // Standard library imports first
     "context"
     "fmt"
+    "math/big"
     "time"
-)
 
-// Third-party imports second (grouped by organization)
-import (
+    // Third-party imports second (grouped by organization)
+    "github.com/ethereum/go-ethereum/accounts/abi/bind"
     "github.com/ethereum/go-ethereum/common"
     "github.com/ethereum/go-ethereum/core/types"
-    
+    "github.com/holiman/uint256"
     "github.com/sirupsen/logrus"
     "github.com/spf13/pflag"
-    
     "gopkg.in/yaml.v3"
-)
 
-// Local imports last
-import (
+    // Local imports last
     "github.com/ethpandaops/spamoor/scenario"
     "github.com/ethpandaops/spamoor/spamoor"
+    "github.com/ethpandaops/spamoor/txbuilder"
+    "github.com/ethpandaops/spamoor/utils"
 )
 ```
 
 ### Logging Standards
 - Use structured logging with logrus
-- Create named loggers: `logger := logrus.WithField("component", "scenario-name")`
+- Create named loggers: `logger := logrus.WithField("scenario", ScenarioName)`
 - Log levels:
   - **Error**: System failures, critical issues
-  - **Warn**: Recoverable problems, deprecated usage
+  - **Warn**: Recoverable problems, failed transactions
   - **Info**: Important operations, scenario lifecycle
   - **Debug**: Detailed operational information
   - **Trace**: Very detailed debugging information
-
-### Testing Patterns
-- Unit tests for utility functions
-- Integration tests for scenario functionality
-- Use table-driven tests when appropriate
-- Mock external dependencies (RPC clients, etc.)
-- Test files: `*_test.go`
+- Add transaction context to logs: wallet, nonce, client
 
 ### Concurrency Patterns
 - Use context.Context for cancellation and timeouts
 - Protect shared state with mutexes
 - Use channels for communication between goroutines
-- Follow Go concurrency best practices (share memory by communicating)
+- Follow Go concurrency best practices
+- Use RunTransactionScenario for transaction based scenarios
+- Use appropiate transaction send mechanism (SendTransaction / SendMultiTransactionBatch / SendTransactionBatch)
+- Respect client pending transaction limits
 
 ### Constants and Configuration
 - Define magic numbers as named constants
 - Group related constants in const blocks
 - Use iota for enumerated values
-- Configuration should be environment-aware
+- Configuration should be environment-aware- Use standard option names across scenarios
+
+### Best Practices Summary
+1. **Always use RunTransactionScenario helper** for transaction scenarios
+2. **Configure adequate wallet count** based on throughput needs
+3. **Use BuildBoundTx** for all contract interactions
+4. **Handle nil receipts** in transaction callbacks
+5. **Enable rebroadcast** for important transactions
+6. **Update balances manually** for internal transfers
+7. **Spread load across clients** using appropriate selection
+8. **Monitor wallet funding** through logs
+9. **Validate configurations** in Init()
+10. **Always call onComplete()** in ProcessNextTxFn
