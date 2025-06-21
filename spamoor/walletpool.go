@@ -55,6 +55,16 @@ type WellKnownWalletConfig struct {
 	VeryWellKnown bool
 }
 
+// ExternalWalletConfig defines configuration for an external wallet imported into the pool.
+// External wallets are not used for GetWallet calls but can optionally be funded.
+type ExternalWalletConfig struct {
+	Name          string
+	Wallet        *Wallet
+	RefillAmount  *uint256.Int
+	RefillBalance *uint256.Int
+	EnableFunding bool
+}
+
 // WalletPool manages a pool of child wallets derived from a root wallet with automatic funding
 // and balance monitoring. It provides wallet selection strategies, automatic refills when balances
 // drop below thresholds, and batch funding operations for efficiency.
@@ -70,9 +80,11 @@ type WalletPool struct {
 	childWallets     []*Wallet
 	wellKnownNames   []*WellKnownWalletConfig
 	wellKnownWallets map[string]*Wallet
+	externalWallets  []*ExternalWalletConfig
 	selectionMutex   sync.Mutex
 	rrWalletIdx      int
 	reclaimedFunds   bool
+	preparedWallets  bool
 
 	// Optional callback to track transaction results for metrics
 	transactionTracker func(err error)
@@ -112,6 +124,7 @@ func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *R
 		txpool:               txpool,
 		childWallets:         make([]*Wallet, 0),
 		wellKnownWallets:     make(map[string]*Wallet),
+		externalWallets:      make([]*ExternalWalletConfig, 0),
 		runFundings:          true,
 		lowBalanceNotifyChan: make(chan struct{}, 100), // buffered channel
 	}
@@ -179,6 +192,16 @@ func (pool *WalletPool) AddWellKnownWallet(config *WellKnownWalletConfig) {
 	pool.wellKnownNames = append(pool.wellKnownNames, config)
 }
 
+// AddExternalWallet adds an external wallet with custom funding configuration.
+// External wallets are not part of the deterministic wallet generation but can optionally be tracked and funded.
+func (pool *WalletPool) AddExternalWallet(config *ExternalWalletConfig) {
+	pool.externalWallets = append(pool.externalWallets, config)
+
+	if pool.runFundings && config.EnableFunding && pool.preparedWallets {
+		config.Wallet.setLowBalanceNotification(pool.lowBalanceNotifyChan, config.RefillBalance.ToBig())
+	}
+}
+
 // SetRefillAmount sets the amount sent to wallets when they need funding.
 func (pool *WalletPool) SetRefillAmount(amount *uint256.Int) {
 	pool.config.RefillAmount = amount
@@ -187,6 +210,11 @@ func (pool *WalletPool) SetRefillAmount(amount *uint256.Int) {
 // SetRefillBalance sets the balance threshold below which wallets are automatically refilled.
 func (pool *WalletPool) SetRefillBalance(balance *uint256.Int) {
 	pool.config.RefillBalance = balance
+}
+
+// GetWalletSeed returns the seed used for deterministic wallet generation.
+func (pool *WalletPool) GetWalletSeed() string {
+	return pool.config.WalletSeed
 }
 
 // SetWalletSeed sets the seed used for deterministic wallet generation.
@@ -260,6 +288,17 @@ func (pool *WalletPool) GetWellKnownWallet(name string) *Wallet {
 	return pool.wellKnownWallets[name]
 }
 
+// GetExternalWallet returns an external wallet by name.
+// Returns nil if the wallet doesn't exist.
+func (pool *WalletPool) GetExternalWallet(name string) *Wallet {
+	for _, config := range pool.externalWallets {
+		if config.Name == name {
+			return config.Wallet
+		}
+	}
+	return nil
+}
+
 // GetVeryWellKnownWalletAddress derives the address of a "very well known" wallet
 // without registering it. Very well known wallets are derived only from the root
 // wallet's private key and the wallet name, without any scenario seed.
@@ -308,17 +347,30 @@ func (pool *WalletPool) GetWalletName(address common.Address) string {
 		}
 	}
 
+	for _, config := range pool.externalWallets {
+		if config.Wallet != nil && config.Wallet.GetAddress() == address {
+			return config.Name
+		}
+	}
+
 	return "unknown"
 }
 
-// GetAllWallets returns a slice containing all wallets (well-known and child wallets).
+// GetAllWallets returns a slice containing all wallets (well-known, external, and child wallets).
 // The root wallet is not included in this list.
 func (pool *WalletPool) GetAllWallets() []*Wallet {
-	wallets := make([]*Wallet, len(pool.childWallets)+len(pool.wellKnownWallets))
-	for i, config := range pool.wellKnownNames {
-		wallets[i] = pool.wellKnownWallets[config.Name]
+	totalCount := len(pool.childWallets) + len(pool.wellKnownWallets) + len(pool.externalWallets)
+	wallets := make([]*Wallet, totalCount)
+	idx := 0
+	for _, config := range pool.wellKnownNames {
+		wallets[idx] = pool.wellKnownWallets[config.Name]
+		idx++
 	}
-	copy(wallets[len(pool.wellKnownWallets):], pool.childWallets)
+	for _, config := range pool.externalWallets {
+		wallets[idx] = config.Wallet
+		idx++
+	}
+	copy(wallets[idx:], pool.childWallets)
 	return wallets
 }
 
@@ -337,13 +389,14 @@ func (pool *WalletPool) GetWalletCount() uint64 {
 // then funds any wallets below the refill threshold. Also starts the
 // automatic balance monitoring if funding is enabled.
 func (pool *WalletPool) PrepareWallets() error {
-	if len(pool.childWallets) > 0 {
+	if pool.preparedWallets {
 		return nil
 	}
+	pool.preparedWallets = true
 
 	seed := pool.config.WalletSeed
 
-	if pool.config.WalletCount == 0 && len(pool.wellKnownWallets) == 0 {
+	if pool.config.WalletCount == 0 && len(pool.wellKnownWallets) == 0 && len(pool.externalWallets) == 0 {
 		pool.childWallets = make([]*Wallet, 0)
 	} else {
 		var client *Client
@@ -390,6 +443,52 @@ func (pool *WalletPool) PrepareWallets() error {
 					pool.wellKnownWallets[config.Name] = childWallet
 					walletsMutex.Unlock()
 				}(config)
+			}
+
+			for _, config := range pool.externalWallets {
+				if config.EnableFunding && pool.runFundings {
+					wg.Add(1)
+					wl <- true
+					go func(config *ExternalWalletConfig) {
+						defer func() {
+							<-wl
+							wg.Done()
+						}()
+						if walletErr != nil {
+							return
+						}
+
+						// Set up low balance notification
+						if pool.runFundings {
+							config.Wallet.setLowBalanceNotification(pool.lowBalanceNotifyChan, config.RefillBalance.ToBig())
+						}
+
+						err := client.UpdateWallet(pool.ctx, config.Wallet)
+						if err != nil {
+							pool.logger.Errorf("could not update external wallet %v: %v", config.Name, err)
+							walletErr = err
+							return
+						}
+
+						refillAmount := pool.config.RefillAmount
+						refillBalance := pool.config.RefillBalance
+						if config.RefillAmount != nil {
+							refillAmount = config.RefillAmount
+						}
+						if config.RefillBalance != nil {
+							refillBalance = config.RefillBalance
+						}
+
+						if config.Wallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
+							walletsMutex.Lock()
+							fundingReqs = append(fundingReqs, &FundingRequest{
+								Wallet: config.Wallet,
+								Amount: refillAmount,
+							})
+							walletsMutex.Unlock()
+						}
+					}(config)
+				}
 			}
 
 			for childIdx := uint64(0); childIdx < pool.config.WalletCount; childIdx++ {
@@ -618,7 +717,8 @@ func (pool *WalletPool) resupplyChildWallets() error {
 	wl := make(chan bool, 50)
 
 	wellKnownCount := uint64(len(pool.wellKnownWallets))
-	fundingReqs := make([]*FundingRequest, 0, pool.config.WalletCount+wellKnownCount)
+	externalCount := uint64(len(pool.externalWallets))
+	fundingReqs := make([]*FundingRequest, 0, pool.config.WalletCount+wellKnownCount+externalCount)
 	reqsMutex := &sync.Mutex{}
 
 	for idx, config := range pool.wellKnownNames {
@@ -663,6 +763,47 @@ func (pool *WalletPool) resupplyChildWallets() error {
 				reqsMutex.Unlock()
 			}
 		}(idx, wellKnownWallet, config)
+	}
+
+	for _, config := range pool.externalWallets {
+		if config.EnableFunding {
+			wg.Add(1)
+			wl <- true
+			go func(config *ExternalWalletConfig) {
+				defer func() {
+					<-wl
+					wg.Done()
+				}()
+				if walletErr != nil {
+					return
+				}
+
+				refillAmount := pool.config.RefillAmount
+				refillBalance := pool.config.RefillBalance
+
+				if config.RefillAmount != nil {
+					refillAmount = config.RefillAmount
+				}
+				if config.RefillBalance != nil {
+					refillBalance = config.RefillBalance
+				}
+
+				err := client.UpdateWallet(pool.ctx, config.Wallet)
+				if err != nil {
+					walletErr = err
+					return
+				}
+
+				if config.Wallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
+					reqsMutex.Lock()
+					fundingReqs = append(fundingReqs, &FundingRequest{
+						Wallet: config.Wallet,
+						Amount: refillAmount,
+					})
+					reqsMutex.Unlock()
+				}
+			}(config)
+		}
 	}
 
 	for childIdx := uint64(0); childIdx < pool.config.WalletCount; childIdx++ {
@@ -930,7 +1071,7 @@ func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *W
 	return tx, nil
 }
 
-// collectPoolWallets adds all wallets (root, child, and well-known) to the provided map.
+// collectPoolWallets adds all wallets (root, child, well-known, and external) to the provided map.
 // This is used by the transaction pool to track which addresses belong to this wallet pool.
 func (pool *WalletPool) collectPoolWallets(walletMap map[common.Address]*Wallet) {
 	walletMap[pool.rootWallet.wallet.GetAddress()] = pool.rootWallet.wallet
@@ -939,6 +1080,11 @@ func (pool *WalletPool) collectPoolWallets(walletMap map[common.Address]*Wallet)
 	}
 	for _, wallet := range pool.wellKnownWallets {
 		walletMap[wallet.GetAddress()] = wallet
+	}
+	for _, config := range pool.externalWallets {
+		if config.Wallet != nil {
+			walletMap[config.Wallet.GetAddress()] = config.Wallet
+		}
 	}
 }
 
@@ -1040,6 +1186,11 @@ func (pool *WalletPool) ReclaimFunds(ctx context.Context, client *Client) error 
 	}
 	for _, wallet := range pool.wellKnownWallets {
 		reclaimWallet(wallet)
+	}
+	for _, config := range pool.externalWallets {
+		if config.Wallet != nil {
+			reclaimWallet(config.Wallet)
+		}
 	}
 	reclaimWg.Wait()
 

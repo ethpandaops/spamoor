@@ -53,6 +53,7 @@ RPC hosts support additional configuration parameters through URL prefixes:
 
 Spamoor provides multiple scenarios for different transaction types:
 
+
 | Scenario | Description |
 |----------|-------------|
 | [`eoatx`](./scenarios/eoatx/README.md) | **EOA Transactions**<br>Send standard EOA transactions with configurable amounts and targets |
