@@ -1139,7 +1139,12 @@ func (pool *TxPool) runRebroadcastLoop() {
 		case <-ticker.C:
 			nextAttempt := pool.processRebroadcastRequests()
 			if !nextAttempt.IsZero() {
-				ticker.Reset(time.Until(nextAttempt))
+				duration := time.Until(nextAttempt)
+				if duration > 0 {
+					ticker.Reset(duration)
+				} else {
+					ticker.Reset(50 * time.Millisecond)
+				}
 			} else {
 				ticker.Reset(10 * time.Second)
 			}
