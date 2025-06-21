@@ -273,7 +273,7 @@
                 <div class="mt-2">Loading spammer library...</div>
               </div>
               
-              <div id="libraryContent" class="d-none" style="max-height: 450px; overflow-y: auto; overflow-x: hidden;">
+              <div id="libraryContent" class="d-none library-content">
                 <div id="libraryCategories"></div>
               </div>
 
@@ -1597,6 +1597,20 @@ async function importFromLibrary(filename) {
 
 #spammerTabs {
   margin: 0 -16px;
+}
+
+/* Library content responsive height */
+.library-content {
+  max-height: 450px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Increase max-height for larger screens */
+@media (min-height: 651px) {
+  .library-content {
+    max-height: 650px;
+  }
 }
 </style>
 {{ end }}
