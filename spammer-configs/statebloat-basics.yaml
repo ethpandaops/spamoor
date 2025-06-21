@@ -1,0 +1,50 @@
+# Name: State Bloat Basics
+# Description: Basic state bloat spammers for max random EOA and ERC20 transactions per block
+# Tags: statebloat, max-gas
+# Min_Version: v1.1.5
+- scenario: erctx
+  name: '[State Bloat] Max random ERC20 transactions per block spammer'
+  description: Sends maximum number of normal ERC20 transactions to random addresses (5000 tx/block)
+  config:
+    amount: 1
+    base_fee: 20
+    client_group: ""
+    log_txs: false
+    max_pending: 5000
+    max_wallets: 1000
+    random_amount: false
+    random_target: true
+    rebroadcast: 1
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: erctx-max-1
+    throughput: 5000
+    timeout: ""
+    tip_fee: 2
+    total_count: 0
+- scenario: eoatx
+  name: '[State Bloat] Max random EOA transactions per block spammer'
+  description: Sends maximum number of normal EOA transactions to random addresses (10000 tx/block)
+  config:
+    amount: 1
+    base_fee: 20
+    client_group: ""
+    data: ""
+    gas_limit: 21000
+    log_txs: false
+    max_pending: 10000
+    max_wallets: 5000
+    random_amount: false
+    random_target: true
+    rebroadcast: 1
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: eoatx-max-1
+    self_tx_only: false
+    throughput: 10000
+    timeout: ""
+    tip_fee: 2
+    to: ""
+    total_count: 0

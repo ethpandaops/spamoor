@@ -5,7 +5,7 @@ GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildVersion="$(VERSION)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildTime="$(BUILDTIME)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildRelease="$(RELEASE)"'
 
-.PHONY: all docs build test clean
+.PHONY: all docs build test clean generate-spammer-index
 
 all: docs build
 
@@ -25,13 +25,17 @@ build-lib:
 docs:
 	go install github.com/swaggo/swag/cmd/swag@v1.16.3 && swag init -g handler.go -d webui/handlers/api --parseDependency -o webui/handlers/docs
 
+generate-spammer-index:
+	@echo "Generating spammer configuration index..."
+	go run scripts/generate-spammer-index.go
+
 clean:
 	rm -f bin/*
 
 devnet:
 	.hack/devnet/run.sh
 
-devnet-run: devnet build
+devnet-run: devnet docs build
 	bin/spamoor-daemon --rpchost-file .hack/devnet/generated-hosts.txt --privkey 3fd98b5187bf6526734efaa644ffbb4e3670d66f5d0268ce0323ec09124bff61 --port 8080 --db .hack/devnet/custom-spamoor.db
 
 devnet-clean:

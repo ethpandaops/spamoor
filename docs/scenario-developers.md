@@ -5,13 +5,17 @@ This guide provides comprehensive documentation for developers who want to imple
 ## Table of Contents
 
 - [Scenario Architecture](#scenario-architecture)
+- [Scenario Lifecycle](#scenario-lifecycle-overview)
 - [Core Interfaces](#core-interfaces)
 - [Critical Development Rules](#critical-development-rules)
 - [Project Structure](#project-structure)
+- [Common Scenario Options](#common-scenario-options)
+- [Client Pool Management](#client-pool-management)
 - [Wallet Management](#wallet-management)
 - [Transaction Building](#transaction-building)
 - [Contract Deployments](#contract-deployments)
 - [Common Patterns](#common-patterns)
+- [RunTransactionScenario Helper](#runtransactionscenario-helper)
 - [Best Practices](#best-practices)
 - [Testing Scenarios](#testing-scenarios)
 - [Example Implementation](#example-implementation)
@@ -28,13 +32,165 @@ Spamoor scenarios are self-contained Go packages that implement the `Scenario` i
 - **Handles wallet management**: Child wallet selection and funding
 - **Provides logging**: Structured logging with transaction tracking
 
-### Lifecycle
+### Scenario Lifecycle Overview
+
+The scenario lifecycle consists of distinct phases that Spamoor manages:
 
 1. **Registration**: Scenario registered in `scenarios/scenarios.go`
-2. **Initialization**: CLI flags parsed, configuration loaded
-3. **Setup**: Wallets prepared, contracts deployed if needed
-4. **Execution**: Transaction generation loop with rate limiting
-5. **Cleanup**: Resources cleaned up on context cancellation
+2. **Instantiation**: New scenario instance created via factory function
+3. **Configuration**: CLI flags registered and parsed
+4. **Initialization**: Scenario configured with wallet pool and options
+5. **Wallet Funding**: Spamoor prepares and funds wallets automatically
+6. **Execution**: Scenario runs transaction generation logic
+7. **Cleanup**: Resources cleaned up on completion or cancellation
+
+### Detailed Lifecycle Phases
+
+#### 1. Registration Phase
+
+Every scenario must be registered in `scenarios/scenarios.go`:
+
+```go
+var ScenarioDescriptors = []*scenario.Descriptor{
+    &simpleeoa.ScenarioDescriptor,
+    &contractcalls.ScenarioDescriptor,
+    &blobscenario.ScenarioDescriptor,
+    // ... your scenario here
+}
+```
+
+The descriptor provides metadata and a factory function:
+
+```go
+var ScenarioDescriptor = scenario.Descriptor{
+    Name:           "my-scenario",
+    Description:    "Description of what this scenario does",
+    DefaultOptions: ScenarioDefaultOptions,
+    NewScenario:    newScenario,  // Factory function
+}
+```
+
+#### 2. Instantiation and Configuration
+
+When a user runs a scenario, Spamoor:
+
+1. **Creates a new instance** using the factory function:
+```go
+scenarioInstance := descriptor.NewScenario(logger)
+```
+
+2. **Registers CLI flags** by calling `Flags()`:
+```go
+func (s *Scenario) Flags(flags *pflag.FlagSet) error {
+    flags.Uint64VarP(&s.options.TotalCount, "count", "c", 0, "Total transactions")
+    flags.Uint64VarP(&s.options.Throughput, "throughput", "t", 10, "Transactions per slot")
+    // Register all scenario-specific flags
+    return nil
+}
+```
+
+3. **Parses command-line arguments** to populate the options
+
+#### 3. Initialization Phase
+
+After configuration, Spamoor calls `Init()` with runtime options:
+
+```go
+func (s *Scenario) Init(options *scenario.Options) error {
+    // 1. Store wallet pool reference
+    s.walletPool = options.WalletPool
+    
+    // 2. Parse YAML config if provided
+    if options.Config != "" {
+        err := yaml.Unmarshal([]byte(options.Config), &s.options)
+        if err != nil {
+            return fmt.Errorf("failed to unmarshal config: %w", err)
+        }
+    }
+    
+    // 3. Configure wallet pool
+    s.walletPool.SetWalletCount(100)  // Number of child wallets
+    s.walletPool.SetRefillAmount(utils.EtherToWei(uint256.NewInt(5)))   // 5 ETH per refill
+    s.walletPool.SetRefillBalance(utils.EtherToWei(uint256.NewInt(1)))  // Refill when < 1 ETH
+    
+    // 4. Add well-known wallets if needed
+    s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
+        Name:          "deployer",
+        RefillAmount:  utils.EtherToWei(uint256.NewInt(50)),
+        RefillBalance: utils.EtherToWei(uint256.NewInt(10)),
+    })
+    
+    // 5. Validate configuration
+    if s.options.TotalCount == 0 && s.options.Throughput == 0 {
+        return fmt.Errorf("either total_count or throughput must be specified")
+    }
+    
+    return nil
+}
+```
+
+**Important**: During `Init()`, you MUST configure all wallets that your scenario will use. This includes:
+- Setting the number of child wallets via `SetWalletCount()`
+- Adding any well-known wallets via `AddWellKnownWallet()`
+- Configuring refill amounts and thresholds
+
+#### 4. Wallet Funding Phase (Automatic)
+
+**After `Init()` completes and before `Run()` is called**, Spamoor automatically:
+
+1. **Creates all configured wallets** based on your settings
+2. **Funds wallets** that are below the refill threshold
+3. **Waits for funding transactions** to be confirmed
+4. **Starts background refill monitoring** to maintain balances
+
+This automatic funding ensures all wallets have sufficient ETH before your scenario begins executing transactions.
+
+#### 5. Execution Phase
+
+Spamoor calls `Run()` with a cancellable context:
+
+```go
+func (s *Scenario) Run(ctx context.Context) error {
+    s.logger.Infof("starting scenario: %s", s.options)
+    
+    // Most scenarios use the RunTransactionScenario helper
+    return scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
+        TotalCount:      s.options.TotalCount,
+        Throughput:      s.options.Throughput,
+        MaxPending:      s.options.MaxPending,
+        Timeout:         timeout,
+        WalletPool:      s.walletPool,
+        Logger:          s.logger,
+        ProcessNextTxFn: s.sendNextTransaction,
+    })
+}
+```
+
+The `Run()` method should:
+- Respect context cancellation for graceful shutdown
+- Execute the scenario's transaction logic
+- Return when complete or cancelled
+- Return an error if the scenario fails
+
+#### 6. Context Cancellation and Cleanup
+
+Scenarios must handle context cancellation properly:
+
+```go
+select {
+case <-ctx.Done():
+    s.logger.Info("scenario cancelled")
+    return ctx.Err()
+default:
+    // Continue processing
+}
+```
+
+When the context is cancelled (user presses Ctrl+C or timeout reached):
+- Stop all transaction generation
+- Allow pending transactions to complete if possible
+- Clean up any resources
+- Return promptly
 
 ## Core Interfaces
 
@@ -122,6 +278,314 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 🚨 **ALWAYS call onComplete() in ProcessNextTxFn** - required for scenario.RunTransactionScenario transaction counting.
 
 🚨 **NEVER assume receipt is non-nil in OnComplete** - handle cancellation and replacement transaction scenarios properly.
+
+## Common Scenario Options
+
+All scenarios should support a standard set of options to ensure consistent behavior across the tool. These options control transaction execution, rate limiting, and resource management.
+
+### Standard Options
+
+```go
+type ScenarioOptions struct {
+    // Transaction Control
+    TotalCount  uint64 `yaml:"total_count"`  // Total number of transactions to send (0 = unlimited)
+    Throughput  uint64 `yaml:"throughput"`   // Transactions per slot (12 seconds on mainnet)
+    MaxPending  uint64 `yaml:"max_pending"`  // Maximum concurrent pending transactions
+    MaxWallets  uint64 `yaml:"max_wallets"`  // Maximum number of child wallets to use
+    
+    // Gas Configuration
+    BaseFee     uint64 `yaml:"base_fee"`     // Base fee in gwei for EIP-1559 transactions
+    TipFee      uint64 `yaml:"tip_fee"`      // Priority fee (tip) in gwei
+    GasLimit    uint64 `yaml:"gas_limit"`    // Gas limit for transactions
+    
+    // Client Control
+    ClientGroup string `yaml:"client_group"` // Preferred client group (e.g., "validators", "archive")
+    
+    // Logging
+    LogTxs      bool   `yaml:"log_txs"`      // Log individual transactions (vs just summary)
+    
+    // Scenario-specific options...
+}
+```
+
+### Option Descriptions
+
+#### Transaction Control Options
+
+**`total_count`** (default: 0)
+- Total number of transactions to send before scenario completes
+- Set to 0 for unlimited (scenario runs until cancelled or timeout)
+- Takes precedence over timeout if both are specified
+
+**`throughput`** (default: varies by scenario)
+- Target transactions per slot (12 seconds on mainnet, 4 seconds on some testnets)
+- Set to 0 for maximum speed (limited only by max_pending)
+- Automatically adjusted based on network congestion
+
+**`max_pending`** (default: 0)
+- Maximum number of transactions pending confirmation at any time
+- Set to 0 for no limit (use with caution)
+- Helps prevent overwhelming clients with too many pending transactions
+
+**`max_wallets`** (default: 0)
+- Maximum number of child wallets to create and use
+- Set to 0 to let scenario determine based on throughput
+- More wallets allow higher throughput but increase funding costs
+
+#### Gas Configuration Options
+
+**`base_fee`** (default: 20 gwei)
+- Base fee multiplier for EIP-1559 transactions
+- Actual fee = network base fee × multiplier
+- Higher values increase transaction priority
+
+**`tip_fee`** (default: 2 gwei)
+- Priority fee (miner tip) for EIP-1559 transactions
+- Added to base fee for total gas price
+- Higher tips can improve inclusion speed
+
+**`gas_limit`** (default: varies by transaction type)
+- Gas limit for each transaction
+- Must be sufficient for transaction type
+- Common values: 21000 (simple transfer), 100000+ (contract calls)
+
+#### Client Control Options
+
+**`client_group`** (default: "")
+- Preferred group of RPC clients to use
+- Common groups: "validators", "archive", "local"
+- Empty string uses any available client
+
+#### Logging Options
+
+**`log_txs`** (default: false)
+- When true, logs each individual transaction
+- When false, only logs summary statistics
+- Useful for debugging but can be verbose
+
+### Implementation Example
+
+```go
+func (s *Scenario) Flags(flags *pflag.FlagSet) error {
+    flags.Uint64VarP(&s.options.TotalCount, "count", "c", 0, 
+        "Total number of transactions to send (0 = unlimited)")
+    flags.Uint64VarP(&s.options.Throughput, "throughput", "t", 10, 
+        "Transactions per slot")
+    flags.Uint64Var(&s.options.MaxPending, "max-pending", 0, 
+        "Maximum pending transactions (0 = no limit)")
+    flags.Uint64Var(&s.options.MaxWallets, "max-wallets", 0, 
+        "Maximum number of wallets (0 = auto)")
+    flags.Uint64Var(&s.options.BaseFee, "basefee", 20, 
+        "Max base fee in gwei")
+    flags.Uint64Var(&s.options.TipFee, "tipfee", 2, 
+        "Max tip fee in gwei")
+    flags.Uint64Var(&s.options.GasLimit, "gaslimit", 50000, 
+        "Gas limit for transactions")
+    flags.StringVar(&s.options.ClientGroup, "clientgroup", "", 
+        "Client group to use for transactions")
+    flags.BoolVar(&s.options.LogTxs, "log-txs", false, 
+        "Log all transactions")
+    
+    // Scenario-specific flags...
+    
+    return nil
+}
+```
+
+### Configuration File Example
+
+Scenarios can also be configured via YAML:
+
+```yaml
+# Standard options
+total_count: 1000
+throughput: 50
+max_pending: 100
+max_wallets: 20
+
+# Gas configuration
+base_fee: 30
+tip_fee: 3
+gas_limit: 100000
+
+# Execution control
+timeout: "30m"
+client_group: "validators"
+
+# Logging
+log_txs: true
+
+# Scenario-specific options
+amount: 1000000000000000000  # 1 ETH in wei
+contract_address: "0x..."
+```
+
+### Best Practices
+
+1. **Always support the standard options** - Users expect consistent behavior
+2. **Provide sensible defaults** - Most users won't customize every option
+3. **Validate option combinations** - Warn about conflicting settings
+4. **Document scenario-specific options** - Explain any custom parameters
+5. **Use standard flag names** - Maintain consistency with other scenarios
+
+## Client Pool Management
+
+The client pool is a critical component that manages RPC endpoint connections and ensures reliable transaction submission. Understanding how to properly use the client pool is essential for building robust scenarios.
+
+### Overview
+
+The client pool provides:
+- **Health monitoring**: Continuously checks that clients are alive and following the chain head
+- **Client groups**: Logical grouping of clients by capability (validators, archive nodes, etc.)
+- **Load distribution**: Spreads transactions across multiple endpoints
+- **Automatic failover**: Routes around unhealthy clients
+
+### Client Health Monitoring
+
+Spamoor automatically monitors all configured RPC clients:
+
+1. **Liveness checks**: Regular polling to ensure clients respond to requests
+2. **Chain head tracking**: Verifies clients are synced and following the canonical chain
+3. **Automatic marking**: Unhealthy clients are marked as unavailable
+4. **Recovery detection**: Previously unhealthy clients are re-enabled when they recover
+
+### Client Selection
+
+#### Basic Client Selection
+
+```go
+// Get any available healthy client
+client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, "")
+
+// Get client by index (round-robin)
+client := s.walletPool.GetClient(spamoor.SelectClientByIndex, txIdx, "")
+
+// Get client from specific group
+client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, "validators")
+```
+
+#### Selection Strategies
+
+**`SelectClientRandom`**
+- Randomly selects from available healthy clients
+- Best for: Even load distribution
+- Use when: Order doesn't matter
+
+**`SelectClientByIndex`**
+- Deterministic selection using modulo of index
+- Best for: Reproducible client assignment
+- Use when: Debugging or testing specific endpoints
+
+**`SelectClientRoundRobin`**
+- Sequential selection with automatic wraparound
+- Best for: Fair distribution across all clients
+- Use when: Want to ensure all clients get traffic
+
+#### Client Groups
+
+Client groups allow filtering by capability or purpose:
+
+```go
+// Common client groups
+"validators"    // Validator nodes (may have mempool restrictions)
+"archive"       // Archive nodes with full history
+"local"         // Local development nodes
+"light"         // Light clients
+""              // Any available client (default)
+```
+
+Configure groups when starting Spamoor:
+```bash
+./spamoor my-scenario \
+  --rpchost "http://validator1:8545#group=validators" \
+  --rpchost "http://archive1:8545#group=archive" \
+  --rpchost "http://local:8545#group=local"
+```
+
+### Transaction Distribution Strategies
+
+#### Single Transaction Submission
+
+For individual transactions, distribute across clients:
+
+```go
+func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
+    // Rotate clients for each transaction
+    client := s.walletPool.GetClient(spamoor.SelectClientRoundRobin, txIdx, s.options.ClientGroup)
+    
+    // Build and submit transaction
+    err := s.walletPool.GetTxPool().SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
+        Client: client,  // Use selected client
+        OnComplete: onComplete,
+    })
+}
+```
+
+#### Batch Submission Considerations
+
+When submitting large batches of transactions, be aware of transaction ordering requirements:
+
+**Problem**: Different clients may have gaps in their view of pending transactions, leading to nonce gaps if transactions are distributed across multiple clients.
+
+**Solution 1 - Single Client for Batches**:
+```go
+// Get a single client for the entire batch
+client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
+
+// Submit all batch transactions to the same client
+receipts, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, wallet, transactions, &spamoor.BatchOptions{
+    SendTransactionOptions: spamoor.SendTransactionOptions{
+        Client: client,  // Same client for all transactions
+    },
+    PendingLimit: 50,
+})
+```
+
+**Solution 2 - Use Multi-Wallet Batch Submission**:
+```go
+// When using multiple wallets, transactions can be distributed
+// because each wallet maintains its own nonce sequence
+walletTxs := make(map[*spamoor.Wallet][]*types.Transaction)
+
+// Group transactions by wallet
+for i, tx := range transactions {
+    wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, i)
+    walletTxs[wallet] = append(walletTxs[wallet], tx)
+}
+
+// Submit using multi-wallet batch - internally handles client distribution
+receipts, err := s.walletPool.GetTxPool().SendMultiTransactionBatch(ctx, walletTxs, &spamoor.BatchOptions{
+    ClientGroup: s.options.ClientGroup,
+    PendingLimit: 50,
+})
+```
+
+### Best Practices
+
+1. **Spread individual transactions across clients** - Maximizes throughput and resilience
+2. **Use client groups** - Target appropriate client types for your scenario
+3. **Keep transaction batches on single clients** - Avoids nonce gap issues
+4. **Monitor client health in logs** - Watch for warnings about unhealthy clients
+5. **Use multi-wallet batching for mass submission** - Allows safe client distribution
+
+### Troubleshooting Client Issues
+
+Common issues and solutions:
+
+**"No healthy clients available"**
+- Check that RPC endpoints are accessible
+- Verify clients are synced to chain head
+- Look for connection errors in logs
+
+**"Transaction nonce gaps"**
+- Ensure batch transactions use single client
+- Consider using multi-wallet batching
+- Check for client mempool limits
+
+**"Uneven client load"**
+- Use round-robin selection instead of random
+- Verify all clients are marked healthy
+- Check client group configuration
 
 ## Wallet Management
 
@@ -800,11 +1264,179 @@ OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 
 ## Common Patterns
 
-### RunTransactionScenario Helper Function
+### Standard Scenario Structure
 
-Most scenarios use the `scenario.RunTransactionScenario` helper function, which provides standardized transaction execution with rate limiting, concurrency control, and lifecycle management. This is the recommended pattern for all transaction-based scenarios.
+```go
+package myscenario
 
-#### Function Signature
+import (
+    "context"
+    "fmt"
+    "time"
+    
+    "gopkg.in/yaml.v3"
+    "github.com/sirupsen/logrus"
+    "github.com/spf13/pflag"
+    
+    "github.com/ethpandaops/spamoor/scenario"
+    "github.com/ethpandaops/spamoor/spamoor"
+    "github.com/ethpandaops/spamoor/txbuilder"
+    "github.com/ethpandaops/spamoor/utils"
+)
+
+// Configuration structure
+type ScenarioOptions struct {
+    TotalCount  uint64 `yaml:"total_count"`
+    Throughput  uint64 `yaml:"throughput"`
+    MaxPending  uint64 `yaml:"max_pending"`
+    MaxWallets  uint64 `yaml:"max_wallets"`
+    BaseFee     uint64 `yaml:"base_fee"`
+    TipFee      uint64 `yaml:"tip_fee"`
+    GasLimit    uint64 `yaml:"gas_limit"`
+    Timeout     string `yaml:"timeout"`
+    ClientGroup string `yaml:"client_group"`
+    LogTxs      bool   `yaml:"log_txs"`
+    // Scenario-specific options...
+}
+
+// Main scenario struct
+type Scenario struct {
+    options    ScenarioOptions
+    logger     *logrus.Entry
+    walletPool *spamoor.WalletPool
+    
+    // Scenario-specific state...
+}
+
+// Scenario metadata
+var ScenarioName = "my-scenario"
+var ScenarioDefaultOptions = ScenarioOptions{
+    TotalCount:  0,
+    Throughput:  10,
+    MaxPending:  0,
+    MaxWallets:  0,
+    BaseFee:     20,
+    TipFee:      2,
+    GasLimit:    21000,
+    Timeout:     "",
+    ClientGroup: "",
+    LogTxs:      false,
+}
+
+var ScenarioDescriptor = scenario.Descriptor{
+    Name:           ScenarioName,
+    Description:    "Description of what this scenario does",
+    DefaultOptions: ScenarioDefaultOptions,
+    NewScenario:    newScenario,
+}
+
+func newScenario(logger logrus.FieldLogger) scenario.Scenario {
+    return &Scenario{
+        options: ScenarioDefaultOptions,
+        logger:  logger.WithField("scenario", ScenarioName),
+    }
+}
+
+func (s *Scenario) Flags(flags *pflag.FlagSet) error {
+    flags.Uint64VarP(&s.options.TotalCount, "count", "c", ScenarioDefaultOptions.TotalCount, "Total number of transactions")
+    flags.Uint64VarP(&s.options.Throughput, "throughput", "t", ScenarioDefaultOptions.Throughput, "Transactions per slot")
+    flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum pending transactions")
+    // Add scenario-specific flags...
+    return nil
+}
+
+func (s *Scenario) Init(options *scenario.Options) error {
+    s.walletPool = options.WalletPool
+    
+    // Parse YAML configuration if provided
+    if options.Config != "" {
+        err := yaml.Unmarshal([]byte(options.Config), &s.options)
+        if err != nil {
+            return fmt.Errorf("failed to unmarshal config: %w", err)
+        }
+    }
+    
+    // Configure wallet pool
+    if s.options.MaxWallets > 0 {
+        s.walletPool.SetWalletCount(s.options.MaxWallets)
+    }
+    
+    // Scenario-specific initialization...
+    return nil
+}
+
+func (s *Scenario) Run(ctx context.Context) error {
+    // Parse timeout if specified
+    var timeout time.Duration
+    if s.options.Timeout != "" {
+        var err error
+        timeout, err = time.ParseDuration(s.options.Timeout)
+        if err != nil {
+            return fmt.Errorf("invalid timeout duration: %w", err)
+        }
+    }
+    
+    // Run the transaction scenario
+    return scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
+        TotalCount:     s.options.TotalCount,
+        Throughput:     s.options.Throughput,
+        MaxPending:     s.options.MaxPending,
+        Timeout:        timeout,
+        WalletPool:     s.walletPool,
+        Logger:         s.logger,
+        ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
+			logger := s.logger
+			tx, client, wallet, err := s.sendNextTransaction(ctx, txIdx, onComplete)
+			if client != nil {
+				logger = logger.WithField("rpc", client.GetName())
+			}
+			if tx != nil {
+				logger = logger.WithField("nonce", tx.Nonce())
+			}
+			if wallet != nil {
+				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
+			}
+
+			return func() {
+				if err != nil {
+					logger.Warnf("could not send transaction: %v", err)
+				} else if s.options.LogTxs {
+					logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+				} else {
+					logger.Debugf("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+				}
+			}, err
+		},
+    })
+}
+
+func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+    // Standard wallet and client selection - see Wallet Management section
+    wallet := s.walletPool.GetWallet(spamoor.SelectWalletRandom)
+    client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
+    
+    // Get suggested fees and build transaction - see Transaction Building section
+    feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+    // ... transaction building logic ...
+    
+    // Submit transaction - see Transaction Submission section for detailed options
+    err = txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
+        Client:      client,
+        Rebroadcast: true,
+        OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+            onComplete()  // CRITICAL: Always call this when done
+        },
+    })
+    
+    return signedTx, client, wallet, err
+}
+```
+
+## RunTransactionScenario Helper
+
+The `scenario.RunTransactionScenario` helper function is the recommended way to implement transaction-based scenarios. It provides a complete execution engine with rate limiting, concurrency control, and lifecycle management.
+
+### Function Signature
 
 ```go
 func RunTransactionScenario(ctx context.Context, options TransactionScenarioOptions) error
@@ -820,36 +1452,123 @@ type TransactionScenarioOptions struct {
 }
 ```
 
-#### Key Features
+### How It Works
+
+1. **Initialization**
+   - Sets up rate limiter based on throughput setting
+   - Configures pending transaction counter
+   - Subscribes to block updates for statistics
+   - Starts timeout timer if specified
+
+2. **Main Execution Loop**
+   - Waits for rate limiter permit (respects throughput limit)
+   - Checks pending transaction limit
+   - Calls `ProcessNextTxFn` to build and submit transaction
+   - Tracks transaction in pending counter
+   - Chains logging callbacks for sequential output
+
+3. **Transaction Processing**
+   - Your `ProcessNextTxFn` builds and submits the transaction
+   - You MUST call `onComplete()` when transaction processing finishes
+   - The helper tracks completion and updates counters
+
+4. **Completion Handling**
+   - Waits for all pending transactions to complete
+   - Cancels on context cancellation or timeout
+   - Logs final statistics and throughput metrics
+
+### Key Features
 
 - **Rate Limiting**: Controls transaction throughput per slot (12 seconds on mainnet)
 - **Concurrency Management**: Limits concurrent pending transactions
 - **Lifecycle Management**: Handles scenario completion, cancellation, and timeouts
 - **Progress Tracking**: Automatically tracks transaction counts and completion
 - **Context Handling**: Respects context cancellation for clean shutdown
+- **Throughput Monitoring**: Tracks transactions per block over different windows (5, 20, 60 blocks)
+- **Dynamic Throughput**: Optional incremental throughput increases
+- **Statistics Logging**: Periodic progress updates and final summary
 
-#### ProcessNextTxFn Callback
+### ProcessNextTxFn Callback
 
-The `ProcessNextTxFn` is the core of your scenario implementation:
+The `ProcessNextTxFn` is the core of your scenario implementation. This callback is called for each transaction that needs to be generated.
+
+#### Callback Parameters
+
+- **`ctx context.Context`**: The scenario context (check for cancellation)
+- **`txIdx uint64`**: Zero-based index of the current transaction
+- **`onComplete func()`**: Completion callback that MUST be called when transaction processing finishes
+
+#### Return Values
+
+- **`func()`**: A logging function that will be called after transaction submission
+- **`error`**: Any error that occurred during transaction preparation/submission
+
+#### Implementation Pattern
 
 ```go
 func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
-    // 1. Select wallet, client, build and submit transaction
+    // 1. Check context for cancellation
+    select {
+    case <-ctx.Done():
+        onComplete() // Always call onComplete
+        return nil, ctx.Err()
+    default:
+    }
+    
+    // 2. Select wallet and client
     wallet := s.walletPool.GetWallet(spamoor.SelectWalletRandom)
     client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
     
-    // ... build and submit transaction ...
+    // 3. Build transaction
+    feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+    if err != nil {
+        onComplete() // Call onComplete on early failure
+        return nil, err
+    }
     
-    err := txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
+    txData := &txbuilder.TxMetadata{
+        GasTipCap: uint256.NewInt(tipCap),
+        GasFeeCap: uint256.NewInt(feeCap),
+        Gas:       s.options.GasLimit,
+        // ... other transaction fields
+    }
+    
+    signedTx, err := wallet.BuildBoundTx(ctx, txData)
+    if err != nil {
+        onComplete() // Call onComplete on build failure
+        return nil, err
+    }
+    
+    // 4. Submit transaction
+    err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
+        Client:      client,
+        Rebroadcast: true,
         OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+            // This is called when transaction is confirmed or fails
             onComplete() // CRITICAL: Must call this to signal completion
+            
+            // Optional: Handle transaction result
+            if err != nil {
+                s.logger.Warnf("transaction failed: %v", err)
+            } else if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+                s.logger.Debugf("transaction confirmed in block %d", receipt.BlockNumber.Uint64())
+            }
         },
     })
     
-    // 2. Return logging function and any error
+    if err != nil {
+        onComplete() // Call onComplete if submission fails
+        return nil, err
+    }
+    
+    // 5. Return logging function
     return func() {
-        s.logger.Infof("sent transaction #%d: %s", txIdx+1, signedTx.Hash().Hex())
-    }, err
+        // This function is called after transaction is submitted
+        // Use it for deferred logging to maintain output order
+        if s.options.LogTxs {
+            s.logger.Infof("sent tx #%d: %s", txIdx+1, signedTx.Hash().Hex())
+        }
+    }, nil
 }
 ```
 
@@ -866,11 +1585,11 @@ err := txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOpt
 })
 ```
 
-2. **Directly if transaction submission fails**:
+2. **Directly if anything before transaction submission fails**:
 ```go
-err := txpool.SendTransaction(ctx, wallet, signedTx, options)
+err := s.prepareTransaction(...)
 if err != nil {
-    onComplete() // Call immediately on submission failure
+    onComplete() // Call immediately on preparation failure
     return nil, err
 }
 ```
@@ -907,7 +1626,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 ```
 
-#### Benefits of Using RunTransactionScenario
+### Benefits of Using RunTransactionScenario
 
 - **Consistent behavior**: All scenarios follow the same execution patterns
 - **Built-in rate limiting**: Automatic slot-based throughput control
@@ -917,6 +1636,56 @@ func (s *Scenario) Run(ctx context.Context) error {
 - **Context respect**: Proper context cancellation handling
 
 **Always prefer this helper function over custom transaction loops** - it provides battle-tested transaction execution logic that handles edge cases and provides consistent behavior across all scenarios.
+
+### Example Output
+
+When running a scenario with RunTransactionScenario, you'll see per block output like:
+
+```
+INFO[11184] block 1587: submitted=100, pending=800, confirmed=120, throughput: 5B=160.00 tx/B, 20B=300.40 tx/B, 60B=320.72 tx/B  module=daemon scenario=eoatx spammer_id=1 wallets=120
+```
+
+### Advanced Features
+
+#### Dynamic Throughput
+
+You can implement dynamic throughput increases:
+
+```go
+return scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
+    TotalCount:           s.options.TotalCount,
+    Throughput:           s.options.Throughput,
+    MaxPending:           s.options.MaxPending,
+    ThroughputIncrement:  10,  // Increase by 10 tx/slot every period
+    ThroughputIncrementPeriod: 60 * time.Second,  // Every minute
+    // ...
+})
+```
+
+#### Custom Completion Logic
+
+For scenarios that need custom completion handling:
+
+```go
+ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
+    // Track custom metrics
+    startTime := time.Now()
+    
+    // ... build and submit transaction ...
+    
+    err = txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
+        OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+            // Custom completion logic
+            duration := time.Since(startTime)
+            s.recordTransactionMetrics(tx, receipt, duration)
+            
+            // Always call onComplete
+            onComplete()
+        },
+    })
+    
+    return logFn, err
+}
 
 ### Standard Scenario Structure
 

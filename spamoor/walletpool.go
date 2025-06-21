@@ -84,9 +84,14 @@ type WalletPool struct {
 	selectionMutex   sync.Mutex
 	rrWalletIdx      int
 	reclaimedFunds   bool
+	preparedWallets  bool
 
 	// Optional callback to track transaction results for metrics
 	transactionTracker func(err error)
+
+	// Low balance notification system
+	lowBalanceNotifyChan chan struct{}
+	lastFundingTime      time.Time
 }
 
 // FundingRequest represents a request to fund a wallet with a specific amount.
@@ -112,15 +117,16 @@ func GetDefaultWalletConfig(scenarioName string) *WalletPoolConfig {
 // The pool must be configured and prepared with PrepareWallets() before use.
 func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *RootWallet, clientPool *ClientPool, txpool *TxPool) *WalletPool {
 	return &WalletPool{
-		ctx:              ctx,
-		logger:           logger,
-		rootWallet:       rootWallet,
-		clientPool:       clientPool,
-		txpool:           txpool,
-		childWallets:     make([]*Wallet, 0),
-		wellKnownWallets: make(map[string]*Wallet),
-		externalWallets:  make([]*ExternalWalletConfig, 0),
-		runFundings:      true,
+		ctx:                  ctx,
+		logger:               logger,
+		rootWallet:           rootWallet,
+		clientPool:           clientPool,
+		txpool:               txpool,
+		childWallets:         make([]*Wallet, 0),
+		wellKnownWallets:     make(map[string]*Wallet),
+		externalWallets:      make([]*ExternalWalletConfig, 0),
+		runFundings:          true,
+		lowBalanceNotifyChan: make(chan struct{}, 100), // buffered channel
 	}
 }
 
@@ -190,6 +196,10 @@ func (pool *WalletPool) AddWellKnownWallet(config *WellKnownWalletConfig) {
 // External wallets are not part of the deterministic wallet generation but can optionally be tracked and funded.
 func (pool *WalletPool) AddExternalWallet(config *ExternalWalletConfig) {
 	pool.externalWallets = append(pool.externalWallets, config)
+
+	if pool.runFundings && config.EnableFunding && pool.preparedWallets {
+		config.Wallet.setLowBalanceNotification(pool.lowBalanceNotifyChan, config.RefillBalance.ToBig())
+	}
 }
 
 // SetRefillAmount sets the amount sent to wallets when they need funding.
@@ -379,9 +389,10 @@ func (pool *WalletPool) GetWalletCount() uint64 {
 // then funds any wallets below the refill threshold. Also starts the
 // automatic balance monitoring if funding is enabled.
 func (pool *WalletPool) PrepareWallets() error {
-	if len(pool.childWallets) > 0 {
+	if pool.preparedWallets {
 		return nil
 	}
+	pool.preparedWallets = true
 
 	seed := pool.config.WalletSeed
 
@@ -445,6 +456,11 @@ func (pool *WalletPool) PrepareWallets() error {
 						}()
 						if walletErr != nil {
 							return
+						}
+
+						// Set up low balance notification
+						if pool.runFundings {
+							config.Wallet.setLowBalanceNotification(pool.lowBalanceNotifyChan, config.RefillBalance.ToBig())
 						}
 
 						err := client.UpdateWallet(pool.ctx, config.Wallet)
@@ -593,6 +609,11 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 		return nil, nil, err
 	}
 
+	// Set up low balance notification
+	if pool.runFundings {
+		childWallet.setLowBalanceNotification(pool.lowBalanceNotifyChan, refillBalance.ToBig())
+	}
+
 	var fundingReq *FundingRequest
 	if pool.runFundings && childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
 		fundingReq = &FundingRequest{
@@ -605,26 +626,75 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 
 // watchWalletBalancesLoop runs continuously to monitor and refill wallet balances.
 // It periodically checks all wallets and funds those below the refill threshold.
+// Also listens for low balance notifications to trigger immediate checks.
 // Exits when the context is cancelled or funds have been reclaimed.
 func (pool *WalletPool) watchWalletBalancesLoop() {
 	sleepTime := time.Duration(pool.config.RefillInterval) * time.Second
-	for {
-		select {
-		case <-pool.ctx.Done():
-			return
-		case <-time.After(sleepTime):
-		}
+	timer := time.NewTimer(sleepTime)
+	defer timer.Stop()
 
+	// Aggregation timer for notifications
+	var aggregationTimer *time.Timer
+	aggregationChan := make(chan struct{})
+
+	resupplyWallets := func() {
 		if pool.reclaimedFunds {
 			return
 		}
 
+		if time.Since(pool.lastFundingTime) < 30*time.Second {
+			return
+		}
+
+		pool.lastFundingTime = time.Now()
+		if aggregationTimer != nil {
+			aggregationTimer.Stop()
+			aggregationTimer = nil
+		}
+
 		err := pool.resupplyChildWallets()
 		if err != nil {
-			pool.logger.Warnf("could not check & resupply chile wallets: %v", err)
+			pool.logger.Warnf("could not check & resupply child wallets: %v", err)
 			sleepTime = 1 * time.Minute
 		} else {
 			sleepTime = time.Duration(pool.config.RefillInterval) * time.Second
+		}
+		timer.Reset(sleepTime)
+	}
+
+	for {
+		select {
+		case <-pool.ctx.Done():
+			return
+
+		case <-timer.C:
+			// Regular interval check
+			resupplyWallets()
+
+		case <-pool.lowBalanceNotifyChan:
+			// Low balance notification received
+			if aggregationTimer == nil {
+				// First notification, start aggregation timer
+				aggregationTimer = time.AfterFunc(30*time.Second, func() {
+					select {
+					case aggregationChan <- struct{}{}:
+					default:
+					}
+				})
+			}
+			// Drain any additional notifications to avoid blocking
+		drainloop:
+			for {
+				select {
+				case <-pool.lowBalanceNotifyChan:
+				default:
+					break drainloop
+				}
+			}
+
+		case <-aggregationChan:
+			// Aggregation period ended, trigger funding
+			resupplyWallets()
 		}
 	}
 }
@@ -846,7 +916,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		}
 
 		for _, receipt := range receipts {
-			if receipt.Status == types.ReceiptStatusSuccessful {
+			if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
 				batch, ok := batchTxMap[receipt.TxHash]
 				if ok {
 					for _, req := range batch {

@@ -3,13 +3,16 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ethpandaops/spamoor/scenarios"
+	"github.com/ethpandaops/spamoor/utils"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -41,10 +44,10 @@ type SpammerDetails struct {
 	Status      int    `json:"status"`
 }
 
-// Response represents a standard API response envelope
-type Response struct {
-	Data  interface{} `json:"data,omitempty"`
-	Error string      `json:"error,omitempty"`
+// VersionResponse represents version information
+type VersionResponse struct {
+	Version string `json:"version"`
+	Release string `json:"release"`
 }
 
 type ScenarioEntries struct {
@@ -52,15 +55,54 @@ type ScenarioEntries struct {
 	Description string `json:"description"`
 }
 
+// SpammerLibraryEntry represents a spammer config from the library
+type SpammerLibraryEntry struct {
+	File         string   `json:"file"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Tags         []string `json:"tags"`
+	SpammerCount int      `json:"spammer_count"`
+	Scenarios    []string `json:"scenarios"`
+	MinVersion   string   `json:"min_version,omitempty"`
+}
+
+// SpammerLibraryIndex represents the index of all available configs
+type SpammerLibraryIndex struct {
+	Generated time.Time             `json:"generated"`
+	Configs   []SpammerLibraryEntry `json:"configs"`
+	CachedAt  time.Time             `json:"cached_at"`
+	BaseURL   string                `json:"base_url"`
+}
+
+// GitHubFile represents a file from GitHub API
+type GitHubFile struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Sha         string `json:"sha"`
+	Size        int    `json:"size"`
+	URL         string `json:"url"`
+	HTMLURL     string `json:"html_url"`
+	GitURL      string `json:"git_url"`
+	DownloadURL string `json:"download_url"`
+	Type        string `json:"type"`
+}
+
+// Library cache structure
+var (
+	libraryCache      *SpammerLibraryIndex
+	libraryCacheMutex sync.RWMutex
+	cacheExpiry       = 10 * time.Minute
+)
+
 // GetScenarios godoc
 // @Id getScenarios
 // @Summary Get all scenarios
 // @Tags Scenario
 // @Description Returns a list of all scenarios
 // @Produce json
-// @Success 200 {object} Response{data=[]ScenarioEntries} "Success"
-// @Failure 400 {object} Response "Failure"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 {array} ScenarioEntries "Success"
+// @Failure 400 {string} string "Failure"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/scenarios [get]
 func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
 	scenarioNames := scenarios.GetScenarioNames()
@@ -76,6 +118,24 @@ func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(entries)
 }
 
+// GetVersion godoc
+// @Id getVersion
+// @Summary Get spamoor version
+// @Tags Version
+// @Description Returns the current spamoor version information
+// @Produce json
+// @Success 200 {object} VersionResponse "Success"
+// @Router /api/version [get]
+func (ah *APIHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
+	versionInfo := VersionResponse{
+		Version: utils.BuildVersion,
+		Release: utils.BuildRelease,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(versionInfo)
+}
+
 // GetScenarioConfig godoc
 // @Id getScenarioConfig
 // @Summary Get scenario configuration
@@ -84,8 +144,8 @@ func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
 // @Produce text/plain
 // @Param name path string true "Scenario name"
 // @Success 200 {string} string "YAML configuration"
-// @Failure 404 {object} Response "Scenario not found"
-// @Failure 500 {object} Response "Server Error"
+// @Failure 404 {string} string "Scenario not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/scenarios/{name}/config [get]
 func (ah *APIHandler) GetScenarioConfig(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -130,7 +190,7 @@ type SpammerListEntry struct {
 // @Tags Spammer
 // @Description Returns a list of all configured spammers
 // @Produce json
-// @Success 200 {object} Response{data=[]SpammerListEntry} "Success"
+// @Success 200 {array} SpammerListEntry "Success"
 // @Router /api/spammers [get]
 func (ah *APIHandler) GetSpammerList(w http.ResponseWriter, r *http.Request) {
 	spammers := ah.daemon.GetAllSpammers()
@@ -159,9 +219,9 @@ func (ah *APIHandler) GetSpammerList(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Produce json
 // @Param request body CreateSpammerRequest true "Spammer configuration"
-// @Success 200 {object} Response{data=int64} "Spammer ID"
-// @Failure 400 {object} Response "Invalid request"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 {object} int64 "Spammer ID"
+// @Failure 400 {string} string "Invalid request"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer [post]
 func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -193,10 +253,10 @@ func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
 // @Tags Spammer
 // @Description Starts a specific spammer
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/start [post]
 func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -229,10 +289,10 @@ func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Param id path int true "Spammer ID"
 // @Param request body UpdateSpammerRequest true "Updated configuration"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid request"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid request"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [put]
 func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -274,10 +334,10 @@ func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
 // @Tags Spammer
 // @Description Pauses a running spammer
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/pause [post]
 func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -308,10 +368,10 @@ func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
 // @Tags Spammer
 // @Description Deletes a spammer and stops it if running
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [delete]
 func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -336,10 +396,10 @@ func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 // @Tags Spammer
 // @Description Reclaims funds from a spammer's wallet pool back to the root wallet
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/reclaim [post]
 func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -365,9 +425,9 @@ func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
 // @Description Returns detailed information about a specific spammer
 // @Produce json
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response{data=SpammerDetails} "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
+// @Success 200 {object} SpammerDetails "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
 // @Router /api/spammer/{id} [get]
 func (ah *APIHandler) GetSpammerDetails(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -417,9 +477,9 @@ type LogEntry struct {
 // @Description Returns the most recent logs for a specific spammer
 // @Produce json
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response{data=[]LogEntry} "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
+// @Success 200 {array} LogEntry "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
 // @Router /api/spammer/{id}/logs [get]
 func (ah *APIHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -467,9 +527,9 @@ func (ah *APIHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Param since query string false "Timestamp to start from (RFC3339Nano)"
 // @Success 200 {string} string "SSE stream of log entries"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Streaming unsupported"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Streaming unsupported"
 // @Router /api/spammer/{id}/logs/stream [get]
 func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -579,7 +639,7 @@ type UpdateClientNameRequest struct {
 // @Tags Client
 // @Description Returns a list of all clients with their details
 // @Produce json
-// @Success 200 {object} Response{data=[]ClientEntry} "Success"
+// @Success 200 {array} ClientEntry "Success"
 // @Router /api/clients [get]
 func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -622,9 +682,9 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Param index path int true "Client index"
 // @Param request body UpdateClientGroupRequest true "New group name(s)"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid client index"
-// @Failure 404 {object} Response "Client not found"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid client index"
+// @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/group [put]
 func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -669,9 +729,9 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 // @Accept json
 // @Param index path int true "Client index"
 // @Param request body UpdateClientEnabledRequest true "New enabled state"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid client index"
-// @Failure 404 {object} Response "Client not found"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid client index"
+// @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/enabled [put]
 func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -707,9 +767,9 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 // @Accept json
 // @Param index path int true "Client index"
 // @Param request body UpdateClientNameRequest true "New name override"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid client index"
-// @Failure 404 {object} Response "Client not found"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid client index"
+// @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/name [put]
 func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -756,8 +816,8 @@ type ImportSpammersRequest struct {
 // @Produce text/plain
 // @Param request body ExportSpammersRequest false "Spammer IDs to export (optional)"
 // @Success 200 {string} string "YAML configuration"
-// @Failure 400 {object} Response "Invalid request"
-// @Failure 500 {object} Response "Server Error"
+// @Failure 400 {string} string "Invalid request"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammers/export [post]
 func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
 	var req ExportSpammersRequest
@@ -785,9 +845,9 @@ func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Produce json
 // @Param request body ImportSpammersRequest true "Import configuration"
-// @Success 200 {object} Response{data=daemon.ImportResult} "Success"
-// @Failure 400 {object} Response "Invalid request"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 {object} daemon.ImportResult "Success"
+// @Failure 400 {string} string "Invalid request"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammers/import [post]
 func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
 	var req ImportSpammersRequest
@@ -808,5 +868,105 @@ func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(Response{Data: result})
+	json.NewEncoder(w).Encode(result)
+}
+
+// fetchFileContent fetches file content from a URL
+func fetchFileContent(downloadURL string) (string, error) {
+	resp, err := http.Get(downloadURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch file content: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch file, status: %d", resp.StatusCode)
+	}
+
+	var content []byte
+	if resp.ContentLength > 0 {
+		content = make([]byte, resp.ContentLength)
+		_, err = resp.Body.Read(content)
+	} else {
+		// Read all content if ContentLength is unknown
+		content, err = io.ReadAll(resp.Body)
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("failed to read file content: %w", err)
+	}
+
+	return string(content), nil
+}
+
+// refreshLibraryCache fetches and caches the spammer library index
+func refreshLibraryCache() error {
+	// Fetch the _index.yaml file directly
+	indexURL := "https://raw.githubusercontent.com/ethpandaops/spamoor/master/spammer-configs/_index.yaml"
+	content, err := fetchFileContent(indexURL)
+	if err != nil {
+		return fmt.Errorf("failed to fetch index file: %w", err)
+	}
+
+	// Parse the index YAML
+	var index SpammerLibraryIndex
+	if err := yaml.Unmarshal([]byte(content), &index); err != nil {
+		return fmt.Errorf("failed to parse index file: %w", err)
+	}
+
+	// Set the cached at time and base URL
+	index.CachedAt = time.Now()
+	index.BaseURL = "https://raw.githubusercontent.com/ethpandaops/spamoor/master/spammer-configs/"
+
+	libraryCacheMutex.Lock()
+	libraryCache = &index
+	libraryCacheMutex.Unlock()
+
+	return nil
+}
+
+// getLibraryIndex returns the cached library index, refreshing if needed
+func getLibraryIndex() (*SpammerLibraryIndex, error) {
+	libraryCacheMutex.RLock()
+	if libraryCache != nil && time.Since(libraryCache.CachedAt) < cacheExpiry {
+		defer libraryCacheMutex.RUnlock()
+		return libraryCache, nil
+	}
+	libraryCacheMutex.RUnlock()
+
+	// Cache is expired or doesn't exist, refresh it
+	if err := refreshLibraryCache(); err != nil {
+		// If refresh fails, return cached data if available
+		libraryCacheMutex.RLock()
+		defer libraryCacheMutex.RUnlock()
+		if libraryCache != nil {
+			logrus.Warnf("Failed to refresh library cache, using cached data: %v", err)
+			return libraryCache, nil
+		}
+		return nil, err
+	}
+
+	libraryCacheMutex.RLock()
+	defer libraryCacheMutex.RUnlock()
+	return libraryCache, nil
+}
+
+// GetSpammerLibraryIndex godoc
+// @Id getSpammerLibraryIndex
+// @Summary Get spammer library index
+// @Tags SpammerLibrary
+// @Description Returns the index of available spammer configurations from GitHub
+// @Produce json
+// @Success 200 {object} SpammerLibraryIndex "Success"
+// @Failure 500 {string} string "Server Error"
+// @Router /api/spammer-library/index [get]
+func (ah *APIHandler) GetSpammerLibraryIndex(w http.ResponseWriter, r *http.Request) {
+	index, err := getLibraryIndex()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch library index: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(index)
 }
