@@ -385,7 +385,7 @@ func (pool *WalletPool) PrepareWallets() error {
 
 	seed := pool.config.WalletSeed
 
-	if pool.config.WalletCount == 0 && len(pool.wellKnownWallets) == 0 {
+	if pool.config.WalletCount == 0 && len(pool.wellKnownWallets) == 0 && len(pool.externalWallets) == 0 {
 		pool.childWallets = make([]*Wallet, 0)
 	} else {
 		var client *Client
