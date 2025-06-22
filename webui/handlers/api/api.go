@@ -90,11 +90,11 @@ type GitHubFile struct {
 
 // GraphsDashboardResponse represents the main dashboard graphs data
 type GraphsDashboardResponse struct {
-	TimeRange  TimeRange              `json:"timeRange"`
-	Spammers   []SpammerMetricsData   `json:"spammers"`
-	Totals     TotalMetricsData       `json:"totals"`
-	Others     OthersMetricsData      `json:"others"`
-	DataPoints []GraphsDataPoint      `json:"dataPoints"`
+	TimeRange  TimeRange            `json:"timeRange"`
+	Spammers   []SpammerMetricsData `json:"spammers"`
+	Totals     TotalMetricsData     `json:"totals"`
+	Others     OthersMetricsData    `json:"others"`
+	DataPoints []GraphsDataPoint    `json:"dataPoints"`
 }
 
 // TimeRange represents the time range of collected metrics
@@ -127,13 +127,13 @@ type OthersMetricsData struct {
 
 // GraphsDataPoint represents a single time-series data point for the graphs
 type GraphsDataPoint struct {
-	Timestamp        time.Time                        `json:"timestamp"`
-	StartBlockNumber uint64                           `json:"startBlockNumber"`
-	EndBlockNumber   uint64                           `json:"endBlockNumber"`
-	BlockCount       uint64                           `json:"blockCount"`
-	TotalGasUsed     uint64                           `json:"totalGasUsed"`
-	OthersGasUsed    uint64                           `json:"othersGasUsed"`
-	SpammerData      map[string]*SpammerBlockData     `json:"spammerData"` // spammerID -> detailed data
+	Timestamp        time.Time                    `json:"timestamp"`
+	StartBlockNumber uint64                       `json:"startBlockNumber"`
+	EndBlockNumber   uint64                       `json:"endBlockNumber"`
+	BlockCount       uint64                       `json:"blockCount"`
+	TotalGasUsed     uint64                       `json:"totalGasUsed"`
+	OthersGasUsed    uint64                       `json:"othersGasUsed"`
+	SpammerData      map[string]*SpammerBlockData `json:"spammerData"` // spammerID -> detailed data
 }
 
 // SpammerBlockData represents a spammer's data within a time period
@@ -145,10 +145,10 @@ type SpammerBlockData struct {
 
 // SpammerTimeSeriesResponse represents time-series data for a specific spammer
 type SpammerTimeSeriesResponse struct {
-	SpammerID   uint64                     `json:"spammerId"`
-	SpammerName string                     `json:"spammerName"`
-	TimeRange   TimeRange                  `json:"timeRange"`
-	DataPoints  []SpammerTimeSeriesPoint   `json:"dataPoints"`
+	SpammerID   uint64                   `json:"spammerId"`
+	SpammerName string                   `json:"spammerName"`
+	TimeRange   TimeRange                `json:"timeRange"`
+	DataPoints  []SpammerTimeSeriesPoint `json:"dataPoints"`
 }
 
 // SpammerTimeSeriesPoint represents a single time-series point for a spammer
@@ -1060,29 +1060,29 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 
 	// Get time range from short window (30 minutes)
 	startTime, endTime := shortWindow.GetTimeRange()
-	
+
 	// Get current spammer snapshots
 	spammerSnapshots := shortWindow.GetSpammerSnapshots()
 	spammers := make([]SpammerMetricsData, 0, len(spammerSnapshots))
-	
+
 	totalPending := uint64(0)
 	totalConfirmed := uint64(0)
-	
+
 	// Calculate gas used in window from data points
 	dataPoints := shortWindow.GetDataPoints()
 	spammerGasInWindow := make(map[uint64]uint64)
-	
+
 	for _, point := range dataPoints {
 		for spammerID, spammerData := range point.SpammerGasData {
 			spammerGasInWindow[spammerID] += spammerData.GasUsed
 		}
 	}
-	
+
 	totalGasUsed := uint64(0)
 	for spammerID, snapshot := range spammerSnapshots {
 		spammerName := ah.daemon.GetSpammerName(spammerID)
 		gasInWindow := spammerGasInWindow[spammerID]
-		
+
 		spammers = append(spammers, SpammerMetricsData{
 			ID:               spammerID,
 			Name:             spammerName,
@@ -1091,16 +1091,16 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 			GasUsedInWindow:  gasInWindow,
 			LastUpdate:       snapshot.LastUpdate.Format(time.RFC3339),
 		})
-		
+
 		totalPending += snapshot.PendingTxCount
 		totalConfirmed += snapshot.TotalConfirmedTx
 		totalGasUsed += gasInWindow
 	}
-	
+
 	// Convert data points to API format
 	chartDataPoints := make([]GraphsDataPoint, len(dataPoints))
 	totalOthersGas := uint64(0)
-	
+
 	for i, point := range dataPoints {
 		// Convert spammer data
 		spammerData := make(map[string]*SpammerBlockData)
@@ -1111,7 +1111,7 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 				PendingTxCount:   data.PendingTxCount,
 			}
 		}
-		
+
 		chartDataPoints[i] = GraphsDataPoint{
 			Timestamp:        point.Timestamp,
 			StartBlockNumber: point.StartBlockNumber,
@@ -1121,10 +1121,10 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 			OthersGasUsed:    point.OthersGasUsed,
 			SpammerData:      spammerData,
 		}
-		
+
 		totalOthersGas += point.OthersGasUsed
 	}
-	
+
 	response := GraphsDashboardResponse{
 		TimeRange: TimeRange{
 			Start: startTime,
@@ -1159,33 +1159,33 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 func (ah *APIHandler) GetSpammerTimeSeries(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	spammerIDStr := vars["id"]
-	
+
 	spammerID, err := strconv.ParseUint(spammerIDStr, 10, 64)
 	if err != nil {
 		http.Error(w, "Invalid spammer ID", http.StatusBadRequest)
 		return
 	}
-	
+
 	metricsData := ah.daemon.GetShortWindowMetrics()
 	if metricsData == nil {
 		http.Error(w, "Graphs data collection not available", http.StatusServiceUnavailable)
 		return
 	}
-	
+
 	// Check if spammer exists
 	spammerSnapshots := metricsData.GetSpammerSnapshots()
 	if _, exists := spammerSnapshots[spammerID]; !exists {
 		http.Error(w, "Spammer not found", http.StatusNotFound)
 		return
 	}
-	
+
 	spammerName := ah.daemon.GetSpammerName(spammerID)
 	startTime, endTime := metricsData.GetTimeRange()
-	
+
 	// Build time series data from data points
 	dataPoints := metricsData.GetDataPoints()
 	spammerDataPoints := make([]SpammerTimeSeriesPoint, 0, len(dataPoints))
-	
+
 	for _, point := range dataPoints {
 		if spammerData, exists := point.SpammerGasData[spammerID]; exists {
 			spammerDataPoints = append(spammerDataPoints, SpammerTimeSeriesPoint{
@@ -1196,7 +1196,7 @@ func (ah *APIHandler) GetSpammerTimeSeries(w http.ResponseWriter, r *http.Reques
 			})
 		}
 	}
-	
+
 	response := SpammerTimeSeriesResponse{
 		SpammerID:   spammerID,
 		SpammerName: spammerName,
@@ -1224,26 +1224,26 @@ func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("X-Accel-Buffering", "no")
-	
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Send initial data
 	shortWindow := ah.daemon.GetShortWindowMetrics()
 	if shortWindow != nil {
 		ah.sendCurrentSpammerData(w, flusher, shortWindow)
 	}
-	
+
 	// Set up a ticker to send updates every 5 seconds
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	
+
 	// Context for cleanup
 	ctx := r.Context()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -1253,7 +1253,7 @@ func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
 			if shortWindow == nil {
 				continue
 			}
-			
+
 			ah.sendCurrentSpammerData(w, flusher, shortWindow)
 		}
 	}
@@ -1262,7 +1262,6 @@ func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
 // SSE state tracking
 type SSEState struct {
 	lastDataPointCount int
-	lastUpdateTime     time.Time
 	lastSpammerHashes  map[uint64]string
 }
 
@@ -1274,10 +1273,10 @@ var sseState = &SSEState{
 func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http.Flusher, shortWindow *daemon.MultiGranularityMetrics) {
 	spammerSnapshots := shortWindow.GetSpammerSnapshots()
 	dataPoints := shortWindow.GetDataPoints()
-	
+
 	// Check if there are new data points
 	hasNewDataPoints := len(dataPoints) > sseState.lastDataPointCount
-	
+
 	// Calculate gas usage from data points
 	spammerGasInWindow := make(map[uint64]uint64)
 	for _, point := range dataPoints {
@@ -1285,40 +1284,40 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 			spammerGasInWindow[spammerID] += spammerData.GasUsed
 		}
 	}
-	
+
 	// Check if spammer data has changed
 	hasSpammerChanges := false
 	newHashes := make(map[uint64]string)
-	
+
 	for spammerID, snapshot := range spammerSnapshots {
 		// Create a simple hash of the spammer state
 		gasInWindow := spammerGasInWindow[spammerID]
-		currentHash := fmt.Sprintf("%d-%d-%d-%s", 
-			snapshot.PendingTxCount, 
-			snapshot.TotalConfirmedTx, 
-			gasInWindow, 
+		currentHash := fmt.Sprintf("%d-%d-%d-%s",
+			snapshot.PendingTxCount,
+			snapshot.TotalConfirmedTx,
+			gasInWindow,
 			snapshot.LastUpdate.Format(time.RFC3339))
-		
+
 		newHashes[spammerID] = currentHash
-		
+
 		if oldHash, exists := sseState.lastSpammerHashes[spammerID]; !exists || oldHash != currentHash {
 			hasSpammerChanges = true
 		}
 	}
-	
+
 	// Only send data if there are changes
 	if !hasNewDataPoints && !hasSpammerChanges {
 		return
 	}
-	
+
 	// Build response data
 	data := make(map[string]interface{})
-	
+
 	// Add new data points if any
 	if hasNewDataPoints {
 		newDataPoints := dataPoints[sseState.lastDataPointCount:]
 		convertedDataPoints := make([]GraphsDataPoint, len(newDataPoints))
-		
+
 		for i, point := range newDataPoints {
 			convertedDataPoints[i] = GraphsDataPoint{
 				Timestamp:        point.Timestamp,
@@ -1329,7 +1328,7 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 				OthersGasUsed:    point.OthersGasUsed,
 				SpammerData:      make(map[string]*SpammerBlockData),
 			}
-			
+
 			// Convert spammer data with string keys
 			for spammerID, spammerData := range point.SpammerGasData {
 				convertedDataPoints[i].SpammerData[fmt.Sprintf("%d", spammerID)] = &SpammerBlockData{
@@ -1339,18 +1338,20 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 				}
 			}
 		}
-		
+
 		data["newDataPoints"] = convertedDataPoints
 		sseState.lastDataPointCount = len(dataPoints)
 	}
-	
-	// Add spammer updates
+
+	// Add spammer updates and detect new spammers
 	if hasSpammerChanges {
+		newSpammers := make([]map[string]interface{}, 0)
+
 		for spammerID, snapshot := range spammerSnapshots {
 			spammerName := ah.daemon.GetSpammerName(spammerID)
 			gasInWindow := spammerGasInWindow[spammerID]
-			
-			data[fmt.Sprintf("spammer_%d", spammerID)] = map[string]interface{}{
+
+			spammerData := map[string]interface{}{
 				"id":               spammerID,
 				"name":             spammerName,
 				"pendingTxCount":   snapshot.PendingTxCount,
@@ -1358,17 +1359,29 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 				"gasUsedInWindow":  gasInWindow,
 				"lastUpdate":       snapshot.LastUpdate.Format(time.RFC3339),
 			}
+
+			// Check if this is a new spammer
+			if _, exists := sseState.lastSpammerHashes[spammerID]; !exists {
+				newSpammers = append(newSpammers, spammerData)
+			} else {
+				data[fmt.Sprintf("spammer_%d", spammerID)] = spammerData
+			}
 		}
-		
+
+		// Include new spammers in the response
+		if len(newSpammers) > 0 {
+			data["newSpammers"] = newSpammers
+		}
+
 		sseState.lastSpammerHashes = newHashes
 	}
-	
+
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		logrus.Errorf("Failed to marshal graphs data: %v", err)
 		return
 	}
-	
+
 	fmt.Fprintf(w, "data: %s\n\n", jsonData)
 	flusher.Flush()
 }

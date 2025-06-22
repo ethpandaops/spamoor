@@ -300,6 +300,17 @@ function initializeCharts() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: {
+        duration: 750,
+        easing: 'easeInOutQuart'
+      },
+      transitions: {
+        active: {
+          animation: {
+            duration: 400
+          }
+        }
+      },
       scales: {
         x: {
           stacked: true,
@@ -378,6 +389,17 @@ function initializeCharts() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: {
+        duration: 750,
+        easing: 'easeInOutQuart'
+      },
+      transitions: {
+        active: {
+          animation: {
+            duration: 400
+          }
+        }
+      },
       scales: {
         x: {
           title: {
@@ -495,7 +517,7 @@ function updateGasConsumptionChart() {
   gasConsumptionChart.config.type = isStacked ? 'bar' : 'line';
   gasConsumptionChart.options.scales.x.stacked = isStacked;
   gasConsumptionChart.options.scales.y.stacked = isStacked;
-  gasConsumptionChart.update();
+  gasConsumptionChart.update('none');
 }
 
 function updateGasDistributionChart() {
@@ -524,7 +546,7 @@ function updateGasDistributionChart() {
   gasDistributionChart.data.labels = labels;
   gasDistributionChart.data.datasets[0].data = data;
   gasDistributionChart.data.datasets[0].backgroundColor = colors;
-  gasDistributionChart.update();
+  gasDistributionChart.update('none');
 }
 
 function updateTransactionCountChart() {
@@ -571,7 +593,7 @@ function updateTransactionCountChart() {
   
   transactionCountChart.data.labels = labels;
   transactionCountChart.data.datasets = datasets;
-  transactionCountChart.update();
+  transactionCountChart.update('none');
 }
 
 function updateSpammerTable() {
@@ -659,7 +681,9 @@ function setupRealTimeUpdates() {
 function updateRealTimeData(data) {
   if (!metricsData || !metricsData.spammers) return;
   
-  let updated = false;
+  let hasNewDataPoints = false;
+  let hasSpammerUpdates = false;
+  let hasNewSpammers = false;
   
   if (data.newDataPoints && Array.isArray(data.newDataPoints)) {
     metricsData.dataPoints.push(...data.newDataPoints);
@@ -669,7 +693,25 @@ function updateRealTimeData(data) {
     }
     
     console.log(`Added ${data.newDataPoints.length} new data points, total: ${metricsData.dataPoints.length}`);
-    updated = true;
+    hasNewDataPoints = true;
+  }
+  
+  if (data.newSpammers && Array.isArray(data.newSpammers)) {
+    data.newSpammers.forEach(newSpammerData => {
+      const existingSpammer = metricsData.spammers.find(s => s.id === newSpammerData.id);
+      if (!existingSpammer) {
+        metricsData.spammers.push({
+          id: newSpammerData.id,
+          name: newSpammerData.name,
+          pendingTxCount: newSpammerData.pendingTxCount,
+          confirmedTxCount: newSpammerData.confirmedTxCount,
+          gasUsedInWindow: newSpammerData.gasUsedInWindow,
+          lastUpdate: newSpammerData.lastUpdate
+        });
+        hasNewSpammers = true;
+        console.log(`Added new spammer: ${newSpammerData.name} (ID: ${newSpammerData.id})`);
+      }
+    });
   }
   
   Object.keys(data).forEach(key => {
@@ -682,12 +724,12 @@ function updateRealTimeData(data) {
         spammer.confirmedTxCount = spammerData.confirmedTxCount;
         spammer.gasUsedInWindow = spammerData.gasUsedInWindow;
         spammer.lastUpdate = spammerData.lastUpdate;
-        updated = true;
+        hasSpammerUpdates = true;
       }
     }
   });
   
-  if (updated) {
+  if (hasNewDataPoints || hasSpammerUpdates || hasNewSpammers) {
     metricsData.totals.pendingTxCount = metricsData.spammers.reduce((sum, s) => sum + s.pendingTxCount, 0);
     metricsData.totals.confirmedTxCount = metricsData.spammers.reduce((sum, s) => sum + s.confirmedTxCount, 0);
     metricsData.totals.gasUsedInWindow = metricsData.spammers.reduce((sum, s) => sum + s.gasUsedInWindow, 0);
@@ -696,8 +738,125 @@ function updateRealTimeData(data) {
       metricsData.totals.gasUsedInWindow = metricsData.dataPoints.reduce((sum, point) => sum + point.totalGasUsed, 0);
     }
     
-    updateDashboard();
+    updateDashboardSmooth(hasNewDataPoints || hasNewSpammers);
+    
+    if (hasNewSpammers) {
+      showConnectionStatus(`${data.newSpammers.length} new spammer(s) added`, 'success');
+    }
   }
+}
+
+function updateDashboardSmooth(hasNewDataPoints) {
+  if (!metricsData) return;
+  
+  document.getElementById('totalConfirmed').textContent = formatNumber(metricsData.totals.confirmedTxCount);
+  document.getElementById('totalPending').textContent = formatNumber(metricsData.totals.pendingTxCount);
+  document.getElementById('totalGasUsed').textContent = formatNumber(metricsData.totals.gasUsedInWindow);
+  document.getElementById('activeSpammers').textContent = metricsData.spammers.length;
+  
+  updateGasConsumptionChartSmooth(hasNewDataPoints);
+  updateGasDistributionChart();
+  updateTransactionCountChartSmooth(hasNewDataPoints);
+  
+  updateSpammerTable();
+  
+  document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+function updateGasConsumptionChartSmooth(hasNewDataPoints) {
+  if (!metricsData || !metricsData.dataPoints) return;
+  
+  const chartType = document.querySelector('input[name="gasChartType"]:checked').value;
+  const isStacked = chartType === 'stacked';
+  
+  const labels = metricsData.dataPoints.map(point => 
+    new Date(point.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+  );
+  
+  const datasets = [];
+  
+  datasets.push({
+    label: 'Others',
+    data: metricsData.dataPoints.map(point => point.othersGasUsed),
+    backgroundColor: '#6c757d',
+    borderColor: '#6c757d',
+    borderWidth: isStacked ? 0 : 2,
+    fill: isStacked
+  });
+  
+  metricsData.spammers.forEach((spammer, index) => {
+    const spammerIdStr = spammer.id.toString();
+    const spammerData = metricsData.dataPoints.map(point => 
+      point.spammerData && point.spammerData[spammerIdStr] 
+        ? point.spammerData[spammerIdStr].gasUsed 
+        : 0
+    );
+    
+    datasets.push({
+      label: spammer.name,
+      data: spammerData,
+      backgroundColor: chartColors[index % chartColors.length],
+      borderColor: chartColors[index % chartColors.length],
+      borderWidth: isStacked ? 0 : 2,
+      fill: isStacked
+    });
+  });
+  
+  gasConsumptionChart.data.labels = labels;
+  gasConsumptionChart.data.datasets = datasets;
+  gasConsumptionChart.config.type = isStacked ? 'bar' : 'line';
+  gasConsumptionChart.options.scales.x.stacked = isStacked;
+  gasConsumptionChart.options.scales.y.stacked = isStacked;
+  
+  gasConsumptionChart.update(hasNewDataPoints ? 'active' : 'none');
+}
+
+function updateTransactionCountChartSmooth(hasNewDataPoints) {
+  if (!metricsData || !metricsData.dataPoints) return;
+  
+  const labels = metricsData.dataPoints.map(point => 
+    new Date(point.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+  );
+  
+  const datasets = [];
+  
+  metricsData.spammers.forEach((spammer, index) => {
+    const spammerIdStr = spammer.id.toString();
+    
+    const confirmedData = metricsData.dataPoints.map(point => 
+      point.spammerData && point.spammerData[spammerIdStr] 
+        ? point.spammerData[spammerIdStr].confirmedTxCount 
+        : 0
+    );
+    
+    const pendingData = metricsData.dataPoints.map(() => spammer.pendingTxCount);
+    
+    datasets.push({
+      label: spammer.name + ' (Confirmed)',
+      data: confirmedData,
+      backgroundColor: chartColors[index % chartColors.length],
+      borderColor: chartColors[index % chartColors.length],
+      borderWidth: 2,
+      fill: false,
+      tension: 0.1
+    });
+    
+    datasets.push({
+      label: spammer.name + ' (Pending)',
+      data: pendingData,
+      backgroundColor: chartColors[index % chartColors.length] + '40',
+      borderColor: chartColors[index % chartColors.length],
+      borderWidth: 2,
+      borderDash: [5, 5],
+      fill: false,
+      tension: 0.1
+    });
+  });
+  
+  transactionCountChart.data.labels = labels;
+  transactionCountChart.data.datasets = datasets;
+  
+  transactionCountChart.update(hasNewDataPoints ? 'active' : 'none');
 }
 
 function refreshDashboard() {
