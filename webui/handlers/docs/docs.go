@@ -1002,7 +1002,7 @@ const docTemplate = `{
         "api.GraphsDashboardResponse": {
             "type": "object",
             "properties": {
-                "dataPoints": {
+                "data": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/api.GraphsDataPoint"
@@ -1011,14 +1011,14 @@ const docTemplate = `{
                 "others": {
                     "$ref": "#/definitions/api.OthersMetricsData"
                 },
+                "range": {
+                    "$ref": "#/definitions/api.TimeRange"
+                },
                 "spammers": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/api.SpammerMetricsData"
                     }
-                },
-                "timeRange": {
-                    "$ref": "#/definitions/api.TimeRange"
                 },
                 "totals": {
                     "$ref": "#/definitions/api.TotalMetricsData"
@@ -1028,30 +1028,30 @@ const docTemplate = `{
         "api.GraphsDataPoint": {
             "type": "object",
             "properties": {
-                "blockCount": {
+                "blocks": {
                     "type": "integer"
                 },
-                "endBlockNumber": {
+                "endBlock": {
                     "type": "integer"
                 },
-                "othersGasUsed": {
+                "othersGas": {
                     "type": "integer"
                 },
-                "spammerData": {
+                "spammers": {
                     "description": "spammerID -\u003e detailed data",
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/api.SpammerBlockData"
                     }
                 },
-                "startBlockNumber": {
+                "startBlock": {
                     "type": "integer"
                 },
-                "timestamp": {
+                "totalGas": {
+                    "type": "integer"
+                },
+                "ts": {
                     "type": "string"
-                },
-                "totalGasUsed": {
-                    "type": "integer"
                 }
             }
         },
@@ -1087,7 +1087,7 @@ const docTemplate = `{
         "api.OthersMetricsData": {
             "type": "object",
             "properties": {
-                "gasUsedInWindow": {
+                "gasUsed": {
                     "type": "integer"
                 }
             }
@@ -1106,13 +1106,16 @@ const docTemplate = `{
         "api.SpammerBlockData": {
             "type": "object",
             "properties": {
-                "confirmedTxCount": {
+                "confirmed": {
                     "type": "integer"
                 },
-                "gasUsed": {
+                "gas": {
                     "type": "integer"
                 },
-                "pendingTxCount": {
+                "pending": {
+                    "type": "integer"
+                },
+                "submitted": {
                     "type": "integer"
                 }
             }
@@ -1219,23 +1222,26 @@ const docTemplate = `{
         "api.SpammerMetricsData": {
             "type": "object",
             "properties": {
-                "confirmedTxCount": {
+                "confirmed": {
                     "type": "integer"
                 },
-                "gasUsedInWindow": {
+                "gasUsed": {
                     "type": "integer"
                 },
                 "id": {
                     "type": "integer"
                 },
-                "lastUpdate": {
-                    "type": "string"
-                },
                 "name": {
                     "type": "string"
                 },
-                "pendingTxCount": {
+                "pending": {
                     "type": "integer"
+                },
+                "submitted": {
+                    "type": "integer"
+                },
+                "updated": {
+                    "type": "string"
                 }
             }
         },
@@ -1293,13 +1299,16 @@ const docTemplate = `{
         "api.TotalMetricsData": {
             "type": "object",
             "properties": {
-                "confirmedTxCount": {
+                "confirmed": {
                     "type": "integer"
                 },
-                "gasUsedInWindow": {
+                "gasUsed": {
                     "type": "integer"
                 },
-                "pendingTxCount": {
+                "pending": {
+                    "type": "integer"
+                },
+                "submitted": {
                     "type": "integer"
                 }
             }

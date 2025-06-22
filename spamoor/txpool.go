@@ -817,6 +817,9 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 		return err
 	}
 
+	// Increment wallet's submitted transaction counter
+	wallet.IncrementSubmittedTxCount()
+
 	// Start reliable rebroadcast if enabled
 	if options.Rebroadcast {
 		pool.scheduleRebroadcast(confirmCtx, wallet, tx, options)

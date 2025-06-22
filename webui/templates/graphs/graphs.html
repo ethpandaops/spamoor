@@ -551,9 +551,9 @@ async function loadDashboard() {
     
     console.log('Loaded metrics data:', {
       spammers: metricsData.spammers.length,
-      dataPoints: metricsData.dataPoints.length,
-      totalGasUsed: metricsData.totals.gasUsedInWindow,
-      sampleDataPoint: metricsData.dataPoints[0]
+      dataPoints: metricsData.data.length,
+      totalGasUsed: metricsData.totals.gasUsed,
+      sampleDataPoint: metricsData.data[0]
     });
     
     updateDashboard();
@@ -568,9 +568,9 @@ async function loadDashboard() {
 function updateDashboard() {
   if (!metricsData) return;
   
-  document.getElementById('totalConfirmed').textContent = formatNumber(metricsData.totals.confirmedTxCount);
-  document.getElementById('totalPending').textContent = formatNumber(metricsData.totals.pendingTxCount);
-  document.getElementById('totalGasUsed').textContent = formatNumber(metricsData.totals.gasUsedInWindow);
+  document.getElementById('totalConfirmed').textContent = formatNumber(metricsData.totals.confirmed);
+  document.getElementById('totalPending').textContent = formatNumber(metricsData.totals.pending);
+  document.getElementById('totalGasUsed').textContent = formatNumber(metricsData.totals.gasUsed);
   document.getElementById('activeSpammers').textContent = metricsData.spammers.length;
   
   updateGasConsumptionChart();
@@ -584,20 +584,20 @@ function updateDashboard() {
 }
 
 function updateGasConsumptionChart() {
-  if (!metricsData || !metricsData.dataPoints) return;
+  if (!metricsData || !metricsData.data) return;
   
   const chartType = document.querySelector('input[name="gasChartType"]:checked').value;
   const isStacked = chartType === 'stacked';
   
-  const labels = metricsData.dataPoints.map(point => 
-    `#${point.endBlockNumber}`
+  const labels = metricsData.data.map(point => 
+    `#${point.endBlock}`
   );
   
   const datasets = [];
   
   datasets.push({
     label: 'Others',
-    data: metricsData.dataPoints.map(point => point.othersGasUsed),
+    data: metricsData.data.map(point => point.othersGas),
     backgroundColor: '#6c757d',
     borderColor: '#6c757d',
     borderWidth: isStacked ? 0 : 2,
@@ -606,9 +606,9 @@ function updateGasConsumptionChart() {
   
   metricsData.spammers.forEach((spammer, index) => {
     const spammerIdStr = spammer.id.toString();
-    const spammerData = metricsData.dataPoints.map(point => 
-      point.spammerData && point.spammerData[spammerIdStr] 
-        ? point.spammerData[spammerIdStr].gasUsed 
+    const spammerData = metricsData.data.map(point => 
+      point.spammers && point.spammers[spammerIdStr] 
+        ? point.spammers[spammerIdStr].gas 
         : 0
     );
     
@@ -631,7 +631,7 @@ function updateGasConsumptionChart() {
 }
 
 function updateGasDistributionChart() {
-  if (!metricsData || !metricsData.dataPoints) return;
+  if (!metricsData || !metricsData.data) return;
   
   const selectedPeriod = parseInt(document.querySelector('input[name="gasDistributionPeriod"]:checked').value);
   
@@ -639,20 +639,20 @@ function updateGasDistributionChart() {
   const data = [];
   const colors = [];
   
-  const relevantDataPoints = metricsData.dataPoints.slice(-selectedPeriod);
+  const relevantDataPoints = metricsData.data.slice(-selectedPeriod);
   const spammerGasInPeriod = {};
   let totalGasInPeriod = 0;
   
   relevantDataPoints.forEach(point => {
-    totalGasInPeriod += point.totalGasUsed;
+    totalGasInPeriod += point.totalGas;
     
-    if (point.spammerData) {
-      Object.keys(point.spammerData).forEach(spammerIdStr => {
+    if (point.spammers) {
+      Object.keys(point.spammers).forEach(spammerIdStr => {
         const spammerID = parseInt(spammerIdStr);
         if (!spammerGasInPeriod[spammerID]) {
           spammerGasInPeriod[spammerID] = 0;
         }
-        spammerGasInPeriod[spammerID] += point.spammerData[spammerIdStr].gasUsed;
+        spammerGasInPeriod[spammerID] += point.spammers[spammerIdStr].gas;
       });
     }
   });
@@ -682,10 +682,10 @@ function updateGasDistributionChart() {
 }
 
 function updateTransactionSubmissionChart() {
-  if (!metricsData || !metricsData.dataPoints) return;
+  if (!metricsData || !metricsData.data) return;
   
-  const labels = metricsData.dataPoints.map(point => 
-    `#${point.endBlockNumber}`
+  const labels = metricsData.data.map(point => 
+    `#${point.endBlock}`
   );
   
   const datasets = [];
@@ -693,9 +693,9 @@ function updateTransactionSubmissionChart() {
   metricsData.spammers.forEach((spammer, index) => {
     const spammerIdStr = spammer.id.toString();
     
-    const confirmedData = metricsData.dataPoints.map(point => 
-      point.spammerData && point.spammerData[spammerIdStr] 
-        ? point.spammerData[spammerIdStr].confirmedTxCount 
+    const confirmedData = metricsData.data.map(point => 
+      point.spammers && point.spammers[spammerIdStr] 
+        ? point.spammers[spammerIdStr].confirmed 
         : 0
     );
     
@@ -709,11 +709,18 @@ function updateTransactionSubmissionChart() {
       tension: 0.1
     });
     
-    const submittedData = metricsData.dataPoints.map(point => {
-      const confirmed = point.spammerData && point.spammerData[spammerIdStr] 
-        ? point.spammerData[spammerIdStr].confirmedTxCount 
-        : 0;
-      return confirmed + spammer.pendingTxCount;
+    const submittedData = [];
+    let prevSubmitted = 0;
+    
+    metricsData.data.forEach((point, pointIndex) => {
+      const currentSubmitted = point.spammers && point.spammers[spammerIdStr] 
+        ? point.spammers[spammerIdStr].submitted 
+        : prevSubmitted;
+      
+      const delta = currentSubmitted - prevSubmitted;
+      submittedData.push(Math.max(0, delta));
+      
+      prevSubmitted = currentSubmitted;
     });
     
     datasets.push({
@@ -734,16 +741,16 @@ function updateTransactionSubmissionChart() {
 }
 
 function updateTransactionPendingChart() {
-  if (!metricsData || !metricsData.dataPoints) return;
+  if (!metricsData || !metricsData.data) return;
   
-  const labels = metricsData.dataPoints.map(point => 
-    `#${point.endBlockNumber}`
+  const labels = metricsData.data.map(point => 
+    `#${point.endBlock}`
   );
   
   const datasets = [];
   
   metricsData.spammers.forEach((spammer, index) => {
-    const pendingData = metricsData.dataPoints.map(() => spammer.pendingTxCount);
+    const pendingData = metricsData.data.map(() => spammer.pending);
     
     datasets.push({
       label: spammer.name,
@@ -765,7 +772,7 @@ function updateSpammerTable() {
   if (!metricsData) return;
   
   const tbody = document.getElementById('spammerTableBody');
-  const totalGas = metricsData.totals.gasUsedInWindow;
+  const totalGas = metricsData.totals.gasUsed;
   
   if (metricsData.spammers.length === 0) {
     tbody.innerHTML = `
@@ -776,27 +783,27 @@ function updateSpammerTable() {
     return;
   }
   
-  const sortedSpammers = [...metricsData.spammers].sort((a, b) => b.gasUsedInWindow - a.gasUsedInWindow);
+  const sortedSpammers = [...metricsData.spammers].sort((a, b) => b.gasUsed - a.gasUsed);
   
   const lastBlockGas = {};
   let totalLastBlockGas = 0;
-  if (metricsData.dataPoints.length > 0) {
-    const lastBlock = metricsData.dataPoints[metricsData.dataPoints.length - 1];
-    totalLastBlockGas = lastBlock.totalGasUsed;
-    if (lastBlock.spammerData) {
-      Object.keys(lastBlock.spammerData).forEach(spammerIdStr => {
+  if (metricsData.data.length > 0) {
+    const lastBlock = metricsData.data[metricsData.data.length - 1];
+    totalLastBlockGas = lastBlock.totalGas;
+    if (lastBlock.spammers) {
+      Object.keys(lastBlock.spammers).forEach(spammerIdStr => {
         const spammerID = parseInt(spammerIdStr);
-        lastBlockGas[spammerID] = lastBlock.spammerData[spammerIdStr].gasUsed;
+        lastBlockGas[spammerID] = lastBlock.spammers[spammerIdStr].gas;
       });
     }
   }
   
   tbody.innerHTML = sortedSpammers.map(spammer => {
-    const gasPercentage30min = totalGas > 0 ? ((spammer.gasUsedInWindow / totalGas) * 100).toFixed(1) : '0.0';
+    const gasPercentage30min = totalGas > 0 ? ((spammer.gasUsed / totalGas) * 100).toFixed(1) : '0.0';
     const gasUsedLastBlock = lastBlockGas[spammer.id] || 0;
     const gasPercentageLastBlock = totalLastBlockGas > 0 ? ((gasUsedLastBlock / totalLastBlockGas) * 100).toFixed(1) : '0.0';
-    const submittedTxs = spammer.confirmedTxCount + spammer.pendingTxCount;
-    const isActive = spammer.pendingTxCount > 0 || spammer.confirmedTxCount > 0;
+    const submittedTxs = spammer.submitted;
+    const isActive = spammer.pending > 0 || spammer.confirmed > 0;
     
     return `
       <tr>
@@ -809,12 +816,12 @@ function updateSpammerTable() {
             </div>
           </div>
         </td>
-        <td class="text-end">${formatNumber(spammer.pendingTxCount)}</td>
-        <td class="text-end">${formatNumber(spammer.confirmedTxCount)}</td>
+        <td class="text-end">${formatNumber(spammer.pending)}</td>
+        <td class="text-end">${formatNumber(spammer.confirmed)}</td>
         <td class="text-end">${formatNumber(submittedTxs)}</td>
         <td class="text-end progress-cell">
           <div class="progress-bar-bg" style="width: ${gasPercentage30min}%"></div>
-          <div class="progress-text">${formatNumber(spammer.gasUsedInWindow)} (${gasPercentage30min}%)</div>
+          <div class="progress-text">${formatNumber(spammer.gasUsed)} (${gasPercentage30min}%)</div>
         </td>
         <td class="text-end progress-cell">
           <div class="progress-bar-bg" style="width: ${gasPercentageLastBlock}%"></div>
@@ -874,13 +881,13 @@ function updateRealTimeData(data) {
   let hasNewSpammers = false;
   
   if (data.newDataPoints && Array.isArray(data.newDataPoints)) {
-    metricsData.dataPoints.push(...data.newDataPoints);
+    metricsData.data.push(...data.newDataPoints);
     
-    if (metricsData.dataPoints.length > 150) {
-      metricsData.dataPoints = metricsData.dataPoints.slice(-150);
+    if (metricsData.data.length > 150) {
+      metricsData.data = metricsData.data.slice(-150);
     }
     
-    console.log(`Added ${data.newDataPoints.length} new data points, total: ${metricsData.dataPoints.length}`);
+    console.log(`Added ${data.newDataPoints.length} new data points, total: ${metricsData.data.length}`);
     hasNewDataPoints = true;
   }
   
@@ -891,10 +898,11 @@ function updateRealTimeData(data) {
         metricsData.spammers.push({
           id: newSpammerData.id,
           name: newSpammerData.name,
-          pendingTxCount: newSpammerData.pendingTxCount,
-          confirmedTxCount: newSpammerData.confirmedTxCount,
-          gasUsedInWindow: newSpammerData.gasUsedInWindow,
-          lastUpdate: newSpammerData.lastUpdate
+          pending: newSpammerData.pending,
+          confirmed: newSpammerData.confirmed,
+          submitted: newSpammerData.submitted,
+          gasUsed: newSpammerData.gasUsed,
+          updated: newSpammerData.updated
         });
         hasNewSpammers = true;
         console.log(`Added new spammer: ${newSpammerData.name} (ID: ${newSpammerData.id})`);
@@ -908,22 +916,24 @@ function updateRealTimeData(data) {
       const spammer = metricsData.spammers.find(s => s.id === spammerData.id);
       
       if (spammer) {
-        spammer.pendingTxCount = spammerData.pendingTxCount;
-        spammer.confirmedTxCount = spammerData.confirmedTxCount;
-        spammer.gasUsedInWindow = spammerData.gasUsedInWindow;
-        spammer.lastUpdate = spammerData.lastUpdate;
+        spammer.pending = spammerData.pending;
+        spammer.confirmed = spammerData.confirmed;
+        spammer.submitted = spammerData.submitted;
+        spammer.gasUsed = spammerData.gasUsed;
+        spammer.updated = spammerData.updated;
         hasSpammerUpdates = true;
       }
     }
   });
   
   if (hasNewDataPoints || hasSpammerUpdates || hasNewSpammers) {
-    metricsData.totals.pendingTxCount = metricsData.spammers.reduce((sum, s) => sum + s.pendingTxCount, 0);
-    metricsData.totals.confirmedTxCount = metricsData.spammers.reduce((sum, s) => sum + s.confirmedTxCount, 0);
-    metricsData.totals.gasUsedInWindow = metricsData.spammers.reduce((sum, s) => sum + s.gasUsedInWindow, 0);
+    metricsData.totals.pending = metricsData.spammers.reduce((sum, s) => sum + s.pending, 0);
+    metricsData.totals.confirmed = metricsData.spammers.reduce((sum, s) => sum + s.confirmed, 0);
+    metricsData.totals.submitted = metricsData.spammers.reduce((sum, s) => sum + s.submitted, 0);
+    metricsData.totals.gasUsed = metricsData.spammers.reduce((sum, s) => sum + s.gasUsed, 0);
     
-    if (metricsData.dataPoints.length > 0) {
-      metricsData.totals.gasUsedInWindow = metricsData.dataPoints.reduce((sum, point) => sum + point.totalGasUsed, 0);
+    if (metricsData.data.length > 0) {
+      metricsData.totals.gasUsed = metricsData.data.reduce((sum, point) => sum + point.totalGas, 0);
     }
     
     updateDashboard();

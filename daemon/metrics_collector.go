@@ -46,7 +46,8 @@ type BlockDataPoint struct {
 type SpammerBlockData struct {
 	GasUsed          uint64 `json:"gasUsed"`
 	ConfirmedTxCount uint64 `json:"confirmedTxCount"`
-	PendingTxCount   uint64 `json:"pendingTxCount"` // snapshot at end of period
+	PendingTxCount   uint64 `json:"pendingTxCount"`   // snapshot at end of period
+	SubmittedTxCount uint64 `json:"submittedTxCount"` // total transactions submitted (lifetime)
 }
 
 // SpammerSnapshot represents current state of a spammer (not aggregated)
@@ -54,6 +55,7 @@ type SpammerSnapshot struct {
 	SpammerID        uint64
 	PendingTxCount   uint64
 	TotalConfirmedTx uint64 // lifetime total
+	TotalSubmittedTx uint64 // lifetime total submitted
 	LastUpdate       time.Time
 }
 
@@ -140,12 +142,13 @@ func (mc *TxPoolMetricsCollector) processBlockForWindow(
 	for walletPool, stats := range allWalletPoolStats {
 		spammerID := walletPool.GetSpammerID()
 		gasUsed := mc.calculateGasUsedFromReceipts(stats.Receipts)
-		pendingCount := mc.getPendingTxCountForSpammer(walletPool)
+		pendingCount, submittedCount := mc.getWalletPoolTxCounts(walletPool)
 
 		spammerGasData[spammerID] = &SpammerBlockData{
 			GasUsed:          gasUsed,
 			ConfirmedTxCount: stats.ConfirmedTxCount,
 			PendingTxCount:   pendingCount,
+			SubmittedTxCount: submittedCount,
 		}
 
 		totalSpammerGas += gasUsed
@@ -154,12 +157,14 @@ func (mc *TxPoolMetricsCollector) processBlockForWindow(
 		if existing, exists := window.currentSpammers[spammerID]; exists {
 			existing.PendingTxCount = pendingCount
 			existing.TotalConfirmedTx += stats.ConfirmedTxCount
+			existing.TotalSubmittedTx = submittedCount
 			existing.LastUpdate = now
 		} else {
 			window.currentSpammers[spammerID] = &SpammerSnapshot{
 				SpammerID:        spammerID,
 				PendingTxCount:   pendingCount,
 				TotalConfirmedTx: stats.ConfirmedTxCount,
+				TotalSubmittedTx: submittedCount,
 				LastUpdate:       now,
 			}
 		}
@@ -206,12 +211,14 @@ func (mgm *MultiGranularityMetrics) addDataPoint(
 				if existing, exists := lastPoint.SpammerGasData[spammerID]; exists {
 					existing.GasUsed += data.GasUsed
 					existing.ConfirmedTxCount += data.ConfirmedTxCount
-					existing.PendingTxCount = data.PendingTxCount // Keep latest pending count
+					existing.PendingTxCount = data.PendingTxCount     // Keep latest pending count
+					existing.SubmittedTxCount = data.SubmittedTxCount // Keep latest submitted count
 				} else {
 					lastPoint.SpammerGasData[spammerID] = &SpammerBlockData{
 						GasUsed:          data.GasUsed,
 						ConfirmedTxCount: data.ConfirmedTxCount,
 						PendingTxCount:   data.PendingTxCount,
+						SubmittedTxCount: data.SubmittedTxCount,
 					}
 				}
 			}
@@ -226,6 +233,7 @@ func (mgm *MultiGranularityMetrics) addDataPoint(
 			GasUsed:          data.GasUsed,
 			ConfirmedTxCount: data.ConfirmedTxCount,
 			PendingTxCount:   data.PendingTxCount,
+			SubmittedTxCount: data.SubmittedTxCount,
 		}
 	}
 
@@ -274,20 +282,30 @@ func (mc *TxPoolMetricsCollector) calculateGasUsedFromReceipts(receipts []*types
 	return totalGas
 }
 
-// getPendingTxCountForSpammer gets pending transaction count for a spammer
-func (mc *TxPoolMetricsCollector) getPendingTxCountForSpammer(walletPool *spamoor.WalletPool) uint64 {
+// getWalletPoolTxCounts efficiently gets both pending and submitted transaction counts for a spammer
+// by iterating through wallets only once
+func (mc *TxPoolMetricsCollector) getWalletPoolTxCounts(walletPool *spamoor.WalletPool) (pendingCount, submittedCount uint64) {
+	if walletPool == nil {
+		return 0, 0
+	}
+
 	allWallets := walletPool.GetAllWallets()
 	totalPending := uint64(0)
+	totalSubmitted := uint64(0)
 
 	for _, wallet := range allWallets {
+		// Get pending count
 		pendingNonce := wallet.GetNonce()
 		confirmedNonce := wallet.GetConfirmedNonce()
 		if pendingNonce > confirmedNonce {
 			totalPending += pendingNonce - confirmedNonce
 		}
+
+		// Get submitted count
+		totalSubmitted += wallet.GetSubmittedTxCount()
 	}
 
-	return totalPending
+	return totalPending, totalSubmitted
 }
 
 // GetShortWindowMetrics returns the 30-minute per-block metrics
@@ -321,6 +339,7 @@ func (mgm *MultiGranularityMetrics) GetSpammerSnapshots() map[uint64]*SpammerSna
 			SpammerID:        snapshot.SpammerID,
 			PendingTxCount:   snapshot.PendingTxCount,
 			TotalConfirmedTx: snapshot.TotalConfirmedTx,
+			TotalSubmittedTx: snapshot.TotalSubmittedTx,
 			LastUpdate:       snapshot.LastUpdate,
 		}
 	}

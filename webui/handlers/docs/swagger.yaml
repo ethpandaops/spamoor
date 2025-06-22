@@ -49,40 +49,40 @@ definitions:
     type: object
   api.GraphsDashboardResponse:
     properties:
-      dataPoints:
+      data:
         items:
           $ref: '#/definitions/api.GraphsDataPoint'
         type: array
       others:
         $ref: '#/definitions/api.OthersMetricsData'
+      range:
+        $ref: '#/definitions/api.TimeRange'
       spammers:
         items:
           $ref: '#/definitions/api.SpammerMetricsData'
         type: array
-      timeRange:
-        $ref: '#/definitions/api.TimeRange'
       totals:
         $ref: '#/definitions/api.TotalMetricsData'
     type: object
   api.GraphsDataPoint:
     properties:
-      blockCount:
+      blocks:
         type: integer
-      endBlockNumber:
+      endBlock:
         type: integer
-      othersGasUsed:
+      othersGas:
         type: integer
-      spammerData:
+      spammers:
         additionalProperties:
           $ref: '#/definitions/api.SpammerBlockData'
         description: spammerID -> detailed data
         type: object
-      startBlockNumber:
+      startBlock:
         type: integer
-      timestamp:
+      totalGas:
+        type: integer
+      ts:
         type: string
-      totalGasUsed:
-        type: integer
     type: object
   api.ImportSpammersRequest:
     properties:
@@ -105,7 +105,7 @@ definitions:
     type: object
   api.OthersMetricsData:
     properties:
-      gasUsedInWindow:
+      gasUsed:
         type: integer
     type: object
   api.ScenarioEntries:
@@ -117,11 +117,13 @@ definitions:
     type: object
   api.SpammerBlockData:
     properties:
-      confirmedTxCount:
+      confirmed:
         type: integer
-      gasUsed:
+      gas:
         type: integer
-      pendingTxCount:
+      pending:
+        type: integer
+      submitted:
         type: integer
     type: object
   api.SpammerDetails:
@@ -191,18 +193,20 @@ definitions:
     type: object
   api.SpammerMetricsData:
     properties:
-      confirmedTxCount:
+      confirmed:
         type: integer
-      gasUsedInWindow:
+      gasUsed:
         type: integer
       id:
         type: integer
-      lastUpdate:
-        type: string
       name:
         type: string
-      pendingTxCount:
+      pending:
         type: integer
+      submitted:
+        type: integer
+      updated:
+        type: string
     type: object
   api.SpammerTimeSeriesPoint:
     properties:
@@ -239,11 +243,13 @@ definitions:
     type: object
   api.TotalMetricsData:
     properties:
-      confirmedTxCount:
+      confirmed:
         type: integer
-      gasUsedInWindow:
+      gasUsed:
         type: integer
-      pendingTxCount:
+      pending:
+        type: integer
+      submitted:
         type: integer
     type: object
   api.UpdateClientEnabledRequest:

@@ -29,6 +29,7 @@ type Wallet struct {
 	address          common.Address
 	chainid          *big.Int
 	pendingTxCount   atomic.Uint64
+	submittedTxCount atomic.Uint64
 	confirmedTxCount uint64
 	balance          *big.Int
 
@@ -126,6 +127,18 @@ func (wallet *Wallet) GetNonce() uint64 {
 // This represents the highest nonce that has been confirmed on-chain.
 func (wallet *Wallet) GetConfirmedNonce() uint64 {
 	return wallet.confirmedTxCount
+}
+
+// GetSubmittedTxCount returns the total number of transactions submitted by this wallet.
+// This represents the cumulative count of all transactions that have been submitted to the network.
+func (wallet *Wallet) GetSubmittedTxCount() uint64 {
+	return wallet.submittedTxCount.Load()
+}
+
+// IncrementSubmittedTxCount increments the submitted transaction counter.
+// This should be called when a transaction is successfully submitted to the network.
+func (wallet *Wallet) IncrementSubmittedTxCount() {
+	wallet.submittedTxCount.Add(1)
 }
 
 // GetBalance returns the current balance of the wallet.

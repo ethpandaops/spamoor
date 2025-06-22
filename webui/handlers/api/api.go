@@ -90,11 +90,11 @@ type GitHubFile struct {
 
 // GraphsDashboardResponse represents the main dashboard graphs data
 type GraphsDashboardResponse struct {
-	TimeRange  TimeRange            `json:"timeRange"`
+	TimeRange  TimeRange            `json:"range"`
 	Spammers   []SpammerMetricsData `json:"spammers"`
 	Totals     TotalMetricsData     `json:"totals"`
 	Others     OthersMetricsData    `json:"others"`
-	DataPoints []GraphsDataPoint    `json:"dataPoints"`
+	DataPoints []GraphsDataPoint    `json:"data"`
 }
 
 // TimeRange represents the time range of collected metrics
@@ -107,40 +107,43 @@ type TimeRange struct {
 type SpammerMetricsData struct {
 	ID               uint64 `json:"id"`
 	Name             string `json:"name"`
-	PendingTxCount   uint64 `json:"pendingTxCount"`
-	ConfirmedTxCount uint64 `json:"confirmedTxCount"`
-	GasUsedInWindow  uint64 `json:"gasUsedInWindow"`
-	LastUpdate       string `json:"lastUpdate"`
+	PendingTxCount   uint64 `json:"pending"`
+	ConfirmedTxCount uint64 `json:"confirmed"`
+	SubmittedTxCount uint64 `json:"submitted"`
+	GasUsedInWindow  uint64 `json:"gasUsed"`
+	LastUpdate       string `json:"updated"`
 }
 
 // TotalMetricsData represents aggregated metrics across all spammers
 type TotalMetricsData struct {
-	PendingTxCount   uint64 `json:"pendingTxCount"`
-	ConfirmedTxCount uint64 `json:"confirmedTxCount"`
-	GasUsedInWindow  uint64 `json:"gasUsedInWindow"`
+	PendingTxCount   uint64 `json:"pending"`
+	ConfirmedTxCount uint64 `json:"confirmed"`
+	SubmittedTxCount uint64 `json:"submitted"`
+	GasUsedInWindow  uint64 `json:"gasUsed"`
 }
 
 // OthersMetricsData represents metrics for non-spammer transactions
 type OthersMetricsData struct {
-	GasUsedInWindow uint64 `json:"gasUsedInWindow"`
+	GasUsedInWindow uint64 `json:"gasUsed"`
 }
 
 // GraphsDataPoint represents a single time-series data point for the graphs
 type GraphsDataPoint struct {
-	Timestamp        time.Time                    `json:"timestamp"`
-	StartBlockNumber uint64                       `json:"startBlockNumber"`
-	EndBlockNumber   uint64                       `json:"endBlockNumber"`
-	BlockCount       uint64                       `json:"blockCount"`
-	TotalGasUsed     uint64                       `json:"totalGasUsed"`
-	OthersGasUsed    uint64                       `json:"othersGasUsed"`
-	SpammerData      map[string]*SpammerBlockData `json:"spammerData"` // spammerID -> detailed data
+	Timestamp        time.Time                    `json:"ts"`
+	StartBlockNumber uint64                       `json:"startBlock"`
+	EndBlockNumber   uint64                       `json:"endBlock"`
+	BlockCount       uint64                       `json:"blocks"`
+	TotalGasUsed     uint64                       `json:"totalGas"`
+	OthersGasUsed    uint64                       `json:"othersGas"`
+	SpammerData      map[string]*SpammerBlockData `json:"spammers"` // spammerID -> detailed data
 }
 
 // SpammerBlockData represents a spammer's data within a time period
 type SpammerBlockData struct {
-	GasUsed          uint64 `json:"gasUsed"`
-	ConfirmedTxCount uint64 `json:"confirmedTxCount"`
-	PendingTxCount   uint64 `json:"pendingTxCount"`
+	GasUsed          uint64 `json:"gas"`
+	ConfirmedTxCount uint64 `json:"confirmed"`
+	PendingTxCount   uint64 `json:"pending"`
+	SubmittedTxCount uint64 `json:"submitted"`
 }
 
 // SpammerTimeSeriesResponse represents time-series data for a specific spammer
@@ -1067,6 +1070,7 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 
 	totalPending := uint64(0)
 	totalConfirmed := uint64(0)
+	totalSubmitted := uint64(0)
 
 	// Calculate gas used in window from data points
 	dataPoints := shortWindow.GetDataPoints()
@@ -1088,12 +1092,14 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 			Name:             spammerName,
 			PendingTxCount:   snapshot.PendingTxCount,
 			ConfirmedTxCount: snapshot.TotalConfirmedTx,
+			SubmittedTxCount: snapshot.TotalSubmittedTx,
 			GasUsedInWindow:  gasInWindow,
 			LastUpdate:       snapshot.LastUpdate.Format(time.RFC3339),
 		})
 
 		totalPending += snapshot.PendingTxCount
 		totalConfirmed += snapshot.TotalConfirmedTx
+		totalSubmitted += snapshot.TotalSubmittedTx
 		totalGasUsed += gasInWindow
 	}
 
@@ -1109,6 +1115,7 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 				GasUsed:          data.GasUsed,
 				ConfirmedTxCount: data.ConfirmedTxCount,
 				PendingTxCount:   data.PendingTxCount,
+				SubmittedTxCount: data.SubmittedTxCount,
 			}
 		}
 
@@ -1134,6 +1141,7 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 		Totals: TotalMetricsData{
 			PendingTxCount:   totalPending,
 			ConfirmedTxCount: totalConfirmed,
+			SubmittedTxCount: totalSubmitted,
 			GasUsedInWindow:  totalGasUsed,
 		},
 		Others: OthersMetricsData{
@@ -1292,9 +1300,10 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 	for spammerID, snapshot := range spammerSnapshots {
 		// Create a simple hash of the spammer state
 		gasInWindow := spammerGasInWindow[spammerID]
-		currentHash := fmt.Sprintf("%d-%d-%d-%s",
+		currentHash := fmt.Sprintf("%d-%d-%d-%d-%s",
 			snapshot.PendingTxCount,
 			snapshot.TotalConfirmedTx,
+			snapshot.TotalSubmittedTx,
 			gasInWindow,
 			snapshot.LastUpdate.Format(time.RFC3339))
 
@@ -1335,6 +1344,7 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 					GasUsed:          spammerData.GasUsed,
 					ConfirmedTxCount: spammerData.ConfirmedTxCount,
 					PendingTxCount:   spammerData.PendingTxCount,
+					SubmittedTxCount: spammerData.SubmittedTxCount,
 				}
 			}
 		}
@@ -1352,12 +1362,13 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 			gasInWindow := spammerGasInWindow[spammerID]
 
 			spammerData := map[string]interface{}{
-				"id":               spammerID,
-				"name":             spammerName,
-				"pendingTxCount":   snapshot.PendingTxCount,
-				"confirmedTxCount": snapshot.TotalConfirmedTx,
-				"gasUsedInWindow":  gasInWindow,
-				"lastUpdate":       snapshot.LastUpdate.Format(time.RFC3339),
+				"id":        spammerID,
+				"name":      spammerName,
+				"pending":   snapshot.PendingTxCount,
+				"confirmed": snapshot.TotalConfirmedTx,
+				"submitted": snapshot.TotalSubmittedTx,
+				"gasUsed":   gasInWindow,
+				"updated":   snapshot.LastUpdate.Format(time.RFC3339),
 			}
 
 			// Check if this is a new spammer
