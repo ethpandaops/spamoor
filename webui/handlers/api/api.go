@@ -1484,6 +1484,8 @@ func (ah *APIHandler) sendMetricsUpdateWithState(w http.ResponseWriter, flusher 
 			}
 		}
 
+		newSpammers := make([]map[string]interface{}, 0)
+
 		for spammerID, snapshot := range update.UpdatedSpammers {
 			spammerName := ah.daemon.GetSpammerName(spammerID)
 
@@ -1507,7 +1509,17 @@ func (ah *APIHandler) sendMetricsUpdateWithState(w http.ResponseWriter, flusher 
 				"status":    status,
 			}
 
-			data[fmt.Sprintf("spammer_%d", spammerID)] = spammerData
+			// Check if this is a new spammer
+			if _, exists := state.lastSpammerHashes[spammerID]; !exists {
+				newSpammers = append(newSpammers, spammerData)
+			} else {
+				data[fmt.Sprintf("spammer_%d", spammerID)] = spammerData
+			}
+		}
+
+		// Include new spammers in the response
+		if len(newSpammers) > 0 {
+			data["newSpammers"] = newSpammers
 		}
 	}
 
