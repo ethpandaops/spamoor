@@ -46,12 +46,16 @@ type TxInfo struct {
 // BlockStatsCallback is called when a block is processed with statistics for a specific wallet pool
 type BlockStatsCallback func(blockNumber uint64, walletPoolStats *WalletPoolBlockStats)
 
+// BulkBlockStatsCallback is called when a block is processed with statistics for ALL wallet pools
+type BulkBlockStatsCallback func(blockNumber uint64, allWalletPoolStats map[*WalletPool]*WalletPoolBlockStats)
+
 // WalletPoolBlockStats contains transaction statistics for a wallet pool in a specific block
 type WalletPoolBlockStats struct {
 	ConfirmedTxCount uint64
 	TotalTxFees      *big.Int
 	AffectedWallets  int
 	Block            *types.Block
+	ConfirmedTxs     []*TxInfo
 	Receipts         []*types.Receipt
 }
 
@@ -60,6 +64,12 @@ type BlockSubscription struct {
 	ID         uint64
 	WalletPool *WalletPool
 	Callback   BlockStatsCallback
+}
+
+// BulkBlockSubscription represents a subscription to block updates for ALL wallet pools
+type BulkBlockSubscription struct {
+	ID       uint64
+	Callback BulkBlockStatsCallback
 }
 
 // RebroadcastRequest represents a transaction that needs to be rebroadcast
@@ -97,6 +107,7 @@ type TxPool struct {
 	// Block update subscriptions
 	subscriptionsMutex sync.RWMutex
 	subscriptions      map[uint64]*BlockSubscription
+	bulkSubscriptions  map[uint64]*BulkBlockSubscription
 	nextSubscriptionID atomic.Uint64
 
 	// Rebroadcast management
@@ -119,12 +130,13 @@ type TxPoolOptions struct {
 // transaction confirmations and reorgs.
 func NewTxPool(options *TxPoolOptions) *TxPool {
 	pool := &TxPool{
-		options:          options,
-		processStaleChan: make(chan uint64, 1),
-		blocks:           map[uint64]*BlockInfo{},
-		confirmedTxs:     map[uint64][]*TxInfo{},
-		reorgDepth:       10, // Default value
-		subscriptions:    map[uint64]*BlockSubscription{},
+		options:           options,
+		processStaleChan:  make(chan uint64, 1),
+		blocks:            map[uint64]*BlockInfo{},
+		confirmedTxs:      map[uint64][]*TxInfo{},
+		reorgDepth:        10, // Default value
+		subscriptions:     map[uint64]*BlockSubscription{},
+		bulkSubscriptions: map[uint64]*BulkBlockSubscription{},
 	}
 
 	if options.Context == nil {
@@ -501,17 +513,77 @@ func (pool *TxPool) UnsubscribeFromBlockUpdates(id uint64) {
 	delete(pool.subscriptions, id)
 }
 
+// GetActiveWalletPools returns all active wallet pools
+func (pool *TxPool) GetActiveWalletPools() []*WalletPool {
+	if pool.options.GetActiveWalletPools != nil {
+		return pool.options.GetActiveWalletPools()
+	}
+	return []*WalletPool{}
+}
+
+// SubscribeToBulkBlockUpdates subscribes to block update notifications for ALL wallet pools.
+// Returns a unique subscription ID that can be used to unsubscribe later.
+func (pool *TxPool) SubscribeToBulkBlockUpdates(callback BulkBlockStatsCallback) uint64 {
+	pool.subscriptionsMutex.Lock()
+	defer pool.subscriptionsMutex.Unlock()
+
+	// Generate unique subscription ID
+	id := pool.nextSubscriptionID.Add(1)
+
+	pool.bulkSubscriptions[id] = &BulkBlockSubscription{
+		ID:       id,
+		Callback: callback,
+	}
+
+	return id
+}
+
+// UnsubscribeFromBulkBlockUpdates removes a bulk block update subscription.
+func (pool *TxPool) UnsubscribeFromBulkBlockUpdates(id uint64) {
+	pool.subscriptionsMutex.Lock()
+	defer pool.subscriptionsMutex.Unlock()
+
+	delete(pool.bulkSubscriptions, id)
+}
+
 // notifyBlockSubscribers notifies all subscribers about a processed block with wallet-specific stats.
 func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, confirmedTxs []*TxInfo, block *types.Block, receipts []*types.Receipt) {
 	pool.subscriptionsMutex.RLock()
+
+	// Copy subscriptions for concurrent access
 	subscriptions := make(map[uint64]*BlockSubscription, len(pool.subscriptions))
 	for id, sub := range pool.subscriptions {
 		subscriptions[id] = sub
 	}
+
+	bulkSubscriptions := make(map[uint64]*BulkBlockSubscription, len(pool.bulkSubscriptions))
+	for id, sub := range pool.bulkSubscriptions {
+		bulkSubscriptions[id] = sub
+	}
+
 	pool.subscriptionsMutex.RUnlock()
 
+	// If we have bulk subscribers, calculate stats for all wallet pools once
+	var allWalletPoolStats map[*WalletPool]*WalletPoolBlockStats
+	if len(bulkSubscriptions) > 0 {
+		allWalletPoolStats = pool.calculateAllWalletPoolStats(confirmedTxs, block, receipts)
+
+		// Notify bulk subscribers
+		for _, bulkSubscription := range bulkSubscriptions {
+			bulkSubscription.Callback(blockNumber, allWalletPoolStats)
+		}
+	}
+
+	// Notify individual subscribers (reuse stats if already calculated)
 	for _, subscription := range subscriptions {
-		stats := pool.calculateWalletPoolStats(subscription.WalletPool, confirmedTxs, block, receipts)
+		var stats *WalletPoolBlockStats
+		if allWalletPoolStats != nil {
+			// Reuse already calculated stats
+			stats = allWalletPoolStats[subscription.WalletPool]
+		} else {
+			// Calculate stats individually
+			stats = pool.calculateWalletPoolStats(subscription.WalletPool, confirmedTxs, block, receipts)
+		}
 		subscription.Callback(blockNumber, stats)
 	}
 }
@@ -519,9 +591,10 @@ func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, confirmedTxs []*T
 // calculateWalletPoolStats calculates transaction statistics for a specific wallet pool.
 func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTxs []*TxInfo, block *types.Block, receipts []*types.Receipt) *WalletPoolBlockStats {
 	stats := &WalletPoolBlockStats{
-		TotalTxFees: big.NewInt(0),
-		Block:       block,
-		Receipts:    receipts,
+		TotalTxFees:  big.NewInt(0),
+		Block:        block,
+		Receipts:     make([]*types.Receipt, 0, len(receipts)),
+		ConfirmedTxs: make([]*TxInfo, 0, len(confirmedTxs)),
 	}
 
 	affectedWallets := make(map[common.Address]bool)
@@ -532,7 +605,7 @@ func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTx
 		walletSet[wallet.GetAddress()] = true
 	}
 
-	for _, txInfo := range confirmedTxs {
+	for idx, txInfo := range confirmedTxs {
 		if txInfo.FromWallet != nil && walletSet[txInfo.FromWallet.GetAddress()] {
 			stats.ConfirmedTxCount++
 			if txInfo.TxFees != nil {
@@ -540,11 +613,78 @@ func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTx
 				stats.TotalTxFees.Add(stats.TotalTxFees, totalFee)
 			}
 			affectedWallets[txInfo.FromWallet.GetAddress()] = true
+
+			stats.Receipts = append(stats.Receipts, receipts[idx])
+			stats.ConfirmedTxs = append(stats.ConfirmedTxs, confirmedTxs[idx])
 		}
 	}
 
 	stats.AffectedWallets = len(affectedWallets)
+
 	return stats
+}
+
+// calculateAllWalletPoolStats efficiently calculates statistics for ALL active wallet pools in a single pass.
+// This avoids recalculating the same data multiple times for bulk subscribers.
+func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxs []*TxInfo, block *types.Block, receipts []*types.Receipt) map[*WalletPool]*WalletPoolBlockStats {
+	// Get all active wallet pools
+	activeWalletPools := pool.GetActiveWalletPools()
+
+	// Initialize result map
+	allStats := make(map[*WalletPool]*WalletPoolBlockStats, len(activeWalletPools))
+
+	// Create wallet address to wallet pool mapping for efficient lookup
+	walletToPool := make(map[common.Address]*WalletPool)
+	for _, walletPool := range activeWalletPools {
+		allWallets := walletPool.GetAllWallets()
+		for _, wallet := range allWallets {
+			walletToPool[wallet.GetAddress()] = walletPool
+		}
+
+		// Initialize stats for each wallet pool
+		allStats[walletPool] = &WalletPoolBlockStats{
+			TotalTxFees:  big.NewInt(0),
+			Block:        block,
+			Receipts:     make([]*types.Receipt, 0, len(receipts)),
+			ConfirmedTxs: make([]*TxInfo, 0, len(confirmedTxs)),
+		}
+	}
+
+	// Track affected wallets per pool
+	affectedWallets := make(map[*WalletPool]map[common.Address]bool)
+	for _, walletPool := range activeWalletPools {
+		affectedWallets[walletPool] = make(map[common.Address]bool)
+	}
+
+	// Single pass through confirmed transactions
+	for idx, txInfo := range confirmedTxs {
+		if txInfo.FromWallet != nil {
+			walletAddr := txInfo.FromWallet.GetAddress()
+			if walletPool, exists := walletToPool[walletAddr]; exists {
+				stats := allStats[walletPool]
+
+				// Update transaction count
+				stats.ConfirmedTxCount++
+
+				// Update total fees
+				if txInfo.TxFees != nil {
+					totalFee := new(big.Int).Add(&txInfo.TxFees.FeeAmount, &txInfo.TxFees.BlobFeeAmount)
+					stats.TotalTxFees.Add(stats.TotalTxFees, totalFee)
+				}
+
+				affectedWallets[walletPool][walletAddr] = true
+				stats.Receipts = append(stats.Receipts, receipts[idx])
+				stats.ConfirmedTxs = append(stats.ConfirmedTxs, confirmedTxs[idx])
+			}
+		}
+	}
+
+	// Set affected wallet counts
+	for walletPool, stats := range allStats {
+		stats.AffectedWallets = len(affectedWallets[walletPool])
+	}
+
+	return allStats
 }
 
 // submitTransaction handles the core transaction submission logic.
@@ -676,6 +816,9 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 
 		return err
 	}
+
+	// Increment wallet's submitted transaction counter
+	wallet.IncrementSubmittedTxCount()
 
 	// Start reliable rebroadcast if enabled
 	if options.Rebroadcast {
