@@ -77,6 +77,9 @@ type WalletPool struct {
 	// Optional callback to track transaction results for metrics
 	transactionTracker func(err error)
 
+	// Spammer ID for metrics tracking
+	spammerID uint64
+
 	// Low balance notification system
 	lowBalanceNotifyChan chan struct{}
 	lastFundingTime      time.Time
@@ -1064,4 +1067,14 @@ func (pool *WalletPool) ReclaimFunds(ctx context.Context, client *Client) error 
 	}
 
 	return nil
+}
+
+// SetSpammerID sets the spammer ID for metrics tracking
+func (pool *WalletPool) SetSpammerID(spammerID uint64) {
+	pool.spammerID = spammerID
+}
+
+// GetSpammerID returns the spammer ID for metrics tracking
+func (pool *WalletPool) GetSpammerID() uint64 {
+	return pool.spammerID
 }

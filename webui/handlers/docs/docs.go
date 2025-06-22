@@ -183,6 +183,99 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/graphs/dashboard": {
+            "get": {
+                "description": "Returns comprehensive graphs data for the dashboard including all spammers, totals, and time-series data",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Graphs"
+                ],
+                "summary": "Get graphs dashboard data",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.GraphsDashboardResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/graphs/spammer/{id}/timeseries": {
+            "get": {
+                "description": "Returns detailed time-series graphs data for a specific spammer",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Graphs"
+                ],
+                "summary": "Get time-series data for a specific spammer",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Spammer ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.SpammerTimeSeriesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid spammer ID",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Spammer not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/graphs/stream": {
+            "get": {
+                "description": "Provides real-time graphs updates via Server-Sent Events (SSE)",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "Graphs"
+                ],
+                "summary": "Stream real-time graphs updates",
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/api/scenarios": {
             "get": {
                 "description": "Returns a list of all scenarios",
@@ -906,6 +999,62 @@ const docTemplate = `{
                 }
             }
         },
+        "api.GraphsDashboardResponse": {
+            "type": "object",
+            "properties": {
+                "dataPoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.GraphsDataPoint"
+                    }
+                },
+                "others": {
+                    "$ref": "#/definitions/api.OthersMetricsData"
+                },
+                "spammers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.SpammerMetricsData"
+                    }
+                },
+                "timeRange": {
+                    "$ref": "#/definitions/api.TimeRange"
+                },
+                "totals": {
+                    "$ref": "#/definitions/api.TotalMetricsData"
+                }
+            }
+        },
+        "api.GraphsDataPoint": {
+            "type": "object",
+            "properties": {
+                "blockCount": {
+                    "type": "integer"
+                },
+                "endBlockNumber": {
+                    "type": "integer"
+                },
+                "othersGasUsed": {
+                    "type": "integer"
+                },
+                "spammerData": {
+                    "description": "spammerID -\u003e detailed data",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/api.SpammerBlockData"
+                    }
+                },
+                "startBlockNumber": {
+                    "type": "integer"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "totalGasUsed": {
+                    "type": "integer"
+                }
+            }
+        },
         "api.ImportSpammersRequest": {
             "type": "object",
             "properties": {
@@ -935,6 +1084,14 @@ const docTemplate = `{
                 }
             }
         },
+        "api.OthersMetricsData": {
+            "type": "object",
+            "properties": {
+                "gasUsedInWindow": {
+                    "type": "integer"
+                }
+            }
+        },
         "api.ScenarioEntries": {
             "type": "object",
             "properties": {
@@ -943,6 +1100,20 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "api.SpammerBlockData": {
+            "type": "object",
+            "properties": {
+                "confirmedTxCount": {
+                    "type": "integer"
+                },
+                "gasUsed": {
+                    "type": "integer"
+                },
+                "pendingTxCount": {
+                    "type": "integer"
                 }
             }
         },
@@ -1041,6 +1212,94 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.SpammerMetricsData": {
+            "type": "object",
+            "properties": {
+                "confirmedTxCount": {
+                    "type": "integer"
+                },
+                "gasUsedInWindow": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "lastUpdate": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pendingTxCount": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.SpammerTimeSeriesPoint": {
+            "type": "object",
+            "properties": {
+                "blockNumber": {
+                    "type": "integer"
+                },
+                "confirmedTxCount": {
+                    "type": "integer"
+                },
+                "gasUsed": {
+                    "type": "integer"
+                },
+                "pendingTxCount": {
+                    "type": "integer"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.SpammerTimeSeriesResponse": {
+            "type": "object",
+            "properties": {
+                "dataPoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.SpammerTimeSeriesPoint"
+                    }
+                },
+                "spammerId": {
+                    "type": "integer"
+                },
+                "spammerName": {
+                    "type": "string"
+                },
+                "timeRange": {
+                    "$ref": "#/definitions/api.TimeRange"
+                }
+            }
+        },
+        "api.TimeRange": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "string"
+                },
+                "start": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.TotalMetricsData": {
+            "type": "object",
+            "properties": {
+                "confirmedTxCount": {
+                    "type": "integer"
+                },
+                "gasUsedInWindow": {
+                    "type": "integer"
+                },
+                "pendingTxCount": {
                     "type": "integer"
                 }
             }

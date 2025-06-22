@@ -50,6 +50,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	router.HandleFunc("/", frontendHandler.Index).Methods("GET")
 	router.HandleFunc("/clients", frontendHandler.Clients).Methods("GET")
 	router.HandleFunc("/wallets", frontendHandler.Wallets).Methods("GET")
+	router.HandleFunc("/graphs", frontendHandler.Graphs).Methods("GET")
 
 	// API routes
 	apiHandler := api.NewAPIHandler(daemon)
@@ -76,6 +77,11 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/spammers/export", apiHandler.ExportSpammers).Methods("POST")
 	apiRouter.HandleFunc("/spammers/import", apiHandler.ImportSpammers).Methods("POST")
 	apiRouter.HandleFunc("/spammers/library", apiHandler.GetSpammerLibraryIndex).Methods("GET")
+	
+	// Graphs routes
+	apiRouter.HandleFunc("/graphs/dashboard", apiHandler.GetGraphsDashboard).Methods("GET")
+	apiRouter.HandleFunc("/graphs/spammer/{id}/timeseries", apiHandler.GetSpammerTimeSeries).Methods("GET")
+	apiRouter.HandleFunc("/graphs/stream", apiHandler.StreamGraphs).Methods("GET")
 
 	// metrics endpoint
 	router.Handle("/metrics", promhttp.Handler()).Methods("GET")

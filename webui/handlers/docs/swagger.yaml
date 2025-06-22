@@ -47,6 +47,43 @@ definitions:
           type: integer
         type: array
     type: object
+  api.GraphsDashboardResponse:
+    properties:
+      dataPoints:
+        items:
+          $ref: '#/definitions/api.GraphsDataPoint'
+        type: array
+      others:
+        $ref: '#/definitions/api.OthersMetricsData'
+      spammers:
+        items:
+          $ref: '#/definitions/api.SpammerMetricsData'
+        type: array
+      timeRange:
+        $ref: '#/definitions/api.TimeRange'
+      totals:
+        $ref: '#/definitions/api.TotalMetricsData'
+    type: object
+  api.GraphsDataPoint:
+    properties:
+      blockCount:
+        type: integer
+      endBlockNumber:
+        type: integer
+      othersGasUsed:
+        type: integer
+      spammerData:
+        additionalProperties:
+          $ref: '#/definitions/api.SpammerBlockData'
+        description: spammerID -> detailed data
+        type: object
+      startBlockNumber:
+        type: integer
+      timestamp:
+        type: string
+      totalGasUsed:
+        type: integer
+    type: object
   api.ImportSpammersRequest:
     properties:
       input:
@@ -66,12 +103,26 @@ definitions:
       time:
         type: string
     type: object
+  api.OthersMetricsData:
+    properties:
+      gasUsedInWindow:
+        type: integer
+    type: object
   api.ScenarioEntries:
     properties:
       description:
         type: string
       name:
         type: string
+    type: object
+  api.SpammerBlockData:
+    properties:
+      confirmedTxCount:
+        type: integer
+      gasUsed:
+        type: integer
+      pendingTxCount:
+        type: integer
     type: object
   api.SpammerDetails:
     properties:
@@ -136,6 +187,63 @@ definitions:
       scenario:
         type: string
       status:
+        type: integer
+    type: object
+  api.SpammerMetricsData:
+    properties:
+      confirmedTxCount:
+        type: integer
+      gasUsedInWindow:
+        type: integer
+      id:
+        type: integer
+      lastUpdate:
+        type: string
+      name:
+        type: string
+      pendingTxCount:
+        type: integer
+    type: object
+  api.SpammerTimeSeriesPoint:
+    properties:
+      blockNumber:
+        type: integer
+      confirmedTxCount:
+        type: integer
+      gasUsed:
+        type: integer
+      pendingTxCount:
+        type: integer
+      timestamp:
+        type: string
+    type: object
+  api.SpammerTimeSeriesResponse:
+    properties:
+      dataPoints:
+        items:
+          $ref: '#/definitions/api.SpammerTimeSeriesPoint'
+        type: array
+      spammerId:
+        type: integer
+      spammerName:
+        type: string
+      timeRange:
+        $ref: '#/definitions/api.TimeRange'
+    type: object
+  api.TimeRange:
+    properties:
+      end:
+        type: string
+      start:
+        type: string
+    type: object
+  api.TotalMetricsData:
+    properties:
+      confirmedTxCount:
+        type: integer
+      gasUsedInWindow:
+        type: integer
+      pendingTxCount:
         type: integer
     type: object
   api.UpdateClientEnabledRequest:
@@ -357,6 +465,68 @@ paths:
       summary: Get all clients
       tags:
       - Client
+  /api/graphs/dashboard:
+    get:
+      description: Returns comprehensive graphs data for the dashboard including all
+        spammers, totals, and time-series data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.GraphsDashboardResponse'
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get graphs dashboard data
+      tags:
+      - Graphs
+  /api/graphs/spammer/{id}/timeseries:
+    get:
+      description: Returns detailed time-series graphs data for a specific spammer
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.SpammerTimeSeriesResponse'
+        "400":
+          description: Invalid spammer ID
+          schema:
+            type: string
+        "404":
+          description: Spammer not found
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get time-series data for a specific spammer
+      tags:
+      - Graphs
+  /api/graphs/stream:
+    get:
+      description: Provides real-time graphs updates via Server-Sent Events (SSE)
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+      summary: Stream real-time graphs updates
+      tags:
+      - Graphs
   /api/scenarios:
     get:
       description: Returns a list of all scenarios
