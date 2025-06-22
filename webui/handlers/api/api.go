@@ -1254,10 +1254,15 @@ func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create per-connection SSE state
+	connectionState := &SSEState{
+		lastSpammerHashes: make(map[uint64]string),
+	}
+
 	// Send initial data
 	shortWindow := ah.daemon.GetShortWindowMetrics()
 	if shortWindow != nil {
-		ah.sendCurrentSpammerData(w, flusher, shortWindow)
+		ah.sendCurrentSpammerDataWithState(w, flusher, shortWindow, connectionState)
 	}
 
 	subscriptionID, updateChan := metricsCollector.Subscribe()
@@ -1276,7 +1281,7 @@ func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
 			return
 		case update := <-updateChan:
 			// Send real-time update based on metrics update
-			ah.sendMetricsUpdate(w, flusher, update)
+			ah.sendMetricsUpdateWithState(w, flusher, update, connectionState)
 		case <-fallbackTicker.C:
 			// Fallback update in case we miss real-time updates
 			shortWindow := ah.daemon.GetShortWindowMetrics()
@@ -1284,7 +1289,7 @@ func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			ah.sendCurrentSpammerData(w, flusher, shortWindow)
+			ah.sendCurrentSpammerDataWithState(w, flusher, shortWindow, connectionState)
 		}
 	}
 }
@@ -1295,17 +1300,23 @@ type SSEState struct {
 	lastSpammerHashes  map[uint64]string
 }
 
-var sseState = &SSEState{
-	lastSpammerHashes: make(map[uint64]string),
+// Removed global sseState - now using per-connection state
+
+// sendCurrentSpammerData provides backward compatibility (creates temporary state)
+func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http.Flusher, shortWindow *daemon.MultiGranularityMetrics) {
+	tempState := &SSEState{
+		lastSpammerHashes: make(map[uint64]string),
+	}
+	ah.sendCurrentSpammerDataWithState(w, flusher, shortWindow, tempState)
 }
 
-// sendCurrentSpammerData sends current spammer data via SSE only if there are changes
-func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http.Flusher, shortWindow *daemon.MultiGranularityMetrics) {
+// sendCurrentSpammerDataWithState sends current spammer data via SSE only if there are changes
+func (ah *APIHandler) sendCurrentSpammerDataWithState(w http.ResponseWriter, flusher http.Flusher, shortWindow *daemon.MultiGranularityMetrics, state *SSEState) {
 	spammerSnapshots := shortWindow.GetSpammerSnapshots()
 	dataPoints := shortWindow.GetDataPoints()
 
 	// Check if there are new data points
-	hasNewDataPoints := len(dataPoints) > sseState.lastDataPointCount
+	hasNewDataPoints := len(dataPoints) > state.lastDataPointCount
 
 	// Calculate gas usage from data points
 	spammerGasInWindow := make(map[uint64]uint64)
@@ -1339,7 +1350,7 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 
 		newHashes[spammerID] = currentHash
 
-		if oldHash, exists := sseState.lastSpammerHashes[spammerID]; !exists || oldHash != currentHash {
+		if oldHash, exists := state.lastSpammerHashes[spammerID]; !exists || oldHash != currentHash {
 			hasSpammerChanges = true
 		}
 	}
@@ -1354,7 +1365,7 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 
 	// Add new data points if any
 	if hasNewDataPoints {
-		newDataPoints := dataPoints[sseState.lastDataPointCount:]
+		newDataPoints := dataPoints[state.lastDataPointCount:]
 		convertedDataPoints := make([]GraphsDataPoint, len(newDataPoints))
 
 		for i, point := range newDataPoints {
@@ -1380,7 +1391,7 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 		}
 
 		data["newDataPoints"] = convertedDataPoints
-		sseState.lastDataPointCount = len(dataPoints)
+		state.lastDataPointCount = len(dataPoints)
 	}
 
 	// Add spammer updates and detect new spammers
@@ -1409,7 +1420,7 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 			}
 
 			// Check if this is a new spammer
-			if _, exists := sseState.lastSpammerHashes[spammerID]; !exists {
+			if _, exists := state.lastSpammerHashes[spammerID]; !exists {
 				newSpammers = append(newSpammers, spammerData)
 			} else {
 				data[fmt.Sprintf("spammer_%d", spammerID)] = spammerData
@@ -1421,7 +1432,7 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 			data["newSpammers"] = newSpammers
 		}
 
-		sseState.lastSpammerHashes = newHashes
+		state.lastSpammerHashes = newHashes
 	}
 
 	jsonData, err := json.Marshal(data)
@@ -1434,8 +1445,16 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 	flusher.Flush()
 }
 
-// sendMetricsUpdate sends real-time metrics updates via SSE
+// sendMetricsUpdate provides backward compatibility (creates temporary state)
 func (ah *APIHandler) sendMetricsUpdate(w http.ResponseWriter, flusher http.Flusher, update *daemon.MetricsUpdate) {
+	tempState := &SSEState{
+		lastSpammerHashes: make(map[uint64]string),
+	}
+	ah.sendMetricsUpdateWithState(w, flusher, update, tempState)
+}
+
+// sendMetricsUpdateWithState sends real-time metrics updates via SSE
+func (ah *APIHandler) sendMetricsUpdateWithState(w http.ResponseWriter, flusher http.Flusher, update *daemon.MetricsUpdate, state *SSEState) {
 	if update == nil {
 		return
 	}
@@ -1469,6 +1488,18 @@ func (ah *APIHandler) sendMetricsUpdate(w http.ResponseWriter, flusher http.Flus
 
 	// Add updated spammer snapshots
 	if len(update.UpdatedSpammers) > 0 {
+		// Get the complete window data to calculate cumulative gas usage
+		shortWindow := ah.daemon.GetShortWindowMetrics()
+		spammerGasInWindow := make(map[uint64]uint64)
+		if shortWindow != nil {
+			dataPoints := shortWindow.GetDataPoints()
+			for _, point := range dataPoints {
+				for spammerID, spammerData := range point.SpammerGasData {
+					spammerGasInWindow[spammerID] += spammerData.GasUsed
+				}
+			}
+		}
+
 		for spammerID, snapshot := range update.UpdatedSpammers {
 			spammerName := ah.daemon.GetSpammerName(spammerID)
 
@@ -1478,13 +1509,8 @@ func (ah *APIHandler) sendMetricsUpdate(w http.ResponseWriter, flusher http.Flus
 				status = spammer.GetStatus()
 			}
 
-			// Calculate gas usage from the new data point
-			gasInWindow := uint64(0)
-			if update.NewDataPoint != nil {
-				if spammerData, exists := update.NewDataPoint.SpammerGasData[spammerID]; exists {
-					gasInWindow = spammerData.GasUsed
-				}
-			}
+			// Use cumulative gas usage from the entire window
+			gasInWindow := spammerGasInWindow[spammerID]
 
 			spammerData := map[string]interface{}{
 				"id":        spammerID,
@@ -1504,6 +1530,48 @@ func (ah *APIHandler) sendMetricsUpdate(w http.ResponseWriter, flusher http.Flus
 	// Only send if we have data
 	if len(data) == 0 {
 		return
+	}
+
+	// Update state to track what we've sent
+	if update.NewDataPoint != nil {
+		// Get current window data to update our state
+		shortWindow := ah.daemon.GetShortWindowMetrics()
+		if shortWindow != nil {
+			dataPoints := shortWindow.GetDataPoints()
+			state.lastDataPointCount = len(dataPoints)
+		}
+	}
+
+	// Update spammer hashes for real-time updates
+	if len(update.UpdatedSpammers) > 0 {
+		for spammerID, snapshot := range update.UpdatedSpammers {
+			// Get spammer status for hash
+			status := 0
+			if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
+				status = spammer.GetStatus()
+			}
+
+			// Get gas usage
+			gasInWindow := uint64(0)
+			if shortWindow := ah.daemon.GetShortWindowMetrics(); shortWindow != nil {
+				dataPoints := shortWindow.GetDataPoints()
+				for _, point := range dataPoints {
+					if spammerData, exists := point.SpammerGasData[spammerID]; exists {
+						gasInWindow += spammerData.GasUsed
+					}
+				}
+			}
+
+			currentHash := fmt.Sprintf("%d-%d-%d-%d-%d-%s",
+				snapshot.PendingTxCount,
+				snapshot.TotalConfirmedTx,
+				snapshot.TotalSubmittedTx,
+				gasInWindow,
+				status,
+				snapshot.LastUpdate.Format(time.RFC3339))
+
+			state.lastSpammerHashes[spammerID] = currentHash
+		}
 	}
 
 	jsonData, err := json.Marshal(data)
