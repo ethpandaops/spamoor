@@ -25,7 +25,7 @@ func (fh *FrontendHandler) Graphs(w http.ResponseWriter, r *http.Request) {
 		server.HandlePageError(w, r, pageError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "text/html")
 	if server.HandleTemplateError(w, r, "graphs.go", "Graphs", "", pageTemplate.ExecuteTemplate(w, "layout", data)) != nil {
 		return
@@ -36,6 +36,6 @@ func (fh *FrontendHandler) getGraphsPageData() (*GraphsPage, error) {
 	pageData := &GraphsPage{
 		// Initialize any server-side data if needed
 	}
-	
+
 	return pageData, nil
 }

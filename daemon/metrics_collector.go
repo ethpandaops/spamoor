@@ -19,8 +19,8 @@ type TxPoolMetricsCollector struct {
 	longWindow  *MultiGranularityMetrics // 6h with per-32-block precision
 
 	// Real-time update subscribers
-	subscribers     map[uint64]chan *MetricsUpdate
-	subscribersMux  sync.RWMutex
+	subscribers      map[uint64]chan *MetricsUpdate
+	subscribersMux   sync.RWMutex
 	nextSubscriberID uint64
 
 	logger *logrus.Entry
@@ -66,20 +66,20 @@ type SpammerSnapshot struct {
 
 // MetricsUpdate represents a real-time update to metrics
 type MetricsUpdate struct {
-	BlockNumber      uint64
-	NewDataPoint     *BlockDataPoint
-	UpdatedSpammers  map[uint64]*SpammerSnapshot
-	Timestamp        time.Time
+	BlockNumber     uint64
+	NewDataPoint    *BlockDataPoint
+	UpdatedSpammers map[uint64]*SpammerSnapshot
+	Timestamp       time.Time
 }
 
 // NewTxPoolMetricsCollector creates and initializes the metrics collector
 func NewTxPoolMetricsCollector(txPool *spamoor.TxPool) *TxPoolMetricsCollector {
 	collector := &TxPoolMetricsCollector{
-		txPool:       txPool,
-		shortWindow:  NewMultiGranularityMetrics(30*time.Minute, 1), // 30min, per-block
-		longWindow:   NewMultiGranularityMetrics(6*time.Hour, 32),   // 6h, per-32-blocks
-		subscribers:  make(map[uint64]chan *MetricsUpdate),
-		logger:       logrus.WithField("component", "metrics_collector"),
+		txPool:      txPool,
+		shortWindow: NewMultiGranularityMetrics(30*time.Minute, 1), // 30min, per-block
+		longWindow:  NewMultiGranularityMetrics(6*time.Hour, 32),   // 6h, per-32-blocks
+		subscribers: make(map[uint64]chan *MetricsUpdate),
+		logger:      logrus.WithField("component", "metrics_collector"),
 	}
 
 	// Subscribe to bulk block updates
@@ -133,7 +133,7 @@ func (mc *TxPoolMetricsCollector) handleBulkBlockUpdate(blockNumber uint64, allW
 	// Process the block for both time windows
 	newDataPoint := mc.processBlockForWindow(mc.shortWindow, blockNumber, block, allWalletPoolStats, receipts)
 	mc.processBlockForWindow(mc.longWindow, blockNumber, block, allWalletPoolStats, receipts)
-	
+
 	// Send real-time update to subscribers (only for short window)
 	if newDataPoint != nil {
 		update := &MetricsUpdate{
@@ -398,7 +398,7 @@ func (mc *TxPoolMetricsCollector) Shutdown() {
 		mc.txPool.UnsubscribeFromBulkBlockUpdates(mc.subscription)
 		mc.logger.Infof("Unsubscribed from bulk block updates (subscription ID: %d)", mc.subscription)
 	}
-	
+
 	// Close all subscriber channels
 	mc.subscribersMux.Lock()
 	for id, ch := range mc.subscribers {
@@ -412,14 +412,14 @@ func (mc *TxPoolMetricsCollector) Shutdown() {
 func (mc *TxPoolMetricsCollector) Subscribe() (uint64, <-chan *MetricsUpdate) {
 	mc.subscribersMux.Lock()
 	defer mc.subscribersMux.Unlock()
-	
+
 	id := mc.nextSubscriberID
 	mc.nextSubscriberID++
-	
+
 	// Create buffered channel to prevent blocking
 	ch := make(chan *MetricsUpdate, 10)
 	mc.subscribers[id] = ch
-	
+
 	mc.logger.Debugf("New metrics subscriber registered: %d", id)
 	return id, ch
 }
@@ -428,7 +428,7 @@ func (mc *TxPoolMetricsCollector) Subscribe() (uint64, <-chan *MetricsUpdate) {
 func (mc *TxPoolMetricsCollector) Unsubscribe(id uint64) {
 	mc.subscribersMux.Lock()
 	defer mc.subscribersMux.Unlock()
-	
+
 	if ch, exists := mc.subscribers[id]; exists {
 		close(ch)
 		delete(mc.subscribers, id)
@@ -440,7 +440,7 @@ func (mc *TxPoolMetricsCollector) Unsubscribe(id uint64) {
 func (mc *TxPoolMetricsCollector) notifySubscribers(update *MetricsUpdate) {
 	mc.subscribersMux.RLock()
 	defer mc.subscribersMux.RUnlock()
-	
+
 	for id, ch := range mc.subscribers {
 		select {
 		case ch <- update:
