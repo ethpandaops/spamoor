@@ -19,17 +19,18 @@ import (
 )
 
 type CliArgs struct {
-	verbose        bool
-	trace          bool
-	debug          bool
-	rpchosts       []string
-	rpchostsFile   string
-	privkey        string
-	port           int
-	dbFile         string
-	startupSpammer string
-	fuluActivation uint64
-	withoutBatcher bool
+	verbose          bool
+	trace            bool
+	debug            bool
+	rpchosts         []string
+	rpchostsFile     string
+	privkey          string
+	port             int
+	dbFile           string
+	startupSpammer   string
+	fuluActivation   uint64
+	withoutBatcher   bool
+	disableTxMetrics bool
 }
 
 func main() {
@@ -47,6 +48,7 @@ func main() {
 	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file or URL with startup spammers configuration")
 	flags.Uint64Var(&cliArgs.fuluActivation, "fulu-activation", 0, "The unix timestamp of the Fulu activation (if activated)")
 	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
+	flags.BoolVar(&cliArgs.disableTxMetrics, "disable-tx-metrics", false, "Disable transaction metrics collection and graphs page (keeps Prometheus metrics)")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -143,12 +145,13 @@ func main() {
 
 	// start frontend
 	webui.StartHttpServer(&types.FrontendConfig{
-		Host:     "0.0.0.0",
-		Port:     cliArgs.port,
-		SiteName: "Spamoor",
-		Debug:    cliArgs.debug,
-		Pprof:    true,
-		Minify:   true,
+		Host:             "0.0.0.0",
+		Port:             cliArgs.port,
+		SiteName:         "Spamoor",
+		Debug:            cliArgs.debug,
+		Pprof:            true,
+		Minify:           true,
+		DisableTxMetrics: cliArgs.disableTxMetrics,
 	}, spamoorDaemon)
 
 	// start daemon

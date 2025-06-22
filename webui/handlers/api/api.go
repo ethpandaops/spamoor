@@ -1058,7 +1058,7 @@ func (ah *APIHandler) GetSpammerLibraryIndex(w http.ResponseWriter, r *http.Requ
 func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request) {
 	shortWindow := ah.daemon.GetShortWindowMetrics()
 	if shortWindow == nil {
-		http.Error(w, "Graphs data collection not available", http.StatusServiceUnavailable)
+		http.Error(w, "Transaction metrics collection is disabled", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -1184,7 +1184,7 @@ func (ah *APIHandler) GetSpammerTimeSeries(w http.ResponseWriter, r *http.Reques
 
 	metricsData := ah.daemon.GetShortWindowMetrics()
 	if metricsData == nil {
-		http.Error(w, "Graphs data collection not available", http.StatusServiceUnavailable)
+		http.Error(w, "Transaction metrics collection is disabled", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -1234,6 +1234,13 @@ func (ah *APIHandler) GetSpammerTimeSeries(w http.ResponseWriter, r *http.Reques
 // @Success 200 {string} string "SSE stream"
 // @Router /api/graphs/stream [get]
 func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
+	// Check if tx metrics are enabled
+	metricsCollector := ah.daemon.GetMetricsCollector()
+	if metricsCollector == nil {
+		http.Error(w, "Transaction metrics collection is disabled", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -1253,9 +1260,12 @@ func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
 		ah.sendCurrentSpammerData(w, flusher, shortWindow)
 	}
 
-	// Set up a ticker to send updates every 5 seconds
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	subscriptionID, updateChan := metricsCollector.Subscribe()
+	defer metricsCollector.Unsubscribe(subscriptionID)
+
+	// Set up a fallback ticker for updates every 30 seconds (reduced from 5)
+	fallbackTicker := time.NewTicker(30 * time.Second)
+	defer fallbackTicker.Stop()
 
 	// Context for cleanup
 	ctx := r.Context()
@@ -1264,7 +1274,11 @@ func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case update := <-updateChan:
+			// Send real-time update based on metrics update
+			ah.sendMetricsUpdate(w, flusher, update)
+		case <-fallbackTicker.C:
+			// Fallback update in case we miss real-time updates
 			shortWindow := ah.daemon.GetShortWindowMetrics()
 			if shortWindow == nil {
 				continue
@@ -1308,13 +1322,13 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 	for spammerID, snapshot := range spammerSnapshots {
 		// Create a simple hash of the spammer state
 		gasInWindow := spammerGasInWindow[spammerID]
-		
+
 		// Get spammer status for hash
 		status := 0
 		if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
 			status = spammer.GetStatus()
 		}
-		
+
 		currentHash := fmt.Sprintf("%d-%d-%d-%d-%d-%s",
 			snapshot.PendingTxCount,
 			snapshot.TotalConfirmedTx,
@@ -1413,6 +1427,88 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		logrus.Errorf("Failed to marshal graphs data: %v", err)
+		return
+	}
+
+	fmt.Fprintf(w, "data: %s\n\n", jsonData)
+	flusher.Flush()
+}
+
+// sendMetricsUpdate sends real-time metrics updates via SSE
+func (ah *APIHandler) sendMetricsUpdate(w http.ResponseWriter, flusher http.Flusher, update *daemon.MetricsUpdate) {
+	if update == nil {
+		return
+	}
+
+	data := make(map[string]interface{})
+
+	// Add new data point if available
+	if update.NewDataPoint != nil {
+		convertedDataPoint := GraphsDataPoint{
+			Timestamp:        update.NewDataPoint.Timestamp,
+			StartBlockNumber: update.NewDataPoint.StartBlockNumber,
+			EndBlockNumber:   update.NewDataPoint.EndBlockNumber,
+			BlockCount:       update.NewDataPoint.BlockCount,
+			TotalGasUsed:     update.NewDataPoint.TotalGasUsed,
+			OthersGasUsed:    update.NewDataPoint.OthersGasUsed,
+			SpammerData:      make(map[string]*SpammerBlockData),
+		}
+
+		// Convert spammer data with string keys
+		for spammerID, spammerData := range update.NewDataPoint.SpammerGasData {
+			convertedDataPoint.SpammerData[fmt.Sprintf("%d", spammerID)] = &SpammerBlockData{
+				GasUsed:          spammerData.GasUsed,
+				ConfirmedTxCount: spammerData.ConfirmedTxCount,
+				PendingTxCount:   spammerData.PendingTxCount,
+				SubmittedTxCount: spammerData.SubmittedTxCount,
+			}
+		}
+
+		data["newDataPoints"] = []GraphsDataPoint{convertedDataPoint}
+	}
+
+	// Add updated spammer snapshots
+	if len(update.UpdatedSpammers) > 0 {
+		for spammerID, snapshot := range update.UpdatedSpammers {
+			spammerName := ah.daemon.GetSpammerName(spammerID)
+
+			// Get spammer status
+			status := 0 // Default to stopped
+			if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
+				status = spammer.GetStatus()
+			}
+
+			// Calculate gas usage from the new data point
+			gasInWindow := uint64(0)
+			if update.NewDataPoint != nil {
+				if spammerData, exists := update.NewDataPoint.SpammerGasData[spammerID]; exists {
+					gasInWindow = spammerData.GasUsed
+				}
+			}
+
+			spammerData := map[string]interface{}{
+				"id":        spammerID,
+				"name":      spammerName,
+				"pending":   snapshot.PendingTxCount,
+				"confirmed": snapshot.TotalConfirmedTx,
+				"submitted": snapshot.TotalSubmittedTx,
+				"gasUsed":   gasInWindow,
+				"updated":   snapshot.LastUpdate.Format(time.RFC3339),
+				"status":    status,
+			}
+
+			data[fmt.Sprintf("spammer_%d", spammerID)] = spammerData
+		}
+	}
+
+	// Only send if we have data
+	if len(data) == 0 {
+		return
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		logrus.Errorf("Failed to marshal real-time metrics update: %v", err)
 		return
 	}
 

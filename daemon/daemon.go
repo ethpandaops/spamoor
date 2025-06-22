@@ -293,6 +293,11 @@ func (d *Daemon) GetLongWindowMetrics() *MultiGranularityMetrics {
 	return d.txPoolMetricsCollector.GetLongWindowMetrics()
 }
 
+// GetMetricsCollector returns the TxPool metrics collector for real-time subscriptions
+func (d *Daemon) GetMetricsCollector() *TxPoolMetricsCollector {
+	return d.txPoolMetricsCollector
+}
+
 // No longer need RegisterSpammerForMetrics/UnregisterSpammerFromMetrics
 // Spammer metrics are automatically tracked via WalletPool.GetSpammerID()
 

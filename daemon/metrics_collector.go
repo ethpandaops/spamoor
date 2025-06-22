@@ -18,6 +18,11 @@ type TxPoolMetricsCollector struct {
 	shortWindow *MultiGranularityMetrics // 30min with per-block precision
 	longWindow  *MultiGranularityMetrics // 6h with per-32-block precision
 
+	// Real-time update subscribers
+	subscribers     map[uint64]chan *MetricsUpdate
+	subscribersMux  sync.RWMutex
+	nextSubscriberID uint64
+
 	logger *logrus.Entry
 }
 
@@ -59,13 +64,22 @@ type SpammerSnapshot struct {
 	LastUpdate       time.Time
 }
 
+// MetricsUpdate represents a real-time update to metrics
+type MetricsUpdate struct {
+	BlockNumber      uint64
+	NewDataPoint     *BlockDataPoint
+	UpdatedSpammers  map[uint64]*SpammerSnapshot
+	Timestamp        time.Time
+}
+
 // NewTxPoolMetricsCollector creates and initializes the metrics collector
 func NewTxPoolMetricsCollector(txPool *spamoor.TxPool) *TxPoolMetricsCollector {
 	collector := &TxPoolMetricsCollector{
-		txPool:      txPool,
-		shortWindow: NewMultiGranularityMetrics(30*time.Minute, 1), // 30min, per-block
-		longWindow:  NewMultiGranularityMetrics(6*time.Hour, 32),   // 6h, per-32-blocks
-		logger:      logrus.WithField("component", "metrics_collector"),
+		txPool:       txPool,
+		shortWindow:  NewMultiGranularityMetrics(30*time.Minute, 1), // 30min, per-block
+		longWindow:   NewMultiGranularityMetrics(6*time.Hour, 32),   // 6h, per-32-blocks
+		subscribers:  make(map[uint64]chan *MetricsUpdate),
+		logger:       logrus.WithField("component", "metrics_collector"),
 	}
 
 	// Subscribe to bulk block updates
@@ -117,8 +131,19 @@ func (mc *TxPoolMetricsCollector) handleBulkBlockUpdate(blockNumber uint64, allW
 	}
 
 	// Process the block for both time windows
-	mc.processBlockForWindow(mc.shortWindow, blockNumber, block, allWalletPoolStats, receipts)
+	newDataPoint := mc.processBlockForWindow(mc.shortWindow, blockNumber, block, allWalletPoolStats, receipts)
 	mc.processBlockForWindow(mc.longWindow, blockNumber, block, allWalletPoolStats, receipts)
+	
+	// Send real-time update to subscribers (only for short window)
+	if newDataPoint != nil {
+		update := &MetricsUpdate{
+			BlockNumber:     blockNumber,
+			NewDataPoint:    newDataPoint,
+			UpdatedSpammers: mc.shortWindow.GetSpammerSnapshots(),
+			Timestamp:       time.Now(),
+		}
+		mc.notifySubscribers(update)
+	}
 }
 
 // processBlockForWindow processes a block for a specific time window
@@ -128,7 +153,7 @@ func (mc *TxPoolMetricsCollector) processBlockForWindow(
 	block *types.Block,
 	allWalletPoolStats map[*spamoor.WalletPool]*spamoor.WalletPoolBlockStats,
 	receipts []*types.Receipt,
-) {
+) *BlockDataPoint {
 	window.mutex.Lock()
 	defer window.mutex.Unlock()
 
@@ -176,23 +201,30 @@ func (mc *TxPoolMetricsCollector) processBlockForWindow(
 	}
 
 	// Add or aggregate data point based on granularity
-	window.addDataPoint(blockNumber, now, totalGasUsed, spammerGasData, othersGasUsed)
+	updatedDataPoint := window.addDataPoint(blockNumber, now, totalGasUsed, spammerGasData, othersGasUsed)
 
 	// Clean up old data
 	window.pruneOldData(now)
 
 	mc.logger.Tracef("Processed block %d for window (granularity %d): total_gas=%d, spammer_gas=%d, others_gas=%d",
 		blockNumber, window.blockGranularity, totalGasUsed, totalSpammerGas, othersGasUsed)
+
+	// Return the data point only for short window (granularity 1)
+	if window.blockGranularity == 1 {
+		return updatedDataPoint
+	}
+	return nil
 }
 
 // addDataPoint adds a block's data to the window, aggregating based on granularity
+// Returns the data point that was either updated or newly created
 func (mgm *MultiGranularityMetrics) addDataPoint(
 	blockNumber uint64,
 	timestamp time.Time,
 	totalGasUsed uint64,
 	spammerGasData map[uint64]*SpammerBlockData,
 	othersGasUsed uint64,
-) {
+) *BlockDataPoint {
 	// Check if we should aggregate with the last data point
 	if len(mgm.dataPoints) > 0 {
 		lastPoint := &mgm.dataPoints[len(mgm.dataPoints)-1]
@@ -222,7 +254,7 @@ func (mgm *MultiGranularityMetrics) addDataPoint(
 					}
 				}
 			}
-			return
+			return lastPoint
 		}
 	}
 
@@ -248,6 +280,7 @@ func (mgm *MultiGranularityMetrics) addDataPoint(
 	}
 
 	mgm.dataPoints = append(mgm.dataPoints, newPoint)
+	return &mgm.dataPoints[len(mgm.dataPoints)-1]
 }
 
 // pruneOldData removes data points outside the time window
@@ -364,5 +397,57 @@ func (mc *TxPoolMetricsCollector) Shutdown() {
 	if mc.subscription != 0 {
 		mc.txPool.UnsubscribeFromBulkBlockUpdates(mc.subscription)
 		mc.logger.Infof("Unsubscribed from bulk block updates (subscription ID: %d)", mc.subscription)
+	}
+	
+	// Close all subscriber channels
+	mc.subscribersMux.Lock()
+	for id, ch := range mc.subscribers {
+		close(ch)
+		delete(mc.subscribers, id)
+	}
+	mc.subscribersMux.Unlock()
+}
+
+// Subscribe creates a new subscription for real-time metrics updates
+func (mc *TxPoolMetricsCollector) Subscribe() (uint64, <-chan *MetricsUpdate) {
+	mc.subscribersMux.Lock()
+	defer mc.subscribersMux.Unlock()
+	
+	id := mc.nextSubscriberID
+	mc.nextSubscriberID++
+	
+	// Create buffered channel to prevent blocking
+	ch := make(chan *MetricsUpdate, 10)
+	mc.subscribers[id] = ch
+	
+	mc.logger.Debugf("New metrics subscriber registered: %d", id)
+	return id, ch
+}
+
+// Unsubscribe removes a subscription
+func (mc *TxPoolMetricsCollector) Unsubscribe(id uint64) {
+	mc.subscribersMux.Lock()
+	defer mc.subscribersMux.Unlock()
+	
+	if ch, exists := mc.subscribers[id]; exists {
+		close(ch)
+		delete(mc.subscribers, id)
+		mc.logger.Debugf("Metrics subscriber unregistered: %d", id)
+	}
+}
+
+// notifySubscribers sends updates to all active subscribers
+func (mc *TxPoolMetricsCollector) notifySubscribers(update *MetricsUpdate) {
+	mc.subscribersMux.RLock()
+	defer mc.subscribersMux.RUnlock()
+	
+	for id, ch := range mc.subscribers {
+		select {
+		case ch <- update:
+			// Successfully sent update
+		default:
+			// Channel is full, skip this update
+			mc.logger.Warnf("Metrics subscriber %d channel is full, skipping update", id)
+		}
 	}
 }

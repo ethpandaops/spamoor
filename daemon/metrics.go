@@ -148,12 +148,16 @@ func (mc *MetricsCollector) UpdateTotalBlockGas(category string, gasUsed uint64)
 	mc.totalBlockGasGauge.With(labels).Set(float64(gasUsed))
 }
 
-func (d *Daemon) InitializeMetrics() error {
-	// Initialize metrics collector
-	d.metricsCollector = d.NewMetricsCollector()
-
+func (d *Daemon) InitializeTxPoolMetrics() error {
 	// Initialize TxPool metrics collector with multi-granularity windows
 	d.txPoolMetricsCollector = NewTxPoolMetricsCollector(d.txpool)
+
+	return nil
+}
+
+func (d *Daemon) InitializeMetrics() error {
+	// Initialize metrics collector (Prometheus metrics)
+	d.metricsCollector = d.NewMetricsCollector()
 
 	// Initialize metrics for existing spammers
 	d.initializeExistingSpammerMetrics()

@@ -33,8 +33,13 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	err := daemon.InitializeMetrics()
 	if err != nil {
 		logrus.Errorf("failed to initialize metrics: %v", err)
-	} else {
-		logrus.Info("metrics endpoint available at /metrics")
+	}
+
+	if !config.DisableTxMetrics {
+		err = daemon.InitializeTxPoolMetrics()
+		if err != nil {
+			logrus.Errorf("failed to initialize tx pool metrics: %v", err)
+		}
 	}
 
 	// init router
@@ -50,7 +55,9 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	router.HandleFunc("/", frontendHandler.Index).Methods("GET")
 	router.HandleFunc("/clients", frontendHandler.Clients).Methods("GET")
 	router.HandleFunc("/wallets", frontendHandler.Wallets).Methods("GET")
-	router.HandleFunc("/graphs", frontendHandler.Graphs).Methods("GET")
+	if !config.DisableTxMetrics {
+		router.HandleFunc("/graphs", frontendHandler.Graphs).Methods("GET")
+	}
 
 	// API routes
 	apiHandler := api.NewAPIHandler(daemon)
@@ -77,11 +84,13 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/spammers/export", apiHandler.ExportSpammers).Methods("POST")
 	apiRouter.HandleFunc("/spammers/import", apiHandler.ImportSpammers).Methods("POST")
 	apiRouter.HandleFunc("/spammers/library", apiHandler.GetSpammerLibraryIndex).Methods("GET")
-	
-	// Graphs routes
-	apiRouter.HandleFunc("/graphs/dashboard", apiHandler.GetGraphsDashboard).Methods("GET")
-	apiRouter.HandleFunc("/graphs/spammer/{id}/timeseries", apiHandler.GetSpammerTimeSeries).Methods("GET")
-	apiRouter.HandleFunc("/graphs/stream", apiHandler.StreamGraphs).Methods("GET")
+
+	// Graphs routes (only if tx metrics are enabled)
+	if !config.DisableTxMetrics {
+		apiRouter.HandleFunc("/graphs/dashboard", apiHandler.GetGraphsDashboard).Methods("GET")
+		apiRouter.HandleFunc("/graphs/spammer/{id}/timeseries", apiHandler.GetSpammerTimeSeries).Methods("GET")
+		apiRouter.HandleFunc("/graphs/stream", apiHandler.StreamGraphs).Methods("GET")
+	}
 
 	// metrics endpoint
 	router.Handle("/metrics", promhttp.Handler()).Methods("GET")
