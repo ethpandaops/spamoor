@@ -710,16 +710,19 @@ function updateTransactionSubmissionChart() {
     });
     
     const submittedData = [];
-    let prevSubmitted = 0;
+    let prevSubmitted = null;
     
     metricsData.data.forEach((point, pointIndex) => {
       const currentSubmitted = point.spammers && point.spammers[spammerIdStr] 
         ? point.spammers[spammerIdStr].submitted 
-        : prevSubmitted;
+        : 0;
       
-      const delta = currentSubmitted - prevSubmitted;
+      let delta = 0;
+      if (pointIndex > 0 && prevSubmitted !== null) {
+        delta = currentSubmitted - prevSubmitted;
+      }
+      
       submittedData.push(Math.max(0, delta));
-      
       prevSubmitted = currentSubmitted;
     });
     
