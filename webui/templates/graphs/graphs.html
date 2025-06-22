@@ -291,8 +291,8 @@
   
   .progress-cell {
     position: relative;
-    min-width: 160px;
-    width: 160px;
+    min-width: 180px;
+    width: 180px;
   }
   
   .progress-bar-bg {
@@ -750,7 +750,13 @@ function updateTransactionPendingChart() {
   const datasets = [];
   
   metricsData.spammers.forEach((spammer, index) => {
-    const pendingData = metricsData.data.map(() => spammer.pending);
+    const spammerIdStr = spammer.id.toString();
+    
+    const pendingData = metricsData.data.map(point => 
+      point.spammers && point.spammers[spammerIdStr] 
+        ? point.spammers[spammerIdStr].pending 
+        : 0
+    );
     
     datasets.push({
       label: spammer.name,
@@ -803,7 +809,7 @@ function updateSpammerTable() {
     const gasUsedLastBlock = lastBlockGas[spammer.id] || 0;
     const gasPercentageLastBlock = totalLastBlockGas > 0 ? ((gasUsedLastBlock / totalLastBlockGas) * 100).toFixed(1) : '0.0';
     const submittedTxs = spammer.submitted;
-    const isActive = spammer.pending > 0 || spammer.confirmed > 0;
+    const isActive = spammer.status === 1;
     
     return `
       <tr>
@@ -902,7 +908,8 @@ function updateRealTimeData(data) {
           confirmed: newSpammerData.confirmed,
           submitted: newSpammerData.submitted,
           gasUsed: newSpammerData.gasUsed,
-          updated: newSpammerData.updated
+          updated: newSpammerData.updated,
+          status: newSpammerData.status
         });
         hasNewSpammers = true;
         console.log(`Added new spammer: ${newSpammerData.name} (ID: ${newSpammerData.id})`);
@@ -921,6 +928,7 @@ function updateRealTimeData(data) {
         spammer.submitted = spammerData.submitted;
         spammer.gasUsed = spammerData.gasUsed;
         spammer.updated = spammerData.updated;
+        spammer.status = spammerData.status;
         hasSpammerUpdates = true;
       }
     }

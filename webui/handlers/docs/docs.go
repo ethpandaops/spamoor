@@ -1237,6 +1237,10 @@ const docTemplate = `{
                 "pending": {
                     "type": "integer"
                 },
+                "status": {
+                    "description": "Running status from daemon",
+                    "type": "integer"
+                },
                 "submitted": {
                     "type": "integer"
                 },

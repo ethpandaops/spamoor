@@ -112,6 +112,7 @@ type SpammerMetricsData struct {
 	SubmittedTxCount uint64 `json:"submitted"`
 	GasUsedInWindow  uint64 `json:"gasUsed"`
 	LastUpdate       string `json:"updated"`
+	Status           int    `json:"status"` // Running status from daemon
 }
 
 // TotalMetricsData represents aggregated metrics across all spammers
@@ -1087,6 +1088,12 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 		spammerName := ah.daemon.GetSpammerName(spammerID)
 		gasInWindow := spammerGasInWindow[spammerID]
 
+		// Get spammer status
+		status := 0 // Default to stopped
+		if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
+			status = spammer.GetStatus()
+		}
+
 		spammers = append(spammers, SpammerMetricsData{
 			ID:               spammerID,
 			Name:             spammerName,
@@ -1095,6 +1102,7 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 			SubmittedTxCount: snapshot.TotalSubmittedTx,
 			GasUsedInWindow:  gasInWindow,
 			LastUpdate:       snapshot.LastUpdate.Format(time.RFC3339),
+			Status:           status,
 		})
 
 		totalPending += snapshot.PendingTxCount
@@ -1300,11 +1308,19 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 	for spammerID, snapshot := range spammerSnapshots {
 		// Create a simple hash of the spammer state
 		gasInWindow := spammerGasInWindow[spammerID]
-		currentHash := fmt.Sprintf("%d-%d-%d-%d-%s",
+		
+		// Get spammer status for hash
+		status := 0
+		if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
+			status = spammer.GetStatus()
+		}
+		
+		currentHash := fmt.Sprintf("%d-%d-%d-%d-%d-%s",
 			snapshot.PendingTxCount,
 			snapshot.TotalConfirmedTx,
 			snapshot.TotalSubmittedTx,
 			gasInWindow,
+			status,
 			snapshot.LastUpdate.Format(time.RFC3339))
 
 		newHashes[spammerID] = currentHash
@@ -1361,6 +1377,12 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 			spammerName := ah.daemon.GetSpammerName(spammerID)
 			gasInWindow := spammerGasInWindow[spammerID]
 
+			// Get spammer status
+			status := 0 // Default to stopped
+			if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
+				status = spammer.GetStatus()
+			}
+
 			spammerData := map[string]interface{}{
 				"id":        spammerID,
 				"name":      spammerName,
@@ -1369,6 +1391,7 @@ func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http
 				"submitted": snapshot.TotalSubmittedTx,
 				"gasUsed":   gasInWindow,
 				"updated":   snapshot.LastUpdate.Format(time.RFC3339),
+				"status":    status,
 			}
 
 			// Check if this is a new spammer
