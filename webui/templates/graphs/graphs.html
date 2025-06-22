@@ -106,8 +106,18 @@
       <!-- Spammer Distribution Pie Chart -->
       <div class="col-lg-4 mb-4">
         <div class="card">
-          <div class="card-header">
+          <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="mb-0">Gas Distribution</h5>
+            <div class="btn-group" role="group">
+              <input type="radio" class="btn-check" name="gasDistributionPeriod" id="lastBlock" value="1" checked>
+              <label class="btn btn-outline-secondary btn-sm" for="lastBlock">Last Block</label>
+              
+              <input type="radio" class="btn-check" name="gasDistributionPeriod" id="last32Blocks" value="32">
+              <label class="btn btn-outline-secondary btn-sm" for="last32Blocks">32 Blocks</label>
+              
+              <input type="radio" class="btn-check" name="gasDistributionPeriod" id="last256Blocks" value="256">
+              <label class="btn btn-outline-secondary btn-sm" for="last256Blocks">256 Blocks</label>
+            </div>
           </div>
           <div class="card-body">
             <canvas id="gasDistributionChart" height="300"></canvas>
@@ -116,15 +126,36 @@
       </div>
     </div>
 
-    <!-- Transaction Count Chart -->
+    <!-- Transaction Charts with Tabs -->
     <div class="row mb-4">
       <div class="col-12">
         <div class="card">
           <div class="card-header">
-            <h5 class="mb-0">Transaction Submission Rate (Last 30 Minutes)</h5>
+            <div class="d-flex justify-content-between align-items-center">
+              <h5 class="mb-0">Transaction Analytics (Last 30 Minutes)</h5>
+              <ul class="nav nav-pills nav-pills-sm" id="transactionTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link active" id="submission-tab" data-bs-toggle="pill" data-bs-target="#submission-chart" type="button" role="tab">
+                    Transaction Submission
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" id="pending-tab" data-bs-toggle="pill" data-bs-target="#pending-chart" type="button" role="tab">
+                    Pending Transactions
+                  </button>
+                </li>
+              </ul>
+            </div>
           </div>
           <div class="card-body">
-            <canvas id="transactionCountChart" height="200"></canvas>
+            <div class="tab-content" id="transactionTabContent">
+              <div class="tab-pane fade show active" id="submission-chart" role="tabpanel">
+                <canvas id="transactionSubmissionChart" height="300"></canvas>
+              </div>
+              <div class="tab-pane fade" id="pending-chart" role="tabpanel">
+                <canvas id="transactionPendingChart" height="300"></canvas>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -146,14 +177,15 @@
                     <th>Spammer</th>
                     <th class="text-end">Pending Txs</th>
                     <th class="text-end">Confirmed Txs</th>
+                    <th class="text-end">Submitted Txs</th>
                     <th class="text-end">Gas Used (30min)</th>
-                    <th class="text-end">% of Total Gas</th>
+                    <th class="text-end">Gas Used (Last Block)</th>
                     <th class="text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody id="spammerTableBody">
                   <tr>
-                    <td colspan="6" class="text-center text-muted">
+                    <td colspan="7" class="text-center text-muted">
                       <div class="spinner-border spinner-border-sm me-2" role="status">
                         <span class="visually-hidden">Loading...</span>
                       </div>
@@ -242,6 +274,42 @@
     border-color: var(--bs-primary);
     color: white;
   }
+  
+  .nav-pills-sm .nav-link {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.875rem;
+  }
+  
+  .tab-content {
+    min-height: 350px;
+  }
+  
+  .tab-content canvas {
+    max-height: 300px !important;
+    height: 300px !important;
+  }
+  
+  .progress-cell {
+    position: relative;
+    min-width: 160px;
+    width: 160px;
+  }
+  
+  .progress-bar-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background-color: rgba(13, 110, 253, 0.1);
+    border-radius: 3px;
+    z-index: 1;
+  }
+  
+  .progress-text {
+    position: relative;
+    z-index: 2;
+    padding: 0.25rem 0.5rem;
+  }
 </style>
 {{ end }}
 
@@ -250,7 +318,8 @@
 <script>
 let gasConsumptionChart;
 let gasDistributionChart;
-let transactionCountChart;
+let transactionSubmissionChart;
+let transactionPendingChart;
 let metricsData = null;
 let eventSource = null;
 let realTimeEnabled = true;
@@ -287,6 +356,12 @@ function setupEventListeners() {
       updateGasConsumptionChart();
     });
   });
+  
+  document.querySelectorAll('input[name="gasDistributionPeriod"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+      updateGasDistributionChart();
+    });
+  });
 }
 
 function initializeCharts() {
@@ -300,23 +375,14 @@ function initializeCharts() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: {
-        duration: 750,
-        easing: 'easeInOutQuart'
-      },
-      transitions: {
-        active: {
-          animation: {
-            duration: 400
-          }
-        }
-      },
+      animation: false,
+      transitions: {},
       scales: {
         x: {
           stacked: true,
           title: {
             display: true,
-            text: 'Time'
+            text: 'Block Number'
           }
         },
         y: {
@@ -379,8 +445,8 @@ function initializeCharts() {
     }
   });
   
-  const txCtx = document.getElementById('transactionCountChart').getContext('2d');
-  transactionCountChart = new Chart(txCtx, {
+  const txSubmissionCtx = document.getElementById('transactionSubmissionChart').getContext('2d');
+  transactionSubmissionChart = new Chart(txSubmissionCtx, {
     type: 'line',
     data: {
       labels: [],
@@ -389,22 +455,13 @@ function initializeCharts() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: {
-        duration: 750,
-        easing: 'easeInOutQuart'
-      },
-      transitions: {
-        active: {
-          animation: {
-            duration: 400
-          }
-        }
-      },
+      animation: false,
+      transitions: {},
       scales: {
         x: {
           title: {
             display: true,
-            text: 'Time'
+            text: 'Block Number'
           }
         },
         y: {
@@ -417,12 +474,64 @@ function initializeCharts() {
       },
       plugins: {
         legend: {
-          position: 'top'
+          display: false
         },
         tooltip: {
+          mode: 'index',
+          intersect: false,
           callbacks: {
+            title: function(context) {
+              return 'Block: ' + context[0].label;
+            },
             label: function(context) {
               return context.dataset.label + ': ' + formatNumber(context.parsed.y) + ' txs';
+            }
+          }
+        }
+      }
+    }
+  });
+  
+  const txPendingCtx = document.getElementById('transactionPendingChart').getContext('2d');
+  transactionPendingChart = new Chart(txPendingCtx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: []
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      transitions: {},
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: 'Block Number'
+          }
+        },
+        y: {
+          title: {
+            display: true,
+            text: 'Pending Transactions'
+          },
+          beginAtZero: true
+        }
+      },
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            title: function(context) {
+              return 'Block: ' + context[0].label;
+            },
+            label: function(context) {
+              return context.dataset.label + ': ' + formatNumber(context.parsed.y) + ' pending';
             }
           }
         }
@@ -466,7 +575,8 @@ function updateDashboard() {
   
   updateGasConsumptionChart();
   updateGasDistributionChart();
-  updateTransactionCountChart();
+  updateTransactionSubmissionChart();
+  updateTransactionPendingChart();
   
   updateSpammerTable();
   
@@ -480,7 +590,7 @@ function updateGasConsumptionChart() {
   const isStacked = chartType === 'stacked';
   
   const labels = metricsData.dataPoints.map(point => 
-    new Date(point.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+    `#${point.endBlockNumber}`
   );
   
   const datasets = [];
@@ -517,26 +627,48 @@ function updateGasConsumptionChart() {
   gasConsumptionChart.config.type = isStacked ? 'bar' : 'line';
   gasConsumptionChart.options.scales.x.stacked = isStacked;
   gasConsumptionChart.options.scales.y.stacked = isStacked;
-  gasConsumptionChart.update('none');
+  gasConsumptionChart.update();
 }
 
 function updateGasDistributionChart() {
-  if (!metricsData) return;
+  if (!metricsData || !metricsData.dataPoints) return;
+  
+  const selectedPeriod = parseInt(document.querySelector('input[name="gasDistributionPeriod"]:checked').value);
   
   const labels = [];
   const data = [];
   const colors = [];
   
-  metricsData.spammers.forEach((spammer, index) => {
-    labels.push(spammer.name);
-    data.push(spammer.gasUsedInWindow);
-    colors.push(chartColors[index % chartColors.length]);
+  const relevantDataPoints = metricsData.dataPoints.slice(-selectedPeriod);
+  const spammerGasInPeriod = {};
+  let totalGasInPeriod = 0;
+  
+  relevantDataPoints.forEach(point => {
+    totalGasInPeriod += point.totalGasUsed;
+    
+    if (point.spammerData) {
+      Object.keys(point.spammerData).forEach(spammerIdStr => {
+        const spammerID = parseInt(spammerIdStr);
+        if (!spammerGasInPeriod[spammerID]) {
+          spammerGasInPeriod[spammerID] = 0;
+        }
+        spammerGasInPeriod[spammerID] += point.spammerData[spammerIdStr].gasUsed;
+      });
+    }
   });
   
-  const totalSpammerGas = metricsData.spammers.reduce((sum, spammer) => sum + spammer.gasUsedInWindow, 0);
-  const totalBlockGas = metricsData.dataPoints.reduce((sum, point) => sum + point.totalGasUsed, 0);
-  const othersGas = totalBlockGas > totalSpammerGas ? totalBlockGas - totalSpammerGas : 0;
+  let totalSpammerGas = 0;
+  metricsData.spammers.forEach((spammer, index) => {
+    const gasUsed = spammerGasInPeriod[spammer.id] || 0;
+    if (gasUsed > 0) {
+      labels.push(spammer.name);
+      data.push(gasUsed);
+      colors.push(chartColors[index % chartColors.length]);
+      totalSpammerGas += gasUsed;
+    }
+  });
   
+  const othersGas = totalGasInPeriod > totalSpammerGas ? totalGasInPeriod - totalSpammerGas : 0;
   if (othersGas > 0) {
     labels.push('Others');
     data.push(othersGas);
@@ -546,14 +678,14 @@ function updateGasDistributionChart() {
   gasDistributionChart.data.labels = labels;
   gasDistributionChart.data.datasets[0].data = data;
   gasDistributionChart.data.datasets[0].backgroundColor = colors;
-  gasDistributionChart.update('none');
+  gasDistributionChart.update();
 }
 
-function updateTransactionCountChart() {
+function updateTransactionSubmissionChart() {
   if (!metricsData || !metricsData.dataPoints) return;
   
   const labels = metricsData.dataPoints.map(point => 
-    new Date(point.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+    `#${point.endBlockNumber}`
   );
   
   const datasets = [];
@@ -567,8 +699,6 @@ function updateTransactionCountChart() {
         : 0
     );
     
-    const pendingData = metricsData.dataPoints.map(() => spammer.pendingTxCount);
-    
     datasets.push({
       label: spammer.name + ' (Confirmed)',
       data: confirmedData,
@@ -579,9 +709,16 @@ function updateTransactionCountChart() {
       tension: 0.1
     });
     
+    const submittedData = metricsData.dataPoints.map(point => {
+      const confirmed = point.spammerData && point.spammerData[spammerIdStr] 
+        ? point.spammerData[spammerIdStr].confirmedTxCount 
+        : 0;
+      return confirmed + spammer.pendingTxCount;
+    });
+    
     datasets.push({
-      label: spammer.name + ' (Pending)',
-      data: pendingData,
+      label: spammer.name + ' (Submitted)',
+      data: submittedData,
       backgroundColor: chartColors[index % chartColors.length] + '40',
       borderColor: chartColors[index % chartColors.length],
       borderWidth: 2,
@@ -591,9 +728,37 @@ function updateTransactionCountChart() {
     });
   });
   
-  transactionCountChart.data.labels = labels;
-  transactionCountChart.data.datasets = datasets;
-  transactionCountChart.update('none');
+  transactionSubmissionChart.data.labels = labels;
+  transactionSubmissionChart.data.datasets = datasets;
+  transactionSubmissionChart.update();
+}
+
+function updateTransactionPendingChart() {
+  if (!metricsData || !metricsData.dataPoints) return;
+  
+  const labels = metricsData.dataPoints.map(point => 
+    `#${point.endBlockNumber}`
+  );
+  
+  const datasets = [];
+  
+  metricsData.spammers.forEach((spammer, index) => {
+    const pendingData = metricsData.dataPoints.map(() => spammer.pendingTxCount);
+    
+    datasets.push({
+      label: spammer.name,
+      data: pendingData,
+      backgroundColor: chartColors[index % chartColors.length],
+      borderColor: chartColors[index % chartColors.length],
+      borderWidth: 3,
+      fill: false,
+      tension: 0.1
+    });
+  });
+  
+  transactionPendingChart.data.labels = labels;
+  transactionPendingChart.data.datasets = datasets;
+  transactionPendingChart.update();
 }
 
 function updateSpammerTable() {
@@ -605,7 +770,7 @@ function updateSpammerTable() {
   if (metricsData.spammers.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" class="text-center text-muted">No active spammers found</td>
+        <td colspan="7" class="text-center text-muted">No active spammers found</td>
       </tr>
     `;
     return;
@@ -613,8 +778,24 @@ function updateSpammerTable() {
   
   const sortedSpammers = [...metricsData.spammers].sort((a, b) => b.gasUsedInWindow - a.gasUsedInWindow);
   
+  const lastBlockGas = {};
+  let totalLastBlockGas = 0;
+  if (metricsData.dataPoints.length > 0) {
+    const lastBlock = metricsData.dataPoints[metricsData.dataPoints.length - 1];
+    totalLastBlockGas = lastBlock.totalGasUsed;
+    if (lastBlock.spammerData) {
+      Object.keys(lastBlock.spammerData).forEach(spammerIdStr => {
+        const spammerID = parseInt(spammerIdStr);
+        lastBlockGas[spammerID] = lastBlock.spammerData[spammerIdStr].gasUsed;
+      });
+    }
+  }
+  
   tbody.innerHTML = sortedSpammers.map(spammer => {
-    const gasPercentage = totalGas > 0 ? ((spammer.gasUsedInWindow / totalGas) * 100).toFixed(1) : '0.0';
+    const gasPercentage30min = totalGas > 0 ? ((spammer.gasUsedInWindow / totalGas) * 100).toFixed(1) : '0.0';
+    const gasUsedLastBlock = lastBlockGas[spammer.id] || 0;
+    const gasPercentageLastBlock = totalLastBlockGas > 0 ? ((gasUsedLastBlock / totalLastBlockGas) * 100).toFixed(1) : '0.0';
+    const submittedTxs = spammer.confirmedTxCount + spammer.pendingTxCount;
     const isActive = spammer.pendingTxCount > 0 || spammer.confirmedTxCount > 0;
     
     return `
@@ -630,8 +811,15 @@ function updateSpammerTable() {
         </td>
         <td class="text-end">${formatNumber(spammer.pendingTxCount)}</td>
         <td class="text-end">${formatNumber(spammer.confirmedTxCount)}</td>
-        <td class="text-end">${formatNumber(spammer.gasUsedInWindow)}</td>
-        <td class="text-end">${gasPercentage}%</td>
+        <td class="text-end">${formatNumber(submittedTxs)}</td>
+        <td class="text-end progress-cell">
+          <div class="progress-bar-bg" style="width: ${gasPercentage30min}%"></div>
+          <div class="progress-text">${formatNumber(spammer.gasUsedInWindow)} (${gasPercentage30min}%)</div>
+        </td>
+        <td class="text-end progress-cell">
+          <div class="progress-bar-bg" style="width: ${gasPercentageLastBlock}%"></div>
+          <div class="progress-text">${formatNumber(gasUsedLastBlock)} (${gasPercentageLastBlock}%)</div>
+        </td>
         <td class="text-center">
           <span class="badge ${isActive ? 'bg-success' : 'bg-secondary'}">
             ${isActive ? 'Active' : 'Idle'}
@@ -738,7 +926,7 @@ function updateRealTimeData(data) {
       metricsData.totals.gasUsedInWindow = metricsData.dataPoints.reduce((sum, point) => sum + point.totalGasUsed, 0);
     }
     
-    updateDashboardSmooth(hasNewDataPoints || hasNewSpammers);
+    updateDashboard();
     
     if (hasNewSpammers) {
       showConnectionStatus(`${data.newSpammers.length} new spammer(s) added`, 'success');
@@ -746,118 +934,6 @@ function updateRealTimeData(data) {
   }
 }
 
-function updateDashboardSmooth(hasNewDataPoints) {
-  if (!metricsData) return;
-  
-  document.getElementById('totalConfirmed').textContent = formatNumber(metricsData.totals.confirmedTxCount);
-  document.getElementById('totalPending').textContent = formatNumber(metricsData.totals.pendingTxCount);
-  document.getElementById('totalGasUsed').textContent = formatNumber(metricsData.totals.gasUsedInWindow);
-  document.getElementById('activeSpammers').textContent = metricsData.spammers.length;
-  
-  updateGasConsumptionChartSmooth(hasNewDataPoints);
-  updateGasDistributionChart();
-  updateTransactionCountChartSmooth(hasNewDataPoints);
-  
-  updateSpammerTable();
-  
-  document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
-}
-
-function updateGasConsumptionChartSmooth(hasNewDataPoints) {
-  if (!metricsData || !metricsData.dataPoints) return;
-  
-  const chartType = document.querySelector('input[name="gasChartType"]:checked').value;
-  const isStacked = chartType === 'stacked';
-  
-  const labels = metricsData.dataPoints.map(point => 
-    new Date(point.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
-  );
-  
-  const datasets = [];
-  
-  datasets.push({
-    label: 'Others',
-    data: metricsData.dataPoints.map(point => point.othersGasUsed),
-    backgroundColor: '#6c757d',
-    borderColor: '#6c757d',
-    borderWidth: isStacked ? 0 : 2,
-    fill: isStacked
-  });
-  
-  metricsData.spammers.forEach((spammer, index) => {
-    const spammerIdStr = spammer.id.toString();
-    const spammerData = metricsData.dataPoints.map(point => 
-      point.spammerData && point.spammerData[spammerIdStr] 
-        ? point.spammerData[spammerIdStr].gasUsed 
-        : 0
-    );
-    
-    datasets.push({
-      label: spammer.name,
-      data: spammerData,
-      backgroundColor: chartColors[index % chartColors.length],
-      borderColor: chartColors[index % chartColors.length],
-      borderWidth: isStacked ? 0 : 2,
-      fill: isStacked
-    });
-  });
-  
-  gasConsumptionChart.data.labels = labels;
-  gasConsumptionChart.data.datasets = datasets;
-  gasConsumptionChart.config.type = isStacked ? 'bar' : 'line';
-  gasConsumptionChart.options.scales.x.stacked = isStacked;
-  gasConsumptionChart.options.scales.y.stacked = isStacked;
-  
-  gasConsumptionChart.update(hasNewDataPoints ? 'active' : 'none');
-}
-
-function updateTransactionCountChartSmooth(hasNewDataPoints) {
-  if (!metricsData || !metricsData.dataPoints) return;
-  
-  const labels = metricsData.dataPoints.map(point => 
-    new Date(point.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
-  );
-  
-  const datasets = [];
-  
-  metricsData.spammers.forEach((spammer, index) => {
-    const spammerIdStr = spammer.id.toString();
-    
-    const confirmedData = metricsData.dataPoints.map(point => 
-      point.spammerData && point.spammerData[spammerIdStr] 
-        ? point.spammerData[spammerIdStr].confirmedTxCount 
-        : 0
-    );
-    
-    const pendingData = metricsData.dataPoints.map(() => spammer.pendingTxCount);
-    
-    datasets.push({
-      label: spammer.name + ' (Confirmed)',
-      data: confirmedData,
-      backgroundColor: chartColors[index % chartColors.length],
-      borderColor: chartColors[index % chartColors.length],
-      borderWidth: 2,
-      fill: false,
-      tension: 0.1
-    });
-    
-    datasets.push({
-      label: spammer.name + ' (Pending)',
-      data: pendingData,
-      backgroundColor: chartColors[index % chartColors.length] + '40',
-      borderColor: chartColors[index % chartColors.length],
-      borderWidth: 2,
-      borderDash: [5, 5],
-      fill: false,
-      tension: 0.1
-    });
-  });
-  
-  transactionCountChart.data.labels = labels;
-  transactionCountChart.data.datasets = datasets;
-  
-  transactionCountChart.update(hasNewDataPoints ? 'active' : 'none');
-}
 
 function refreshDashboard() {
   const refreshIcon = document.getElementById('refreshIcon');
