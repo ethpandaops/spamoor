@@ -1302,14 +1302,6 @@ type SSEState struct {
 
 // Removed global sseState - now using per-connection state
 
-// sendCurrentSpammerData provides backward compatibility (creates temporary state)
-func (ah *APIHandler) sendCurrentSpammerData(w http.ResponseWriter, flusher http.Flusher, shortWindow *daemon.MultiGranularityMetrics) {
-	tempState := &SSEState{
-		lastSpammerHashes: make(map[uint64]string),
-	}
-	ah.sendCurrentSpammerDataWithState(w, flusher, shortWindow, tempState)
-}
-
 // sendCurrentSpammerDataWithState sends current spammer data via SSE only if there are changes
 func (ah *APIHandler) sendCurrentSpammerDataWithState(w http.ResponseWriter, flusher http.Flusher, shortWindow *daemon.MultiGranularityMetrics, state *SSEState) {
 	spammerSnapshots := shortWindow.GetSpammerSnapshots()
@@ -1443,14 +1435,6 @@ func (ah *APIHandler) sendCurrentSpammerDataWithState(w http.ResponseWriter, flu
 
 	fmt.Fprintf(w, "data: %s\n\n", jsonData)
 	flusher.Flush()
-}
-
-// sendMetricsUpdate provides backward compatibility (creates temporary state)
-func (ah *APIHandler) sendMetricsUpdate(w http.ResponseWriter, flusher http.Flusher, update *daemon.MetricsUpdate) {
-	tempState := &SSEState{
-		lastSpammerHashes: make(map[uint64]string),
-	}
-	ah.sendMetricsUpdateWithState(w, flusher, update, tempState)
 }
 
 // sendMetricsUpdateWithState sends real-time metrics updates via SSE
