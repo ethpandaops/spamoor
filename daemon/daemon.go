@@ -36,6 +36,9 @@ type Daemon struct {
 
 	// Metrics collector for Prometheus metrics
 	metricsCollector *MetricsCollector
+
+	// TxPool metrics collector for advanced transaction metrics
+	txPoolMetricsCollector *TxPoolMetricsCollector
 }
 
 // NewDaemon creates a new daemon instance with the provided components.
@@ -274,6 +277,39 @@ func (d *Daemon) TrackSpammerStatusChange(spammerID int64, running bool) {
 	)
 }
 
+// GetShortWindowMetrics returns the 30-minute per-block metrics for the dashboard
+func (d *Daemon) GetShortWindowMetrics() *MultiGranularityMetrics {
+	if d.txPoolMetricsCollector == nil {
+		return nil
+	}
+	return d.txPoolMetricsCollector.GetShortWindowMetrics()
+}
+
+// GetLongWindowMetrics returns the 6-hour per-32-block metrics for the dashboard
+func (d *Daemon) GetLongWindowMetrics() *MultiGranularityMetrics {
+	if d.txPoolMetricsCollector == nil {
+		return nil
+	}
+	return d.txPoolMetricsCollector.GetLongWindowMetrics()
+}
+
+// GetMetricsCollector returns the TxPool metrics collector for real-time subscriptions
+func (d *Daemon) GetMetricsCollector() *TxPoolMetricsCollector {
+	return d.txPoolMetricsCollector
+}
+
+// No longer need RegisterSpammerForMetrics/UnregisterSpammerFromMetrics
+// Spammer metrics are automatically tracked via WalletPool.GetSpammerID()
+
+// GetSpammerName returns the name of a spammer by ID for metrics dashboard
+func (d *Daemon) GetSpammerName(spammerID uint64) string {
+	spammer := d.GetSpammer(int64(spammerID))
+	if spammer == nil {
+		return "unknown"
+	}
+	return spammer.GetName()
+}
+
 // Shutdown performs a graceful shutdown of the daemon and all running spammers.
 // It cancels the context to stop all spammers, waits up to 10 seconds for them to finish,
 // and closes the database connection. This ensures clean resource cleanup.
@@ -309,6 +345,12 @@ func (d *Daemon) Shutdown() {
 		case <-time.After(10 * time.Second):
 			d.logger.Warn("timeout waiting for spammers to stop")
 		}
+	}
+
+	// Shutdown TxPool metrics collector
+	if d.txPoolMetricsCollector != nil {
+		d.txPoolMetricsCollector.Shutdown()
+		d.logger.Info("TxPool metrics collector shutdown")
 	}
 
 	// Close database connection

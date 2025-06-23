@@ -42,9 +42,19 @@ func (txFees *TxFees) TotalFeeGwei() (res big.Int) {
 	return
 }
 
+func (txFees *TxFees) TotalFeeGweiString() string {
+	fee := txFees.TotalFeeGwei()
+	return fee.String()
+}
+
 func (txFees *TxFees) TxFeeGwei() (res big.Int) {
 	res.Div(&txFees.FeeAmount, big.NewInt(1000000000))
 	return
+}
+
+func (txFees *TxFees) TxFeeGweiString() string {
+	fee := txFees.TxFeeGwei()
+	return fee.String()
 }
 
 func (txFees *TxFees) TxBaseFeeGwei() (res big.Int) {
@@ -52,12 +62,27 @@ func (txFees *TxFees) TxBaseFeeGwei() (res big.Int) {
 	return
 }
 
+func (txFees *TxFees) TxBaseFeeGweiString() string {
+	fee := txFees.TxBaseFeeGwei()
+	return fee.String()
+}
+
 func (txFees *TxFees) BlobFeeGwei() (res big.Int) {
 	res.Div(&txFees.BlobFeeAmount, big.NewInt(1000000000))
 	return
 }
 
+func (txFees *TxFees) BlobFeeGweiString() string {
+	fee := txFees.BlobFeeGwei()
+	return fee.String()
+}
+
 func (txFees *TxFees) BlobBaseFeeGwei() (res big.Int) {
 	res.Div(&txFees.BlobBaseFee, big.NewInt(1000000000))
 	return
+}
+
+func (txFees *TxFees) BlobBaseFeeGweiString() string {
+	fee := txFees.BlobBaseFeeGwei()
+	return fee.String()
 }

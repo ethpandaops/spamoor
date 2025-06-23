@@ -22,6 +22,7 @@ type TransactionScenarioOptions struct {
 	ThroughputIncrementInterval uint64
 	Timeout                     time.Duration // Maximum duration for scenario execution (0 = no timeout)
 	WalletPool                  *spamoor.WalletPool
+	NoAwaitTransactions         bool // If true, the scenario will not wait for transactions to be included in a block
 
 	// Logger for scenario execution information
 	Logger *logrus.Entry
@@ -66,6 +67,8 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	var pendingMutex sync.Mutex
 	var pendingCond *sync.Cond
 
+	pendingWg := sync.WaitGroup{}
+
 	if options.MaxPending > 0 {
 		maxPending.Store(options.MaxPending)
 		pendingCond = sync.NewCond(&pendingMutex)
@@ -81,7 +84,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	var lastSubmittedCount uint64
 	if options.WalletPool != nil && options.WalletPool.GetTxPool() != nil {
 		txPool := options.WalletPool.GetTxPool()
-		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats spamoor.WalletPoolBlockStats) {
+		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats *spamoor.WalletPoolBlockStats) {
 			currentSubmitted := txCount.Load()
 			submittedThisBlock := currentSubmitted - lastSubmittedCount
 			lastSubmittedCount = currentSubmitted
@@ -160,6 +163,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			pendingMutex.Unlock()
 		}
 		pendingCount.Add(1)
+		pendingWg.Add(1)
 
 		currentChan := make(chan bool, 1)
 
@@ -169,8 +173,18 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 				currentChan <- true
 			}()
 
+			completed := false
+
 			logcb, err := options.ProcessNextTxFn(ctx, txIdx, func() {
+				if completed {
+					return
+				}
+
+				completed = true
+
+				pendingWg.Done()
 				pendingCount.Add(-1)
+				txCount.Add(1)
 				if pendingCond != nil {
 					pendingCond.Signal()
 				}
@@ -181,12 +195,10 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 				close(lastChan)
 			}
 
-			if err == nil {
-				txCount.Add(1)
-			}
-
 			if logcb != nil {
 				logcb()
+			} else if err != nil {
+				options.Logger.Warnf("process next tx failed: %v", err)
 			}
 		}(txIdx, lastChan, currentChan)
 
@@ -201,6 +213,10 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	if lastChan != nil {
 		<-lastChan
 		close(lastChan)
+	}
+
+	if !options.NoAwaitTransactions {
+		pendingWg.Wait()
 	}
 
 	return nil

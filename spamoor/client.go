@@ -28,6 +28,7 @@ type Client struct {
 
 	clientGroups []string
 	enabled      bool
+	nameOverride string
 
 	gasSuggestionMutex sync.Mutex
 	lastGasSuggestion  time.Time
@@ -47,12 +48,14 @@ type Client struct {
 //   - headers(key:value|key2:value2) - sets custom HTTP headers
 //   - group(name) - assigns the client to a named group (can be used multiple times)
 //   - group(name1,name2,name3) - assigns the client to multiple groups (comma-separated)
+//   - name(custom_name) - sets a custom display name override
 //
-// Example: "headers(Authorization:Bearer token|User-Agent:MyApp)group(mainnet)group(primary)http://localhost:8545"
-// Example: "group(mainnet,primary,backup)http://localhost:8545"
+// Example: "headers(Authorization:Bearer token|User-Agent:MyApp)group(mainnet)group(primary)name(My Custom Node)http://localhost:8545"
+// Example: "group(mainnet,primary,backup)name(MainNet Primary)http://localhost:8545"
 func NewClient(rpchost string) (*Client, error) {
 	headers := map[string]string{}
 	clientGroups := []string{"default"}
+	nameOverride := ""
 
 	for {
 		if strings.HasPrefix(rpchost, "headers(") {
@@ -87,6 +90,10 @@ func NewClient(rpchost string) (*Client, error) {
 					}
 				}
 			}
+		} else if strings.HasPrefix(rpchost, "name(") {
+			nameEnd := strings.Index(rpchost, ")")
+			nameOverride = rpchost[5:nameEnd]
+			rpchost = rpchost[nameEnd+1:]
 		} else {
 			break
 		}
@@ -109,12 +116,17 @@ func NewClient(rpchost string) (*Client, error) {
 		logger:       logrus.WithField("rpc", rpchost),
 		clientGroups: clientGroups,
 		enabled:      true,
+		nameOverride: nameOverride,
 	}, nil
 }
 
 // GetName returns a shortened name for the client derived from the RPC host URL,
 // removing common suffixes like ".ethpandaops.io".
+// If a name override is set, it returns the override instead.
 func (client *Client) GetName() string {
+	if client.nameOverride != "" {
+		return client.nameOverride
+	}
 	url, _ := url.Parse(client.rpchost)
 	name := strings.TrimSuffix(url.Host, ".ethpandaops.io")
 	return name
@@ -219,6 +231,17 @@ func (client *Client) IsEnabled() bool {
 // Disabled clients will not be considered for selection in the client pool.
 func (client *Client) SetEnabled(enabled bool) {
 	client.enabled = enabled
+}
+
+// GetNameOverride returns the name override for the client.
+func (client *Client) GetNameOverride() string {
+	return client.nameOverride
+}
+
+// SetNameOverride sets a custom name override for the client.
+// If set, this name will be used instead of the auto-generated name from the RPC host.
+func (client *Client) SetNameOverride(name string) {
+	client.nameOverride = name
 }
 
 func (client *Client) getContext(ctx context.Context) (context.Context, context.CancelFunc) {

@@ -22,6 +22,7 @@ import (
 	//extcodesizeoverload "github.com/ethpandaops/spamoor/scenarios/statebloat/extcodesize-overload"
 	randsstorebloater "github.com/ethpandaops/spamoor/scenarios/statebloat/rand_sstore_bloater"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
+
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 	"github.com/ethpandaops/spamoor/scenarios/xentoken"
@@ -52,7 +53,10 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&storagespam.ScenarioDescriptor,
 	&uniswapswaps.ScenarioDescriptor,
 	&wallets.ScenarioDescriptor,
+	&contractdeploy.ScenarioDescriptor,
+	&eoadelegation.ScenarioDescriptor,
 	&xentoken.ScenarioDescriptor,
+
 }
 
 // GetScenario finds and returns a scenario descriptor by name.

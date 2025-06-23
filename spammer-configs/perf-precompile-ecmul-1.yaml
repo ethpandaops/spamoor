@@ -1,0 +1,37 @@
+# Name: ecMul precompile performance test
+# Description: Tests ecMul precompile performance with changing inputs
+# Tags: ecmul, precompile, performance
+# Min_Version: v1.1.5
+- scenario: calltx
+  name: 'ecMul precompile performance test'
+  description: "ecMul precompile performance test with changing inputs, 30M gas limit"
+  config:
+    amount: 0
+    base_fee: 2
+    call_abi: ""
+    call_abi_file: ""
+    call_args: ""
+    call_data: ""
+    call_fn_name: ""
+    call_fn_sig: ""
+    client_group: ""
+    contract_addr_path: ""
+    contract_address: ""
+    contract_args: ""
+    contract_code: 0x600b380380600b5f395ff37f27518f65c9608738dd585dc1b3f95bbc3db0a9dc71fd209f4475c41d138786c96000527f20b56448a932ab7a2a51f16cc691ff094da383ad3dc9884dea52a09acfafb629602052633c1dd9156040525b60406000606060006007611770fa50605056
+    contract_file: ""
+    deploy_gas_limit: 2000000
+    gas_limit: 30000000
+    max_pending: 5
+    max_wallets: 0
+    random_amount: false
+    random_target: false
+    rebroadcast: 120
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: calltx-ecmul-1
+    throughput: 10
+    timeout: ""
+    tip_fee: 1
+    total_count: 0
