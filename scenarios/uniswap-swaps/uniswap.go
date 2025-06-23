@@ -180,10 +180,10 @@ func (u *Uniswap) getTxFee(ctx context.Context, client *spamoor.Client) (*big.In
 	var tipCap *big.Int
 
 	if u.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(u.options.BaseFee)), big.NewInt(1000000000))
+		feeCap = new(big.Int).SetUint64(uint64(u.options.BaseFee * 1e9))
 	}
 	if u.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(u.options.TipFee)), big.NewInt(1000000000))
+		tipCap = new(big.Int).SetUint64(uint64(u.options.TipFee * 1e9))
 	}
 
 	if feeCap == nil || tipCap == nil {
