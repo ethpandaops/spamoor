@@ -101,7 +101,7 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		// Validate configuration before parsing
 		validFields := scenario.GetScenarioValidFields(ScenarioName)
 		validator := scenario.NewConfigValidator(ScenarioName, validFields, s.logger)
-		
+
 		validationResult := validator.ValidateConfig(options.Config)
 		if !validationResult.Valid {
 			for _, err := range validationResult.Errors {
