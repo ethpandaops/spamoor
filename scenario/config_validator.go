@@ -73,7 +73,7 @@ func (cv *ConfigValidator) ValidateConfig(configYAML string) *ValidationResult {
 				result.Errors = append(result.Errors, validationErr.Error())
 			}
 		} else {
-			// Field doesn't exist in valid fields - this is the main issue we're solving
+			// Field doesn't exist in valid fields - this is now an error that crashes
 			invalidFields = append(invalidFields, fmt.Sprintf("'%s' (value: %v)", fieldName, fieldValue))
 
 			// Check for common typos (underscore vs dash)
@@ -83,9 +83,17 @@ func (cv *ConfigValidator) ValidateConfig(configYAML string) *ValidationResult {
 		}
 	}
 
-	// Log a single comprehensive warning message if there are invalid fields
+	// Convert invalid fields to errors instead of warnings
 	if len(invalidFields) > 0 {
-		cv.logInvalidFields(invalidFields, suggestions)
+		result.Valid = false
+		errorMessage := fmt.Sprintf("invalid configuration fields detected for scenario '%s': %s",
+			cv.scenarioName, strings.Join(invalidFields, ", "))
+
+		if len(suggestions) > 0 {
+			errorMessage += fmt.Sprintf(" - possible corrections: %s", strings.Join(suggestions, ", "))
+		}
+
+		result.Errors = append(result.Errors, errorMessage)
 	}
 
 	// Check all required fields are present
@@ -122,20 +130,6 @@ func (cv *ConfigValidator) validateFieldValue(fieldName string, value interface{
 	}
 
 	return nil
-}
-
-// logInvalidFields logs a single comprehensive warning about all invalid configuration fields
-func (cv *ConfigValidator) logInvalidFields(invalidFields []string, suggestions []string) {
-	message := fmt.Sprintf("Invalid configuration fields detected for scenario '%s': %s",
-		cv.scenarioName, strings.Join(invalidFields, ", "))
-
-	message += ". These fields will be ignored."
-
-	if len(suggestions) > 0 {
-		message += fmt.Sprintf(" Possible corrections: %s", strings.Join(suggestions, ", "))
-	}
-
-	cv.logger.Warnf("%s", message)
 }
 
 // suggestCorrectField suggests a correct field name based on common typos
