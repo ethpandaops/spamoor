@@ -19,11 +19,11 @@ import (
 // DeployTask represents a contract deployment task
 type DeployTask struct {
 	BaseTask
-	ContractCode string `yaml:"contract_code" json:"contract_code"`     // Hex-encoded bytecode
-	ContractFile string `yaml:"contract_file" json:"contract_file"`     // Path to bytecode file or URL (http/https)
-	ContractArgs string `yaml:"contract_args" json:"contract_args"`     // Constructor arguments (hex)
-	GasLimit     uint64 `yaml:"gas_limit" json:"gas_limit"`             // Gas limit for deployment
-	Amount       uint64 `yaml:"amount" json:"amount"`                   // ETH amount to send (in gwei)
+	ContractCode string `yaml:"contract_code" json:"contract_code"` // Hex-encoded bytecode
+	ContractFile string `yaml:"contract_file" json:"contract_file"` // Path to bytecode file or URL (http/https)
+	ContractArgs string `yaml:"contract_args" json:"contract_args"` // Constructor arguments (hex)
+	GasLimit     uint64 `yaml:"gas_limit" json:"gas_limit"`         // Gas limit for deployment
+	Amount       uint64 `yaml:"amount" json:"amount"`               // ETH amount to send (in gwei)
 }
 
 // NewDeployTask creates a new deploy task from configuration
@@ -155,7 +155,7 @@ func (t *DeployTask) loadBytecode() ([]byte, error) {
 	// File or URL source
 	if t.ContractFile != "" {
 		var bytecodeBytes []byte
-		
+
 		// Check if it's a URL (same logic as calltx)
 		if strings.HasPrefix(t.ContractFile, "https://") || strings.HasPrefix(t.ContractFile, "http://") {
 			resp, err := http.Get(t.ContractFile)

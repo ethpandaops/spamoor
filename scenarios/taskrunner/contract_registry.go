@@ -36,7 +36,6 @@ func (r *ContractRegistry) Set(name string, address common.Address) {
 	}
 }
 
-
 // Get retrieves a contract address by name
 // It first checks the local registry, then the parent registry
 func (r *ContractRegistry) Get(name string) (common.Address, bool) {
@@ -44,12 +43,12 @@ func (r *ContractRegistry) Get(name string) (common.Address, bool) {
 	if addr, ok := r.contracts[name]; ok {
 		return addr, true
 	}
-	
+
 	// Fall back to parent registry (init contracts)
 	if r.parent != nil {
 		return r.parent.Get(name)
 	}
-	
+
 	return common.Address{}, false
 }
 
@@ -65,7 +64,7 @@ func (r *ContractRegistry) ResolveReference(ref string) (common.Address, error) 
 	if ref == "" {
 		return common.Address{}, fmt.Errorf("empty reference")
 	}
-	
+
 	// Check if it's a contract reference: {contract:name}
 	if strings.HasPrefix(ref, "{contract:") && strings.HasSuffix(ref, "}") {
 		name := ref[10 : len(ref)-1] // Extract name between {contract: and }
@@ -75,12 +74,12 @@ func (r *ContractRegistry) ResolveReference(ref string) (common.Address, error) 
 		}
 		return addr, nil
 	}
-	
+
 	// Otherwise treat as direct address
 	if !common.IsHexAddress(ref) {
 		return common.Address{}, fmt.Errorf("invalid address format: %s", ref)
 	}
-	
+
 	return common.HexToAddress(ref), nil
 }
 
@@ -88,19 +87,19 @@ func (r *ContractRegistry) ResolveReference(ref string) (common.Address, error) 
 // (excluding parent registry)
 func (r *ContractRegistry) ListContracts() map[string]common.Address {
 	result := make(map[string]common.Address)
-	
+
 	// Add all contracts
 	for name, addr := range r.contracts {
 		result[name] = addr
 	}
-	
+
 	return result
 }
 
 // ListAllContracts returns all contracts including from parent registries
 func (r *ContractRegistry) ListAllContracts() map[string]common.Address {
 	result := make(map[string]common.Address)
-	
+
 	// Start with parent contracts (if any)
 	if r.parent != nil {
 		parentContracts := r.parent.ListAllContracts()
@@ -108,12 +107,12 @@ func (r *ContractRegistry) ListAllContracts() map[string]common.Address {
 			result[name] = addr
 		}
 	}
-	
+
 	// Override with local contracts
 	localContracts := r.ListContracts()
 	for name, addr := range localContracts {
 		result[name] = addr
 	}
-	
+
 	return result
 }
