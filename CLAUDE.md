@@ -63,3 +63,11 @@ When working with transaction submission:
 🚨 **ALWAYS spread transactions across multiple wallets** - respect client pending limits
 🚨 **ALWAYS call onComplete() in ProcessNextTxFn** - required for scenario.RunTransactionScenario transaction counting
 🚨 **ALWAYS respect context cancellation** - scenarios must stop when context is cancelled
+
+## Code Quality Requirements
+**Claude MUST automatically run these checks after ANY Go code changes:**
+1. `go fmt ./...` - Format all Go code
+2. `go vet ./...` - Check for Go code issues  
+3. `staticcheck ./...` - Run static analysis
+
+These checks match the GitHub Actions CI pipeline and must pass before any code is considered complete. Do NOT ask the user to run these - they should be executed automatically after every code modification.
