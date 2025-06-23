@@ -18,6 +18,9 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	contractdeploy "github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy"
 	eoadelegation "github.com/ethpandaops/spamoor/scenarios/statebloat/eoa_delegation"
+	//erc20maxtransfers "github.com/ethpandaops/spamoor/scenarios/statebloat/erc20_max_transfers"
+	//extcodesizeoverload "github.com/ethpandaops/spamoor/scenarios/statebloat/extcodesize-overload"
+	randsstorebloater "github.com/ethpandaops/spamoor/scenarios/statebloat/rand_sstore_bloater"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
 
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
@@ -42,6 +45,11 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&gasburnertx.ScenarioDescriptor,
 	&geastx.ScenarioDescriptor,
 	&setcodetx.ScenarioDescriptor,
+	&randsstorebloater.ScenarioDescriptor,
+	&uniswapswaps.ScenarioDescriptor,
+	&wallets.ScenarioDescriptor,
+	&contractdeploy.ScenarioDescriptor,
+	&eoadelegation.ScenarioDescriptor,
 	&storagespam.ScenarioDescriptor,
 	&uniswapswaps.ScenarioDescriptor,
 	&wallets.ScenarioDescriptor,
