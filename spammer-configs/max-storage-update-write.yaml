@@ -6,32 +6,36 @@
   name: Storage update spammer
   description: Repeatedly calls deployed contract with no calldata to write storage slots until gas is exhausted
   config:
-    amount: 0
-    base_fee: 20
-    call_abi: ""
-    call_abi_file: ""
-    call_args: ""
-    call_data: ""
-    call_fn_name: ""
-    call_fn_sig: ""
-    client_group: ""
-    contract_addr_path: ""
-    contract_address: ""
-    contract_args: ""
-    contract_code: 0x600b380380600b5f395ff35f545b6001018080555a62013880106002575f5f55
-    contract_file: ""
-    deploy_gas_limit: 2000000
-    gas_limit: 0
+    # wallet settings
+    seed: calltx-storage-update-1 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+
+    # scenario: calltx
+    total_count: 0
+    throughput: 10
     max_pending: 10
     max_wallets: 50
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    deploy_gas_limit: 200000
+    gas_limit: 0
+    amount: 0
     random_amount: false
     random_target: false
-    rebroadcast: 120
-    refill_amount: 5000000000000000000
-    refill_balance: 1000000000000000000
-    refill_interval: 600
-    seed: calltx-storage-update-1
-    throughput: 10
+    contract_code: "0x600b380380600b5f395ff35f545b6001018080555a62013880106002575f5f55"
+    contract_file: ""
+    contract_address: ""
+    contract_args: ""
+    contract_addr_path: ""
+    call_data: ""
+    call_abi: ""
+    call_abi_file: ""
+    call_fn_name: ""
+    call_fn_sig: ""
+    call_args: ""
     timeout: ""
-    tip_fee: 2
-    total_count: 0
+    client_group: ""
+    log_txs: false
