@@ -1,0 +1,37 @@
+# Name: Storage update spammer
+# Description: Deploys a contract that exhaustively writes existing & new storage slots to generate state bloat and maximize state updates
+# Tags: storage, performance, max-gas, statebloat
+# Min_Version: v1.1.5
+- scenario: calltx
+  name: Storage update spammer
+  description: Repeatedly calls deployed contract with no calldata to write storage slots until gas is exhausted
+  config:
+    amount: 0
+    base_fee: 20
+    call_abi: ""
+    call_abi_file: ""
+    call_args: ""
+    call_data: ""
+    call_fn_name: ""
+    call_fn_sig: ""
+    client_group: ""
+    contract_addr_path: ""
+    contract_address: ""
+    contract_args: ""
+    contract_code: 0x600b380380600b5f395ff35f545b6001018080555a62013880106002575f5f55
+    contract_file: ""
+    deploy_gas_limit: 2000000
+    gas_limit: 0
+    max_pending: 10
+    max_wallets: 50
+    random_amount: false
+    random_target: false
+    rebroadcast: 120
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: calltx-storage-update-1
+    throughput: 10
+    timeout: ""
+    tip_fee: 2
+    total_count: 0

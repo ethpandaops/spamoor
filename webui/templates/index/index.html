@@ -976,7 +976,7 @@ async function performImport() {
 }
 
 async function doImport(input) {
-  const importBtn = document.getElementById('importBtn');
+  const importBtn = document.getElementById('primaryAction');
   const originalText = importBtn.textContent;
   
   try {
@@ -995,7 +995,7 @@ async function doImport(input) {
       throw new Error(result.error || 'Import failed');
     }
     
-    showImportResults(result.data);
+    showImportResults(result);
   } catch (err) {
     showImportError(err.message);
   } finally {
@@ -1043,9 +1043,7 @@ function showImportResults(data) {
   resultsDiv.classList.remove('d-none');
   
   if (data.imported_count > 0) {
-    setTimeout(() => {
-      window.location.reload();
-    }, 3000);
+    hasImportedSpammers = true;
   }
 }
 
