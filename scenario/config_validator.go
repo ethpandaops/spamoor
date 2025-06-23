@@ -108,16 +108,16 @@ func (cv *ConfigValidator) validateFieldValue(fieldName string, value interface{
 	case reflect.Uint64:
 		if _, ok := value.(int); !ok {
 			if _, ok := value.(uint64); !ok {
-				return fmt.Errorf("Field '%s' must be a positive integer", fieldName)
+				return fmt.Errorf("field '%s' must be a positive integer", fieldName)
 			}
 		}
 	case reflect.String:
 		if _, ok := value.(string); !ok {
-			return fmt.Errorf("Field '%s' must be a string", fieldName)
+			return fmt.Errorf("field '%s' must be a string", fieldName)
 		}
 	case reflect.Bool:
 		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("Field '%s' must be a boolean", fieldName)
+			return fmt.Errorf("field '%s' must be a boolean", fieldName)
 		}
 	}
 
