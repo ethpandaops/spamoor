@@ -251,6 +251,7 @@ func (s *Spammer) runScenario() {
 	}
 
 	s.walletPool = spamoor.NewWalletPool(s.scenarioCtx, s.logger, s.daemon.rootWallet, s.daemon.clientPool, s.daemon.txpool)
+	s.walletPool.SetSpammerID(uint64(s.dbEntity.ID))
 	s.walletPool.SetTransactionTracker(s.TrackTransactionResult)
 	options := &scenario.Options{
 		WalletPool: s.walletPool,

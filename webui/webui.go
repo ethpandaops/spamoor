@@ -33,8 +33,13 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	err := daemon.InitializeMetrics()
 	if err != nil {
 		logrus.Errorf("failed to initialize metrics: %v", err)
-	} else {
-		logrus.Info("metrics endpoint available at /metrics")
+	}
+
+	if !config.DisableTxMetrics {
+		err = daemon.InitializeTxPoolMetrics()
+		if err != nil {
+			logrus.Errorf("failed to initialize tx pool metrics: %v", err)
+		}
 	}
 
 	// init router
@@ -50,6 +55,9 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	router.HandleFunc("/", frontendHandler.Index).Methods("GET")
 	router.HandleFunc("/clients", frontendHandler.Clients).Methods("GET")
 	router.HandleFunc("/wallets", frontendHandler.Wallets).Methods("GET")
+	if !config.DisableTxMetrics {
+		router.HandleFunc("/graphs", frontendHandler.Graphs).Methods("GET")
+	}
 
 	// API routes
 	apiHandler := api.NewAPIHandler(daemon)
@@ -57,6 +65,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/spammers", apiHandler.GetSpammerList).Methods("GET")
 	apiRouter.HandleFunc("/scenarios", apiHandler.GetScenarios).Methods("GET")
 	apiRouter.HandleFunc("/scenarios/{name}/config", apiHandler.GetScenarioConfig).Methods("GET")
+	apiRouter.HandleFunc("/version", apiHandler.GetVersion).Methods("GET")
 	apiRouter.HandleFunc("/spammer", apiHandler.CreateSpammer).Methods("POST")
 	apiRouter.HandleFunc("/spammer/{id}/start", apiHandler.StartSpammer).Methods("POST")
 	apiRouter.HandleFunc("/spammer/{id}/pause", apiHandler.PauseSpammer).Methods("POST")
@@ -69,10 +78,19 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/clients", apiHandler.GetClients).Methods("GET")
 	apiRouter.HandleFunc("/client/{index}/group", apiHandler.UpdateClientGroup).Methods("PUT")
 	apiRouter.HandleFunc("/client/{index}/enabled", apiHandler.UpdateClientEnabled).Methods("PUT")
+	apiRouter.HandleFunc("/client/{index}/name", apiHandler.UpdateClientName).Methods("PUT")
 
 	// Export/Import routes
 	apiRouter.HandleFunc("/spammers/export", apiHandler.ExportSpammers).Methods("POST")
 	apiRouter.HandleFunc("/spammers/import", apiHandler.ImportSpammers).Methods("POST")
+	apiRouter.HandleFunc("/spammers/library", apiHandler.GetSpammerLibraryIndex).Methods("GET")
+
+	// Graphs routes (only if tx metrics are enabled)
+	if !config.DisableTxMetrics {
+		apiRouter.HandleFunc("/graphs/dashboard", apiHandler.GetGraphsDashboard).Methods("GET")
+		apiRouter.HandleFunc("/graphs/spammer/{id}/timeseries", apiHandler.GetSpammerTimeSeries).Methods("GET")
+		apiRouter.HandleFunc("/graphs/stream", apiHandler.StreamGraphs).Methods("GET")
+	}
 
 	// metrics endpoint
 	router.Handle("/metrics", promhttp.Handler()).Methods("GET")

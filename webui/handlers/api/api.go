@@ -3,13 +3,17 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
+	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/scenarios"
+	"github.com/ethpandaops/spamoor/utils"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -41,10 +45,10 @@ type SpammerDetails struct {
 	Status      int    `json:"status"`
 }
 
-// Response represents a standard API response envelope
-type Response struct {
-	Data  interface{} `json:"data,omitempty"`
-	Error string      `json:"error,omitempty"`
+// VersionResponse represents version information
+type VersionResponse struct {
+	Version string `json:"version"`
+	Release string `json:"release"`
 }
 
 type ScenarioEntries struct {
@@ -52,15 +56,130 @@ type ScenarioEntries struct {
 	Description string `json:"description"`
 }
 
+// SpammerLibraryEntry represents a spammer config from the library
+type SpammerLibraryEntry struct {
+	File         string   `json:"file"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Tags         []string `json:"tags"`
+	SpammerCount int      `json:"spammer_count"`
+	Scenarios    []string `json:"scenarios"`
+	MinVersion   string   `json:"min_version,omitempty"`
+}
+
+// SpammerLibraryIndex represents the index of all available configs
+type SpammerLibraryIndex struct {
+	Generated time.Time             `json:"generated"`
+	Configs   []SpammerLibraryEntry `json:"configs"`
+	CachedAt  time.Time             `json:"cached_at"`
+	BaseURL   string                `json:"base_url"`
+}
+
+// GitHubFile represents a file from GitHub API
+type GitHubFile struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Sha         string `json:"sha"`
+	Size        int    `json:"size"`
+	URL         string `json:"url"`
+	HTMLURL     string `json:"html_url"`
+	GitURL      string `json:"git_url"`
+	DownloadURL string `json:"download_url"`
+	Type        string `json:"type"`
+}
+
+// GraphsDashboardResponse represents the main dashboard graphs data
+type GraphsDashboardResponse struct {
+	TimeRange  TimeRange            `json:"range"`
+	Spammers   []SpammerMetricsData `json:"spammers"`
+	Totals     TotalMetricsData     `json:"totals"`
+	Others     OthersMetricsData    `json:"others"`
+	DataPoints []GraphsDataPoint    `json:"data"`
+}
+
+// TimeRange represents the time range of collected metrics
+type TimeRange struct {
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+}
+
+// SpammerMetricsData represents metrics for a single spammer
+type SpammerMetricsData struct {
+	ID               uint64 `json:"id"`
+	Name             string `json:"name"`
+	PendingTxCount   uint64 `json:"pending"`
+	ConfirmedTxCount uint64 `json:"confirmed"`
+	SubmittedTxCount uint64 `json:"submitted"`
+	GasUsedInWindow  uint64 `json:"gasUsed"`
+	LastUpdate       string `json:"updated"`
+	Status           int    `json:"status"` // Running status from daemon
+}
+
+// TotalMetricsData represents aggregated metrics across all spammers
+type TotalMetricsData struct {
+	PendingTxCount   uint64 `json:"pending"`
+	ConfirmedTxCount uint64 `json:"confirmed"`
+	SubmittedTxCount uint64 `json:"submitted"`
+	GasUsedInWindow  uint64 `json:"gasUsed"`
+}
+
+// OthersMetricsData represents metrics for non-spammer transactions
+type OthersMetricsData struct {
+	GasUsedInWindow uint64 `json:"gasUsed"`
+}
+
+// GraphsDataPoint represents a single time-series data point for the graphs
+type GraphsDataPoint struct {
+	Timestamp        time.Time                    `json:"ts"`
+	StartBlockNumber uint64                       `json:"startBlock"`
+	EndBlockNumber   uint64                       `json:"endBlock"`
+	BlockCount       uint64                       `json:"blocks"`
+	TotalGasUsed     uint64                       `json:"totalGas"`
+	OthersGasUsed    uint64                       `json:"othersGas"`
+	SpammerData      map[string]*SpammerBlockData `json:"spammers"` // spammerID -> detailed data
+}
+
+// SpammerBlockData represents a spammer's data within a time period
+type SpammerBlockData struct {
+	GasUsed          uint64 `json:"gas"`
+	ConfirmedTxCount uint64 `json:"confirmed"`
+	PendingTxCount   uint64 `json:"pending"`
+	SubmittedTxCount uint64 `json:"submitted"`
+}
+
+// SpammerTimeSeriesResponse represents time-series data for a specific spammer
+type SpammerTimeSeriesResponse struct {
+	SpammerID   uint64                   `json:"spammerId"`
+	SpammerName string                   `json:"spammerName"`
+	TimeRange   TimeRange                `json:"timeRange"`
+	DataPoints  []SpammerTimeSeriesPoint `json:"dataPoints"`
+}
+
+// SpammerTimeSeriesPoint represents a single time-series point for a spammer
+type SpammerTimeSeriesPoint struct {
+	Timestamp        time.Time `json:"timestamp"`
+	BlockNumber      uint64    `json:"blockNumber"`
+	GasUsed          uint64    `json:"gasUsed"`
+	ConfirmedTxCount uint64    `json:"confirmedTxCount"`
+	PendingTxCount   uint64    `json:"pendingTxCount"`
+}
+
+// Library cache structure
+var (
+	libraryCache      *SpammerLibraryIndex
+	libraryCacheMutex sync.RWMutex
+	cacheExpiry       = 10 * time.Minute
+)
+
 // GetScenarios godoc
 // @Id getScenarios
 // @Summary Get all scenarios
 // @Tags Scenario
 // @Description Returns a list of all scenarios
 // @Produce json
-// @Success 200 {object} Response{data=[]ScenarioEntries} "Success"
-// @Failure 400 {object} Response "Failure"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 {array} ScenarioEntries "Success"
+// @Failure 400 {string} string "Failure"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/scenarios [get]
 func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
 	scenarioNames := scenarios.GetScenarioNames()
@@ -76,6 +195,24 @@ func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(entries)
 }
 
+// GetVersion godoc
+// @Id getVersion
+// @Summary Get spamoor version
+// @Tags Version
+// @Description Returns the current spamoor version information
+// @Produce json
+// @Success 200 {object} VersionResponse "Success"
+// @Router /api/version [get]
+func (ah *APIHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
+	versionInfo := VersionResponse{
+		Version: utils.BuildVersion,
+		Release: utils.BuildRelease,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(versionInfo)
+}
+
 // GetScenarioConfig godoc
 // @Id getScenarioConfig
 // @Summary Get scenario configuration
@@ -84,8 +221,8 @@ func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
 // @Produce text/plain
 // @Param name path string true "Scenario name"
 // @Success 200 {string} string "YAML configuration"
-// @Failure 404 {object} Response "Scenario not found"
-// @Failure 500 {object} Response "Server Error"
+// @Failure 404 {string} string "Scenario not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/scenarios/{name}/config [get]
 func (ah *APIHandler) GetScenarioConfig(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -130,7 +267,7 @@ type SpammerListEntry struct {
 // @Tags Spammer
 // @Description Returns a list of all configured spammers
 // @Produce json
-// @Success 200 {object} Response{data=[]SpammerListEntry} "Success"
+// @Success 200 {array} SpammerListEntry "Success"
 // @Router /api/spammers [get]
 func (ah *APIHandler) GetSpammerList(w http.ResponseWriter, r *http.Request) {
 	spammers := ah.daemon.GetAllSpammers()
@@ -159,9 +296,9 @@ func (ah *APIHandler) GetSpammerList(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Produce json
 // @Param request body CreateSpammerRequest true "Spammer configuration"
-// @Success 200 {object} Response{data=int64} "Spammer ID"
-// @Failure 400 {object} Response "Invalid request"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 {object} int64 "Spammer ID"
+// @Failure 400 {string} string "Invalid request"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer [post]
 func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -193,10 +330,10 @@ func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
 // @Tags Spammer
 // @Description Starts a specific spammer
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/start [post]
 func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -229,10 +366,10 @@ func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Param id path int true "Spammer ID"
 // @Param request body UpdateSpammerRequest true "Updated configuration"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid request"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid request"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [put]
 func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -274,10 +411,10 @@ func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
 // @Tags Spammer
 // @Description Pauses a running spammer
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/pause [post]
 func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -308,10 +445,10 @@ func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
 // @Tags Spammer
 // @Description Deletes a spammer and stops it if running
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [delete]
 func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -336,10 +473,10 @@ func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 // @Tags Spammer
 // @Description Reclaims funds from a spammer's wallet pool back to the root wallet
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/reclaim [post]
 func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -365,9 +502,9 @@ func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
 // @Description Returns detailed information about a specific spammer
 // @Produce json
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response{data=SpammerDetails} "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
+// @Success 200 {object} SpammerDetails "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
 // @Router /api/spammer/{id} [get]
 func (ah *APIHandler) GetSpammerDetails(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -417,9 +554,9 @@ type LogEntry struct {
 // @Description Returns the most recent logs for a specific spammer
 // @Produce json
 // @Param id path int true "Spammer ID"
-// @Success 200 {object} Response{data=[]LogEntry} "Success"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
+// @Success 200 {array} LogEntry "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
 // @Router /api/spammer/{id}/logs [get]
 func (ah *APIHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -467,9 +604,9 @@ func (ah *APIHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Param since query string false "Timestamp to start from (RFC3339Nano)"
 // @Success 200 {string} string "SSE stream of log entries"
-// @Failure 400 {object} Response "Invalid spammer ID"
-// @Failure 404 {object} Response "Spammer not found"
-// @Failure 500 {object} Response "Streaming unsupported"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Streaming unsupported"
 // @Router /api/spammer/{id}/logs/stream [get]
 func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -545,15 +682,16 @@ func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) 
 
 // ClientEntry represents a client in the API response
 type ClientEntry struct {
-	Index       int      `json:"index"`
-	Name        string   `json:"name"`
-	Group       string   `json:"group"`  // First group for backward compatibility
-	Groups      []string `json:"groups"` // All groups
-	Version     string   `json:"version"`
-	BlockHeight uint64   `json:"block_height"`
-	IsReady     bool     `json:"ready"`
-	RpcHost     string   `json:"rpc_host"`
-	Enabled     bool     `json:"enabled"`
+	Index        int      `json:"index"`
+	Name         string   `json:"name"`
+	Group        string   `json:"group"`  // First group for backward compatibility
+	Groups       []string `json:"groups"` // All groups
+	Version      string   `json:"version"`
+	BlockHeight  uint64   `json:"block_height"`
+	IsReady      bool     `json:"ready"`
+	RpcHost      string   `json:"rpc_host"`
+	Enabled      bool     `json:"enabled"`
+	NameOverride string   `json:"name_override,omitempty"`
 }
 
 // UpdateClientGroupRequest represents the request body for updating a client group
@@ -567,13 +705,18 @@ type UpdateClientEnabledRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+// UpdateClientNameRequest represents the request body for updating a client's name override
+type UpdateClientNameRequest struct {
+	NameOverride string `json:"name_override"`
+}
+
 // GetClients godoc
 // @Id getClients
 // @Summary Get all clients
 // @Tags Client
 // @Description Returns a list of all clients with their details
 // @Produce json
-// @Success 200 {object} Response{data=[]ClientEntry} "Success"
+// @Success 200 {array} ClientEntry "Success"
 // @Router /api/clients [get]
 func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -591,15 +734,16 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 		}
 
 		response[i] = ClientEntry{
-			Index:       i,
-			Name:        client.GetName(),
-			Group:       client.GetClientGroup(),
-			Groups:      client.GetClientGroups(),
-			Version:     version,
-			BlockHeight: blockHeight,
-			IsReady:     slices.Contains(goodClients, client),
-			RpcHost:     client.GetRPCHost(),
-			Enabled:     client.IsEnabled(),
+			Index:        i,
+			Name:         client.GetName(),
+			Group:        client.GetClientGroup(),
+			Groups:       client.GetClientGroups(),
+			Version:      version,
+			BlockHeight:  blockHeight,
+			IsReady:      slices.Contains(goodClients, client),
+			RpcHost:      client.GetRPCHost(),
+			Enabled:      client.IsEnabled(),
+			NameOverride: client.GetNameOverride(),
 		}
 	}
 
@@ -615,9 +759,9 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Param index path int true "Client index"
 // @Param request body UpdateClientGroupRequest true "New group name(s)"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid client index"
-// @Failure 404 {object} Response "Client not found"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid client index"
+// @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/group [put]
 func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -662,9 +806,9 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 // @Accept json
 // @Param index path int true "Client index"
 // @Param request body UpdateClientEnabledRequest true "New enabled state"
-// @Success 200 {object} Response "Success"
-// @Failure 400 {object} Response "Invalid client index"
-// @Failure 404 {object} Response "Client not found"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid client index"
+// @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/enabled [put]
 func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -692,6 +836,44 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 }
 
+// UpdateClientName godoc
+// @Id updateClientName
+// @Summary Update client name override
+// @Tags Client
+// @Description Updates the name override for a specific client
+// @Accept json
+// @Param index path int true "Client index"
+// @Param request body UpdateClientNameRequest true "New name override"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid client index"
+// @Failure 404 {string} string "Client not found"
+// @Router /api/client/{index}/name [put]
+func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	index, err := strconv.Atoi(vars["index"])
+	if err != nil {
+		http.Error(w, "Invalid client index", http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateClientNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	allClients := ah.daemon.GetClientPool().GetAllClients()
+	if index < 0 || index >= len(allClients) {
+		http.Error(w, "Client not found", http.StatusNotFound)
+		return
+	}
+
+	client := allClients[index]
+	client.SetNameOverride(req.NameOverride)
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // ExportSpammersRequest represents the request body for exporting spammers
 type ExportSpammersRequest struct {
 	SpammerIDs []int64 `json:"spammer_ids,omitempty"` // If empty, exports all spammers
@@ -711,8 +893,8 @@ type ImportSpammersRequest struct {
 // @Produce text/plain
 // @Param request body ExportSpammersRequest false "Spammer IDs to export (optional)"
 // @Success 200 {string} string "YAML configuration"
-// @Failure 400 {object} Response "Invalid request"
-// @Failure 500 {object} Response "Server Error"
+// @Failure 400 {string} string "Invalid request"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammers/export [post]
 func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
 	var req ExportSpammersRequest
@@ -740,9 +922,9 @@ func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Produce json
 // @Param request body ImportSpammersRequest true "Import configuration"
-// @Success 200 {object} Response{data=daemon.ImportResult} "Success"
-// @Failure 400 {object} Response "Invalid request"
-// @Failure 500 {object} Response "Server Error"
+// @Success 200 {object} daemon.ImportResult "Success"
+// @Failure 400 {string} string "Invalid request"
+// @Failure 500 {string} string "Server Error"
 // @Router /api/spammers/import [post]
 func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
 	var req ImportSpammersRequest
@@ -763,5 +945,637 @@ func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(Response{Data: result})
+	json.NewEncoder(w).Encode(result)
+}
+
+// fetchFileContent fetches file content from a URL
+func fetchFileContent(downloadURL string) (string, error) {
+	resp, err := http.Get(downloadURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch file content: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch file, status: %d", resp.StatusCode)
+	}
+
+	var content []byte
+	if resp.ContentLength > 0 {
+		content = make([]byte, resp.ContentLength)
+		_, err = resp.Body.Read(content)
+	} else {
+		// Read all content if ContentLength is unknown
+		content, err = io.ReadAll(resp.Body)
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("failed to read file content: %w", err)
+	}
+
+	return string(content), nil
+}
+
+// refreshLibraryCache fetches and caches the spammer library index
+func refreshLibraryCache() error {
+	// Fetch the _index.yaml file directly
+	indexURL := "https://raw.githubusercontent.com/ethpandaops/spamoor/master/spammer-configs/_index.yaml"
+	content, err := fetchFileContent(indexURL)
+	if err != nil {
+		return fmt.Errorf("failed to fetch index file: %w", err)
+	}
+
+	// Parse the index YAML
+	var index SpammerLibraryIndex
+	if err := yaml.Unmarshal([]byte(content), &index); err != nil {
+		return fmt.Errorf("failed to parse index file: %w", err)
+	}
+
+	// Set the cached at time and base URL
+	index.CachedAt = time.Now()
+	index.BaseURL = "https://raw.githubusercontent.com/ethpandaops/spamoor/master/spammer-configs/"
+
+	libraryCacheMutex.Lock()
+	libraryCache = &index
+	libraryCacheMutex.Unlock()
+
+	return nil
+}
+
+// getLibraryIndex returns the cached library index, refreshing if needed
+func getLibraryIndex() (*SpammerLibraryIndex, error) {
+	libraryCacheMutex.RLock()
+	if libraryCache != nil && time.Since(libraryCache.CachedAt) < cacheExpiry {
+		defer libraryCacheMutex.RUnlock()
+		return libraryCache, nil
+	}
+	libraryCacheMutex.RUnlock()
+
+	// Cache is expired or doesn't exist, refresh it
+	if err := refreshLibraryCache(); err != nil {
+		// If refresh fails, return cached data if available
+		libraryCacheMutex.RLock()
+		defer libraryCacheMutex.RUnlock()
+		if libraryCache != nil {
+			logrus.Warnf("Failed to refresh library cache, using cached data: %v", err)
+			return libraryCache, nil
+		}
+		return nil, err
+	}
+
+	libraryCacheMutex.RLock()
+	defer libraryCacheMutex.RUnlock()
+	return libraryCache, nil
+}
+
+// GetSpammerLibraryIndex godoc
+// @Id getSpammerLibraryIndex
+// @Summary Get spammer library index
+// @Tags SpammerLibrary
+// @Description Returns the index of available spammer configurations from GitHub
+// @Produce json
+// @Success 200 {object} SpammerLibraryIndex "Success"
+// @Failure 500 {string} string "Server Error"
+// @Router /api/spammer-library/index [get]
+func (ah *APIHandler) GetSpammerLibraryIndex(w http.ResponseWriter, r *http.Request) {
+	index, err := getLibraryIndex()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to fetch library index: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(index)
+}
+
+// @Summary Get graphs dashboard data
+// @Tags Graphs
+// @Description Returns comprehensive graphs data for the dashboard including all spammers, totals, and time-series data
+// @Produce json
+// @Success 200 {object} GraphsDashboardResponse "Success"
+// @Failure 500 {string} string "Server Error"
+// @Router /api/graphs/dashboard [get]
+func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request) {
+	shortWindow := ah.daemon.GetShortWindowMetrics()
+	if shortWindow == nil {
+		http.Error(w, "Transaction metrics collection is disabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get time range from short window (30 minutes)
+	startTime, endTime := shortWindow.GetTimeRange()
+
+	// Get current spammer snapshots
+	spammerSnapshots := shortWindow.GetSpammerSnapshots()
+	spammers := make([]SpammerMetricsData, 0, len(spammerSnapshots))
+
+	totalPending := uint64(0)
+	totalConfirmed := uint64(0)
+	totalSubmitted := uint64(0)
+
+	// Calculate gas used in window from data points
+	dataPoints := shortWindow.GetDataPoints()
+	spammerGasInWindow := make(map[uint64]uint64)
+
+	for _, point := range dataPoints {
+		for spammerID, spammerData := range point.SpammerGasData {
+			spammerGasInWindow[spammerID] += spammerData.GasUsed
+		}
+	}
+
+	totalGasUsed := uint64(0)
+	for spammerID, snapshot := range spammerSnapshots {
+		spammerName := ah.daemon.GetSpammerName(spammerID)
+		gasInWindow := spammerGasInWindow[spammerID]
+
+		// Get spammer status
+		status := 0 // Default to stopped
+		if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
+			status = spammer.GetStatus()
+		}
+
+		spammers = append(spammers, SpammerMetricsData{
+			ID:               spammerID,
+			Name:             spammerName,
+			PendingTxCount:   snapshot.PendingTxCount,
+			ConfirmedTxCount: snapshot.TotalConfirmedTx,
+			SubmittedTxCount: snapshot.TotalSubmittedTx,
+			GasUsedInWindow:  gasInWindow,
+			LastUpdate:       snapshot.LastUpdate.Format(time.RFC3339),
+			Status:           status,
+		})
+
+		totalPending += snapshot.PendingTxCount
+		totalConfirmed += snapshot.TotalConfirmedTx
+		totalSubmitted += snapshot.TotalSubmittedTx
+		totalGasUsed += gasInWindow
+	}
+
+	// Convert data points to API format
+	chartDataPoints := make([]GraphsDataPoint, len(dataPoints))
+	totalOthersGas := uint64(0)
+
+	for i, point := range dataPoints {
+		// Convert spammer data
+		spammerData := make(map[string]*SpammerBlockData)
+		for spammerID, data := range point.SpammerGasData {
+			spammerData[fmt.Sprintf("%d", spammerID)] = &SpammerBlockData{
+				GasUsed:          data.GasUsed,
+				ConfirmedTxCount: data.ConfirmedTxCount,
+				PendingTxCount:   data.PendingTxCount,
+				SubmittedTxCount: data.SubmittedTxCount,
+			}
+		}
+
+		chartDataPoints[i] = GraphsDataPoint{
+			Timestamp:        point.Timestamp,
+			StartBlockNumber: point.StartBlockNumber,
+			EndBlockNumber:   point.EndBlockNumber,
+			BlockCount:       point.BlockCount,
+			TotalGasUsed:     point.TotalGasUsed,
+			OthersGasUsed:    point.OthersGasUsed,
+			SpammerData:      spammerData,
+		}
+
+		totalOthersGas += point.OthersGasUsed
+	}
+
+	response := GraphsDashboardResponse{
+		TimeRange: TimeRange{
+			Start: startTime,
+			End:   endTime,
+		},
+		Spammers: spammers,
+		Totals: TotalMetricsData{
+			PendingTxCount:   totalPending,
+			ConfirmedTxCount: totalConfirmed,
+			SubmittedTxCount: totalSubmitted,
+			GasUsedInWindow:  totalGasUsed,
+		},
+		Others: OthersMetricsData{
+			GasUsedInWindow: totalOthersGas,
+		},
+		DataPoints: chartDataPoints,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// @Summary Get time-series data for a specific spammer
+// @Tags Graphs
+// @Description Returns detailed time-series graphs data for a specific spammer
+// @Produce json
+// @Param id path int true "Spammer ID"
+// @Success 200 {object} SpammerTimeSeriesResponse "Success"
+// @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 404 {string} string "Spammer not found"
+// @Failure 500 {string} string "Server Error"
+// @Router /api/graphs/spammer/{id}/timeseries [get]
+func (ah *APIHandler) GetSpammerTimeSeries(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	spammerIDStr := vars["id"]
+
+	spammerID, err := strconv.ParseUint(spammerIDStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid spammer ID", http.StatusBadRequest)
+		return
+	}
+
+	metricsData := ah.daemon.GetShortWindowMetrics()
+	if metricsData == nil {
+		http.Error(w, "Transaction metrics collection is disabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Check if spammer exists
+	spammerSnapshots := metricsData.GetSpammerSnapshots()
+	if _, exists := spammerSnapshots[spammerID]; !exists {
+		http.Error(w, "Spammer not found", http.StatusNotFound)
+		return
+	}
+
+	spammerName := ah.daemon.GetSpammerName(spammerID)
+	startTime, endTime := metricsData.GetTimeRange()
+
+	// Build time series data from data points
+	dataPoints := metricsData.GetDataPoints()
+	spammerDataPoints := make([]SpammerTimeSeriesPoint, 0, len(dataPoints))
+
+	for _, point := range dataPoints {
+		if spammerData, exists := point.SpammerGasData[spammerID]; exists {
+			spammerDataPoints = append(spammerDataPoints, SpammerTimeSeriesPoint{
+				Timestamp:        point.Timestamp,
+				GasUsed:          spammerData.GasUsed,
+				ConfirmedTxCount: spammerData.ConfirmedTxCount,
+				PendingTxCount:   spammerData.PendingTxCount,
+			})
+		}
+	}
+
+	response := SpammerTimeSeriesResponse{
+		SpammerID:   spammerID,
+		SpammerName: spammerName,
+		TimeRange: TimeRange{
+			Start: startTime,
+			End:   endTime,
+		},
+		DataPoints: spammerDataPoints,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// @Summary Stream real-time graphs updates
+// @Tags Graphs
+// @Description Provides real-time graphs updates via Server-Sent Events (SSE)
+// @Produce text/event-stream
+// @Success 200 {string} string "SSE stream"
+// @Router /api/graphs/stream [get]
+func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
+	// Check if tx metrics are enabled
+	metricsCollector := ah.daemon.GetMetricsCollector()
+	if metricsCollector == nil {
+		http.Error(w, "Transaction metrics collection is disabled", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	// Create per-connection SSE state
+	connectionState := &SSEState{
+		lastSpammerHashes: make(map[uint64]string),
+	}
+
+	// Send initial data
+	shortWindow := ah.daemon.GetShortWindowMetrics()
+	if shortWindow != nil {
+		ah.sendCurrentSpammerDataWithState(w, flusher, shortWindow, connectionState)
+	}
+
+	subscriptionID, updateChan := metricsCollector.Subscribe()
+	defer metricsCollector.Unsubscribe(subscriptionID)
+
+	// Set up a fallback ticker for updates every 30 seconds (reduced from 5)
+	fallbackTicker := time.NewTicker(30 * time.Second)
+	defer fallbackTicker.Stop()
+
+	// Context for cleanup
+	ctx := r.Context()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case update := <-updateChan:
+			// Send real-time update based on metrics update
+			ah.sendMetricsUpdateWithState(w, flusher, update, connectionState)
+		case <-fallbackTicker.C:
+			// Fallback update in case we miss real-time updates
+			shortWindow := ah.daemon.GetShortWindowMetrics()
+			if shortWindow == nil {
+				continue
+			}
+
+			ah.sendCurrentSpammerDataWithState(w, flusher, shortWindow, connectionState)
+		}
+	}
+}
+
+// SSE state tracking
+type SSEState struct {
+	lastDataPointCount int
+	lastSpammerHashes  map[uint64]string
+}
+
+// Removed global sseState - now using per-connection state
+
+// sendCurrentSpammerDataWithState sends current spammer data via SSE only if there are changes
+func (ah *APIHandler) sendCurrentSpammerDataWithState(w http.ResponseWriter, flusher http.Flusher, shortWindow *daemon.MultiGranularityMetrics, state *SSEState) {
+	spammerSnapshots := shortWindow.GetSpammerSnapshots()
+	dataPoints := shortWindow.GetDataPoints()
+
+	// Check if there are new data points
+	hasNewDataPoints := len(dataPoints) > state.lastDataPointCount
+
+	// Calculate gas usage from data points
+	spammerGasInWindow := make(map[uint64]uint64)
+	for _, point := range dataPoints {
+		for spammerID, spammerData := range point.SpammerGasData {
+			spammerGasInWindow[spammerID] += spammerData.GasUsed
+		}
+	}
+
+	// Check if spammer data has changed
+	hasSpammerChanges := false
+	newHashes := make(map[uint64]string)
+
+	for spammerID, snapshot := range spammerSnapshots {
+		// Create a simple hash of the spammer state
+		gasInWindow := spammerGasInWindow[spammerID]
+
+		// Get spammer status for hash
+		status := 0
+		if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
+			status = spammer.GetStatus()
+		}
+
+		currentHash := fmt.Sprintf("%d-%d-%d-%d-%d-%s",
+			snapshot.PendingTxCount,
+			snapshot.TotalConfirmedTx,
+			snapshot.TotalSubmittedTx,
+			gasInWindow,
+			status,
+			snapshot.LastUpdate.Format(time.RFC3339))
+
+		newHashes[spammerID] = currentHash
+
+		if oldHash, exists := state.lastSpammerHashes[spammerID]; !exists || oldHash != currentHash {
+			hasSpammerChanges = true
+		}
+	}
+
+	// Only send data if there are changes
+	if !hasNewDataPoints && !hasSpammerChanges {
+		return
+	}
+
+	// Build response data
+	data := make(map[string]interface{})
+
+	// Add new data points if any
+	if hasNewDataPoints {
+		newDataPoints := dataPoints[state.lastDataPointCount:]
+		convertedDataPoints := make([]GraphsDataPoint, len(newDataPoints))
+
+		for i, point := range newDataPoints {
+			convertedDataPoints[i] = GraphsDataPoint{
+				Timestamp:        point.Timestamp,
+				StartBlockNumber: point.StartBlockNumber,
+				EndBlockNumber:   point.EndBlockNumber,
+				BlockCount:       point.BlockCount,
+				TotalGasUsed:     point.TotalGasUsed,
+				OthersGasUsed:    point.OthersGasUsed,
+				SpammerData:      make(map[string]*SpammerBlockData),
+			}
+
+			// Convert spammer data with string keys
+			for spammerID, spammerData := range point.SpammerGasData {
+				convertedDataPoints[i].SpammerData[fmt.Sprintf("%d", spammerID)] = &SpammerBlockData{
+					GasUsed:          spammerData.GasUsed,
+					ConfirmedTxCount: spammerData.ConfirmedTxCount,
+					PendingTxCount:   spammerData.PendingTxCount,
+					SubmittedTxCount: spammerData.SubmittedTxCount,
+				}
+			}
+		}
+
+		data["newDataPoints"] = convertedDataPoints
+		state.lastDataPointCount = len(dataPoints)
+	}
+
+	// Add spammer updates and detect new spammers
+	if hasSpammerChanges {
+		newSpammers := make([]map[string]interface{}, 0)
+
+		for spammerID, snapshot := range spammerSnapshots {
+			spammerName := ah.daemon.GetSpammerName(spammerID)
+			gasInWindow := spammerGasInWindow[spammerID]
+
+			// Get spammer status
+			status := 0 // Default to stopped
+			if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
+				status = spammer.GetStatus()
+			}
+
+			spammerData := map[string]interface{}{
+				"id":        spammerID,
+				"name":      spammerName,
+				"pending":   snapshot.PendingTxCount,
+				"confirmed": snapshot.TotalConfirmedTx,
+				"submitted": snapshot.TotalSubmittedTx,
+				"gasUsed":   gasInWindow,
+				"updated":   snapshot.LastUpdate.Format(time.RFC3339),
+				"status":    status,
+			}
+
+			// Check if this is a new spammer
+			if _, exists := state.lastSpammerHashes[spammerID]; !exists {
+				newSpammers = append(newSpammers, spammerData)
+			} else {
+				data[fmt.Sprintf("spammer_%d", spammerID)] = spammerData
+			}
+		}
+
+		// Include new spammers in the response
+		if len(newSpammers) > 0 {
+			data["newSpammers"] = newSpammers
+		}
+
+		state.lastSpammerHashes = newHashes
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		logrus.Errorf("Failed to marshal graphs data: %v", err)
+		return
+	}
+
+	fmt.Fprintf(w, "data: %s\n\n", jsonData)
+	flusher.Flush()
+}
+
+// sendMetricsUpdateWithState sends real-time metrics updates via SSE
+func (ah *APIHandler) sendMetricsUpdateWithState(w http.ResponseWriter, flusher http.Flusher, update *daemon.MetricsUpdate, state *SSEState) {
+	if update == nil {
+		return
+	}
+
+	data := make(map[string]interface{})
+
+	// Add new data point if available
+	if update.NewDataPoint != nil {
+		convertedDataPoint := GraphsDataPoint{
+			Timestamp:        update.NewDataPoint.Timestamp,
+			StartBlockNumber: update.NewDataPoint.StartBlockNumber,
+			EndBlockNumber:   update.NewDataPoint.EndBlockNumber,
+			BlockCount:       update.NewDataPoint.BlockCount,
+			TotalGasUsed:     update.NewDataPoint.TotalGasUsed,
+			OthersGasUsed:    update.NewDataPoint.OthersGasUsed,
+			SpammerData:      make(map[string]*SpammerBlockData),
+		}
+
+		// Convert spammer data with string keys
+		for spammerID, spammerData := range update.NewDataPoint.SpammerGasData {
+			convertedDataPoint.SpammerData[fmt.Sprintf("%d", spammerID)] = &SpammerBlockData{
+				GasUsed:          spammerData.GasUsed,
+				ConfirmedTxCount: spammerData.ConfirmedTxCount,
+				PendingTxCount:   spammerData.PendingTxCount,
+				SubmittedTxCount: spammerData.SubmittedTxCount,
+			}
+		}
+
+		data["newDataPoints"] = []GraphsDataPoint{convertedDataPoint}
+	}
+
+	// Add updated spammer snapshots
+	if len(update.UpdatedSpammers) > 0 {
+		// Get the complete window data to calculate cumulative gas usage
+		shortWindow := ah.daemon.GetShortWindowMetrics()
+		spammerGasInWindow := make(map[uint64]uint64)
+		if shortWindow != nil {
+			dataPoints := shortWindow.GetDataPoints()
+			for _, point := range dataPoints {
+				for spammerID, spammerData := range point.SpammerGasData {
+					spammerGasInWindow[spammerID] += spammerData.GasUsed
+				}
+			}
+		}
+
+		newSpammers := make([]map[string]interface{}, 0)
+
+		for spammerID, snapshot := range update.UpdatedSpammers {
+			spammerName := ah.daemon.GetSpammerName(spammerID)
+
+			// Get spammer status
+			status := 0 // Default to stopped
+			if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
+				status = spammer.GetStatus()
+			}
+
+			// Use cumulative gas usage from the entire window
+			gasInWindow := spammerGasInWindow[spammerID]
+
+			spammerData := map[string]interface{}{
+				"id":        spammerID,
+				"name":      spammerName,
+				"pending":   snapshot.PendingTxCount,
+				"confirmed": snapshot.TotalConfirmedTx,
+				"submitted": snapshot.TotalSubmittedTx,
+				"gasUsed":   gasInWindow,
+				"updated":   snapshot.LastUpdate.Format(time.RFC3339),
+				"status":    status,
+			}
+
+			// Check if this is a new spammer
+			if _, exists := state.lastSpammerHashes[spammerID]; !exists {
+				newSpammers = append(newSpammers, spammerData)
+			} else {
+				data[fmt.Sprintf("spammer_%d", spammerID)] = spammerData
+			}
+		}
+
+		// Include new spammers in the response
+		if len(newSpammers) > 0 {
+			data["newSpammers"] = newSpammers
+		}
+	}
+
+	// Only send if we have data
+	if len(data) == 0 {
+		return
+	}
+
+	// Update state to track what we've sent
+	if update.NewDataPoint != nil {
+		// Get current window data to update our state
+		shortWindow := ah.daemon.GetShortWindowMetrics()
+		if shortWindow != nil {
+			dataPoints := shortWindow.GetDataPoints()
+			state.lastDataPointCount = len(dataPoints)
+		}
+	}
+
+	// Update spammer hashes for real-time updates
+	if len(update.UpdatedSpammers) > 0 {
+		for spammerID, snapshot := range update.UpdatedSpammers {
+			// Get spammer status for hash
+			status := 0
+			if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
+				status = spammer.GetStatus()
+			}
+
+			// Get gas usage
+			gasInWindow := uint64(0)
+			if shortWindow := ah.daemon.GetShortWindowMetrics(); shortWindow != nil {
+				dataPoints := shortWindow.GetDataPoints()
+				for _, point := range dataPoints {
+					if spammerData, exists := point.SpammerGasData[spammerID]; exists {
+						gasInWindow += spammerData.GasUsed
+					}
+				}
+			}
+
+			currentHash := fmt.Sprintf("%d-%d-%d-%d-%d-%s",
+				snapshot.PendingTxCount,
+				snapshot.TotalConfirmedTx,
+				snapshot.TotalSubmittedTx,
+				gasInWindow,
+				status,
+				snapshot.LastUpdate.Format(time.RFC3339))
+
+			state.lastSpammerHashes[spammerID] = currentHash
+		}
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		logrus.Errorf("Failed to marshal real-time metrics update: %v", err)
+		return
+	}
+
+	fmt.Fprintf(w, "data: %s\n\n", jsonData)
+	flusher.Flush()
 }

@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -50,8 +48,6 @@ type Scenario struct {
 
 	factoryAddr   common.Address
 	initCodeBytes []byte
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "factorydeploytx"
@@ -128,11 +124,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.TotalCount > 0 {
-		if s.options.TotalCount < 1000 {
-			s.walletPool.SetWalletCount(s.options.TotalCount)
-		} else {
-			s.walletPool.SetWalletCount(1000)
+		maxWallets := s.options.TotalCount / 50
+		if maxWallets < 10 {
+			maxWallets = 10
+		} else if maxWallets > 1000 {
+			maxWallets = 1000
 		}
+
+		s.walletPool.SetWalletCount(maxWallets)
 	} else {
 		if s.options.Throughput*10 < 1000 {
 			s.walletPool.SetWalletCount(s.options.Throughput * 10)
@@ -232,9 +231,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.pendingWGroup.Wait()
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-
 	return err
 }
 
@@ -269,29 +265,9 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		}
 	}
 
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return common.Address{}, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return common.Address{}, err
 	}
 
 	tx, err := factoryWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
@@ -308,34 +284,20 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		return common.Address{}, err
 	}
 
-	var txReceipt *types.Receipt
-	var txErr error
-	txWg := sync.WaitGroup{}
-	txWg.Add(1)
-
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, factoryWallet, tx, &spamoor.SendTransactionOptions{
+	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, factoryWallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer txWg.Done()
-			txErr = err
-			txReceipt = receipt
-		},
 	})
 	if err != nil {
 		return common.Address{}, err
 	}
 
-	txWg.Wait()
-	if txErr != nil {
-		return common.Address{}, txErr
-	}
-	if txReceipt == nil {
+	if receipt == nil || receipt.ContractAddress == (common.Address{}) {
 		return common.Address{}, fmt.Errorf("factory deployment failed")
 	}
 
-	s.logger.Infof("deployed CREATE2 factory at: %v (confirmed in block #%v)", txReceipt.ContractAddress.String(), txReceipt.BlockNumber.String())
-	return txReceipt.ContractAddress, nil
+	s.logger.Infof("deployed CREATE2 factory at: %v (confirmed in block #%v)", receipt.ContractAddress.String(), receipt.BlockNumber.String())
+	return receipt.ContractAddress, nil
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
@@ -353,29 +315,9 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, client, wallet, fmt.Errorf("no client available")
 	}
 
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return nil, client, wallet, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return nil, client, wallet, err
 	}
 
 	factory, err := contract.NewCREATE2Factory(s.factoryAddr, client.GetEthClient())
@@ -402,25 +344,14 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, nil, wallet, err
 	}
 
-	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer func() {
-				onComplete()
-				s.pendingWGroup.Done()
-			}()
-
-			if err != nil {
-				s.logger.WithField("rpc", client.GetName()).Warnf("deployment tx %6d: await receipt failed: %v", txIdx+1, err)
-				return
-			}
-			if receipt == nil {
-				return
-			}
-
+		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			onComplete()
+		},
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			// Calculate deployed contract address
 			deployedAddr := common.Address{}
 			if len(receipt.Logs) > 0 {
@@ -434,26 +365,16 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			}
 
 			txFees := utils.GetTransactionFees(tx, receipt)
-			s.logger.WithField("rpc", client.GetName()).Debugf("deployment tx %d confirmed in block #%v. deployed at: %v, total fee: %v gwei (base: %v)",
-				txIdx+1, receipt.BlockNumber.String(), deployedAddr.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei())
+			s.logger.WithField("rpc", client.GetName()).Debugf(
+				"deployment tx %d confirmed in block #%v. deployed at: %v, total fee: %v gwei (base: %v)",
+				txIdx+1,
+				receipt.BlockNumber.String(),
+				deployedAddr.String(),
+				txFees.TotalFeeGweiString(),
+				txFees.TxBaseFeeGweiString(),
+			)
 		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())
-			if retry == 0 && rebroadcast > 0 {
-				logger.Infof("rebroadcasting tx %6d", txIdx+1)
-			}
-			if retry > 0 {
-				logger = logger.WithField("retry", retry)
-			}
-			if rebroadcast > 0 {
-				logger = logger.WithField("rebroadcast", rebroadcast)
-			}
-			if err != nil {
-				logger.Debugf("failed sending deployment tx %6d: %v", txIdx+1, err)
-			} else if retry > 0 || rebroadcast > 0 {
-				logger.Debugf("successfully sent deployment tx %6d", txIdx+1)
-			}
-		},
+		LogFn: spamoor.GetDefaultLogFn(s.logger, "", fmt.Sprintf("%6d", txIdx+1), tx),
 	})
 	if err != nil {
 		// reset nonce if tx was not sent

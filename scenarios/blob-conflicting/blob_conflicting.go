@@ -45,8 +45,6 @@ type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "blob-conflicting"
@@ -119,11 +117,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.TotalCount > 0 {
-		if s.options.TotalCount < 1000 {
-			s.walletPool.SetWalletCount(s.options.TotalCount)
-		} else {
-			s.walletPool.SetWalletCount(1000)
+		maxWallets := s.options.TotalCount / 3
+		if maxWallets < 10 {
+			maxWallets = 10
+		} else if maxWallets > 1000 {
+			maxWallets = 1000
 		}
+
+		s.walletPool.SetWalletCount(maxWallets)
 	} else {
 		if s.options.Throughput*10 < 1000 {
 			s.walletPool.SetWalletCount(s.options.Throughput * 10)
@@ -200,9 +201,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-	s.pendingWGroup.Wait()
-
 	return err
 }
 
@@ -222,36 +220,16 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		return nil, client, wallet, 0, fmt.Errorf("no client available")
 	}
 
-	var feeCap *big.Int
-	var tipCap *big.Int
-	var blobFee *big.Int
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return nil, client, wallet, 0, err
+	}
 
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
+	var blobFee *big.Int
 	if s.options.BlobFee > 0 {
 		blobFee = new(big.Int).Mul(big.NewInt(int64(s.options.BlobFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return nil, client, wallet, 0, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
-	}
-	if blobFee == nil {
-		blobFee = big.NewInt(1000000000)
+	} else {
+		blobFee = new(big.Int).Mul(feeCap, big.NewInt(1000000000))
 	}
 
 	blobCount := s.options.Sidecars
@@ -334,53 +312,28 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		return txBytes, txVersion
 	}
 
-	txBytes, txVersion := getTxBytes()
+	_, txVersion := getTxBytes()
 
 	// send both tx at exactly the same time
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	transactionSubmitted = true
 	var err1, err2 error
-	s.pendingWGroup.Add(2)
 	go func() {
 		err1 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx1, &spamoor.SendTransactionOptions{
 			Client:      client,
 			Rebroadcast: s.options.Rebroadcast > 0,
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				defer func() {
-					onComplete()
-					s.pendingWGroup.Done()
-				}()
-
-				if err != nil {
-					s.logger.WithField("rpc", client.GetName()).Warnf("error while awaiting tx receipt: %v", err)
-					return
-				}
-
-				if receipt != nil {
-					s.processTxReceipt(txIdx, tx, receipt, client, "blob")
-				}
+			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				onComplete()
 			},
-			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-				logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx1.Nonce())
-				if retry > 0 {
-					logger = logger.WithField("retry", retry)
-				}
-				if rebroadcast > 0 {
-					logger = logger.WithField("rebroadcast", rebroadcast)
-				}
-				if err != nil {
-					logger.Debugf("failed sending blob tx %6d.0: %v", txIdx+1, err)
-				} else if retry > 0 || rebroadcast > 0 {
-					logger.Debugf("successfully sent blob tx %6d.0", txIdx+1)
-				}
+			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+				s.processTxReceipt(txIdx, tx, receipt, client, "blob")
 			},
-			OnRebroadcast: func(tx *types.Transaction, options *spamoor.SendTransactionOptions, client *spamoor.Client) {
-				// we might need to switch to v1 after fulu activation
+			LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.0", txIdx+1), tx1),
+			OnEncode: func(tx *types.Transaction) ([]byte, error) {
 				txBytes, _ := getTxBytes()
-				options.TransactionBytes = txBytes
+				return txBytes, nil
 			},
-			TransactionBytes: txBytes,
 		})
 		if err1 != nil {
 			s.logger.WithField("rpc", client.GetName()).Warnf("error while sending blob tx %v: %v", txIdx, err1)
@@ -393,37 +346,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		err2 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx2, &spamoor.SendTransactionOptions{
 			Client:      client2,
 			Rebroadcast: s.options.Rebroadcast > 0,
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				defer func() {
-					s.pendingWGroup.Done()
-				}()
-
-				if err != nil {
-					s.logger.WithField("rpc", client.GetName()).Warnf("error while awaiting tx receipt: %v", err)
-					return
-				}
-
-				if receipt != nil {
-					s.processTxReceipt(txIdx, tx, receipt, client, "dynfee")
-				}
+			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+				s.processTxReceipt(txIdx, tx, receipt, client, "dynfee")
 			},
-			LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-				logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx2.Nonce())
-				if retry == 0 && rebroadcast > 0 {
-					logger.Infof("rebroadcasting blob tx %6d", txIdx+1)
-				}
-				if retry > 0 {
-					logger = logger.WithField("retry", retry)
-				}
-				if rebroadcast > 0 {
-					logger = logger.WithField("rebroadcast", rebroadcast)
-				}
-				if err != nil {
-					logger.Debugf("failed sending blob tx %6d.1: %v", txIdx+1, err)
-				} else if retry > 0 || rebroadcast > 0 {
-					logger.Debugf("successfully sent blob tx %6d.1", txIdx+1)
-				}
-			},
+			LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.1", txIdx+1), tx2),
 		})
 		if err2 != nil {
 			s.logger.WithField("rpc", client2.GetName()).Warnf("error while sending dynfee tx %v: %v", txIdx, err2)
@@ -452,5 +378,15 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 
 func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *spamoor.Client, txLabel string) {
 	txFees := utils.GetTransactionFees(tx, receipt)
-	s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d/%v confirmed in block #%v. total fee: %v gwei (tx: %v/%v, blob: %v/%v)", txIdx+1, txLabel, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxFeeGwei(), txFees.TxBaseFeeGwei(), txFees.BlobFeeGwei(), txFees.BlobBaseFeeGwei())
+	s.logger.WithField("rpc", client.GetName()).Debugf(
+		" transaction %d/%v confirmed in block #%v. total fee: %v gwei (tx: %v/%v, blob: %v/%v)",
+		txIdx+1,
+		txLabel,
+		receipt.BlockNumber.String(),
+		txFees.TotalFeeGweiString(),
+		txFees.TxFeeGweiString(),
+		txFees.TxBaseFeeGweiString(),
+		txFees.BlobFeeGweiString(),
+		txFees.BlobBaseFeeGweiString(),
+	)
 }

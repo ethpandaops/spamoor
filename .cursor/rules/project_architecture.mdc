@@ -1,0 +1,63 @@
+---
+description: Spamoor Project Architecture Rules
+alwaysApply: false
+---
+
+# Spamoor Project Architecture
+
+Spamoor is an Ethereum transaction spamming tool written in Go with a modular, scenario-based architecture.
+
+## Project Structure
+
+### Core Components
+- **cmd/**: Entry points for the application
+  - `spamoor/`: CLI tool for running individual scenarios
+  - `spamoor-daemon/`: Web-based daemon for managing multiple spammers
+- **daemon/**: Daemon mode implementation with database management
+- **spamoor/**: Core transaction handling logic (clients, wallets, pools)
+- **scenarios/**: Pluggable transaction scenarios (each in its own directory)
+- **txbuilder/**: Transaction construction utilities
+- **webui/**: Web interface for daemon mode
+- **utils/**: Shared utility functions
+
+### Key Architecture Patterns
+
+#### Scenario-Based Design
+- Each scenario is self-contained in `scenarios/<name>/`
+- Scenarios implement the `TxScenario` interface
+- Scenarios are registered in `scenarios/scenarios.go`
+- Each scenario has its own README.md with documentation
+
+#### Transaction Management
+- Client pooling with RPC endpoint management
+- Wallet management with hierarchical key derivation
+- Transaction batching and submission coordination
+- Configurable transaction pool management
+
+#### Daemon Architecture
+- SQLite database for persistent state
+- REST API with Swagger documentation
+- WebSocket support for real-time updates
+- Metrics collection via Prometheus
+
+## Technology Stack
+- **Language**: Go 1.24+
+- **Blockchain**: Ethereum (using go-ethereum fork)
+- **Database**: SQLite with GORM-like interface (glebarez/go-sqlite)
+- **Web Framework**: Gorilla Mux + Negroni middleware
+- **Frontend**: Bootstrap + vanilla JavaScript
+- **Documentation**: Swagger/OpenAPI
+- **Metrics**: Prometheus client
+
+## Build System
+- **Makefile**: Primary build system
+- **Docker**: Containerization support
+- **Go Modules**: Dependency management
+- Custom go-ethereum fork for EIP-7702 support
+
+## Key Design Principles
+- Modular scenario architecture for extensibility
+- Clean separation between CLI and daemon modes
+- Comprehensive logging and metrics
+- Docker-first deployment approach
+- Configuration via YAML files and command-line flags

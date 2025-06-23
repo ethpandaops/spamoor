@@ -29,12 +29,16 @@ type Wallet struct {
 	address          common.Address
 	chainid          *big.Int
 	pendingTxCount   atomic.Uint64
+	submittedTxCount atomic.Uint64
 	confirmedTxCount uint64
 	balance          *big.Int
 
 	txNonceChans     map[uint64]*nonceStatus
 	txNonceMutex     sync.Mutex
 	lastConfirmation uint64
+
+	lowBalanceNotifyChan chan<- struct{}
+	lowBalanceThreshold  *big.Int
 }
 
 // nonceStatus tracks the confirmation status of a transaction with a specific nonce
@@ -125,12 +129,34 @@ func (wallet *Wallet) GetConfirmedNonce() uint64 {
 	return wallet.confirmedTxCount
 }
 
+// GetSubmittedTxCount returns the total number of transactions submitted by this wallet.
+// This represents the cumulative count of all transactions that have been submitted to the network.
+func (wallet *Wallet) GetSubmittedTxCount() uint64 {
+	return wallet.submittedTxCount.Load()
+}
+
+// IncrementSubmittedTxCount increments the submitted transaction counter.
+// This should be called when a transaction is successfully submitted to the network.
+func (wallet *Wallet) IncrementSubmittedTxCount() {
+	wallet.submittedTxCount.Add(1)
+}
+
 // GetBalance returns the current balance of the wallet.
 // The returned value is thread-safe to read.
 func (wallet *Wallet) GetBalance() *big.Int {
 	wallet.balanceMutex.RLock()
 	defer wallet.balanceMutex.RUnlock()
 	return wallet.balance
+}
+
+// setLowBalanceNotification sets up low balance notification for this wallet.
+// When the balance falls below the threshold, the wallet will send a notification
+// to the channel (non-blocking).
+func (wallet *Wallet) setLowBalanceNotification(notifyChan chan<- struct{}, threshold *big.Int) {
+	wallet.balanceMutex.Lock()
+	defer wallet.balanceMutex.Unlock()
+	wallet.lowBalanceNotifyChan = notifyChan
+	wallet.lowBalanceThreshold = threshold
 }
 
 // SetChainId sets the chain ID for this wallet.
@@ -167,6 +193,7 @@ func (wallet *Wallet) SetBalance(balance *big.Int) {
 	wallet.balanceMutex.Lock()
 	defer wallet.balanceMutex.Unlock()
 	wallet.balance = balance
+	wallet.checkLowBalance()
 }
 
 // SubBalance subtracts the specified amount from the wallet's balance.
@@ -175,6 +202,7 @@ func (wallet *Wallet) SubBalance(amount *big.Int) {
 	wallet.balanceMutex.Lock()
 	defer wallet.balanceMutex.Unlock()
 	wallet.balance = wallet.balance.Sub(wallet.balance, amount)
+	wallet.checkLowBalance()
 }
 
 // AddBalance adds the specified amount to the wallet's balance.
@@ -183,6 +211,23 @@ func (wallet *Wallet) AddBalance(amount *big.Int) {
 	wallet.balanceMutex.Lock()
 	defer wallet.balanceMutex.Unlock()
 	wallet.balance = wallet.balance.Add(wallet.balance, amount)
+}
+
+// checkLowBalance checks if balance has fallen below threshold and sends notification.
+// Must be called with balanceMutex held. Non-blocking - drops notification if channel is full.
+func (wallet *Wallet) checkLowBalance() {
+	if wallet.lowBalanceNotifyChan == nil || wallet.lowBalanceThreshold == nil || wallet.balance == nil {
+		return
+	}
+
+	if wallet.balance.Cmp(wallet.lowBalanceThreshold) < 0 {
+		// Non-blocking send
+		select {
+		case wallet.lowBalanceNotifyChan <- struct{}{}:
+		default:
+			// Channel full, drop notification
+		}
+	}
 }
 
 // BuildDynamicFeeTx builds and signs a dynamic fee (EIP-1559) transaction.
