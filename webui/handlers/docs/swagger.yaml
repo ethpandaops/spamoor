@@ -6,10 +6,18 @@ definitions:
       enabled:
         type: boolean
       group:
+        description: First group for backward compatibility
         type: string
+      groups:
+        description: All groups
+        items:
+          type: string
+        type: array
       index:
         type: integer
       name:
+        type: string
+      name_override:
         type: string
       ready:
         type: boolean
@@ -39,6 +47,43 @@ definitions:
           type: integer
         type: array
     type: object
+  api.GraphsDashboardResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/api.GraphsDataPoint'
+        type: array
+      others:
+        $ref: '#/definitions/api.OthersMetricsData'
+      range:
+        $ref: '#/definitions/api.TimeRange'
+      spammers:
+        items:
+          $ref: '#/definitions/api.SpammerMetricsData'
+        type: array
+      totals:
+        $ref: '#/definitions/api.TotalMetricsData'
+    type: object
+  api.GraphsDataPoint:
+    properties:
+      blocks:
+        type: integer
+      endBlock:
+        type: integer
+      othersGas:
+        type: integer
+      spammers:
+        additionalProperties:
+          $ref: '#/definitions/api.SpammerBlockData'
+        description: spammerID -> detailed data
+        type: object
+      startBlock:
+        type: integer
+      totalGas:
+        type: integer
+      ts:
+        type: string
+    type: object
   api.ImportSpammersRequest:
     properties:
       input:
@@ -58,11 +103,10 @@ definitions:
       time:
         type: string
     type: object
-  api.Response:
+  api.OthersMetricsData:
     properties:
-      data: {}
-      error:
-        type: string
+      gasUsed:
+        type: integer
     type: object
   api.ScenarioEntries:
     properties:
@@ -70,6 +114,17 @@ definitions:
         type: string
       name:
         type: string
+    type: object
+  api.SpammerBlockData:
+    properties:
+      confirmed:
+        type: integer
+      gas:
+        type: integer
+      pending:
+        type: integer
+      submitted:
+        type: integer
     type: object
   api.SpammerDetails:
     properties:
@@ -85,6 +140,40 @@ definitions:
         type: string
       status:
         type: integer
+    type: object
+  api.SpammerLibraryEntry:
+    properties:
+      description:
+        type: string
+      file:
+        type: string
+      min_version:
+        type: string
+      name:
+        type: string
+      scenarios:
+        items:
+          type: string
+        type: array
+      spammer_count:
+        type: integer
+      tags:
+        items:
+          type: string
+        type: array
+    type: object
+  api.SpammerLibraryIndex:
+    properties:
+      base_url:
+        type: string
+      cached_at:
+        type: string
+      configs:
+        items:
+          $ref: '#/definitions/api.SpammerLibraryEntry'
+        type: array
+      generated:
+        type: string
     type: object
   api.SpammerListEntry:
     properties:
@@ -102,6 +191,70 @@ definitions:
       status:
         type: integer
     type: object
+  api.SpammerMetricsData:
+    properties:
+      confirmed:
+        type: integer
+      gasUsed:
+        type: integer
+      id:
+        type: integer
+      name:
+        type: string
+      pending:
+        type: integer
+      status:
+        description: Running status from daemon
+        type: integer
+      submitted:
+        type: integer
+      updated:
+        type: string
+    type: object
+  api.SpammerTimeSeriesPoint:
+    properties:
+      blockNumber:
+        type: integer
+      confirmedTxCount:
+        type: integer
+      gasUsed:
+        type: integer
+      pendingTxCount:
+        type: integer
+      timestamp:
+        type: string
+    type: object
+  api.SpammerTimeSeriesResponse:
+    properties:
+      dataPoints:
+        items:
+          $ref: '#/definitions/api.SpammerTimeSeriesPoint'
+        type: array
+      spammerId:
+        type: integer
+      spammerName:
+        type: string
+      timeRange:
+        $ref: '#/definitions/api.TimeRange'
+    type: object
+  api.TimeRange:
+    properties:
+      end:
+        type: string
+      start:
+        type: string
+    type: object
+  api.TotalMetricsData:
+    properties:
+      confirmed:
+        type: integer
+      gasUsed:
+        type: integer
+      pending:
+        type: integer
+      submitted:
+        type: integer
+    type: object
   api.UpdateClientEnabledRequest:
     properties:
       enabled:
@@ -110,6 +263,17 @@ definitions:
   api.UpdateClientGroupRequest:
     properties:
       group:
+        description: Single group for backward compatibility
+        type: string
+      groups:
+        description: Multiple groups
+        items:
+          type: string
+        type: array
+    type: object
+  api.UpdateClientNameRequest:
+    properties:
+      name_override:
         type: string
     type: object
   api.UpdateSpammerRequest:
@@ -119,6 +283,13 @@ definitions:
       description:
         type: string
       name:
+        type: string
+    type: object
+  api.VersionResponse:
+    properties:
+      release:
+        type: string
+      version:
         type: string
     type: object
   daemon.ImportResult:
@@ -211,16 +382,14 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid client index
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Client not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Update client enabled state
       tags:
       - Client
@@ -228,7 +397,8 @@ paths:
     put:
       consumes:
       - application/json
-      description: Updates the group for a specific client
+      description: Updates the group(s) for a specific client. Supports both single
+        group (backward compatibility) and multiple groups.
       operationId: updateClientGroup
       parameters:
       - description: Client index
@@ -236,7 +406,7 @@ paths:
         name: index
         required: true
         type: integer
-      - description: New group name
+      - description: New group name(s)
         in: body
         name: request
         required: true
@@ -245,17 +415,47 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid client index
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Client not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Update client group
+      tags:
+      - Client
+  /api/client/{index}/name:
+    put:
+      consumes:
+      - application/json
+      description: Updates the name override for a specific client
+      operationId: updateClientName
+      parameters:
+      - description: Client index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: New name override
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateClientNameRequest'
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Invalid client index
+          schema:
+            type: string
+        "404":
+          description: Client not found
+          schema:
+            type: string
+      summary: Update client name override
       tags:
       - Client
   /api/clients:
@@ -268,17 +468,74 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  items:
-                    $ref: '#/definitions/api.ClientEntry'
-                  type: array
-              type: object
+            items:
+              $ref: '#/definitions/api.ClientEntry'
+            type: array
       summary: Get all clients
       tags:
       - Client
+  /api/graphs/dashboard:
+    get:
+      description: Returns comprehensive graphs data for the dashboard including all
+        spammers, totals, and time-series data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.GraphsDashboardResponse'
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get graphs dashboard data
+      tags:
+      - Graphs
+  /api/graphs/spammer/{id}/timeseries:
+    get:
+      description: Returns detailed time-series graphs data for a specific spammer
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.SpammerTimeSeriesResponse'
+        "400":
+          description: Invalid spammer ID
+          schema:
+            type: string
+        "404":
+          description: Spammer not found
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get time-series data for a specific spammer
+      tags:
+      - Graphs
+  /api/graphs/stream:
+    get:
+      description: Provides real-time graphs updates via Server-Sent Events (SSE)
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream
+          schema:
+            type: string
+      summary: Stream real-time graphs updates
+      tags:
+      - Graphs
   /api/scenarios:
     get:
       description: Returns a list of all scenarios
@@ -289,22 +546,17 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  items:
-                    $ref: '#/definitions/api.ScenarioEntries'
-                  type: array
-              type: object
+            items:
+              $ref: '#/definitions/api.ScenarioEntries'
+            type: array
         "400":
           description: Failure
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Get all scenarios
       tags:
       - Scenario
@@ -328,11 +580,11 @@ paths:
         "404":
           description: Scenario not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Get scenario configuration
       tags:
       - Scenario
@@ -355,23 +607,36 @@ paths:
         "200":
           description: Spammer ID
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  type: integer
-              type: object
+            type: integer
         "400":
           description: Invalid request
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Create a new spammer
       tags:
       - Spammer
+  /api/spammer-library/index:
+    get:
+      description: Returns the index of available spammer configurations from GitHub
+      operationId: getSpammerLibraryIndex
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.SpammerLibraryIndex'
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get spammer library index
+      tags:
+      - SpammerLibrary
   /api/spammer/{id}:
     delete:
       description: Deletes a spammer and stops it if running
@@ -385,20 +650,18 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Delete a spammer
       tags:
       - Spammer
@@ -417,20 +680,15 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  $ref: '#/definitions/api.SpammerDetails'
-              type: object
+            $ref: '#/definitions/api.SpammerDetails'
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Get spammer details
       tags:
       - Spammer
@@ -454,20 +712,18 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid request
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Update a spammer
       tags:
       - Spammer
@@ -487,22 +743,17 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  items:
-                    $ref: '#/definitions/api.LogEntry'
-                  type: array
-              type: object
+            items:
+              $ref: '#/definitions/api.LogEntry'
+            type: array
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Get spammer logs
       tags:
       - Spammer
@@ -530,15 +781,15 @@ paths:
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Streaming unsupported
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Stream spammer logs
       tags:
       - Spammer
@@ -555,20 +806,18 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Pause a spammer
       tags:
       - Spammer
@@ -585,20 +834,18 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Reclaim funds from a spammer
       tags:
       - Spammer
@@ -615,20 +862,18 @@ paths:
       responses:
         "200":
           description: Success
-          schema:
-            $ref: '#/definitions/api.Response'
         "400":
           description: Invalid spammer ID
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "404":
           description: Spammer not found
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Start a spammer
       tags:
       - Spammer
@@ -642,14 +887,9 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  items:
-                    $ref: '#/definitions/api.SpammerListEntry'
-                  type: array
-              type: object
+            items:
+              $ref: '#/definitions/api.SpammerListEntry'
+            type: array
       summary: Get all spammers
       tags:
       - Spammer
@@ -675,11 +915,11 @@ paths:
         "400":
           description: Invalid request
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Export spammers to YAML
       tags:
       - Spammer
@@ -702,21 +942,30 @@ paths:
         "200":
           description: Success
           schema:
-            allOf:
-            - $ref: '#/definitions/api.Response'
-            - properties:
-                data:
-                  $ref: '#/definitions/daemon.ImportResult'
-              type: object
+            $ref: '#/definitions/daemon.ImportResult'
         "400":
           description: Invalid request
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
         "500":
           description: Server Error
           schema:
-            $ref: '#/definitions/api.Response'
+            type: string
       summary: Import spammers from YAML data or URL
       tags:
       - Spammer
+  /api/version:
+    get:
+      description: Returns the current spamoor version information
+      operationId: getVersion
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.VersionResponse'
+      summary: Get spamoor version
+      tags:
+      - Version
 swagger: "2.0"

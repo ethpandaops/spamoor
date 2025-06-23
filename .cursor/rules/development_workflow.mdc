@@ -1,0 +1,178 @@
+---
+description: Spamoor Development Workflow and Best Practices
+alwaysApply: false
+---
+
+# Spamoor Development Workflow
+
+## Build System
+
+### Makefile Targets
+- `make all`: Build documentation and binaries
+- `make build`: Build binaries with optimizations
+- `make build-lib`: Build using library mode (without replace directive)
+- `make docs`: Generate Swagger API documentation
+- `make test`: Run all tests
+- `make clean`: Clean build artifacts
+
+### Build Configuration
+- **CGO_ENABLED=1**: Required for SQLite and cryptographic operations
+- **Build tags**: Use `with_blob_v1,ckzg` for blob transaction support
+- **Optimization flags**: `-s -w` for stripped binaries
+- **Version injection**: Git commit hash and build time embedded
+
+## Development Environment
+
+### Local Development
+```bash
+# Standard development setup
+git clone https://github.com/ethpandaops/spamoor.git
+cd spamoor
+make all
+
+# Run tests
+make test
+
+# Generate documentation
+make docs
+```
+
+### DevNet Testing
+```bash
+# Start local devnet
+make devnet
+
+# Run spamoor against devnet
+make devnet-run
+
+# Clean up devnet
+make devnet-clean
+```
+
+## Git Workflow
+
+### Branch Strategy
+- **master**: Main development branch
+- **feature/***: New features and enhancements
+- **fix/***: Bug fixes
+- **docs/***: Documentation updates
+
+### Commit Standards
+- Use conventional commit format: `type(scope): description`
+- Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+- Include issue references when applicable
+- Keep commits atomic and focused
+
+### Pull Request Process
+1. Create feature branch from master
+2. Implement changes with tests
+3. Update documentation if needed
+4. Ensure all tests pass
+5. Submit PR with clear description
+6. Address review feedback
+7. Squash and merge when approved
+
+## Testing Strategy
+
+### Unit Testing
+- Test individual functions and methods
+- Mock external dependencies (RPC clients, databases)
+- Use table-driven tests for multiple scenarios
+- Aim for good coverage of business logic
+
+### Integration Testing
+- Test complete scenarios end-to-end
+- Use local devnet for blockchain interactions
+- Verify transaction generation and submission
+- Test daemon API endpoints
+
+### Testing Commands
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with coverage
+go test -cover ./...
+
+# Run specific test package
+go test ./scenarios/eoatx
+
+# Run tests with verbose output
+go test -v ./...
+```
+
+## Code Quality
+
+### Pre-commit Checks
+- Run `go fmt` for consistent formatting
+- Run `go vet` for static analysis
+- Run `go test` to ensure tests pass
+- Generate docs with `make docs`
+- Check for race conditions: `go test -race`
+
+### Code Review Guidelines
+- Review for adherence to Go best practices
+- Verify proper error handling
+- Check for security vulnerabilities
+- Ensure adequate logging and monitoring
+- Validate configuration handling
+
+## Documentation Requirements
+
+### API Documentation
+- Use Swagger annotations for all endpoints
+- Generate docs with `make docs`
+- Include request/response examples
+- Document error conditions
+
+### Scenario Documentation
+- Each scenario must have README.md
+- Include configuration examples
+- Document expected behavior
+- Provide troubleshooting guidance
+
+### Code Documentation
+- Godoc comments for all public functions
+- Include usage examples where helpful
+- Document complex algorithms
+- Explain non-obvious design decisions
+
+## Release Process
+
+### Version Management
+- Use semantic versioning (MAJOR.MINOR.PATCH)
+- Tag releases in git: `git tag v1.2.3`
+- Update version in relevant files
+- Generate release notes
+
+### Build Artifacts
+- Build binaries for multiple platforms
+- Create Docker images
+- Generate checksums for downloads
+- Test release artifacts
+
+### Deployment
+- Update Docker Hub images
+- Create GitHub releases
+- Update documentation
+- Notify relevant stakeholders
+
+## Troubleshooting
+
+### Common Issues
+- **CGO errors**: Ensure proper C compiler setup
+- **Blob transaction failures**: Check build tags
+- **Database issues**: Verify SQLite permissions
+- **RPC connection problems**: Check network connectivity
+
+### Debugging
+- Use `--debug` flag for detailed logging
+- Check individual scenario logs
+- Monitor system resources
+- Verify RPC endpoint availability
+
+### Performance
+- Monitor memory usage during long runs
+- Check for goroutine leaks
+- Profile CPU usage for optimization
+- Measure transaction throughput

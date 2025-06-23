@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -33,7 +32,7 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 		return nil, fmt.Errorf("no client available")
 	}
 
-	feeCap, tipCap, err := s.getTxFee(ctx, client)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
 	if err != nil {
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
@@ -144,40 +143,19 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 
 	// submit & await all deployment transactions
 	if len(deploymentTxs) > 0 {
-		s.logger.Infof("deploying contracts... (0/%v)", len(deploymentTxs))
-		wg := sync.WaitGroup{}
-		hasErrors := atomic.Bool{}
-		for deployerWallet, txs := range deploymentTxs {
-			wg.Add(1)
-			go func(deployerWallet *spamoor.Wallet, txs []*types.Transaction) {
-				defer wg.Done()
-
-				for txIdx := 0; txIdx < len(txs); txIdx += 10 {
-					endIdx := txIdx + 10
-					if txIdx > 0 {
-						s.logger.Infof("deploying contracts for %s... (%v/%v)", s.walletPool.GetWalletName(deployerWallet.GetAddress()), txIdx, len(txs))
-					}
-					if endIdx > len(txs) {
-						endIdx = len(txs)
-					}
-					err := s.walletPool.GetTxPool().SendAndAwaitTxRange(ctx, deployerWallet, txs[txIdx:endIdx], &spamoor.SendTransactionOptions{
-						Client: client,
-						OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-							if err != nil {
-								s.logger.Warnf("could not send deployment tx %v: %v", tx.Hash().String(), err)
-							}
-						},
-					})
-					if err != nil {
-						s.logger.Warnf("could not send deployment txs: %v", err)
-						hasErrors.Store(true)
-					}
-				}
-			}(deployerWallet, txs)
-		}
-		wg.Wait()
-		if hasErrors.Load() {
-			return nil, fmt.Errorf("some deployment transactions failed")
+		_, err := s.walletPool.GetTxPool().SendMultiTransactionBatch(ctx, deploymentTxs, &spamoor.BatchOptions{
+			SendTransactionOptions: spamoor.SendTransactionOptions{
+				Client: client,
+			},
+			MaxRetries:   3,
+			PendingLimit: 10,
+			LogFn: func(confirmedCount int, totalCount int) {
+				s.logger.Infof("deploying contracts... (%v/%v)", confirmedCount, totalCount)
+			},
+			LogInterval: 10,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("could not send deployment txs: %w", err)
 		}
 
 		s.logger.Infof("contract deployment complete. (%v/%v)", len(deploymentTxs), len(deploymentTxs))

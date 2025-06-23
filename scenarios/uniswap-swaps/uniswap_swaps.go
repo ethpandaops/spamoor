@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	mathrand "math/rand"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -49,8 +48,6 @@ type Scenario struct {
 
 	uniswap        *Uniswap
 	deploymentInfo *DeploymentInfo
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "uniswap-swaps"
@@ -119,11 +116,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.TotalCount > 0 {
-		if s.options.TotalCount < 1000 {
-			s.walletPool.SetWalletCount(s.options.TotalCount)
-		} else {
-			s.walletPool.SetWalletCount(1000)
+		maxWallets := s.options.TotalCount / 50
+		if maxWallets < 10 {
+			maxWallets = 10
+		} else if maxWallets > 1000 {
+			maxWallets = 1000
 		}
+
+		s.walletPool.SetWalletCount(maxWallets)
 	} else {
 		if s.options.Throughput*10 < 1000 {
 			s.walletPool.SetWalletCount(s.options.Throughput * 10)
@@ -248,39 +248,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-	s.pendingWGroup.Wait()
-
 	return err
-}
-
-func (s *Scenario) getTxFee(ctx context.Context, client *spamoor.Client) (*big.Int, *big.Int, error) {
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
-	}
-
-	return feeCap, tipCap, nil
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
@@ -298,7 +266,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, client, wallet, fmt.Errorf("no client available")
 	}
 
-	feeCap, tipCap, err := s.getTxFee(ctx, client)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
 	if err != nil {
 		return nil, client, wallet, err
 	}
@@ -534,45 +502,25 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, nil, wallet, err
 	}
 
-	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer func() {
-				onComplete()
-				s.pendingWGroup.Done()
-			}()
-
-			if err != nil {
-				s.logger.WithField("rpc", client.GetName()).Warnf("tx %6d: await receipt failed: %v", txIdx+1, err)
-				return
-			}
-			if receipt == nil {
-				return
-			}
-
+		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			onComplete()
+		},
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			txFees := utils.GetTransactionFees(tx, receipt)
-			s.logger.WithField("rpc", client.GetName()).Debugf(" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v", txIdx+1, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei(), len(receipt.Logs))
+			s.logger.WithField("rpc", client.GetName()).Debugf(
+				" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v",
+				txIdx+1,
+				receipt.BlockNumber.String(),
+				txFees.TotalFeeGweiString(),
+				txFees.TxBaseFeeGweiString(),
+				len(receipt.Logs),
+			)
 		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())
-			if retry == 0 && rebroadcast > 0 {
-				logger.Infof("rebroadcasting tx %6d", txIdx+1)
-			}
-			if retry > 0 {
-				logger = logger.WithField("retry", retry)
-			}
-			if rebroadcast > 0 {
-				logger = logger.WithField("rebroadcast", rebroadcast)
-			}
-			if err != nil {
-				logger.Debugf("failed sending tx %6d: %v", txIdx+1, err)
-			} else if retry > 0 || rebroadcast > 0 {
-				logger.Debugf("successfully sent tx %6d", txIdx+1)
-			}
-		},
+		LogFn: spamoor.GetDefaultLogFn(s.logger, "", fmt.Sprintf("%6d", txIdx+1), tx),
 	})
 	if err != nil {
 		// reset nonce if tx was not sent

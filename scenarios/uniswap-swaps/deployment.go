@@ -48,7 +48,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	deployerWallet := u.walletPool.GetWellKnownWallet("deployer")
 	ownerWallet := u.walletPool.GetWellKnownWallet("owner")
 
-	feeCap, tipCap, err := u.getTxFee(u.ctx, client)
+	feeCap, tipCap, err := u.walletPool.GetTxPool().GetSuggestedFees(client, u.options.BaseFee, u.options.TipFee)
 	if err != nil {
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
@@ -317,26 +317,19 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	// submit & await all deployment transactions
 	if len(deploymentTxs) > 0 {
-		u.logger.Infof("deploying contracts... (0/%v)", len(deploymentTxs))
-		for txIdx := 0; txIdx < len(deploymentTxs); txIdx += 10 {
-			endIdx := txIdx + 10
-			if txIdx > 0 {
-				u.logger.Infof("deploying contracts... (%v/%v)", txIdx, len(deploymentTxs))
-			}
-			if endIdx > len(deploymentTxs) {
-				endIdx = len(deploymentTxs)
-			}
-			err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, deployerWallet, deploymentTxs[txIdx:endIdx], &spamoor.SendTransactionOptions{
+		_, err := u.walletPool.GetTxPool().SendTransactionBatch(u.ctx, deployerWallet, deploymentTxs, &spamoor.BatchOptions{
+			SendTransactionOptions: spamoor.SendTransactionOptions{
 				Client: client,
-				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-					if err != nil {
-						u.logger.Warnf("could not send deployment tx %v: %v", tx.Hash().String(), err)
-					}
-				},
-			})
-			if err != nil {
-				return nil, fmt.Errorf("could not send deployment txs: %w", err)
-			}
+			},
+			MaxRetries:   3,
+			PendingLimit: 10,
+			LogFn: func(confirmedCount int, totalCount int) {
+				u.logger.Infof("deploying contracts... (%v/%v)", confirmedCount, totalCount)
+			},
+			LogInterval: 10,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("could not send deployment txs: %w", err)
 		}
 		u.logger.Infof("contract deployment complete. (%v/%v)", len(deploymentTxs), len(deploymentTxs))
 	}
@@ -366,27 +359,21 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 		// submit & await all liquidity txs
 		if len(liquidityTxs) > 0 {
-			u.logger.Infof("providing liquidity... (0/%v)", len(liquidityTxs))
-			for txIdx := 0; txIdx < len(liquidityTxs); txIdx += 50 {
-				endIdx := txIdx + 50
-				if txIdx > 0 {
-					u.logger.Infof("providing liquidity... (%v/%v)", txIdx, len(liquidityTxs))
-				}
-				if endIdx > len(liquidityTxs) {
-					endIdx = len(liquidityTxs)
-				}
-				err := u.walletPool.GetTxPool().SendAndAwaitTxRange(u.ctx, rootWallet.GetWallet(), liquidityTxs[txIdx:endIdx], &spamoor.SendTransactionOptions{
+			_, err := u.walletPool.GetTxPool().SendTransactionBatch(u.ctx, rootWallet.GetWallet(), liquidityTxs, &spamoor.BatchOptions{
+				SendTransactionOptions: spamoor.SendTransactionOptions{
 					Client: client,
-					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-						if err != nil {
-							u.logger.Warnf("could not send liquidity tx %v: %v", tx.Hash().String(), err)
-						}
-					},
-				})
-				if err != nil {
-					return fmt.Errorf("could not send liquidity txs: %w", err)
-				}
+				},
+				MaxRetries:   3,
+				PendingLimit: 10,
+				LogFn: func(confirmedCount int, totalCount int) {
+					u.logger.Infof("providing liquidity... (%v/%v)", confirmedCount, totalCount)
+				},
+				LogInterval: 10,
+			})
+			if err != nil {
+				return fmt.Errorf("could not send liquidity txs: %w", err)
 			}
+
 			u.logger.Infof("liquidity provision complete. (%v/%v)", len(liquidityTxs), len(liquidityTxs))
 		}
 
