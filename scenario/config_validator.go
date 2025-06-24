@@ -216,12 +216,6 @@ func ExtractFieldsFromStruct(structValue interface{}) map[string]FieldInfo {
 		}
 	}
 
-	// Add common wallet configuration fields that are valid for all scenarios
-	walletFields := getCommonWalletFields()
-	for key, value := range walletFields {
-		fields[key] = value
-	}
-
 	return fields
 }
 
@@ -260,15 +254,4 @@ func ParseAndValidateConfig(descriptor *Descriptor, configYAML string, target in
 	}
 
 	return nil
-}
-
-// getCommonWalletFields returns wallet configuration fields that are valid for all scenarios
-func getCommonWalletFields() map[string]FieldInfo {
-	return map[string]FieldInfo{
-		"seed":            {Type: reflect.TypeOf(""), Required: false, Description: "Seed for deterministic wallet generation"},
-		"refill_amount":   {Type: reflect.TypeOf(uint64(0)), Required: false, Description: "Amount of ETH to fund/refill each child wallet with"},
-		"refill_balance":  {Type: reflect.TypeOf(uint64(0)), Required: false, Description: "Min amount of ETH each child wallet should hold before refilling"},
-		"refill_interval": {Type: reflect.TypeOf(uint64(0)), Required: false, Description: "Interval for child wallet balance check and refilling if needed (in sec)"},
-		"wallet_count":    {Type: reflect.TypeOf(uint64(0)), Required: false, Description: "Number of child wallets to create"},
-	}
 }
