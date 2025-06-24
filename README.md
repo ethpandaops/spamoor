@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/github/license/ethpandaops/spamoor)](LICENSE)
 [![Docker](https://img.shields.io/docker/pulls/ethpandaops/spamoor)](https://hub.docker.com/r/ethpandaops/spamoor)
 
-Spamoor is a robust transaction spamming tool designed for stress testing, network validation, and continuous transaction testing on Ethereum testnets. With 12+ different transaction scenarios and a powerful web-based daemon mode, it's the ultimate tool for Ethereum network testing.
+Spamoor is a robust transaction spamming tool designed for stress testing, network validation, and continuous transaction testing on Ethereum testnets. With 13+ different transaction scenarios and a powerful web-based daemon mode, it's the ultimate tool for Ethereum network testing.
 
 ## 🚀 Quick Start
 
@@ -74,6 +74,7 @@ Spamoor provides a comprehensive suite of transaction scenarios for different te
 | [`storagespam`](./scenarios/storagespam/README.md) | **Storage Spam** - Stress test EVM storage |
 | [`geastx`](./scenarios/geastx/README.md) | **Geas Transactions** - Execute custom geas bytecode |
 | [`xentoken`](./scenarios/xentoken/README.md) | **XEN Sybil Attack** - Simulate XEN token sybil attacks |
+| [`taskrunner`](./scenarios/taskrunner/README.md) | **Task Runner** - Execute configurable task sequences with init and execution phases |
 
 ## 🖥️ Daemon Mode
 
@@ -201,7 +202,7 @@ Comprehensive guide for implementing custom transaction scenarios. Covers:
 
 ## ✨ Key Features
 
-- **🎯 12+ Transaction Scenarios**: From basic EOA transfers to complex DeFi interactions
+- **🎯 13+ Transaction Scenarios**: From basic EOA transfers to complex DeFi interactions
 - **🖥️ Web-Based Daemon Mode**: Manage multiple spammers through an intuitive UI
 - **🔌 REST API**: Full programmatic control for automation
 - **📊 Prometheus Metrics**: Built-in monitoring and observability
