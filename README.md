@@ -57,6 +57,7 @@ spamoor eoatx --privkey="0x..." \
 
 Spamoor provides a comprehensive suite of transaction scenarios for different testing needs:
 
+
 | Scenario | Description |
 |----------|-------------|
 | [`eoatx`](./scenarios/eoatx/README.md) | **EOA Transactions** - Send standard ETH transfers with configurable amounts |
