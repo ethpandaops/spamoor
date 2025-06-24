@@ -10,7 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
-	"github.com/ethpandaops/spamoor/daemon"
+	"github.com/ethpandaops/spamoor/daemon/configs"
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -19,7 +19,7 @@ import (
 
 // RunSpammer represents a spammer instance for the run command
 type RunSpammer struct {
-	config     daemon.ExportSpammerConfig
+	config     configs.SpammerConfig
 	scenario   scenario.Scenario
 	walletPool *spamoor.WalletPool
 	logger     *logrus.Entry
@@ -112,8 +112,8 @@ func RunCommand(args []string) {
 		logger.WithError(err).Fatal("Failed to init root wallet")
 	}
 
-	// Load and parse YAML file using daemon's import logic
-	spammerConfigs, err := daemon.ResolveImportConfigs(yamlFile, "", make(map[string]bool))
+	// Load and parse YAML file using scenario config logic
+	spammerConfigs, err := configs.ResolveConfigImports(yamlFile, "", make(map[string]bool))
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to load spammer configurations")
 	}
@@ -140,7 +140,7 @@ func RunCommand(args []string) {
 	}
 
 	// Filter spammers if specified
-	var configsToRun []daemon.ExportSpammerConfig
+	var configsToRun []configs.SpammerConfig
 	if len(selectedSpammers) > 0 {
 		for _, idx := range selectedSpammers {
 			if idx < 0 || idx >= len(spammerConfigs) {
@@ -233,7 +233,7 @@ func RunCommand(args []string) {
 }
 
 // createSpammer creates and initializes a spammer instance
-func createSpammer(ctx context.Context, config daemon.ExportSpammerConfig, rootWallet *spamoor.RootWallet,
+func createSpammer(ctx context.Context, config configs.SpammerConfig, rootWallet *spamoor.RootWallet,
 	clientPool *spamoor.ClientPool, txpool *spamoor.TxPool, logger *logrus.Logger, index int) (*RunSpammer, error) {
 
 	// Get scenario descriptor
@@ -259,8 +259,8 @@ func createSpammer(ctx context.Context, config daemon.ExportSpammerConfig, rootW
 	walletPool := spamoor.NewWalletPool(ctx, spammerLogger.WithField("module", "walletpool"),
 		rootWallet, clientPool, txpool)
 
-	// Merge configuration with defaults using daemon's method
-	configYAML, err := daemon.MergeConfiguration(descriptor, config.Config)
+	// Merge configuration with defaults using scenario's method
+	configYAML, err := configs.MergeScenarioConfiguration(descriptor, config.Config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to merge configuration: %w", err)
 	}
