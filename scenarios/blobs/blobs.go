@@ -30,7 +30,7 @@ type ScenarioOptions struct {
 	MaxWallets                  uint64                   `yaml:"max_wallets"`
 	Rebroadcast                 uint64                   `yaml:"rebroadcast"`
 	BaseFee                     float64                  `yaml:"base_fee"`
-	TipFee                      float64                  `yaml:"base_fee"`
+	TipFee                      float64                  `yaml:"tip_fee"`
 	BlobFee                     uint64                   `yaml:"blob_fee"`
 	BlobV1Percent               uint64                   `yaml:"blob_v1_percent"`
 	FuluActivation              utils.FlexibleJsonUInt64 `yaml:"fulu_activation"`
