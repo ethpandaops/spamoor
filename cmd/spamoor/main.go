@@ -30,6 +30,12 @@ type CliArgs struct {
 }
 
 func main() {
+	// Check if "run" subcommand is used
+	if len(os.Args) >= 2 && os.Args[1] == "run" {
+		RunCommand(os.Args[2:])
+		return
+	}
+
 	cliArgs := CliArgs{}
 	flags := pflag.NewFlagSet("main", pflag.ContinueOnError)
 
@@ -71,7 +77,10 @@ func main() {
 	}
 	if invalidScenario {
 		fmt.Printf("invalid or missing scenario\n\n")
-		fmt.Printf("implemented scenarios:\n")
+		fmt.Printf("Usage:\n")
+		fmt.Printf("  spamoor <scenario> [options]     Run a specific scenario\n")
+		fmt.Printf("  spamoor run <yaml-file> [options] Run multiple scenarios from YAML config\n\n")
+		fmt.Printf("Implemented scenarios:\n")
 		scenarioNames := scenarios.GetScenarioNames()
 		sort.Slice(scenarioNames, func(a int, b int) bool {
 			return strings.Compare(scenarioNames[a], scenarioNames[b]) > 0

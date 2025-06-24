@@ -92,7 +92,7 @@ func (d *Daemon) ExportSpammers(spammerIDs ...int64) (string, error) {
 // Returns validation results and the number of spammers imported.
 func (d *Daemon) ImportSpammers(input string) (*ImportResult, error) {
 	// Resolve all includes and get the final spammer configs
-	importConfigs, err := d.resolveImportConfigs(input, "", make(map[string]bool))
+	importConfigs, err := ResolveImportConfigs(input, "", make(map[string]bool))
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve import configs: %w", err)
 	}
@@ -133,7 +133,7 @@ func (d *Daemon) ImportSpammers(input string) (*ImportResult, error) {
 		finalName := importConfig.Name
 
 		// Merge default configuration with imported config
-		configYAML, err := d.mergeConfiguration(scenario, importConfig.Config)
+		configYAML, err := MergeConfiguration(scenario, importConfig.Config)
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to merge config for spammer '%s': %v", finalName, err)
 			importErrors = append(importErrors, errMsg)
@@ -199,8 +199,8 @@ func isFilePath(input string) bool {
 		(len(input) > 1 && input[1] == ':')) // Windows drive letter
 }
 
-// readFromFile reads YAML data from a local file
-func (d *Daemon) readFromFile(filePath string) (string, error) {
+// readFromFile reads YAML data from a local file (standalone function)
+func readFromFile(filePath string) (string, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file %s: %w", filePath, err)
@@ -208,8 +208,8 @@ func (d *Daemon) readFromFile(filePath string) (string, error) {
 	return string(data), nil
 }
 
-// downloadFromURL downloads YAML data from a remote URL
-func (d *Daemon) downloadFromURL(urlStr string) (string, error) {
+// downloadFromURL downloads YAML data from a remote URL (standalone function)
+func downloadFromURL(urlStr string) (string, error) {
 	// Validate URL
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
@@ -239,10 +239,10 @@ func (d *Daemon) downloadFromURL(urlStr string) (string, error) {
 	return string(yamlData), nil
 }
 
-// resolveImportConfigs recursively resolves includes and returns the final spammer configs
-func (d *Daemon) resolveImportConfigs(input string, baseURL string, visited map[string]bool) ([]ExportSpammerConfig, error) {
+// ResolveImportConfigs recursively resolves includes and returns the final spammer configs (standalone function)
+func ResolveImportConfigs(input string, baseURL string, visited map[string]bool) ([]ExportSpammerConfig, error) {
 	// Resolve the actual source path/URL
-	resolvedInput := d.resolveIncludePath(input, baseURL)
+	resolvedInput := resolveIncludePath(input, baseURL)
 
 	// Prevent circular includes
 	if visited[resolvedInput] {
@@ -257,13 +257,13 @@ func (d *Daemon) resolveImportConfigs(input string, baseURL string, visited map[
 
 	// Check if resolved input is a URL
 	if isURL(resolvedInput) {
-		yamlData, err = d.downloadFromURL(resolvedInput)
+		yamlData, err = downloadFromURL(resolvedInput)
 		if err != nil {
 			return nil, fmt.Errorf("failed to download from URL: %w", err)
 		}
 	} else if isFilePath(resolvedInput) {
 		// Try to read as file path
-		yamlData, err = d.readFromFile(resolvedInput)
+		yamlData, err = readFromFile(resolvedInput)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read from file: %w", err)
 		}
@@ -281,13 +281,13 @@ func (d *Daemon) resolveImportConfigs(input string, baseURL string, visited map[
 	var allConfigs []ExportSpammerConfig
 
 	// Determine the new base URL/path for nested includes
-	newBaseURL := d.getBaseURL(resolvedInput)
+	newBaseURL := getBaseURL(resolvedInput)
 
 	// Process each item
 	for _, item := range importItems {
 		if item.Include != "" {
 			// This is an include directive
-			includedConfigs, err := d.resolveImportConfigs(item.Include, newBaseURL, visited)
+			includedConfigs, err := ResolveImportConfigs(item.Include, newBaseURL, visited)
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve include '%s': %w", item.Include, err)
 			}
@@ -367,8 +367,8 @@ func (d *Daemon) spammerExistsByScenarioAndName(scenario, name string) bool {
 	return false
 }
 
-// mergeConfiguration merges scenario defaults with imported configuration
-func (d *Daemon) mergeConfiguration(scenario *scenario.Descriptor, importedConfig map[string]interface{}) (string, error) {
+// MergeConfiguration merges scenario defaults with imported configuration (standalone function)
+func MergeConfiguration(scenario *scenario.Descriptor, importedConfig map[string]interface{}) (string, error) {
 	// Get default configurations
 	defaultYaml, err := yaml.Marshal(scenario.DefaultOptions)
 	if err != nil {
@@ -440,8 +440,8 @@ type SpammerValidationInfo struct {
 	Issues      []string `json:"issues"`
 }
 
-// resolveIncludePath resolves an include path against a base URL or directory
-func (d *Daemon) resolveIncludePath(includePath, baseURL string) string {
+// resolveIncludePath resolves an include path against a base URL or directory (standalone function)
+func resolveIncludePath(includePath, baseURL string) string {
 	// If include path is absolute (URL or absolute file path), return as-is
 	if isURL(includePath) || filepath.IsAbs(includePath) {
 		return includePath
@@ -477,8 +477,8 @@ func (d *Daemon) resolveIncludePath(includePath, baseURL string) string {
 	return includePath
 }
 
-// getBaseURL extracts the base URL or directory from a source path
-func (d *Daemon) getBaseURL(sourcePath string) string {
+// getBaseURL extracts the base URL or directory from a source path (standalone function)
+func getBaseURL(sourcePath string) string {
 	if isURL(sourcePath) {
 		// For URLs, get the base URL (everything except the filename)
 		parsedURL, err := url.Parse(sourcePath)

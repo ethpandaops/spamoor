@@ -26,7 +26,11 @@ make
 
 ### Basic Command Structure
 ```bash
+# Run a single scenario
 spamoor <scenario> [flags]
+
+# Run multiple scenarios from YAML configuration
+spamoor run <yaml-file> [flags]
 ```
 
 ### 🔑 Required Parameters
@@ -76,6 +80,76 @@ Spamoor provides a comprehensive suite of transaction scenarios for different te
 | [`xentoken`](./scenarios/xentoken/README.md) | **XEN Sybil Attack** - Simulate XEN token sybil attacks |
 | [`taskrunner`](./scenarios/taskrunner/README.md) | **Task Runner** - Execute configurable task sequences with init and execution phases |
 
+## 🚄 Run Command - Execute Multiple Scenarios
+
+The `spamoor run` command allows you to execute multiple scenarios concurrently from a YAML configuration file, without needing the full daemon infrastructure.
+
+### Usage
+```bash
+spamoor run <yaml-file> [flags]
+```
+
+### Flags
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--spammers` | `-s` | Indexes of spammers to run (e.g., `-s 0,2`). If not specified, runs all |
+| `--privkey` | `-p` | Private key for the root wallet |
+| `--rpchost` | `-h` | RPC endpoints (multiple allowed) |
+| `--rpchost-file` | - | File containing RPC endpoints |
+| `--verbose` | `-v` | Enable verbose logging |
+| `--trace` | - | Enable trace logging |
+
+### Example Configuration
+```yaml
+# example-run-config.yaml
+- scenario: eoatx
+  name: "High Volume ETH Transfers"
+  description: "Basic ETH transfers with 400 tx/slot throughput"
+  config:
+    seed: eoatx-demo
+    refill_amount: 1000000000000000000  # 1 ETH in wei
+    refill_balance: 500000000000000000  # 0.5 ETH in wei
+    refill_interval: 600  # 10 minutes
+    throughput: 400
+    max_pending: 800
+    max_wallets: 200
+    base_fee: 20  # gwei
+    tip_fee: 2    # gwei
+    amount: 100   # 100 wei per transfer
+    random_amount: true
+    random_target: true
+
+- scenario: erctx
+  name: "ERC20 Token Spammer"
+  description: "Deploy and transfer ERC20 tokens"
+  config:
+    seed: erctx-demo
+    refill_amount: 2000000000000000000  # 2 ETH
+    refill_balance: 1000000000000000000 # 1 ETH
+    throughput: 100
+    max_pending: 200
+    max_wallets: 100
+    amount: 50
+    random_amount: true
+    
+# Include other configuration files
+- include: ./high-load-configs.yaml
+```
+
+### Examples
+```bash
+# Run all spammers from configuration
+spamoor run config.yaml -h http://localhost:8545 -p 0x...
+
+# Run only specific spammers (0-based indexes)
+spamoor run config.yaml -h http://localhost:8545 -p 0x... -s 0,2
+
+# With multiple RPC endpoints
+spamoor run config.yaml -p 0x... \
+  -h http://node1:8545 \
+  -h http://node2:8545
+```
+
 ## 🖥️ Daemon Mode
 
 Run Spamoor as a daemon with a powerful web interface for managing multiple concurrent spammers.
@@ -95,6 +169,10 @@ spamoor-daemon [flags]
 | `--rpchost-file` | - | File containing RPC endpoints | - |
 | `--privkey` | `-p` | Root wallet private key | - |
 | `--port` | `-P` | Web UI port | `8080` |
+| `--startup-spammer` | - | YAML file or URL with startup spammers | - |
+| `--fulu-activation` | - | Unix timestamp of Fulu activation | `0` |
+| `--without-batcher` | - | Disable transaction batching | `false` |
+| `--disable-tx-metrics` | - | Disable transaction metrics collection | `false` |
 | `--verbose` | `-v` | Enable verbose logging | `false` |
 | `--debug` | - | Enable debug mode | `false` |
 | `--trace` | - | Enable trace logging | `false` |

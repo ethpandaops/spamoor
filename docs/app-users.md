@@ -88,7 +88,11 @@ Then open http://localhost:8080 in your browser.
 ### Basic Command Structure
 
 ```bash
+# Run a single scenario
 spamoor [scenario] [flags]
+
+# Run multiple scenarios from YAML configuration
+spamoor run [yaml-file] [flags]
 ```
 
 ### Global Flags
@@ -147,6 +151,146 @@ The tool automatically handles all wallet operations:
 - **Scenario Isolation**: No wallet conflicts between different running scenarios
 - **Deterministic**: Same scenario always uses same wallet addresses for reproducible testing
 - **Automated**: No manual wallet management required - funding and distribution handled automatically
+
+## Run Command - Execute Multiple Scenarios
+
+The `spamoor run` command allows you to execute multiple scenarios concurrently from a YAML configuration file, providing a lightweight alternative to daemon mode.
+
+### Command Structure
+
+```bash
+spamoor run <yaml-file> [flags]
+```
+
+### Run Command Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--spammers`, `-s` | Indexes of spammers to run (e.g., `-s 0,2,3`) | All |
+| `--privkey`, `-p` | Private key of the root wallet | Required |
+| `--rpchost`, `-h` | RPC endpoint(s) to send transactions to | Required |
+| `--rpchost-file` | File containing list of RPC hosts | |
+| `--verbose`, `-v` | Enable verbose logging | false |
+| `--trace` | Enable trace logging | false |
+
+### Configuration File Format
+
+The YAML configuration file uses the same format as daemon import/export:
+
+```yaml
+# example-config.yaml
+- scenario: eoatx
+  name: "High Volume ETH Transfers"
+  description: "Basic ETH transfers with 400 tx/slot throughput"
+  config:
+    seed: eoatx-demo
+    refill_amount: 1000000000000000000  # 1 ETH in wei
+    refill_balance: 500000000000000000  # 0.5 ETH threshold
+    refill_interval: 600  # 10 minutes
+    throughput: 400       # transactions per slot
+    max_pending: 800      # max pending transactions
+    max_wallets: 200      # number of wallets to use
+    base_fee: 20          # base fee in gwei
+    tip_fee: 2            # priority fee in gwei
+    amount: 100           # transfer amount in wei
+    random_amount: true   # randomize transfer amounts
+    random_target: true   # randomize target addresses
+
+- scenario: erctx
+  name: "ERC20 Token Spammer"
+  description: "Deploy ERC20 contracts and transfer tokens"
+  config:
+    seed: erctx-demo
+    refill_amount: 2000000000000000000  # 2 ETH
+    refill_balance: 1000000000000000000 # 1 ETH threshold
+    throughput: 100       # lower throughput for contract interactions
+    max_pending: 200
+    max_wallets: 100
+    amount: 50            # token transfer amount
+    random_amount: true
+    random_target: true
+    
+- scenario: blob-combined
+  name: "Blob Transaction Test"
+  description: "Mixed blob transaction scenarios"
+  config:
+    seed: blob-demo
+    refill_amount: 5000000000000000000  # 5 ETH (blob txs are expensive)
+    refill_balance: 2000000000000000000 # 2 ETH threshold
+    throughput: 3         # low throughput for blob transactions
+    sidecars: 2          # number of blob sidecars
+    max_pending: 6       # low pending limit
+    max_wallets: 10      # fewer wallets needed
+    blob_fee: 20         # blob base fee in gwei
+
+- scenario: gasburnertx
+  name: "Gas Burner Test"
+  description: "Burn gas to test block limits"
+  config:
+    seed: gasburn-demo
+    refill_amount: 3000000000000000000  # 3 ETH
+    refill_balance: 1000000000000000000 # 1 ETH threshold
+    throughput: 5
+    max_pending: 10
+    max_wallets: 20
+    gas_units_to_burn: 500000  # gas to burn per transaction
+    gas_remainder: 50000       # remaining gas after burn
+```
+
+### Including Other Configuration Files
+
+You can split configurations across multiple files using includes:
+
+```yaml
+# main-config.yaml
+- scenario: eoa-transfer
+  name: "ETH Transfers"
+  config:
+    wallet_count: 50
+
+# Include additional configurations
+- include: ./erc20-spammers.yaml
+- include: ./blob-spammers.yaml
+- include: https://example.com/remote-config.yaml
+```
+
+### Examples
+
+```bash
+# Run all spammers from configuration
+spamoor run config.yaml -h http://localhost:8545 -p 0x...
+
+# Run specific spammers by index (0-based)
+spamoor run config.yaml -h http://localhost:8545 -p 0x... -s 0,2
+
+# Run first and third spammer only
+spamoor run config.yaml -p 0x... -h http://localhost:8545 --spammers 0,2
+
+# With verbose output
+spamoor run config.yaml -p 0x... -h http://localhost:8545 -v
+
+# Using multiple RPC endpoints
+spamoor run config.yaml -p 0x... \
+  -h http://node1:8545 \
+  -h http://node2:8545 \
+  -h http://node3:8545
+```
+
+### Run Command vs Daemon Mode
+
+**Use `spamoor run` when you need:**
+- Quick execution of predefined scenarios
+- No web interface or API required
+- Lightweight deployment (no database)
+- Simple concurrent scenario execution
+- CI/CD integration
+
+**Use daemon mode when you need:**
+- Web interface for monitoring
+- Dynamic spammer management
+- Persistent configuration storage
+- REST API access
+- Real-time metrics and log visualization
 
 ## Daemon Mode
 
