@@ -30,8 +30,8 @@ type ScenarioOptions struct {
 	MaxPending                  uint64                   `yaml:"max_pending"`
 	MaxWallets                  uint64                   `yaml:"max_wallets"`
 	Rebroadcast                 uint64                   `yaml:"rebroadcast"`
-	BaseFee                     uint64                   `yaml:"base_fee"`
-	TipFee                      uint64                   `yaml:"tip_fee"`
+	BaseFee                     float64                  `yaml:"base_fee"`
+	TipFee                      float64                  `yaml:"base_fee"`
 	BlobFee                     uint64                   `yaml:"blob_fee"`
 	BlobV1Percent               uint64                   `yaml:"blob_v1_percent"`
 	FuluActivation              utils.FlexibleJsonUInt64 `yaml:"fulu_activation"`
@@ -86,8 +86,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
 	flags.Uint64Var((*uint64)(&s.options.FuluActivation), "fulu-activation", uint64(ScenarioDefaultOptions.FuluActivation), "Unix timestamp of the Fulu activation")
