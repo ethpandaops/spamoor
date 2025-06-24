@@ -11,7 +11,6 @@ import (
 	"time"
 
 	geas "github.com/fjl/geas/asm"
-	"gopkg.in/yaml.v3"
 
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -106,9 +105,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	s.walletPool = options.WalletPool
 
 	if options.Config != "" {
-		err := yaml.Unmarshal([]byte(options.Config), &s.options)
+		// Use the generalized config validation and parsing helper
+		err := scenario.ParseAndValidateConfig(&ScenarioDescriptor, options.Config, &s.options, s.logger)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal config: %w", err)
+			return err
 		}
 	}
 

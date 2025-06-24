@@ -8,8 +8,6 @@ import (
 	"math/rand"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/holiman/uint256"
@@ -101,21 +99,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	s.walletPool = options.WalletPool
 
 	if options.Config != "" {
-		// Validate configuration before parsing
-		validFields := scenario.GetScenarioValidFields(ScenarioName)
-		validator := scenario.NewConfigValidator(ScenarioName, validFields, s.logger)
-
-		validationResult := validator.ValidateConfig(options.Config)
-		if !validationResult.Valid {
-			for _, err := range validationResult.Errors {
-				s.logger.Errorf("Configuration validation error: %s", err)
-			}
-			return fmt.Errorf("configuration validation failed")
-		}
-
-		err := yaml.Unmarshal([]byte(options.Config), &s.options)
+		// Use the generalized config validation and parsing helper
+		err := scenario.ParseAndValidateConfig(&ScenarioDescriptor, options.Config, &s.options, s.logger)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal config: %w", err)
+			return err
 		}
 	}
 
