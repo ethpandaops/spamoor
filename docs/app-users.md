@@ -75,7 +75,7 @@ docker run --rm ethpandaops/spamoor eoatx \
   --port 8080
 
 # Using Docker
-docker run -p 8080:8080 ethpandaops/spamoor spamoor-daemon \
+docker run -p 8080:8080 --entrypoint ./spamoor-daemon ethpandaops/spamoor \
   --privkey "0x1234567890abcdef..." \
   --rpchost "http://localhost:8545" \
   --port 8080
@@ -382,7 +382,7 @@ EOF
 # Start daemon with startup spammers
 docker run -p 8080:8080 \
   -v $(pwd)/startup.yaml:/app/startup.yaml \
-  ethpandaops/spamoor spamoor-daemon \
+  --entrypoint ./spamoor-daemon ethpandaops/spamoor \
   --privkey "0x1234567890abcdef..." \
   --rpchost "http://localhost:8545" \
   --startup-spammer /app/startup.yaml
