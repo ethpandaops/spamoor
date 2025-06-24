@@ -24,19 +24,19 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount    uint64 `yaml:"total_count"`
-	Throughput    uint64 `yaml:"throughput"`
-	MaxPending    uint64 `yaml:"max_pending"`
-	MaxWallets    uint64 `yaml:"max_wallets"`
-	Rebroadcast   uint64 `yaml:"rebroadcast"`
-	GasLimit      uint64 `yaml:"gas_limit"`
-	BaseFee       uint64 `yaml:"base_fee"`
-	TipFee        uint64 `yaml:"tip_fee"`
-	Bytecodes     string `yaml:"bytecodes"`
-	BytecodesFile string `yaml:"bytecodes_file"`
-	Timeout       string `yaml:"timeout"`
-	ClientGroup   string `yaml:"client_group"`
-	LogTxs        bool   `yaml:"log_txs"`
+	TotalCount    uint64  `yaml:"total_count"`
+	Throughput    uint64  `yaml:"throughput"`
+	MaxPending    uint64  `yaml:"max_pending"`
+	MaxWallets    uint64  `yaml:"max_wallets"`
+	Rebroadcast   uint64  `yaml:"rebroadcast"`
+	GasLimit      uint64  `yaml:"gas_limit"`
+	BaseFee       float64 `yaml:"base_fee"`
+	TipFee        float64 `yaml:"tip_fee"`
+	Bytecodes     string  `yaml:"bytecodes"`
+	BytecodesFile string  `yaml:"bytecodes_file"`
+	Timeout       string  `yaml:"timeout"`
+	ClientGroup   string  `yaml:"client_group"`
+	LogTxs        bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -84,8 +84,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Uint64Var(&s.options.GasLimit, "gaslimit", ScenarioDefaultOptions.GasLimit, "Gas limit to use in deployment transactions (in gwei)")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in deployment transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in deployment transactions (in gwei)")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in deployment transactions (in gwei)")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in deployment transactions (in gwei)")
 	flags.StringVar(&s.options.Bytecodes, "bytecodes", ScenarioDefaultOptions.Bytecodes, "Bytecodes to deploy (, separated list of hex bytecodes)")
 	flags.StringVar(&s.options.BytecodesFile, "bytecodes-file", ScenarioDefaultOptions.BytecodesFile, "File with bytecodes to deploy (list with hex bytecodes)")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")

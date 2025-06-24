@@ -22,23 +22,23 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount   uint64 `yaml:"total_count"`
-	Throughput   uint64 `yaml:"throughput"`
-	MaxPending   uint64 `yaml:"max_pending"`
-	MaxWallets   uint64 `yaml:"max_wallets"`
-	Rebroadcast  uint64 `yaml:"rebroadcast"`
-	BaseFee      uint64 `yaml:"base_fee"`
-	TipFee       uint64 `yaml:"tip_fee"`
-	GasLimit     uint64 `yaml:"gas_limit"`
-	Amount       uint64 `yaml:"amount"`
-	Data         string `yaml:"data"`
-	To           string `yaml:"to"`
-	Timeout      string `yaml:"timeout"`
-	RandomAmount bool   `yaml:"random_amount"`
-	RandomTarget bool   `yaml:"random_target"`
-	SelfTxOnly   bool   `yaml:"self_tx_only"`
-	ClientGroup  string `yaml:"client_group"`
-	LogTxs       bool   `yaml:"log_txs"`
+	TotalCount   uint64  `yaml:"total_count"`
+	Throughput   uint64  `yaml:"throughput"`
+	MaxPending   uint64  `yaml:"max_pending"`
+	MaxWallets   uint64  `yaml:"max_wallets"`
+	Rebroadcast  uint64  `yaml:"rebroadcast"`
+	BaseFee      float64 `yaml:"base_fee"`
+	TipFee       float64 `yaml:"tip_fee"`
+	GasLimit     uint64  `yaml:"gas_limit"`
+	Amount       uint64  `yaml:"amount"`
+	Data         string  `yaml:"data"`
+	To           string  `yaml:"to"`
+	Timeout      string  `yaml:"timeout"`
+	RandomAmount bool    `yaml:"random_amount"`
+	RandomTarget bool    `yaml:"random_target"`
+	SelfTxOnly   bool    `yaml:"self_tx_only"`
+	ClientGroup  string  `yaml:"client_group"`
+	LogTxs       bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -87,8 +87,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast with unlimited retries and exponential backoff")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transfer transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transfer transactions (in gwei)")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transfer transactions (in gwei)")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transfer transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasLimit, "gaslimit", ScenarioDefaultOptions.GasLimit, "Gas limit to use in transactions")
 	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (in gwei)")
 	flags.StringVar(&s.options.Data, "data", ScenarioDefaultOptions.Data, "Transaction call data to send")
