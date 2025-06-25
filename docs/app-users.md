@@ -49,6 +49,10 @@ The built binaries will be available in the `bin/` directory.
 
 ## Quick Start
 
+### CLI Output Example
+![CLI Running Example](./../.github/resources/cli-running-example.png)
+*Spamoor CLI showing transaction progress and statistics*
+
 ### CLI Mode - Send 100 EOA Transactions
 
 ```bash
@@ -296,6 +300,9 @@ spamoor run config.yaml -p 0x... \
 
 The daemon mode provides a web-based interface for managing multiple concurrent spammers.
 
+![Spamoor Daemon Dashboard](./../.github/resources/dashboard-overview.png)
+*The Spamoor dashboard showing multiple active spammers with their status and controls*
+
 ### Starting the Daemon
 
 ```bash
@@ -320,26 +327,79 @@ spamoor-daemon \
 
 Once the daemon is running, access the web interface at `http://localhost:8080`:
 
-1. **Dashboard**: Overview of active spammers and system status
-2. **Spammer Management**: 
-   - Create new spammers with custom configurations
-   - Start/stop individual spammers
-   - View real-time logs and metrics
-3. **Wallet Management**: Monitor wallet balances and funding status
-4. **Client Pool**: View RPC endpoint status and health
-5. **API Documentation**: Interactive Swagger UI at `/docs`
+#### Dashboard - Spammer Management
+![Dashboard Interface](./../.github/resources/dashboard-interface.png)
+*Main dashboard with spammer list, status indicators, and control buttons*
+
+**Key Features:**
+- **Spammer Overview**: View all spammers with their ID, name, scenario type, and current status
+- **Quick Actions**: Start, stop, edit, and delete spammers with one click
+- **Live Logs**: Expand any spammer to view real-time log output
+- **Mass Actions**: Select multiple spammers for bulk operations
+
+#### Creating New Spammers
+![Create Spammer Dialog](./../.github/resources/create-spammer.png)
+*Create new spammer dialog with scenario selection and configuration editor*
+
+**Features:**
+- **Scenario Selection**: Choose from 13+ pre-configured scenarios
+- **YAML Configuration**: Edit configuration with syntax highlighting
+- **Library Access**: Browse and use pre-built configurations
+- **Validation**: Real-time configuration validation
+
+#### Import Spammers
+![Import Spammers](./../.github/resources/import-spammer.png)
+*Import spammers from YAML files or URLs*
+
+![Spammer Library](./../.github/resources/spammer-import-library.png)
+*Browse pre-built spammer configurations from the library*
+
+#### Wallet Management
+![Wallet Overview](./../.github/resources/wallets-overview.png)
+*Wallet management page showing balances and transaction counts*
+
+**Monitor:**
+- Root wallet balance and transactions
+- Child wallet status and funding
+- Real-time balance updates
+
+#### Client Pool Management
+![Client Management](./../.github/resources/clients-overview.png)
+*RPC client management with grouping and status monitoring*
+
+**Capabilities:**
+- View all RPC endpoints and their status
+- Group clients for load balancing
+- Enable/disable clients dynamically
+- Monitor block height and client versions
+
+#### Performance Graphs
+![Performance Metrics](./../.github/resources/graphs-overview.png)
+*Real-time performance metrics and transaction statistics*
+
+**Visualizations:**
+- Transaction throughput over time
+- Success/failure rates per spammer
+- Gas usage statistics
+- Network performance metrics
 
 ### Creating Spammers via Web Interface
 
-1. Navigate to the dashboard
-2. Click "Create New Spammer"
-3. Select a scenario type
-4. Configure parameters:
-   - Transaction count or throughput
-   - Gas settings
-   - Scenario-specific options
-5. Click "Create" to add the spammer
-6. Use "Start" to begin transaction generation
+![Spammer Creation Workflow](./../.github/resources/create-spammer.png)
+
+1. **Navigate to the dashboard** - Click the "Create Spammer" button
+2. **Select a scenario** - Choose from available transaction types
+3. **Configure parameters**:
+   - Set transaction count or throughput
+   - Configure gas settings (base fee, tip fee)
+   - Adjust scenario-specific options
+4. **Use the library** - Browse pre-built configurations for common test cases
+5. **Validate configuration** - Ensure YAML syntax is correct
+6. **Create and start** - Add the spammer and begin transaction generation
+
+#### Live Log Viewing
+![Live Logs](./../.github/resources/live-logs-expanded.png)
+*Expanded log view showing real-time transaction status and debugging information*
 
 ### Startup Spammers
 
@@ -436,6 +496,23 @@ spamoor eoatx \
   --verbose
 ```
 
+**Expected Output:**
+```
+INFO[2025-06-25T10:30:45] Initialized scenario: eoatx
+INFO[2025-06-25T10:30:45] Starting transaction spammer
+INFO[2025-06-25T10:30:45] Creating 10 child wallets...
+INFO[2025-06-25T10:30:46] Funding child wallets...
+INFO[2025-06-25T10:30:47] Starting transaction generation
+INFO[2025-06-25T10:30:48] Progress: 50/500 transactions (10.0%)
+INFO[2025-06-25T10:30:49] Progress: 100/500 transactions (20.0%)
+INFO[2025-06-25T10:30:50] Transaction confirmed: 0x1234... (gas: 21000)
+...
+INFO[2025-06-25T10:35:23] Completed: 500/500 transactions
+INFO[2025-06-25T10:35:23] Success rate: 98.4% (492/500)
+INFO[2025-06-25T10:35:23] Average gas used: 21000
+INFO[2025-06-25T10:35:23] Total ETH spent: 0.2205 ETH
+```
+
 ### Example 2: Continuous Blob Transactions
 
 Send 5 blob transactions per slot continuously:
@@ -446,6 +523,23 @@ spamoor blobs \
   --throughput 5 \
   --sidecars 4 \
   --blobfee 50
+```
+
+**Expected Output:**
+```
+INFO[2025-06-25T10:40:12] Initialized scenario: blobs
+INFO[2025-06-25T10:40:12] Configuration: 4 blobs per transaction
+INFO[2025-06-25T10:40:12] Target throughput: 5 tx/slot
+INFO[2025-06-25T10:40:13] Creating child wallets...
+INFO[2025-06-25T10:40:14] Starting continuous blob generation
+INFO[2025-06-25T10:40:15] Slot 1234: Sent 5 blob transactions
+INFO[2025-06-25T10:40:27] Slot 1235: Sent 5 blob transactions
+INFO[2025-06-25T10:40:28] Blob tx confirmed: 0xabcd... (blobs: 4, gas: 85000)
+INFO[2025-06-25T10:40:39] Slot 1236: Sent 5 blob transactions
+INFO[2025-06-25T10:40:40] Stats - Success: 15/15 (100%), Avg blob fee: 45 gwei
+^C
+INFO[2025-06-25T10:41:23] Shutting down gracefully...
+INFO[2025-06-25T10:41:23] Final stats: 85 transactions, 340 blobs sent
 ```
 
 ### Example 3: Contract Deployments with Multiple RPC Hosts

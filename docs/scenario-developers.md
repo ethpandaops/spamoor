@@ -2,6 +2,7 @@
 
 This guide provides comprehensive documentation for developers who want to implement custom transaction scenarios for Spamoor. Scenarios are the core extensibility mechanism that allows you to define specific transaction patterns and behaviors.
 
+
 ## Table of Contents
 
 - [Scenario Architecture](#scenario-architecture)
@@ -43,6 +44,14 @@ The scenario lifecycle consists of distinct phases that Spamoor manages:
 5. **Wallet Funding**: Spamoor prepares and funds wallets automatically
 6. **Execution**: Scenario runs transaction generation logic
 7. **Cleanup**: Resources cleaned up on completion or cancellation
+
+#### Integration with Web UI
+
+Once registered, your scenario will automatically:
+- Appear in the "Create Spammer" dialog (as shown in the [Create Spammer screenshot](./../.github/resources/create-spammer.png))
+- Support YAML configuration in the web editor
+- Display in the scenario dropdown
+- Show custom metrics on the dashboard
 
 ### Detailed Lifecycle Phases
 

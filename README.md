@@ -11,6 +11,9 @@ Spamoor is a robust transaction spamming tool designed for stress testing, netwo
 
 ## 🚀 Quick Start
 
+### CLI Output Example
+![CLI Running](.github/resources/cli-running-example.png)
+
 ```bash
 # 🐳 Using Docker
 docker run ethpandaops/spamoor
@@ -154,6 +157,8 @@ spamoor run config.yaml -p 0x... \
 
 Run Spamoor as a daemon with a powerful web interface for managing multiple concurrent spammers.
 
+![Spamoor Dashboard](.github/resources/dashboard-overview.png)
+
 ### 🚀 Starting the Daemon
 
 ```bash
@@ -181,11 +186,31 @@ spamoor-daemon [flags]
 
 Access the web UI at `http://localhost:8080` for:
 
-- **📊 Dashboard**: Real-time overview of all running spammers
-- **📜 Live Logs**: Stream logs from individual spammers
-- **⚙️ Configuration**: Manage spammer settings on the fly
-- **🎮 Control Panel**: Start, pause, and delete spammers
-- **📈 Metrics**: Visual performance monitoring
+#### 📊 Dashboard - Real-time Spammer Management
+![Dashboard with Spammers](.github/resources/dashboard-interface.png)
+- View all spammers at a glance with their status, scenario type, and actions
+- Mass actions for bulk operations on multiple spammers
+- Quick access to start, stop, edit, and delete spammers
+- Expandable live logs for each spammer
+
+#### 💰 Wallets Overview
+![Wallets Page](.github/resources/wallets-overview.png)
+- Monitor wallet balances and transaction counts
+- Track child wallets spawned from the root wallet
+- Real-time balance updates
+
+#### 🔧 Client Management
+![Clients Configuration](.github/resources/clients-overview.png)
+- View and manage RPC client connections
+- Group clients for load balancing
+- Enable/disable clients dynamically
+- Monitor client status and block height
+
+#### 📈 Performance Graphs
+![Performance Metrics](.github/resources/graphs-overview.png)
+- Visual monitoring of transaction throughput
+- Success/failure rates per spammer
+- Network performance metrics
 
 ### 🔌 REST API
 
@@ -211,6 +236,13 @@ The daemon exposes a comprehensive REST API for automation:
 
 ### 📦 Import/Export System
 
+#### 🎯 Create New Spammer Dialog
+![Create Spammer Dialog](.github/resources/create-spammer.png)
+- Select from 13+ pre-configured scenarios
+- Customize configuration with YAML editor
+- Real-time YAML validation
+- Access to pre-built configuration library
+
 #### Export Configurations
 ```bash
 # Export all spammers to YAML
@@ -218,6 +250,13 @@ curl http://localhost:8080/api/export > my-spammers.yaml
 ```
 
 #### Import Configurations
+
+![Import Spammer Dialog](.github/resources/import-spammer.png)
+*Import dialog showing YAML validation and configuration options*
+
+![Spammer Library](.github/resources/spammer-import-library.png)
+*Pre-built configuration library for common test scenarios*
+
 ```bash
 # Import on startup
 spamoor-daemon --startup-spammer="spammer-configs.yaml"
