@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
@@ -19,7 +20,6 @@ type ConfigValidator struct {
 // FieldInfo contains metadata about a valid configuration field
 type FieldInfo struct {
 	Type         reflect.Type
-	Required     bool
 	DefaultValue interface{}
 	Description  string
 }
@@ -66,14 +66,8 @@ func (cv *ConfigValidator) ValidateConfig(configYAML string) *ValidationResult {
 
 	// Check each field in the provided configuration
 	for fieldName, fieldValue := range config {
-		if fieldInfo, exists := cv.validFields[fieldName]; exists {
-			// Validate field type and value
-			if validationErr := cv.validateFieldValue(fieldName, fieldValue, fieldInfo); validationErr != nil {
-				result.Valid = false
-				result.Errors = append(result.Errors, validationErr.Error())
-			}
-		} else {
-			// Field doesn't exist in valid fields - this is now an error that crashes
+		if _, exists := cv.validFields[fieldName]; !exists {
+			// Field doesn't exist in valid fields
 			invalidFields = append(invalidFields, fmt.Sprintf("'%s' (value: %v)", fieldName, fieldValue))
 
 			// Check for common typos (underscore vs dash)
@@ -96,40 +90,7 @@ func (cv *ConfigValidator) ValidateConfig(configYAML string) *ValidationResult {
 		result.Errors = append(result.Errors, errorMessage)
 	}
 
-	// Check all required fields are present
-	for fieldName, fieldInfo := range cv.validFields {
-		if fieldInfo.Required {
-			if _, exists := config[fieldName]; !exists {
-				result.Valid = false
-				result.Errors = append(result.Errors, fmt.Sprintf("Required field '%s' is missing", fieldName))
-			}
-		}
-	}
-
 	return result
-}
-
-// validateFieldValue validates a specific field value against its expected type
-func (cv *ConfigValidator) validateFieldValue(fieldName string, value interface{}, fieldInfo FieldInfo) error {
-	// Type validation would go here - for now just basic checks
-	switch fieldInfo.Type.Kind() {
-	case reflect.Uint64:
-		if _, ok := value.(int); !ok {
-			if _, ok := value.(uint64); !ok {
-				return fmt.Errorf("field '%s' must be a positive integer", fieldName)
-			}
-		}
-	case reflect.String:
-		if _, ok := value.(string); !ok {
-			return fmt.Errorf("field '%s' must be a string", fieldName)
-		}
-	case reflect.Bool:
-		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("field '%s' must be a boolean", fieldName)
-		}
-	}
-
-	return nil
 }
 
 // suggestCorrectField suggests a correct field name based on common typos
@@ -163,16 +124,19 @@ func (cv *ConfigValidator) suggestCorrectField(invalidField string) string {
 
 // GetScenarioValidFields returns the valid fields for a scenario by extracting them from the scenario descriptor
 func GetScenarioValidFields(descriptor *Descriptor) map[string]FieldInfo {
-	if descriptor == nil {
-		return make(map[string]FieldInfo)
-	}
+	var fields map[string]FieldInfo
 
-	return ExtractFieldsFromStruct(descriptor.DefaultOptions)
+	fields = extractFieldsFromStruct(descriptor.DefaultOptions, fields)
+	fields = extractFieldsFromStruct(&spamoor.WalletPoolConfig{}, fields)
+
+	return fields
 }
 
-// ExtractFieldsFromStruct uses reflection to extract field information from a struct
-func ExtractFieldsFromStruct(structValue interface{}) map[string]FieldInfo {
-	fields := make(map[string]FieldInfo)
+// extractFieldsFromStruct uses reflection to extract field information from a struct
+func extractFieldsFromStruct(structValue interface{}, fields map[string]FieldInfo) map[string]FieldInfo {
+	if fields == nil {
+		fields = make(map[string]FieldInfo)
+	}
 
 	val := reflect.ValueOf(structValue)
 	typ := reflect.TypeOf(structValue)
@@ -210,9 +174,8 @@ func ExtractFieldsFromStruct(structValue interface{}) map[string]FieldInfo {
 
 		fields[yamlName] = FieldInfo{
 			Type:         field.Type,
-			Required:     false, // Generally config fields are optional with defaults
 			DefaultValue: fieldValue.Interface(),
-			Description:  field.Name, // Could be enhanced with struct tags for descriptions
+			Description:  field.Tag.Get("usage"),
 		}
 	}
 
