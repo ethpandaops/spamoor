@@ -195,10 +195,16 @@ func extractContractReferences(task Task) []string {
 	return refs
 }
 
-// extractContractRef extracts contract name from a reference string like {contract:name}
+// extractContractRef extracts contract name from a reference string like {contract:name} or {contract:name:nonce}
 func extractContractRef(str string) string {
 	if strings.HasPrefix(str, "{contract:") && strings.HasSuffix(str, "}") {
-		return str[10 : len(str)-1]
+		content := str[10 : len(str)-1]
+		// Handle both {contract:name} and {contract:name:nonce} formats
+		// Split by colon and take the first part as the contract name
+		parts := strings.Split(content, ":")
+		if len(parts) >= 1 {
+			return parts[0]
+		}
 	}
 	return ""
 }
