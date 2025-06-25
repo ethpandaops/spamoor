@@ -241,32 +241,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 func (s *Scenario) executeInitTasks(ctx context.Context) error {
 	// Use the registered well-known wallet for init tasks to avoid conflicts with numbered wallets
 	wallet := s.walletPool.GetWellKnownWallet("taskrunner-init")
-
-	for i, task := range s.initTasks {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		s.logger.Infof("executing init task %d/%d: %s (%s)",
-			i+1, len(s.initTasks), task.GetName(), task.GetType())
-
-		if err := s.executeTask(ctx, task, wallet, s.initRegistry); err != nil {
-			return fmt.Errorf("init task %d (%s) failed: %w", i+1, task.GetType(), err)
-		}
-	}
-
-	return nil
-}
-
-func (s *Scenario) executeTask(ctx context.Context, task Task, wallet *spamoor.Wallet, registry *ContractRegistry) error {
-	// Get appropriate client (use index 0 for init phase consistency)
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
 
+	// Execute all init tasks using the unified sequence method
+	return s.executeTaskSequence(ctx, s.initTasks, 0, wallet, client, s.initRegistry, 0)
+}
+
+// executeTaskSequence executes a sequence of tasks with unified processing logic
+func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTaskIndex int, wallet *spamoor.Wallet, client *spamoor.Client, registry *ContractRegistry, txIdx uint64) error {
 	// Create execution context with scenario fee settings
 	execCtx := &TaskExecutionContext{
 		BaseFee: s.options.BaseFee,
@@ -274,29 +259,113 @@ func (s *Scenario) executeTask(ctx context.Context, task Task, wallet *spamoor.W
 		TxPool:  s.walletPool.GetTxPool(),
 	}
 
-	// Build transaction
-	tx, err := task.BuildTransaction(ctx, wallet, registry, execCtx)
-	if err != nil {
-		return fmt.Errorf("failed to build transaction: %w", err)
+	// Handle transaction processing based on await-txs mode
+	if s.options.AwaitTxs {
+		// Build, send and await each transaction individually to avoid nonce gaps
+		for i, task := range tasks {
+			taskName := task.GetName()
+			if taskName == "" {
+				taskName = task.GetType()
+			}
+
+			// Build transaction with proper placeholder processing
+			tx, err := s.buildTaskTransaction(ctx, task, baseTaskIndex+i, wallet, registry, execCtx, txIdx)
+			if err != nil {
+				return fmt.Errorf("failed to build transaction for task %d (%s): %w",
+					baseTaskIndex+i+1, task.GetType(), err)
+			}
+
+			// Send and await this transaction immediately
+			receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+				Client:      client,
+				Rebroadcast: s.options.Rebroadcast > 0,
+			})
+			if err != nil {
+				s.logger.Warnf("task %d (%s) failed: %v", baseTaskIndex+i+1, taskName, err)
+				wallet.ResetPendingNonce(ctx, client)
+				return err
+			}
+
+			if s.options.LogTxs {
+				s.logger.Infof("task %d/%d (%s) confirmed: %v (block #%v)",
+					baseTaskIndex+i+1, len(tasks), taskName, tx.Hash().String(), receipt.BlockNumber.String())
+			} else {
+				s.logger.Debugf("task %d/%d (%s) confirmed: %v (block #%v)",
+					baseTaskIndex+i+1, len(tasks), taskName, tx.Hash().String(), receipt.BlockNumber.String())
+			}
+		}
+
+		return nil
+
+	} else {
+		// Batch mode: Build all transactions first, then send as batch
+		var transactions []*types.Transaction
+		for i, task := range tasks {
+			tx, err := s.buildTaskTransaction(ctx, task, baseTaskIndex+i, wallet, registry, execCtx, txIdx)
+			if err != nil {
+				return fmt.Errorf("failed to build transaction for task %d (%s): %w",
+					baseTaskIndex+i+1, task.GetType(), err)
+			}
+			transactions = append(transactions, tx)
+		}
+
+		// Send transactions as batch
+		if len(transactions) == 1 {
+			// Single transaction
+			tx := transactions[0]
+			taskName := tasks[0].GetName()
+			if taskName == "" {
+				taskName = tasks[0].GetType()
+			}
+
+			receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+				Client:      client,
+				Rebroadcast: s.options.Rebroadcast > 0,
+			})
+			if err != nil {
+				wallet.ResetPendingNonce(ctx, client)
+				return err
+			}
+
+			if receipt == nil {
+				return fmt.Errorf("transaction receipt not received")
+			}
+
+			if s.options.LogTxs {
+				s.logger.Infof("task %d/%d (%s) confirmed: %v (block #%v)",
+					baseTaskIndex+1, len(tasks), taskName, tx.Hash().String(), receipt.BlockNumber.String())
+			} else {
+				s.logger.Debugf("task %d/%d (%s) confirmed: %v (block #%v)",
+					baseTaskIndex+1, len(tasks), taskName, tx.Hash().String(), receipt.BlockNumber.String())
+			}
+
+			return nil
+
+		} else {
+			// Multiple transactions - use batch sending
+			receipts, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, wallet, transactions, &spamoor.BatchOptions{
+				SendTransactionOptions: spamoor.SendTransactionOptions{
+					Client:      client,
+					Rebroadcast: s.options.Rebroadcast > 0,
+				},
+			})
+			if err != nil {
+				wallet.ResetPendingNonce(ctx, client)
+				return err
+			}
+
+			// Log batch completion
+			if s.options.LogTxs {
+				s.logger.Infof("batch %d tasks confirmed: %d transactions (block #%v)",
+					len(tasks), len(transactions), receipts[0].BlockNumber.String())
+			} else {
+				s.logger.Debugf("batch %d tasks confirmed: %d transactions (block #%v)",
+					len(tasks), len(transactions), receipts[0].BlockNumber.String())
+			}
+
+			return nil
+		}
 	}
-
-	// Send and wait for transaction
-	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
-		Client:      client,
-		Rebroadcast: true,
-	})
-	if err != nil {
-		return fmt.Errorf("transaction failed: %w", err)
-	}
-
-	if receipt == nil {
-		return fmt.Errorf("transaction receipt not received")
-	}
-
-	s.logger.Debugf("task %s (%s) confirmed in block #%v, gas used: %d",
-		task.GetName(), task.GetType(), receipt.BlockNumber, receipt.GasUsed)
-
-	return nil
 }
 
 func (s *Scenario) executeRecurringTasks(ctx context.Context) error {
@@ -349,118 +418,15 @@ func (s *Scenario) processExecutionTx(ctx context.Context, txIdx uint64, onCompl
 		return nil, fmt.Errorf("no client available")
 	}
 
-	// Create execution context with scenario fee settings
-	execCtx := &TaskExecutionContext{
-		BaseFee: s.options.BaseFee,
-		TipFee:  s.options.TipFee,
-		TxPool:  s.walletPool.GetTxPool(),
-	}
-
-	transactionSubmitted := false
-	defer func() {
-		if !transactionSubmitted {
-			onComplete()
-		}
-	}()
-
-	// Handle transaction processing based on await-txs mode
-	if s.options.AwaitTxs {
-		// Build, send and await each transaction individually to avoid nonce gaps
-		transactionSubmitted = true
-		var sentTransactions []*types.Transaction
-		totalTxs := len(s.executionTasks)
-
-		for i, task := range s.executionTasks {
-			taskName := task.GetName()
-			if taskName == "" {
-				taskName = task.GetType()
-			}
-
-			// Build transaction with proper placeholder processing
-			tx, err := s.buildTaskTransaction(ctx, task, i, wallet, execRegistry, execCtx, txIdx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to build transaction for execution task %d (%s): %w",
-					i+1, task.GetType(), err)
-			}
-
-			// Send and await this transaction immediately
-			receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
-				Client:      client,
-				Rebroadcast: s.options.Rebroadcast > 0,
-			})
-			if err != nil {
-				s.logger.Warnf("execution task %d (%s) failed: %v", i+1, taskName, err)
-				wallet.ResetPendingNonce(ctx, client)
-				return nil, err
-			}
-
-			sentTransactions = append(sentTransactions, tx)
-
-			if s.options.LogTxs {
-				s.logger.Infof("task %d/%d (%s) confirmed: %v (block #%v)",
-					i+1, totalTxs, taskName, tx.Hash().String(), receipt.BlockNumber.String())
-			} else {
-				s.logger.Debugf("task %d/%d (%s) confirmed: %v (block #%v)",
-					i+1, totalTxs, taskName, tx.Hash().String(), receipt.BlockNumber.String())
-			}
-		}
-
+	// Execute all execution tasks using the unified method
+	err := s.executeTaskSequence(ctx, s.executionTasks, 0, wallet, client, execRegistry, txIdx)
+	if err != nil {
 		onComplete()
-		return s.createLogCallback(txIdx, sentTransactions, client), nil
-
-	} else {
-		// Batch mode: Build all transactions first, then send as batch
-		var transactions []*types.Transaction
-		for i, task := range s.executionTasks {
-			tx, err := s.buildTaskTransaction(ctx, task, i, wallet, execRegistry, execCtx, txIdx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to build transaction for execution task %d (%s): %w",
-					i+1, task.GetType(), err)
-			}
-			transactions = append(transactions, tx)
-		}
-
-		// Send transactions as batch
-		transactionSubmitted = true
-		if len(transactions) == 1 {
-			// Single transaction
-			tx := transactions[0]
-
-			err := s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
-				Client:      client,
-				Rebroadcast: s.options.Rebroadcast > 0,
-				OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-					onComplete()
-				},
-				LogFn: spamoor.GetDefaultLogFn(s.logger, "", fmt.Sprintf("%6d", txIdx+1), tx),
-			})
-			if err != nil {
-				wallet.ResetPendingNonce(ctx, client)
-				return nil, err
-			}
-
-			return s.createLogCallback(txIdx, []*types.Transaction{tx}, client), nil
-
-		} else {
-			// Multiple transactions - use batch sending
-			receipts, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, wallet, transactions, &spamoor.BatchOptions{
-				SendTransactionOptions: spamoor.SendTransactionOptions{
-					Client:      client,
-					Rebroadcast: s.options.Rebroadcast > 0,
-					OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-						onComplete()
-					},
-				},
-			})
-			_ = receipts // We don't need to use the receipts
-			if err != nil {
-				wallet.ResetPendingNonce(ctx, client)
-				return nil, err
-			}
-
-			return s.createLogCallback(txIdx, transactions, client), nil
-		}
+		return nil, err
 	}
+
+	onComplete()
+	return func() {}, nil // No additional callback needed since unified method handles all processing
 }
 
 // buildTaskTransaction builds a transaction for a task with proper placeholder processing
@@ -523,24 +489,5 @@ func (s *Scenario) buildTaskTransaction(ctx context.Context, task Task, taskInde
 	} else {
 		// For other task types, build normally
 		return task.BuildTransaction(ctx, wallet, registry, execCtx)
-	}
-}
-
-func (s *Scenario) createLogCallback(txIdx uint64, transactions []*types.Transaction, client *spamoor.Client) func() {
-	return func() {
-		if s.options.LogTxs {
-			for i, tx := range transactions {
-				s.logger.WithField("rpc", client.GetName()).Infof(
-					"sent tx #%6d.%d: %v", txIdx+1, i+1, tx.Hash().String())
-			}
-		} else {
-			if len(transactions) == 1 {
-				s.logger.WithField("rpc", client.GetName()).Debugf(
-					"sent tx #%6d: %v", txIdx+1, transactions[0].Hash().String())
-			} else {
-				s.logger.WithField("rpc", client.GetName()).Debugf(
-					"sent tx batch #%6d: %d transactions", txIdx+1, len(transactions))
-			}
-		}
 	}
 }
