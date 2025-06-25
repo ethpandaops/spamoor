@@ -496,8 +496,32 @@ func (s *Scenario) buildTaskTransaction(ctx context.Context, task Task, taskInde
 		}
 
 		return processedTask.BuildTransaction(ctx, wallet, registry, execCtx)
+	} else if deployTask, ok := task.(*DeployTask); ok {
+		// For deploy tasks, we need to process placeholders with proper context
+		// Create a copy of the task with processed placeholders
+		processedTask := *deployTask
+
+		// Process contract code placeholders if it exists
+		if deployTask.ContractCode != "" {
+			processedCode, err := deployTask.processPlaceholders(deployTask.ContractCode, registry, txIdx, taskIndex)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process contract code placeholders: %w", err)
+			}
+			processedTask.ContractCode = processedCode
+		}
+
+		// Process contract args placeholders if it exists
+		if deployTask.ContractArgs != "" {
+			processedArgs, err := deployTask.processPlaceholders(deployTask.ContractArgs, registry, txIdx, taskIndex)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process contract args placeholders: %w", err)
+			}
+			processedTask.ContractArgs = processedArgs
+		}
+
+		return processedTask.BuildTransaction(ctx, wallet, registry, execCtx)
 	} else {
-		// For non-call tasks, build normally
+		// For other task types, build normally
 		return task.BuildTransaction(ctx, wallet, registry, execCtx)
 	}
 }

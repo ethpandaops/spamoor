@@ -2,15 +2,11 @@ package taskrunner
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"os"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -282,98 +278,17 @@ func (t *CallTask) processArguments(args []interface{}, wallet *spamoor.Wallet, 
 
 // processPlaceholders processes placeholders in strings
 func (t *CallTask) processPlaceholders(str string, registry *ContractRegistry, txIdx uint64, stepIdx int) (string, error) {
-	processed := str
-
-	// Replace {txid} with transaction index
-	processed = strings.ReplaceAll(processed, "{txid}", fmt.Sprintf("%d", txIdx))
-
-	// Replace {stepid} with step index
-	processed = strings.ReplaceAll(processed, "{stepid}", fmt.Sprintf("%d", stepIdx))
-
-	// Replace {contract:name} with deployed contract addresses
-	contractRegex := regexp.MustCompile(`\{contract:([^}]+)\}`)
-	contractMatches := contractRegex.FindAllStringSubmatch(processed, -1)
-	for _, match := range contractMatches {
-		if len(match) != 2 {
-			continue
-		}
-		contractName := match[1]
-		contractAddr, exists := registry.Get(contractName)
-		if !exists {
-			return "", fmt.Errorf("contract '%s' not found in registry", contractName)
-		}
-		processed = strings.Replace(processed, match[0], contractAddr.Hex(), 1)
+	// Process contract placeholders (with 0x prefix for call tasks)
+	processed, err := ProcessContractPlaceholders(str, registry, false)
+	if err != nil {
+		return "", err
 	}
 
-	// Replace {random} with random uint256
-	randomRegex := regexp.MustCompile(`\{random\}`)
-	for randomRegex.MatchString(processed) {
-		randomVal, err := generateRandomUint256()
-		if err != nil {
-			return "", fmt.Errorf("failed to generate random value: %w", err)
-		}
-		processed = randomRegex.ReplaceAllString(processed, randomVal)
-	}
-
-	// Replace {random:N} with random number between 0 and N
-	randomRangeRegex := regexp.MustCompile(`\{random:(\d+)\}`)
-	matches := randomRangeRegex.FindAllStringSubmatch(processed, -1)
-	for _, match := range matches {
-		if len(match) != 2 {
-			continue
-		}
-		maxVal, err := strconv.ParseUint(match[1], 10, 64)
-		if err != nil {
-			return "", fmt.Errorf("invalid random range: %s", match[1])
-		}
-		randomVal, err := generateRandomInRange(maxVal)
-		if err != nil {
-			return "", fmt.Errorf("failed to generate random value in range: %w", err)
-		}
-		processed = strings.Replace(processed, match[0], fmt.Sprintf("%d", randomVal), 1)
-	}
-
-	// Replace {randomaddr} with random address
-	randomAddrRegex := regexp.MustCompile(`\{randomaddr\}`)
-	for randomAddrRegex.MatchString(processed) {
-		randomAddr, err := generateRandomAddress()
-		if err != nil {
-			return "", fmt.Errorf("failed to generate random address: %w", err)
-		}
-		processed = randomAddrRegex.ReplaceAllString(processed, randomAddr)
+	// Process basic placeholders (with 0x prefix for call tasks)
+	processed, err = ProcessBasicPlaceholders(processed, txIdx, stepIdx, false)
+	if err != nil {
+		return "", err
 	}
 
 	return processed, nil
-}
-
-// Helper functions for placeholder generation
-func generateRandomUint256() (string, error) {
-	bytes := make([]byte, 32)
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return "", err
-	}
-	return new(big.Int).SetBytes(bytes).String(), nil
-}
-
-func generateRandomInRange(max uint64) (uint64, error) {
-	if max == 0 {
-		return 0, nil
-	}
-	bytes := make([]byte, 8)
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return 0, err
-	}
-	randomVal := new(big.Int).SetBytes(bytes).Uint64()
-	return randomVal % max, nil
-}
-
-func generateRandomAddress() (string, error) {
-	bytes := make([]byte, 20)
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return "", err
-	}
-	return common.BytesToAddress(bytes).Hex(), nil
 }
