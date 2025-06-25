@@ -89,16 +89,16 @@ func (t *DeployTask) Validate() error {
 
 // BuildTransaction creates a contract deployment transaction
 func (t *DeployTask) BuildTransaction(ctx context.Context, wallet *spamoor.Wallet, registry *ContractRegistry, execCtx *TaskExecutionContext) (*types.Transaction, error) {
-	// Load bytecode from appropriate source
+	// Load bytecode from appropriate source (placeholders already processed)
 	bytecode, err := t.loadBytecode()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load bytecode: %w", err)
 	}
 
-	// Prepare deployment data (bytecode + constructor args)
+	// Prepare deployment data (bytecode + constructor args, placeholders already processed)
 	deployData := bytecode
 	if t.ContractArgs != "" {
-		// Remove 0x prefix if present
+		// Remove 0x prefix if present and convert to bytes
 		argBytes := common.FromHex(t.ContractArgs)
 		deployData = append(deployData, argBytes...)
 	}
@@ -145,9 +145,9 @@ func (t *DeployTask) BuildTransaction(ctx context.Context, wallet *spamoor.Walle
 	return tx, nil
 }
 
-// loadBytecode loads bytecode from the configured source
+// loadBytecode loads bytecode from the configured source (placeholders already processed)
 func (t *DeployTask) loadBytecode() ([]byte, error) {
-	// Direct bytecode string
+	// Direct bytecode string (placeholders already processed)
 	if t.ContractCode != "" {
 		return common.FromHex(t.ContractCode), nil
 	}
@@ -180,4 +180,21 @@ func (t *DeployTask) loadBytecode() ([]byte, error) {
 	}
 
 	return nil, fmt.Errorf("no bytecode source configured")
+}
+
+// processPlaceholders processes placeholders in strings, ensuring no 0x prefixes in calldata/bytecode
+func (t *DeployTask) processPlaceholders(str string, registry *ContractRegistry, txIdx uint64, stepIdx int) (string, error) {
+	// Process contract placeholders (without 0x prefix for deploy bytecode/calldata)
+	processed, err := ProcessContractPlaceholders(str, registry, true)
+	if err != nil {
+		return "", err
+	}
+
+	// Process basic placeholders (without 0x prefix for deploy bytecode/calldata)
+	processed, err = ProcessBasicPlaceholders(processed, txIdx, stepIdx, true)
+	if err != nil {
+		return "", err
+	}
+
+	return processed, nil
 }

@@ -169,19 +169,40 @@ Calls a function on a deployed contract.
 
 ### Placeholders
 
-TaskRunner supports dynamic placeholders in arguments:
+TaskRunner supports dynamic placeholders in arguments and bytecode:
 
+#### Basic Placeholders
 - `{random}` - Random uint256 value
 - `{random:N}` - Random value between 0 and N
 - `{randomaddr}` - Random Ethereum address
-- `{contract:name}` - Reference to deployed contract
 - `{txid}` - Current transaction ID
 - `{stepid}` - Current step index within execution cycle
 
-Example:
+#### Contract Address Placeholders
+- `{contract:name}` - Reference to deployed contract address
+- `{contract:name:nonce}` - Child contract address calculation using CREATE opcode
+
+The child address calculation uses Ethereum's standard CREATE address formula:
+`childAddress = keccak256(rlp.encode(parentAddress, nonce))[12:]`
+
+**Examples:**
 ```yaml
-call_args: ["{randomaddr}", "{random:1000000}", "{contract:token}"]
+# Basic contract reference
+call_args: ["{contract:token}", "{random:1000000}"]
+
+# Child contract addresses
+call_args: ["{contract:factory:1}", "{contract:factory:2}"]  # First and second child contracts
+
+# In deploy bytecode (automatically strips 0x prefix)
+contract_code: "608060405234801561001057600080fd5b50{contract:factory:1}..."
+
+# In constructor arguments (automatically strips 0x prefix)  
+contract_args: "000000000000000000000000{contract:parent:0}0000000000000000000000000000000000000000000000000000000000000001"
 ```
+
+**Address Formatting:**
+- **Call tasks**: Contract addresses include `0x` prefix (standard format)
+- **Deploy tasks**: Contract addresses in `contract_code` and `contract_args` automatically strip `0x` prefix for bytecode compatibility
 
 ### Contract Registry
 
@@ -266,6 +287,77 @@ execution:
       call_abi_file: "./erc20-abi.json"
       call_fn_name: "approve"
       call_args: ["{randomaddr}", "{random:2000000}"]
+```
+
+#### Factory Pattern with Child Contracts
+```yaml
+init:
+  - type: deploy
+    name: factory
+    data:
+      contract_file: "./factory.bin"
+
+execution:
+  # Deploy child contracts through factory
+  - type: call
+    data:
+      target: "{contract:factory}"
+      call_abi_file: "./factory-abi.json"
+      call_fn_name: "createChild"
+      call_args: ["{random}", "{randomaddr}"]
+      
+  # Interact with the first child contract deployed by factory
+  - type: call
+    data:
+      target: "{contract:factory:1}"  # First child (nonce 1)
+      call_abi_file: "./child-abi.json"
+      call_fn_name: "initialize"
+      call_args: ["{contract:factory}", "{random:1000}"]
+      
+  # Deploy another child and interact with the second one
+  - type: call
+    data:
+      target: "{contract:factory}"
+      call_fn_name: "createChild" 
+      call_args: ["{random}", "{randomaddr}"]
+      
+  - type: call
+    data:
+      target: "{contract:factory:2}"  # Second child (nonce 2)
+      call_fn_name: "setParent"
+      call_args: ["{contract:factory}"]
+```
+
+#### Proxy Pattern with Predictable Addresses
+```yaml
+init:
+  - type: deploy
+    name: implementation
+    data:
+      contract_file: "./implementation.bin"
+      
+  - type: deploy
+    name: proxy_factory
+    data:
+      contract_file: "./proxy_factory.bin"
+      # Embed implementation address in proxy bytecode
+      contract_args: "000000000000000000000000{contract:implementation}"
+
+execution:
+  # Create proxy pointing to implementation
+  - type: call
+    data:
+      target: "{contract:proxy_factory}"
+      call_fn_name: "createProxy"
+      call_args: ["{randomaddr}"]  # owner
+      
+  # Call implementation through first proxy
+  - type: call
+    data:
+      target: "{contract:proxy_factory:1}"  # First proxy created
+      call_abi_file: "./implementation-abi.json"
+      call_fn_name: "setValue"
+      call_args: ["{random:1000000}"]
 ```
 
 ## When to Use TaskRunner
