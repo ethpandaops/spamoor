@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -119,6 +118,7 @@ type TxPool struct {
 // TxPoolOptions contains configuration options for the transaction pool.
 type TxPoolOptions struct {
 	Context              context.Context
+	Logger               *logrus.Entry
 	ClientPool           *ClientPool
 	ReorgDepth           int // Number of blocks to keep in memory for reorg tracking
 	GetActiveWalletPools func() []*WalletPool
@@ -164,9 +164,7 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 // Runs until the context is cancelled and recovers from panics with logging.
 func (pool *TxPool) runTxPoolLoop() {
 	defer func() {
-		if err := recover(); err != nil {
-			logrus.WithError(err.(error)).Errorf("uncaught panic in TxPool.runTxPoolLoop subroutine: %v, stack: %v", err, string(debug.Stack()))
-		}
+		utils.RecoverPanic(pool.options.Logger, "TxPool.runTxPoolLoop", pool.runTxPoolLoop)
 	}()
 
 	highestBlockNumber := uint64(0)
@@ -219,9 +217,7 @@ func (pool *TxPool) runTxPoolLoop() {
 // active wallets. Runs until the context is cancelled and recovers from panics.
 func (pool *TxPool) processStaleTransactionsLoop() {
 	defer func() {
-		if err := recover(); err != nil {
-			logrus.WithError(err.(error)).Errorf("uncaught panic in TxPool.processStaleTransactionsLoop subroutine: %v, stack: %v", err, string(debug.Stack()))
-		}
+		utils.RecoverPanic(pool.options.Logger, "TxPool.processStaleTransactionsLoop", pool.processStaleTransactionsLoop)
 	}()
 
 	for {

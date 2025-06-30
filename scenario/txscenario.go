@@ -169,7 +169,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 
 		go func(txIdx uint64, lastChan, currentChan chan bool) {
 			defer func() {
-				utils.RecoverPanic(options.Logger, "scenario.processNextTxFn")
+				utils.RecoverPanic(options.Logger, "scenario.processNextTxFn", nil)
 				currentChan <- true
 			}()
 
