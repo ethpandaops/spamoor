@@ -1336,7 +1336,7 @@ func (pool *TxPool) processRebroadcastRequests() time.Time {
 			// Check if this transaction is blocking wallet progress
 			if pool.isTransactionBlocking(req.fromWallet, req.tx.Nonce()) {
 				// Perform rebroadcast
-				pool.rebroadcastTransaction(req.confirmCtx, req.tx, req.options, req.retryCount)
+				go pool.rebroadcastTransaction(req.confirmCtx, req.tx, req.options, req.retryCount)
 				req.retryCount++
 
 				// Calculate next attempt time
