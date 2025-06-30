@@ -764,7 +764,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 
 	wg.Wait()
 
-	var err error
+	var submitErr error
 
 	submitTx := func(client *Client) error {
 		if options.OnEncode != nil {
@@ -782,6 +782,12 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 	}
 
 	if submitNow {
+		submitCount := options.SubmitCount
+		if submitCount == 0 {
+			submitCount = 3
+		}
+
+		success := false
 		clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 		for i := 0; i < clientCount; i++ {
 			client := options.Client
@@ -792,21 +798,31 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 				continue
 			}
 
-			err = submitTx(client)
+			err := submitTx(client)
 
 			if options.LogFn != nil {
 				options.LogFn(client, i, 0, err)
 			}
 
 			if err == nil {
-				break
+				success = true
+				submitCount--
+				if submitCount == 0 {
+					break
+				}
+			} else if submitErr == nil {
+				submitErr = err
 			}
+		}
+
+		if success {
+			submitErr = nil
 		}
 	}
 
-	submissionComplete <- err
+	submissionComplete <- submitErr
 
-	if err != nil {
+	if submitErr != nil {
 		confirmCancel()
 
 		// Track initial transaction submission failure for metrics
@@ -821,14 +837,14 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 					}
 
 					if poolWallet.GetAddress() == wallet.GetAddress() {
-						tracker(err)
+						tracker(submitErr)
 						break
 					}
 				}
 			}
 		}
 
-		return err
+		return submitErr
 	}
 
 	// Increment wallet's submitted transaction counter
@@ -1217,9 +1233,9 @@ func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeGwei float64, tipFee
 // Uses 30s base delay, 1.5x multiplier, with 10min maximum delay.
 func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
 	const (
-		baseDelay  = 30 * time.Second
+		baseDelay  = 20 * time.Second
 		multiplier = 1.5
-		maxDelay   = 10 * time.Minute
+		maxDelay   = 5 * time.Minute
 	)
 
 	delay := time.Duration(float64(baseDelay) * math.Pow(multiplier, float64(retryCount)))

@@ -34,6 +34,8 @@ type SendTransactionOptions struct {
 	ClientGroup string
 	// ClientsStartOffset for client selection
 	ClientsStartOffset int
+	// SubmitCount is the number of times to submit the transaction in the first attempt (default 3)
+	SubmitCount int
 
 	// Enable reliable rebroadcasting
 	Rebroadcast bool
