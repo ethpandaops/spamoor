@@ -317,6 +317,10 @@ func (pool *WalletPool) GetWalletName(address common.Address) string {
 // GetAllWallets returns a slice containing all wallets (well-known and child wallets).
 // The root wallet is not included in this list.
 func (pool *WalletPool) GetAllWallets() []*Wallet {
+	if pool.childWallets == nil {
+		return []*Wallet{}
+	}
+
 	wallets := make([]*Wallet, len(pool.childWallets)+len(pool.wellKnownWallets))
 	for i, config := range pool.wellKnownNames {
 		wallets[i] = pool.wellKnownWallets[config.Name]

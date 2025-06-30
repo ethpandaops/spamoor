@@ -328,6 +328,9 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 	signer := types.LatestSignerForChainID(chainId)
 	confirmCount := 0
 	affectedWalletMap := map[common.Address]bool{}
+	pool.txsMutex.Lock()
+	pool.confirmedTxs[blockNumber] = []*TxInfo{}
+	pool.txsMutex.Unlock()
 
 	for idx, tx := range blockBody.Transactions() {
 		receipt := receipts[idx]
