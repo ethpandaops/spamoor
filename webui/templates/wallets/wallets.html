@@ -31,7 +31,7 @@
           <td>{{ .PendingNonce }} / {{ .ConfirmedNonce }}</td>
           <td>{{ subUI64 .PendingNonce .ConfirmedNonce }}</td>
           <td class="d-flex align-items-center gap-2">
-            <a href="/" class="text-decoration-none">
+            <a href="/" class="text-decoration-none spammer-name-link">
               #{{ .SpammerID }}
               {{ if .SpammerName }}
                 <small class="text-muted">({{ .SpammerName }})</small>
@@ -62,4 +62,14 @@ setTimeout(() => window.location.reload(), 60000);
 {{ end }} 
 
 {{ define "css" }}
+<style>
+.spammer-name-link {
+  display: inline-block;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+</style>
 {{ end }}
