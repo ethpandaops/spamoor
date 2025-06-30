@@ -321,8 +321,8 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockBody *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
 	t1 := time.Now()
 	txCount := len(blockBody.Transactions())
-	receipts, err := pool.getBlockReceipts(ctx, client, blockNumber, txCount)
-	if receipts == nil {
+	receipts, err := pool.getBlockReceipts(ctx, client, blockBody.Hash(), txCount)
+	if err != nil {
 		return fmt.Errorf("could not load block receipts: %w", err)
 	}
 
@@ -464,21 +464,20 @@ func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumbe
 // getBlockReceipts retrieves all transaction receipts for a block.
 // It validates that the number of receipts matches the expected transaction count
 // and uses a 5-second timeout for the request.
-func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockNumber uint64, txCount int) ([]*types.Receipt, error) {
+func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockHash common.Hash, txCount int) ([]*types.Receipt, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	var receiptErr error
-	blockNum := rpc.BlockNumber(blockNumber)
 
 	blockReceipts, err := client.client.BlockReceipts(ctx, rpc.BlockNumberOrHash{
-		BlockNumber: &blockNum,
+		BlockHash: &blockHash,
 	})
 	if err != nil {
 		receiptErr = err
 	} else {
 		if len(blockReceipts) != txCount {
-			return nil, fmt.Errorf("block %v has %v receipts, expected %v", blockNumber, len(blockReceipts), txCount)
+			return nil, fmt.Errorf("block %v has %v receipts, expected %v", blockHash.Hex(), len(blockReceipts), txCount)
 		}
 
 		return blockReceipts, nil
