@@ -145,6 +145,7 @@ func main() {
 
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
 		Context:    ctx,
+		Logger:     logger.WithField("module", "txpool"),
 		ClientPool: clientPool,
 		GetActiveWalletPools: func() []*spamoor.WalletPool {
 			return []*spamoor.WalletPool{walletPool}
