@@ -321,11 +321,14 @@ func (pool *WalletPool) GetAllWallets() []*Wallet {
 		return []*Wallet{}
 	}
 
-	wallets := make([]*Wallet, len(pool.childWallets)+len(pool.wellKnownWallets))
-	for i, config := range pool.wellKnownNames {
-		wallets[i] = pool.wellKnownWallets[config.Name]
+	wallets := make([]*Wallet, 0, len(pool.childWallets)+len(pool.wellKnownNames))
+	wallets = append(wallets, pool.childWallets...)
+	for _, config := range pool.wellKnownNames {
+		if pool.wellKnownWallets[config.Name] != nil {
+			wallets = append(wallets, pool.wellKnownWallets[config.Name])
+		}
 	}
-	copy(wallets[len(pool.wellKnownWallets):], pool.childWallets)
+
 	return wallets
 }
 

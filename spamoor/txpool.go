@@ -600,6 +600,10 @@ func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTx
 	walletSet := make(map[common.Address]bool)
 
 	for _, wallet := range allWallets {
+		if wallet == nil {
+			continue
+		}
+
 		walletSet[wallet.GetAddress()] = true
 	}
 
@@ -636,6 +640,10 @@ func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxs []*TxInfo, block *t
 	for _, walletPool := range activeWalletPools {
 		allWallets := walletPool.GetAllWallets()
 		for _, wallet := range allWallets {
+			if wallet == nil {
+				continue
+			}
+
 			walletToPool[wallet.GetAddress()] = walletPool
 		}
 
@@ -724,6 +732,10 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 					// Check if this wallet belongs to this pool
 					allWallets := walletPool.GetAllWallets()
 					for _, poolWallet := range allWallets {
+						if poolWallet == nil {
+							continue
+						}
+
 						if poolWallet.GetAddress() == wallet.GetAddress() {
 							tracker(err)
 							break
@@ -804,6 +816,10 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 				// Check if this wallet belongs to this pool
 				allWallets := walletPool.GetAllWallets()
 				for _, poolWallet := range allWallets {
+					if poolWallet == nil {
+						continue
+					}
+
 					if poolWallet.GetAddress() == wallet.GetAddress() {
 						tracker(err)
 						break
