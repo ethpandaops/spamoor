@@ -55,6 +55,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	router.HandleFunc("/", frontendHandler.Index).Methods("GET")
 	router.HandleFunc("/clients", frontendHandler.Clients).Methods("GET")
 	router.HandleFunc("/wallets", frontendHandler.Wallets).Methods("GET")
+	router.HandleFunc("/about", frontendHandler.About).Methods("GET")
 	if !config.DisableTxMetrics {
 		router.HandleFunc("/graphs", frontendHandler.Graphs).Methods("GET")
 	}

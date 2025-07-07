@@ -5,7 +5,7 @@ GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildVersion="$(VERSION)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildTime="$(BUILDTIME)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildRelease="$(RELEASE)"'
 
-.PHONY: all docs build test clean generate-spammer-index
+.PHONY: all docs build build-debug test clean generate-spammer-index
 
 all: docs build
 
@@ -15,6 +15,10 @@ test:
 build:
 	@echo version: $(VERSION)
 	env CGO_ENABLED=1 CGO_CFLAGS="-O2 -D__BLST_PORTABLE__" go build -v -tags=with_blob_v1,ckzg -o bin/ -ldflags="-s -w $(GOLDFLAGS)" ./cmd/*
+
+build-debug:
+	@echo version: $(VERSION) [DEBUG BUILD]
+	env CGO_ENABLED=1 CGO_CFLAGS="-O2 -D__BLST_PORTABLE__" go build -v -tags=with_blob_v1,ckzg -o bin/ -ldflags="$(GOLDFLAGS)" ./cmd/*
 
 build-lib:
 	@echo version: $(VERSION)

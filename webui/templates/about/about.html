@@ -1,0 +1,90 @@
+{{ define "page" }}
+<div class="container">
+  <div class="row">
+    <div class="col-md-12">
+      <h2 class="px-2 py-3">About Spamoor</h2>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-md-12">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title mb-0">Project Information</h5>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6">
+              <table class="table table-sm">
+                <tr>
+                  <th>Repository:</th>
+                  <td><a href="{{ .Repository }}" target="_blank" rel="noopener">{{ .Repository }}</a></td>
+                </tr>
+                <tr>
+                  <th>License:</th>
+                  <td>{{ .License }}</td>
+                </tr>
+                <tr>
+                  <th>Version:</th>
+                  <td>{{ .Version }}</td>
+                </tr>
+                <tr>
+                  <th>Go Version:</th>
+                  <td>{{ .GoVersion }}</td>
+                </tr>
+              </table>
+            </div>
+            <div class="col-md-6">
+              <p class="text-muted">
+                Spamoor is a powerful tool for generating various types of random transactions on Ethereum testnets. 
+                It provides a modular, scenario-based architecture for stress testing, network validation, and continuous transaction testing.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mt-4">
+    <div class="col-md-12">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="card-title mb-0">Dependencies ({{ len .Modules }})</h5>
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm table-striped">
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Version</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{ range .Modules }}
+                <tr>
+                  <td>
+                    <code>{{ .Path }}</code>
+                    {{ if .Replacement }}
+                      <br><span class="badge badge-warning">REPLACED</span> <small class="text-warning">→ {{ .Replacement }}</small>
+                    {{ end }}
+                  </td>
+                  <td>
+                    <span class="badge badge-secondary">{{ .Version }}</span>
+                  </td>
+                </tr>
+                {{ end }}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{{ end }}
+{{ define "js" }}
+{{ end }}
+{{ define "css" }}
+{{ end }}
