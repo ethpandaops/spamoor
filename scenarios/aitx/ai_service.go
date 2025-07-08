@@ -394,7 +394,25 @@ func (ai *AIService) buildBasePrompt(generationMode string) string {
 	promptBuilder.WriteString("2. Computation loops: Mathematical operations with clean stack management\n")
 	promptBuilder.WriteString("3. Storage patterns: Read/write with counters or mappings\n")
 	promptBuilder.WriteString("4. Event emission: Log computation results or state changes\n")
-	promptBuilder.WriteString("5. Memory operations: Expand memory, hash data, manipulate arrays\n\n")
+	promptBuilder.WriteString("5. Memory operations: Expand memory, hash data, manipulate arrays\n")
+	promptBuilder.WriteString("6. Precompile/contract calls: Use CALL opcode to interact with other contracts\n\n")
+
+	promptBuilder.WriteString("PRECOMPILE/CONTRACT CALL PATTERN:\n")
+	promptBuilder.WriteString("To call precompiles (addresses 1-9) or other contracts, use this pattern:\n")
+	promptBuilder.WriteString("```\n")
+	promptBuilder.WriteString("PUSH1 0x20 ; retSize\n")
+	promptBuilder.WriteString("PUSH1 0x00 ; retOffset\n")
+	promptBuilder.WriteString("PUSH1 0x20 ; argsSize\n")
+	promptBuilder.WriteString("PUSH1 0x00 ; argsOffset\n")
+	promptBuilder.WriteString("PUSH1 0x00 ; value\n")
+	promptBuilder.WriteString("PUSH1 0x05 ; address (example: precompile 5 = modexp)\n")
+	promptBuilder.WriteString("PUSH2 0xC350 ; gas (50000)\n")
+	promptBuilder.WriteString("GAS\n")
+	promptBuilder.WriteString("SUB\n")
+	promptBuilder.WriteString("CALL\n")
+	promptBuilder.WriteString("POP        ; remove success flag\n")
+	promptBuilder.WriteString("```\n")
+	promptBuilder.WriteString("Common precompiles: 1=ecrecover, 2=sha256, 3=ripemd160, 4=identity, 5=modexp, 6=ecadd, 7=ecmul, 8=ecpairing, 9=blake2f\n\n")
 
 	promptBuilder.WriteString("AVAILABLE PLACEHOLDERS:\n")
 	promptBuilder.WriteString("- ${RANDOM_UINT256}: Random 256-bit unsigned integer\n")
@@ -484,7 +502,6 @@ func (ai *AIService) parseResponse(response *OpenRouterResponse) (*GenerationRes
 	}
 
 	content := response.Choices[0].Message.Content
-	ai.logger.Infof("AI response content: %s", content)
 
 	var payloads []PayloadTemplate
 
@@ -539,12 +556,12 @@ func (ai *AIService) extractJSONObjectsFromText(content string) ([]PayloadTempla
 		if strings.HasPrefix(line, "```") && inJSONBlock {
 			// End of JSON block, try to parse it
 			jsonStr := jsonBlock.String()
-			ai.logger.Infof("Attempting to parse JSON block: %s", jsonStr)
+			ai.logger.Debugf("Attempting to parse JSON block: %s", jsonStr)
 
 			var payload PayloadTemplate
 			if err := json.Unmarshal([]byte(jsonStr), &payload); err == nil {
 				payloads = append(payloads, payload)
-				ai.logger.Infof("Successfully parsed payload: %s", payload.Description)
+				ai.logger.Debugf("Successfully parsed payload: %s", payload.Description)
 			} else {
 				ai.logger.Errorf("Failed to parse JSON block: %v", err)
 			}

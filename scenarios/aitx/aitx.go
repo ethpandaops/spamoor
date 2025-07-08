@@ -3,7 +3,9 @@ package aitx
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -51,6 +53,15 @@ type ScenarioOptions struct {
 
 	// Debug options
 	LogAIConversations bool `yaml:"log_ai_conversations"`
+
+	// Persistence options
+	MaxPayloads     int    `yaml:"max_payloads"`
+	PersistenceFile string `yaml:"persistence_file"`
+	SavePersistence bool   `yaml:"save_persistence"`
+	LoadPersistence bool   `yaml:"load_persistence"`
+
+	// Payload management options
+	SuccessThreshold int `yaml:"success_threshold"`
 }
 
 type PayloadState struct {
@@ -61,6 +72,7 @@ type PayloadState struct {
 	SuccessCount    int
 	FailCount       int
 	LastUsed        time.Time
+	BatchID         int        // AI batch ID this payload belongs to
 	mutex           sync.Mutex // Protects individual payload state
 }
 
@@ -119,6 +131,15 @@ var ScenarioDefaultOptions = ScenarioOptions{
 
 	// Debug defaults
 	LogAIConversations: false,
+
+	// Persistence defaults
+	MaxPayloads:     100,
+	PersistenceFile: "",
+	SavePersistence: true,
+	LoadPersistence: true,
+
+	// Payload management defaults
+	SuccessThreshold: 20,
 }
 
 var ScenarioDescriptor = scenario.Descriptor{
@@ -165,6 +186,15 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	// Debug flags
 	flags.BoolVar(&s.options.LogAIConversations, "log-ai-conversations", ScenarioDefaultOptions.LogAIConversations, "Enable detailed logging of AI conversations for debugging")
 
+	// Persistence flags
+	flags.IntVar(&s.options.MaxPayloads, "max-payloads", ScenarioDefaultOptions.MaxPayloads, "Maximum number of payloads to keep in memory")
+	flags.StringVar(&s.options.PersistenceFile, "persistence-file", ScenarioDefaultOptions.PersistenceFile, "File to save/load payloads for persistence")
+	flags.BoolVar(&s.options.SavePersistence, "save-persistence", ScenarioDefaultOptions.SavePersistence, "Save payloads to persistence file on shutdown")
+	flags.BoolVar(&s.options.LoadPersistence, "load-persistence", ScenarioDefaultOptions.LoadPersistence, "Load payloads from persistence file on startup")
+
+	// Payload management flags
+	flags.IntVar(&s.options.SuccessThreshold, "success-threshold", ScenarioDefaultOptions.SuccessThreshold, "Number of successful calls before requesting new payloads")
+
 	return nil
 }
 
@@ -210,8 +240,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 
 	// Initialize AI components
 	s.aiService = NewAIService(s.options.OpenRouterAPIKey, s.options.Model, s.options.LogAIConversations, s.logger)
-	s.processor = NewPayloadProcessor(s.logger)
 	s.placeholderSubstituter = NewPlaceholderSubstituter(s.walletPool, s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, ""), s.logger)
+	s.processor = NewPayloadProcessor(s.logger, s.placeholderSubstituter)
 	s.feedbackCollector = NewFeedbackCollector(s.options.FeedbackBatchSize, s.logger)
 	s.geasProcessor = NewGeasProcessor(s.logger)
 
@@ -220,10 +250,21 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	s.aiService.SetBasePrompt(basePrompt)
 
 	// Initialize async payload management
-	s.payloadStates = make([]*PayloadState, 0, 100)
+	s.payloadStates = make([]*PayloadState, 0, s.options.MaxPayloads)
 	s.aiRequestChan = make(chan struct{}, 1)
 	s.aiReadyChan = make(chan struct{}, 1)
 	s.shutdownChan = make(chan struct{})
+
+	// Load payloads from persistence file if enabled
+	if s.options.LoadPersistence && s.options.PersistenceFile != "" {
+		if err := s.loadPayloadsFromFile(); err != nil {
+			s.logger.Warnf("failed to load payloads from persistence file: %v", err)
+		} else {
+			s.logger.Infof("loaded %d payloads from persistence file", len(s.payloadStates))
+			// Verify contract deployments
+			s.verifyDeployedContracts()
+		}
+	}
 
 	return nil
 }
@@ -235,18 +276,20 @@ func (s *Scenario) Run(ctx context.Context) error {
 	// Start background AI worker
 	go s.aiWorker(ctx)
 
-	// Initial AI request to get started
-	select {
-	case s.aiRequestChan <- struct{}{}:
-	default:
-	}
+	if len(s.payloadStates) == 0 {
+		// Initial AI request to get started
+		select {
+		case s.aiRequestChan <- struct{}{}:
+		default:
+		}
 
-	// Wait for AI to be ready
-	s.logger.Infof("waiting for AI payloads to be ready")
-	select {
-	case <-s.aiReadyChan:
-	case <-ctx.Done():
-		return ctx.Err()
+		// Wait for AI to be ready
+		s.logger.Infof("waiting for AI payloads to be ready")
+		select {
+		case <-s.aiReadyChan:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	s.logger.Infof("AI payloads ready, starting transaction generation")
@@ -309,15 +352,29 @@ func (s *Scenario) Run(ctx context.Context) error {
 	// Signal shutdown to AI worker
 	close(s.shutdownChan)
 
+	// Save payloads to persistence file if enabled
+	if s.options.SavePersistence && s.options.PersistenceFile != "" {
+		if saveErr := s.savePayloadsToFile(); saveErr != nil {
+			s.logger.Errorf("failed to save payloads to persistence file: %v", saveErr)
+		} else {
+			s.logger.Infof("saved %d payloads to persistence file", len(s.payloadStates))
+		}
+	}
+
 	return err
 }
 
 func (s *Scenario) sendAITransaction(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	// Send single call transaction using round-robin payload selection
-	defer onComplete()
-
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
+
+	txSubmitted := false
+	defer func() {
+		if !txSubmitted {
+			onComplete()
+		}
+	}()
 
 	if client == nil {
 		return nil, client, wallet, fmt.Errorf("no client available")
@@ -355,6 +412,7 @@ func (s *Scenario) sendAITransaction(ctx context.Context, txIdx uint64, onComple
 	}
 
 	// Send call transaction
+	txSubmitted = true
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, callTx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
@@ -363,6 +421,7 @@ func (s *Scenario) sendAITransaction(ctx context.Context, txIdx uint64, onComple
 			s.recordPayloadSuccess(payloadState, payload, tx, receipt)
 		},
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			onComplete()
 			if err != nil {
 				s.recordPayloadFailure(payloadState, "call_failed", err.Error())
 			}
@@ -384,18 +443,34 @@ func (s *Scenario) getNextPayload(ctx context.Context) (*PayloadState, error) {
 	s.payloadMutex.Lock()
 	defer s.payloadMutex.Unlock()
 
-	// Check for payloads with < 20 successes
+	// Check for payloads that haven't reached success threshold and haven't failed too much
 	for i := 0; i < len(s.payloadStates); i++ {
 		idx := (s.payloadRoundRobin + i) % len(s.payloadStates)
 		payloadState := s.payloadStates[idx]
-		if payloadState.SuccessCount < 20 && !payloadState.IsDeploying {
+
+		// Skip if currently deploying
+		if payloadState.IsDeploying {
+			continue
+		}
+
+		// Use payload if it hasn't reached success threshold AND hasn't failed excessively
+		// A payload is considered "exhausted" if it has reached either:
+		// - Success threshold (working well)
+		// - Failure threshold (not working, give up)
+		totalCalls := payloadState.SuccessCount + payloadState.FailCount
+		hasReachedSuccessThreshold := payloadState.SuccessCount >= s.options.SuccessThreshold
+		hasReachedFailureThreshold := payloadState.FailCount >= s.options.SuccessThreshold
+
+		if !hasReachedSuccessThreshold && !hasReachedFailureThreshold {
 			s.payloadRoundRobin = (idx + 1) % len(s.payloadStates)
 			payloadState.LastUsed = time.Now()
+			s.logger.Debugf("selected payload: %s (success: %d, fail: %d, total: %d)",
+				payloadState.Template.Description, payloadState.SuccessCount, payloadState.FailCount, totalCalls)
 			return payloadState, nil
 		}
 	}
 
-	// No payload with < 20 successes, request more payloads
+	// No payload available that hasn't reached threshold, request more payloads
 	s.requestMorePayloads()
 
 	// If we have any payloads, return the next one
@@ -482,11 +557,12 @@ func (s *Scenario) callGeasContract(ctx context.Context, wallet *spamoor.Wallet,
 
 func (s *Scenario) recordPayloadSuccess(payloadState *PayloadState, payload *PayloadInstance, tx *types.Transaction, receipt *types.Receipt) {
 	payloadState.mutex.Lock()
+	batchID := payloadState.BatchID
 	payloadState.SuccessCount++
 	payloadState.mutex.Unlock()
 
 	if receipt == nil {
-		s.feedbackCollector.RecordFailure(payload, "receipt_nil", "receipt was nil")
+		s.feedbackCollector.RecordFailure(payload, "receipt_nil", "receipt was nil", batchID)
 		return
 	}
 
@@ -515,9 +591,9 @@ func (s *Scenario) recordPayloadSuccess(payloadState *PayloadState, payload *Pay
 			hex.EncodeToString(log.Data)))
 	}
 
-	s.logger.Debugf("transaction confirmed: %s (%s) - %s, gas: %d, fees: %s, logs: %d, success: %d, fail: %d",
+	s.logger.Debugf("transaction confirmed: %s (%s) - %s, gas: %d, fees: %s, logs: %d, success: %d, fail: %d, batch: %d",
 		payload.Description, payload.Type, status, receipt.GasUsed, txFees.TotalFeeGweiString(), len(receipt.Logs),
-		payloadState.SuccessCount, payloadState.FailCount)
+		payloadState.SuccessCount, payloadState.FailCount, batchID)
 
 	// Record result for feedback
 	result := TransactionResult{
@@ -530,7 +606,7 @@ func (s *Scenario) recordPayloadSuccess(payloadState *PayloadState, payload *Pay
 		LogData:            logData,
 	}
 
-	s.feedbackCollector.RecordResult(result)
+	s.feedbackCollector.RecordResult(result, batchID)
 }
 
 // ensureContractDeployed ensures the contract is deployed for the payload
@@ -698,38 +774,44 @@ func (s *Scenario) generatePayloads(ctx context.Context) error {
 	// Increment conversation response count
 	s.conversationResponses++
 
-	// Add new payloads to the pool
-	s.addPayloadsToPool(response.Payloads)
+	// Start a new feedback batch for the new payloads
+	s.feedbackCollector.StartNewBatch()
+	batchID := s.feedbackCollector.GetCurrentBatchID()
 
-	s.logger.Infof("AI call completed, generated %d payloads (conversation: %d responses)",
-		len(response.Payloads), s.conversationResponses)
+	// Add new payloads to the pool with the current batch ID
+	s.addPayloadsToPool(response.Payloads, batchID)
+
+	s.logger.Infof("AI call completed, generated %d payloads (conversation: %d responses, batch: %d)",
+		len(response.Payloads), s.conversationResponses, batchID)
 
 	return nil
 }
 
-// addPayloadsToPool adds new payloads to the pool and manages the 100-payload limit
-func (s *Scenario) addPayloadsToPool(templates []PayloadTemplate) {
+// addPayloadsToPool adds new payloads to the pool and manages the max payload limit
+func (s *Scenario) addPayloadsToPool(templates []PayloadTemplate, batchID int) {
 	s.payloadMutex.Lock()
 	defer s.payloadMutex.Unlock()
 
-	// Add new payloads
+	// Add new payloads with batch ID
 	for _, template := range templates {
 		payloadState := &PayloadState{
 			Template:     template,
 			IsDeployed:   false,
+			IsDeploying:  false,
 			SuccessCount: 0,
 			FailCount:    0,
 			LastUsed:     time.Now(),
+			BatchID:      batchID,
 		}
 		s.payloadStates = append(s.payloadStates, payloadState)
 	}
 
-	// Clean up if we exceed 100 payloads
-	if len(s.payloadStates) > 100 {
+	// Clean up if we exceed max payloads
+	if len(s.payloadStates) > s.options.MaxPayloads {
 		s.cleanupPayloads()
 	}
 
-	s.logger.Infof("added %d payloads to pool, total: %d", len(templates), len(s.payloadStates))
+	s.logger.Infof("added %d payloads to pool (batch %d), total: %d", len(templates), batchID, len(s.payloadStates))
 }
 
 // cleanupPayloads removes failing payloads first, then payloads with highest success count
@@ -742,8 +824,8 @@ func (s *Scenario) cleanupPayloads() {
 		return s.payloadStates[i].SuccessCount > s.payloadStates[j].SuccessCount
 	})
 
-	// Remove the worst 25% to get back to 75 payloads
-	targetSize := 75
+	// Remove the worst 25% to get back to 75% of max
+	targetSize := (s.options.MaxPayloads * 3) / 4 // 75% of max
 	if len(s.payloadStates) > targetSize {
 		removedCount := len(s.payloadStates) - targetSize
 		s.payloadStates = s.payloadStates[removedCount:]
@@ -756,8 +838,179 @@ func (s *Scenario) cleanupPayloads() {
 	}
 }
 
+// PayloadStatePersistence represents the data to persist for a payload state
+type PayloadStatePersistence struct {
+	Template        PayloadTemplate `json:"template"`
+	IsDeployed      bool            `json:"is_deployed"`
+	ContractAddress string          `json:"contract_address,omitempty"`
+	SuccessCount    int             `json:"success_count"`
+	FailCount       int             `json:"fail_count"`
+	LastUsed        time.Time       `json:"last_used"`
+	BatchID         int             `json:"batch_id"`
+}
+
+// PayloadsPersistenceData represents the complete persistence data
+type PayloadsPersistenceData struct {
+	Payloads              []PayloadStatePersistence `json:"payloads"`
+	ConversationHistory   []Message                 `json:"conversation_history,omitempty"`
+	ConversationResponses int                       `json:"conversation_responses"`
+	SavedAt               time.Time                 `json:"saved_at"`
+}
+
+// savePayloadsToFile saves the current payload states to a JSON file
+func (s *Scenario) savePayloadsToFile() error {
+	s.payloadMutex.RLock()
+	defer s.payloadMutex.RUnlock()
+
+	var persistenceData PayloadsPersistenceData
+	persistenceData.ConversationHistory = s.conversationHistory
+	persistenceData.ConversationResponses = s.conversationResponses
+	persistenceData.SavedAt = time.Now()
+
+	// Convert payload states to persistence format
+	persistenceData.Payloads = make([]PayloadStatePersistence, len(s.payloadStates))
+	for i, state := range s.payloadStates {
+		state.mutex.Lock()
+		persistenceData.Payloads[i] = PayloadStatePersistence{
+			Template:        state.Template,
+			IsDeployed:      state.IsDeployed,
+			ContractAddress: state.ContractAddress.Hex(),
+			SuccessCount:    state.SuccessCount,
+			FailCount:       state.FailCount,
+			LastUsed:        state.LastUsed,
+			BatchID:         state.BatchID,
+		}
+		state.mutex.Unlock()
+	}
+
+	// Marshal to JSON
+	data, err := json.MarshalIndent(persistenceData, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal persistence data: %w", err)
+	}
+
+	// Write to file
+	err = os.WriteFile(s.options.PersistenceFile, data, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write persistence file: %w", err)
+	}
+
+	s.logger.Infof("saved %d payloads to persistence file: %s", len(s.payloadStates), s.options.PersistenceFile)
+	return nil
+}
+
+// loadPayloadsFromFile loads payload states from a JSON file
+func (s *Scenario) loadPayloadsFromFile() error {
+	// Check if file exists
+	if _, err := os.Stat(s.options.PersistenceFile); os.IsNotExist(err) {
+		s.logger.Infof("persistence file does not exist: %s", s.options.PersistenceFile)
+		return nil
+	}
+
+	// Read file
+	data, err := os.ReadFile(s.options.PersistenceFile)
+	if err != nil {
+		return fmt.Errorf("failed to read persistence file: %w", err)
+	}
+
+	// Unmarshal JSON
+	var persistenceData PayloadsPersistenceData
+	err = json.Unmarshal(data, &persistenceData)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal persistence data: %w", err)
+	}
+
+	s.payloadMutex.Lock()
+	defer s.payloadMutex.Unlock()
+
+	// Restore conversation state
+	s.conversationHistory = persistenceData.ConversationHistory
+	s.conversationResponses = persistenceData.ConversationResponses
+
+	// Convert persistence format to payload states
+	s.payloadStates = make([]*PayloadState, len(persistenceData.Payloads))
+	for i, persistedState := range persistenceData.Payloads {
+		contractAddr := common.Address{}
+		if persistedState.ContractAddress != "" && persistedState.ContractAddress != "0x0000000000000000000000000000000000000000" {
+			contractAddr = common.HexToAddress(persistedState.ContractAddress)
+		}
+
+		s.payloadStates[i] = &PayloadState{
+			Template:        persistedState.Template,
+			IsDeployed:      persistedState.IsDeployed,
+			IsDeploying:     false, // Always start with false
+			ContractAddress: contractAddr,
+			SuccessCount:    persistedState.SuccessCount,
+			FailCount:       persistedState.FailCount,
+			LastUsed:        persistedState.LastUsed,
+			BatchID:         persistedState.BatchID,
+		}
+	}
+
+	s.logger.Infof("loaded %d payloads from persistence file: %s (saved at: %s)",
+		len(s.payloadStates), s.options.PersistenceFile, persistenceData.SavedAt.Format(time.RFC3339))
+
+	return nil
+}
+
+// verifyDeployedContracts checks if contracts are actually deployed at stored addresses
+func (s *Scenario) verifyDeployedContracts() {
+	if len(s.payloadStates) == 0 {
+		return
+	}
+
+	// Get a client for verification
+	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	if client == nil {
+		s.logger.Warnf("no client available for contract verification")
+		return
+	}
+
+	s.payloadMutex.Lock()
+	defer s.payloadMutex.Unlock()
+
+	verifiedCount := 0
+	invalidatedCount := 0
+
+	for _, payloadState := range s.payloadStates {
+		payloadState.mutex.Lock()
+
+		if payloadState.IsDeployed && payloadState.ContractAddress != (common.Address{}) {
+			// Check if code exists at the address
+			code, err := client.GetEthClient().CodeAt(context.Background(), payloadState.ContractAddress, nil)
+			if err != nil {
+				s.logger.Warnf("failed to check contract code at %s: %v", payloadState.ContractAddress.Hex(), err)
+				// On error, assume contract is not deployed to be safe
+				payloadState.IsDeployed = false
+				payloadState.ContractAddress = common.Address{}
+				invalidatedCount++
+			} else if len(code) == 0 {
+				// No code at address, contract not deployed
+				s.logger.Debugf("no code found at %s, marking payload as not deployed: %s",
+					payloadState.ContractAddress.Hex(), payloadState.Template.Description)
+				payloadState.IsDeployed = false
+				payloadState.ContractAddress = common.Address{}
+				invalidatedCount++
+			} else {
+				// Code exists, contract is deployed
+				s.logger.Debugf("verified contract at %s for payload: %s",
+					payloadState.ContractAddress.Hex(), payloadState.Template.Description)
+				verifiedCount++
+			}
+		}
+
+		payloadState.mutex.Unlock()
+	}
+
+	if verifiedCount > 0 || invalidatedCount > 0 {
+		s.logger.Infof("contract verification complete: %d verified, %d invalidated",
+			verifiedCount, invalidatedCount)
+	}
+}
+
 func (s *Scenario) recordPayloadFailure(payloadState *PayloadState, errorType string, errorMsg string) {
 	payloadState.mutex.Lock()
+	batchID := payloadState.BatchID
 	payloadState.FailCount++
 	payloadState.mutex.Unlock()
 
@@ -766,9 +1019,9 @@ func (s *Scenario) recordPayloadFailure(payloadState *PayloadState, errorType st
 		Type:        payloadState.Template.Type,
 		Description: payloadState.Template.Description,
 	}
-	s.feedbackCollector.RecordFailure(dummyPayload, errorType, errorMsg)
+	s.feedbackCollector.RecordFailure(dummyPayload, errorType, errorMsg, batchID)
 
-	s.logger.Debugf("payload failure: %s - %s: %s, success: %d, fail: %d",
+	s.logger.Debugf("payload failure: %s - %s: %s, success: %d, fail: %d, batch: %d",
 		payloadState.Template.Description, errorType, errorMsg,
-		payloadState.SuccessCount, payloadState.FailCount)
+		payloadState.SuccessCount, payloadState.FailCount, batchID)
 }

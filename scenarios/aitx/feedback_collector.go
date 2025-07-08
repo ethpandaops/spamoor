@@ -9,45 +9,82 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type PayloadStats struct {
+	Description     string
+	SuccessCount    int
+	FailureCount    int
+	TotalGasUsed    uint64
+	SuccessfulCalls []TransactionResult // Successful transactions for this payload
+	FailedCalls     []TransactionResult // Failed transactions for this payload
+}
+
 type FeedbackCollector struct {
-	results           []TransactionResult
-	mutex             sync.RWMutex
-	maxResults        uint64
-	totalTransactions uint64
-	successfulTxs     uint64
-	failedTxs         uint64
-	logger            logrus.FieldLogger
+	payloadStats   map[string]*PayloadStats // Per-payload statistics
+	mutex          sync.RWMutex
+	maxResults     uint64
+	currentBatchID int // ID of current AI response batch
+	logger         logrus.FieldLogger
 }
 
 func NewFeedbackCollector(maxResults uint64, logger logrus.FieldLogger) *FeedbackCollector {
 	return &FeedbackCollector{
-		results:    make([]TransactionResult, 0, maxResults),
-		maxResults: maxResults,
-		logger:     logger.WithField("component", "feedback_collector"),
+		payloadStats:   make(map[string]*PayloadStats),
+		maxResults:     maxResults,
+		currentBatchID: 0,
+		logger:         logger.WithField("component", "feedback_collector"),
 	}
 }
 
-func (fc *FeedbackCollector) RecordResult(result TransactionResult) {
+func (fc *FeedbackCollector) RecordResult(result TransactionResult, batchID int) {
 	fc.mutex.Lock()
 	defer fc.mutex.Unlock()
 
-	fc.results = append(fc.results, result)
-	if uint64(len(fc.results)) > fc.maxResults {
-		fc.results = fc.results[1:]
+	// Only record results for the current batch
+	if batchID != fc.currentBatchID {
+		fc.logger.Debugf("ignoring result from old batch %d (current: %d): %s",
+			batchID, fc.currentBatchID, result.PayloadDescription)
+		return
 	}
 
-	fc.totalTransactions++
+	// Get or create payload stats
+	stats, exists := fc.payloadStats[result.PayloadDescription]
+	if !exists {
+		stats = &PayloadStats{
+			Description:     result.PayloadDescription,
+			SuccessfulCalls: make([]TransactionResult, 0),
+			FailedCalls:     make([]TransactionResult, 0),
+		}
+		fc.payloadStats[result.PayloadDescription] = stats
+	}
+
+	// Record result
 	if result.Status == "success" {
-		fc.successfulTxs++
+		stats.SuccessCount++
+		stats.TotalGasUsed += result.GasUsed
+		stats.SuccessfulCalls = append(stats.SuccessfulCalls, result)
+
+		// Keep only recent successful calls (limit to maxResults/2 per payload)
+		maxPerPayload := int(fc.maxResults / 2)
+		if len(stats.SuccessfulCalls) > maxPerPayload {
+			stats.SuccessfulCalls = stats.SuccessfulCalls[len(stats.SuccessfulCalls)-maxPerPayload:]
+		}
 	} else {
-		fc.failedTxs++
+		stats.FailureCount++
+		stats.FailedCalls = append(stats.FailedCalls, result)
+
+		// Keep only recent failed calls (limit to maxResults/2 per payload)
+		maxPerPayload := int(fc.maxResults / 2)
+		if len(stats.FailedCalls) > maxPerPayload {
+			stats.FailedCalls = stats.FailedCalls[len(stats.FailedCalls)-maxPerPayload:]
+		}
 	}
 
-	fc.logger.Debugf("recorded transaction result: %s (%s) - %s",
-		result.PayloadDescription, result.PayloadType, result.Status)
+	fc.logger.Debugf("recorded transaction result for batch %d: %s (%s) - %s (success: %d, failed: %d)",
+		batchID, result.PayloadDescription, result.PayloadType, result.Status,
+		stats.SuccessCount, stats.FailureCount)
 }
 
-func (fc *FeedbackCollector) RecordFailure(payload *PayloadInstance, status, errorMsg string) {
+func (fc *FeedbackCollector) RecordFailure(payload *PayloadInstance, status, errorMsg string, batchID int) {
 	result := TransactionResult{
 		PayloadType:        payload.Type,
 		PayloadDescription: payload.Description,
@@ -56,85 +93,166 @@ func (fc *FeedbackCollector) RecordFailure(payload *PayloadInstance, status, err
 		BlockExecTime:      "N/A",
 		ErrorMessage:       errorMsg,
 	}
-	fc.RecordResult(result)
+	fc.RecordResult(result, batchID)
 }
 
 func (fc *FeedbackCollector) GenerateFeedback() *TransactionFeedback {
 	fc.mutex.RLock()
 	defer fc.mutex.RUnlock()
 
-	if len(fc.results) == 0 {
+	if len(fc.payloadStats) == 0 {
 		return nil
 	}
 
-	gasValues := make([]uint64, 0, len(fc.results))
-	for _, result := range fc.results {
-		if result.Status == "success" && result.GasUsed > 0 {
-			gasValues = append(gasValues, result.GasUsed)
+	var totalTxs, successfulTxs, failedTxs uint64
+	var allGasValues []uint64
+	var allResults []TransactionResult
+
+	// Aggregate stats from all payloads
+	for _, stats := range fc.payloadStats {
+		totalTxs += uint64(stats.SuccessCount + stats.FailureCount)
+		successfulTxs += uint64(stats.SuccessCount)
+		failedTxs += uint64(stats.FailureCount)
+
+		// Collect gas values from successful calls
+		for _, result := range stats.SuccessfulCalls {
+			if result.GasUsed > 0 {
+				allGasValues = append(allGasValues, result.GasUsed)
+			}
+			allResults = append(allResults, result)
 		}
+
+		// Include failed calls in results
+		allResults = append(allResults, stats.FailedCalls...)
 	}
 
 	var avgGas, medianGas uint64
-	if len(gasValues) > 0 {
-		sort.Slice(gasValues, func(i, j int) bool { return gasValues[i] < gasValues[j] })
+	if len(allGasValues) > 0 {
+		sort.Slice(allGasValues, func(i, j int) bool { return allGasValues[i] < allGasValues[j] })
 
 		var total uint64
-		for _, gas := range gasValues {
+		for _, gas := range allGasValues {
 			total += gas
 		}
-		avgGas = total / uint64(len(gasValues))
-		medianGas = gasValues[len(gasValues)/2]
+		avgGas = total / uint64(len(allGasValues))
+		medianGas = allGasValues[len(allGasValues)/2]
 	}
 
-	summary := fc.generateSummary()
+	summary := fc.generateDetailedSummary()
 
 	return &TransactionFeedback{
-		TotalTransactions:    fc.totalTransactions,
-		SuccessfulTxs:        fc.successfulTxs,
-		FailedTxs:            fc.failedTxs,
+		TotalTransactions:    totalTxs,
+		SuccessfulTxs:        successfulTxs,
+		FailedTxs:            failedTxs,
 		AverageGasUsed:       avgGas,
 		MedianGasUsed:        medianGas,
 		AverageBlockExecTime: "N/A",
-		RecentResults:        fc.getRecentResults(10),
+		RecentResults:        allResults,
 		Summary:              summary,
 	}
 }
 
-func (fc *FeedbackCollector) generateSummary() string {
-	if len(fc.results) == 0 {
-		return "No transaction results yet."
-	}
-
-	typeSuccess := make(map[string]int)
-	typeTotal := make(map[string]int)
-
-	for _, result := range fc.results {
-		typeTotal[result.PayloadType]++
-		if result.Status == "success" {
-			typeSuccess[result.PayloadType]++
-		}
+func (fc *FeedbackCollector) generateDetailedSummary() string {
+	if len(fc.payloadStats) == 0 {
+		return "No transaction results for current batch yet."
 	}
 
 	var summaryParts []string
-	for payloadType, total := range typeTotal {
-		success := typeSuccess[payloadType]
-		successRate := float64(success) / float64(total) * 100
-		summaryParts = append(summaryParts,
-			fmt.Sprintf("%s: %.1f%% success (%d/%d)", payloadType, successRate, success, total))
+
+	for description, stats := range fc.payloadStats {
+		total := stats.SuccessCount + stats.FailureCount
+		if total == 0 {
+			continue
+		}
+
+		successRate := float64(stats.SuccessCount) / float64(total) * 100
+
+		// Calculate average gas for this payload
+		var avgGas uint64
+		if stats.SuccessCount > 0 {
+			avgGas = stats.TotalGasUsed / uint64(stats.SuccessCount)
+		}
+
+		// Get recent logs from successful calls
+		var recentLogs []string
+		for _, result := range stats.SuccessfulCalls {
+			if len(result.LogData) > 0 {
+				recentLogs = append(recentLogs, result.LogData[0]) // Take first log
+				if len(recentLogs) >= 2 {                          // Limit to 2 logs per payload
+					break
+				}
+			}
+		}
+
+		// Get recent error messages from failed calls
+		var recentErrors []string
+		for _, result := range stats.FailedCalls {
+			if result.ErrorMessage != "" {
+				recentErrors = append(recentErrors, result.ErrorMessage)
+				if len(recentErrors) >= 2 { // Limit to 2 errors per payload
+					break
+				}
+			}
+		}
+
+		payloadSummary := fmt.Sprintf("'%s': %.1f%% success (%d/%d), avg_gas: %d",
+			description, successRate, stats.SuccessCount, total, avgGas)
+
+		if len(recentLogs) > 0 {
+			payloadSummary += fmt.Sprintf(", recent_logs: [%s]", strings.Join(recentLogs, ", "))
+		}
+
+		if len(recentErrors) > 0 {
+			payloadSummary += fmt.Sprintf(", recent_errors: [%s]", strings.Join(recentErrors, ", "))
+		}
+
+		summaryParts = append(summaryParts, payloadSummary)
 	}
 
-	return fmt.Sprintf("Pattern analysis: %s", strings.Join(summaryParts, ", "))
+	return fmt.Sprintf("Detailed payload analysis: %s", strings.Join(summaryParts, " | "))
 }
 
-func (fc *FeedbackCollector) getRecentResults(count int) []TransactionResult {
-	if len(fc.results) <= count {
-		return fc.results
-	}
-	return fc.results[len(fc.results)-count:]
+// StartNewBatch resets the feedback collector for a new AI response batch
+func (fc *FeedbackCollector) StartNewBatch() {
+	fc.mutex.Lock()
+	defer fc.mutex.Unlock()
+
+	fc.currentBatchID++
+	fc.payloadStats = make(map[string]*PayloadStats)
+	fc.logger.Infof("started new feedback batch %d", fc.currentBatchID)
 }
 
-func (fc *FeedbackCollector) GetStats() (uint64, uint64, uint64) {
+func (fc *FeedbackCollector) GetCurrentBatchID() int {
 	fc.mutex.RLock()
 	defer fc.mutex.RUnlock()
-	return fc.totalTransactions, fc.successfulTxs, fc.failedTxs
+	return fc.currentBatchID
+}
+
+func (fc *FeedbackCollector) GetCurrentBatchStats() (uint64, uint64, uint64) {
+	fc.mutex.RLock()
+	defer fc.mutex.RUnlock()
+
+	var totalTxs, successfulTxs, failedTxs uint64
+	for _, stats := range fc.payloadStats {
+		totalTxs += uint64(stats.SuccessCount + stats.FailureCount)
+		successfulTxs += uint64(stats.SuccessCount)
+		failedTxs += uint64(stats.FailureCount)
+	}
+
+	return totalTxs, successfulTxs, failedTxs
+}
+
+// GetFailedPayloads returns payloads that have failures for immediate feedback
+func (fc *FeedbackCollector) GetFailedPayloads() map[string]*PayloadStats {
+	fc.mutex.RLock()
+	defer fc.mutex.RUnlock()
+
+	failedPayloads := make(map[string]*PayloadStats)
+	for description, stats := range fc.payloadStats {
+		if stats.FailureCount > 0 {
+			failedPayloads[description] = stats
+		}
+	}
+
+	return failedPayloads
 }

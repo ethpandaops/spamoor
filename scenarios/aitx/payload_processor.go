@@ -9,12 +9,14 @@ import (
 type PayloadProcessor struct {
 	logger        logrus.FieldLogger
 	geasProcessor *GeasProcessor
+	substituter   *PlaceholderSubstituter
 }
 
-func NewPayloadProcessor(logger logrus.FieldLogger) *PayloadProcessor {
+func NewPayloadProcessor(logger logrus.FieldLogger, substituter *PlaceholderSubstituter) *PayloadProcessor {
 	return &PayloadProcessor{
 		logger:        logger.WithField("component", "payload_processor"),
 		geasProcessor: NewGeasProcessor(logger),
+		substituter:   substituter,
 	}
 }
 
@@ -66,18 +68,15 @@ func (pp *PayloadProcessor) ProcessPayloads(templates []PayloadTemplate) ([]Payl
 }
 
 func (pp *PayloadProcessor) validateGeasCompilation(payload *PayloadTemplate) error {
-	// Create a temporary payload instance for compilation testing
-	tempPayload := &PayloadInstance{
-		Type:         payload.Type,
-		Description:  payload.Description,
-		InitCode:     payload.InitCode,
-		RunCode:      payload.RunCode,
-		PostCode:     payload.PostCode,
-		GasRemainder: 10000, // Default value for validation
+	// Substitute placeholders first before validation
+	tempPayloadInstance, err := payload.Substitute(pp.substituter)
+	if err != nil {
+		pp.logger.Debugf("placeholder substitution failed for payload '%s': %v", payload.Description, err)
+		return fmt.Errorf("placeholder substitution failed: %w", err)
 	}
 
-	// Attempt to compile the geas code
-	_, err := pp.geasProcessor.CompileGeasPayload(tempPayload)
+	// Attempt to compile the geas code with substituted placeholders
+	_, err = pp.geasProcessor.CompileGeasPayload(tempPayloadInstance)
 	if err != nil {
 		pp.logger.Debugf("geas compilation validation failed for payload '%s': %v", payload.Description, err)
 		return err
