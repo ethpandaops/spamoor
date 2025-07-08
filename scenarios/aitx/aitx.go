@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -52,6 +53,17 @@ type ScenarioOptions struct {
 	LogAIConversations bool `yaml:"log_ai_conversations"`
 }
 
+type PayloadState struct {
+	Template        PayloadTemplate
+	IsDeployed      bool
+	IsDeploying     bool
+	ContractAddress common.Address
+	SuccessCount    int
+	FailCount       int
+	LastUsed        time.Time
+	mutex           sync.Mutex // Protects individual payload state
+}
+
 type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
@@ -63,11 +75,17 @@ type Scenario struct {
 	feedbackCollector      *FeedbackCollector
 	geasProcessor          *GeasProcessor
 
-	payloadCache          []PayloadTemplate
-	cacheIndex            int
-	aiMutex               sync.Mutex // Protects AI calls and payload cache
-	conversationHistory   []Message  // Persisted conversation history
-	conversationResponses int        // Number of AI responses in current conversation
+	// Async payload management
+	payloadStates         []*PayloadState
+	payloadMutex          sync.RWMutex  // Protects payload states slice
+	payloadRoundRobin     int           // Round-robin index
+	aiRequestChan         chan struct{} // Signals need for more payloads
+	aiReadyChan           chan struct{} // Signals AI has returned payloads
+	shutdownChan          chan struct{} // Signals shutdown
+	conversationHistory   []Message     // Persisted conversation history
+	conversationResponses int           // Number of AI responses in current conversation
+	aiWorkerRunning       bool          // Tracks if AI worker is running
+	aiWorkerMutex         sync.Mutex    // Protects AI worker state
 }
 
 var ScenarioName = "aitx"
@@ -201,12 +219,37 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	basePrompt := s.aiService.buildBasePrompt(s.options.GenerationMode)
 	s.aiService.SetBasePrompt(basePrompt)
 
+	// Initialize async payload management
+	s.payloadStates = make([]*PayloadState, 0, 100)
+	s.aiRequestChan = make(chan struct{}, 1)
+	s.aiReadyChan = make(chan struct{}, 1)
+	s.shutdownChan = make(chan struct{})
+
 	return nil
 }
 
 func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting AI transaction generator scenario")
 	defer s.logger.Infof("AI transaction generator scenario finished")
+
+	// Start background AI worker
+	go s.aiWorker(ctx)
+
+	// Initial AI request to get started
+	select {
+	case s.aiRequestChan <- struct{}{}:
+	default:
+	}
+
+	// Wait for AI to be ready
+	s.logger.Infof("waiting for AI payloads to be ready")
+	select {
+	case <-s.aiReadyChan:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	s.logger.Infof("AI payloads ready, starting transaction generation")
 
 	maxPending := s.options.MaxPending
 	if maxPending == 0 {
@@ -263,11 +306,14 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
+	// Signal shutdown to AI worker
+	close(s.shutdownChan)
+
 	return err
 }
 
 func (s *Scenario) sendAITransaction(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
-	// Deploy a contract and send 10 call transactions using batch sending
+	// Send single call transaction using round-robin payload selection
 	defer onComplete()
 
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
@@ -277,185 +323,101 @@ func (s *Scenario) sendAITransaction(ctx context.Context, txIdx uint64, onComple
 		return nil, client, wallet, fmt.Errorf("no client available")
 	}
 
-	// Get next payload template from AI or cache
-	template, err := s.getNextPayloadTemplate(ctx)
+	// Get next payload using round-robin selection
+	payloadState, err := s.getNextPayload(ctx)
 	if err != nil {
-		s.logger.Errorf("failed to get AI payload template: %v", err)
-		dummyPayload := &PayloadInstance{Type: "geas", Description: "failed_generation"}
-		s.feedbackCollector.RecordFailure(dummyPayload, "payload_generation_failed", err.Error())
+		s.logger.Errorf("failed to get payload: %v", err)
 		return nil, client, wallet, err
 	}
 
 	// Substitute placeholders
-	payload, err := template.Substitute(s.placeholderSubstituter)
+	payload, err := payloadState.Template.Substitute(s.placeholderSubstituter)
 	if err != nil {
 		s.logger.Errorf("failed to substitute placeholders: %v", err)
-		dummyPayload := &PayloadInstance{Type: template.Type, Description: template.Description}
-		s.feedbackCollector.RecordFailure(dummyPayload, "placeholder_substitution_failed", err.Error())
+		s.recordPayloadFailure(payloadState, "placeholder_substitution_failed", err.Error())
 		return nil, client, wallet, err
 	}
 
-	// Build deployment transaction
-	s.logger.Infof("deploying contract for payload: %s", payload.Description)
-	deployTx, contractAddress, err := s.deployGeasContract(ctx, wallet, client, payload)
+	// Handle deployment if needed
+	contractAddress, deployTx, err := s.ensureContractDeployed(ctx, payloadState, payload, wallet, client, txIdx)
 	if err != nil {
 		s.logger.Errorf("failed to deploy contract: %v", err)
-		s.feedbackCollector.RecordFailure(payload, "deployment_failed", err.Error())
-		return nil, client, wallet, err
-	}
-
-	// Deploy contract and wait for confirmation using SendAndAwaitTransaction
-	deployReceipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, deployTx, &spamoor.SendTransactionOptions{
-		Client:      client,
-		Rebroadcast: s.options.Rebroadcast > 0,
-		LogFn:       spamoor.GetDefaultLogFn(s.logger, "deploy", fmt.Sprintf("%6d", txIdx+1), deployTx),
-	})
-
-	if err != nil {
-		s.logger.Errorf("failed to deploy contract: %v", err)
-		s.feedbackCollector.RecordFailure(payload, "deployment_failed", err.Error())
-		return nil, client, wallet, err
-	}
-
-	if deployReceipt.Status != 1 {
-		s.logger.Errorf("contract deployment failed (status: %d)", deployReceipt.Status)
-		s.feedbackCollector.RecordFailure(payload, "deployment_reverted", "deployment transaction reverted")
-		return deployTx, client, wallet, nil
-	}
-
-	s.logger.Infof("contract deployed successfully at %s for payload: %s", contractAddress.Hex(), payload.Description)
-
-	// Build 10 call transactions
-	var callTxs []*types.Transaction
-	for i := 0; i < 10; i++ {
-		callTx, err := s.callGeasContract(ctx, wallet, client, contractAddress, payload)
-		if err != nil {
-			s.logger.Errorf("failed to build call transaction %d: %v", i+1, err)
-			s.feedbackCollector.RecordFailure(payload, "call_build_failed", err.Error())
-			return deployTx, client, wallet, err
-		}
-		callTxs = append(callTxs, callTx)
-	}
-
-	// Send all call transactions as a batch from same wallet
-	_, err = s.walletPool.GetTxPool().SendTransactionBatch(ctx, wallet, callTxs, &spamoor.BatchOptions{
-		SendTransactionOptions: spamoor.SendTransactionOptions{
-			Client:      client,
-			Rebroadcast: s.options.Rebroadcast > 0,
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-				// Collect execution results for feedback from call transactions
-				s.collectTransactionResult(payload, tx, receipt)
-			},
-		},
-	})
-
-	if err != nil {
-		s.logger.Errorf("failed to send call transaction batch: %v", err)
-		s.feedbackCollector.RecordFailure(payload, "batch_send_failed", err.Error())
+		s.recordPayloadFailure(payloadState, "deployment_failed", err.Error())
 		return deployTx, client, wallet, err
 	}
 
-	return deployTx, client, wallet, nil
-}
-
-func (s *Scenario) getNextPayloadTemplate(ctx context.Context) (*PayloadTemplate, error) {
-	// Lock to ensure only one AI call happens at a time
-	s.aiMutex.Lock()
-	defer s.aiMutex.Unlock()
-
-	// Check if we have cached payloads
-	if s.cacheIndex < len(s.payloadCache) {
-		template := s.payloadCache[s.cacheIndex]
-		s.cacheIndex++
-		return &template, nil
+	// Build call transaction
+	callTx, err := s.callGeasContract(ctx, wallet, client, contractAddress, payload)
+	if err != nil {
+		s.logger.Errorf("failed to build call transaction: %v", err)
+		s.recordPayloadFailure(payloadState, "call_build_failed", err.Error())
+		return deployTx, client, wallet, err
 	}
 
-	// Generate new batch of payloads
-	if s.aiService.GetCallCount() >= s.options.MaxAICalls {
-		return nil, fmt.Errorf("maximum AI calls limit reached (%d)", s.options.MaxAICalls)
-	}
-
-	if s.aiService.GetTokenCount() >= s.options.MaxTokens {
-		return nil, fmt.Errorf("maximum token limit reached (%d)", s.options.MaxTokens)
-	}
-
-	// Check if we need to start a new conversation (after 10 responses)
-	if s.conversationResponses >= 10 {
-		s.logger.Infof("resetting conversation after %d responses", s.conversationResponses)
-		s.conversationHistory = nil
-		s.conversationResponses = 0
-	}
-
-	if len(s.conversationHistory) == 0 {
-		s.logger.Infof("making AI call #%d - starting new conversation (other transactions waiting)", s.aiService.GetCallCount()+1)
-	} else {
-		s.logger.Infof("making AI call #%d - continuing conversation with %d messages (other transactions waiting)",
-			s.aiService.GetCallCount()+1, len(s.conversationHistory))
-	}
-
-	// Generate payloads using conversation continuation
-	var response *GenerationResponse
-	var err error
-
-	if len(s.conversationHistory) == 0 {
-		// Start new conversation
-		req := GenerationRequest{
-			TestDirection:       s.options.TestDirection,
-			GenerationMode:      s.options.GenerationMode,
-			PayloadCount:        s.options.PayloadsPerRequest,
-			PreviousSummary:     "",
-			TransactionFeedback: nil,
-		}
-
-		// Add feedback if enabled
-		if s.options.EnableFeedbackLoop {
-			req.TransactionFeedback = s.feedbackCollector.GenerateFeedback()
-		}
-
-		response, s.conversationHistory, err = s.aiService.GeneratePayloadsWithConversation(ctx, req, s.processor, nil)
-	} else {
-		// Continue existing conversation
-		feedback := ""
-		if s.options.EnableFeedbackLoop {
-			txFeedback := s.feedbackCollector.GenerateFeedback()
-			if txFeedback != nil {
-				feedback = fmt.Sprintf("Transaction feedback: %d total (%d success, %d failed), avg gas: %d. Generate more diverse patterns based on this data.",
-					txFeedback.TotalTransactions, txFeedback.SuccessfulTxs, txFeedback.FailedTxs, txFeedback.AverageGasUsed)
+	// Send call transaction
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, callTx, &spamoor.SendTransactionOptions{
+		Client:      client,
+		Rebroadcast: s.options.Rebroadcast > 0,
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+			// Record success
+			s.recordPayloadSuccess(payloadState, payload, tx, receipt)
+		},
+		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			if err != nil {
+				s.recordPayloadFailure(payloadState, "call_failed", err.Error())
 			}
-		}
-
-		if feedback == "" {
-			feedback = fmt.Sprintf("Generate %d more unique geas init_run contracts with different patterns and behaviors.", s.options.PayloadsPerRequest)
-		}
-
-		response, s.conversationHistory, err = s.aiService.GeneratePayloadsWithConversation(ctx, GenerationRequest{}, s.processor, &ConversationContinuation{
-			History:  s.conversationHistory,
-			Feedback: feedback,
-		})
-	}
+		},
+		LogFn: spamoor.GetDefaultLogFn(s.logger, "call", fmt.Sprintf("%6d", txIdx+1), callTx),
+	})
 
 	if err != nil {
-		return nil, fmt.Errorf("AI payload generation failed: %w", err)
+		s.logger.Errorf("failed to send call transaction: %v", err)
+		s.recordPayloadFailure(payloadState, "call_send_failed", err.Error())
+		return callTx, client, wallet, err
 	}
 
-	// Increment conversation response count
-	s.conversationResponses++
+	return callTx, client, wallet, nil
+}
 
-	// Payloads are already validated by the AI service
-	validPayloads := response.Payloads
+// getNextPayload selects the next payload using round-robin, preferring payloads with < 20 successes
+func (s *Scenario) getNextPayload(ctx context.Context) (*PayloadState, error) {
+	s.payloadMutex.Lock()
+	defer s.payloadMutex.Unlock()
 
-	// Update cache
-	s.payloadCache = validPayloads
-	s.cacheIndex = 1 // Return first, set index to second
-
-	if len(validPayloads) == 0 {
-		return nil, fmt.Errorf("no valid payloads generated")
+	// Check for payloads with < 20 successes
+	for i := 0; i < len(s.payloadStates); i++ {
+		idx := (s.payloadRoundRobin + i) % len(s.payloadStates)
+		payloadState := s.payloadStates[idx]
+		if payloadState.SuccessCount < 20 && !payloadState.IsDeploying {
+			s.payloadRoundRobin = (idx + 1) % len(s.payloadStates)
+			payloadState.LastUsed = time.Now()
+			return payloadState, nil
+		}
 	}
 
-	s.logger.Infof("AI call completed, generated %d payloads (conversation: %d responses, cache refilled)",
-		len(validPayloads), s.conversationResponses)
+	// No payload with < 20 successes, request more payloads
+	s.requestMorePayloads()
 
-	return &validPayloads[0], nil
+	// If we have any payloads, return the next one
+	if len(s.payloadStates) > 0 {
+		idx := s.payloadRoundRobin % len(s.payloadStates)
+		payloadState := s.payloadStates[idx]
+		s.payloadRoundRobin = (idx + 1) % len(s.payloadStates)
+		payloadState.LastUsed = time.Now()
+		return payloadState, nil
+	}
+
+	return nil, fmt.Errorf("no payloads available")
+}
+
+// requestMorePayloads signals the AI worker to generate more payloads
+func (s *Scenario) requestMorePayloads() {
+	select {
+	case s.aiRequestChan <- struct{}{}:
+		s.logger.Debugf("requested more payloads from AI worker")
+	default:
+		// Channel full, request already pending
+	}
 }
 
 func (s *Scenario) deployGeasContract(ctx context.Context, wallet *spamoor.Wallet, client *spamoor.Client, payload *PayloadInstance) (*types.Transaction, common.Address, error) {
@@ -518,7 +480,11 @@ func (s *Scenario) callGeasContract(ctx context.Context, wallet *spamoor.Wallet,
 	return wallet.BuildDynamicFeeTx(txData)
 }
 
-func (s *Scenario) collectTransactionResult(payload *PayloadInstance, tx *types.Transaction, receipt *types.Receipt) {
+func (s *Scenario) recordPayloadSuccess(payloadState *PayloadState, payload *PayloadInstance, tx *types.Transaction, receipt *types.Receipt) {
+	payloadState.mutex.Lock()
+	payloadState.SuccessCount++
+	payloadState.mutex.Unlock()
+
 	if receipt == nil {
 		s.feedbackCollector.RecordFailure(payload, "receipt_nil", "receipt was nil")
 		return
@@ -529,6 +495,11 @@ func (s *Scenario) collectTransactionResult(payload *PayloadInstance, tx *types.
 	errorMsg := ""
 	if receipt.Status == 0 {
 		status = "reverted"
+		// Record as failure instead of success
+		payloadState.mutex.Lock()
+		payloadState.SuccessCount--
+		payloadState.FailCount++
+		payloadState.mutex.Unlock()
 	}
 
 	// Calculate transaction fees
@@ -544,8 +515,9 @@ func (s *Scenario) collectTransactionResult(payload *PayloadInstance, tx *types.
 			hex.EncodeToString(log.Data)))
 	}
 
-	s.logger.Debugf("transaction confirmed: %s (%s) - %s, gas: %d, fees: %s, logs: %d",
-		payload.Description, payload.Type, status, receipt.GasUsed, txFees.TotalFeeGweiString(), len(receipt.Logs))
+	s.logger.Debugf("transaction confirmed: %s (%s) - %s, gas: %d, fees: %s, logs: %d, success: %d, fail: %d",
+		payload.Description, payload.Type, status, receipt.GasUsed, txFees.TotalFeeGweiString(), len(receipt.Logs),
+		payloadState.SuccessCount, payloadState.FailCount)
 
 	// Record result for feedback
 	result := TransactionResult{
@@ -559,4 +531,244 @@ func (s *Scenario) collectTransactionResult(payload *PayloadInstance, tx *types.
 	}
 
 	s.feedbackCollector.RecordResult(result)
+}
+
+// ensureContractDeployed ensures the contract is deployed for the payload
+func (s *Scenario) ensureContractDeployed(ctx context.Context, payloadState *PayloadState, payload *PayloadInstance, wallet *spamoor.Wallet, client *spamoor.Client, txIdx uint64) (common.Address, *types.Transaction, error) {
+	payloadState.mutex.Lock()
+	defer payloadState.mutex.Unlock()
+
+	// Check if already deployed
+	if payloadState.IsDeployed {
+		return payloadState.ContractAddress, nil, nil
+	}
+
+	payloadState.IsDeploying = true
+	defer func() {
+		payloadState.IsDeploying = false
+	}()
+
+	// Deploy the contract
+	s.logger.Infof("deploying contract for payload: %s", payload.Description)
+	deployTx, contractAddress, err := s.deployGeasContract(ctx, wallet, client, payload)
+	if err != nil {
+		return common.Address{}, nil, fmt.Errorf("failed to build deployment transaction: %w", err)
+	}
+
+	// Deploy contract and wait for confirmation
+	deployReceipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, deployTx, &spamoor.SendTransactionOptions{
+		Client:      client,
+		Rebroadcast: s.options.Rebroadcast > 0,
+		LogFn:       spamoor.GetDefaultLogFn(s.logger, "deploy", fmt.Sprintf("%6d", txIdx+1), deployTx),
+	})
+
+	if err != nil {
+		return common.Address{}, deployTx, fmt.Errorf("failed to deploy contract: %w", err)
+	}
+
+	if deployReceipt.Status != 1 {
+		return common.Address{}, deployTx, fmt.Errorf("contract deployment failed (status: %d)", deployReceipt.Status)
+	}
+
+	// Mark as deployed
+	payloadState.IsDeployed = true
+	payloadState.ContractAddress = contractAddress
+
+	s.logger.Infof("contract deployed successfully at %s for payload: %s", contractAddress.Hex(), payload.Description)
+	return contractAddress, deployTx, nil
+}
+
+// aiWorker runs in background to generate payloads asynchronously
+func (s *Scenario) aiWorker(ctx context.Context) {
+	s.aiWorkerMutex.Lock()
+	if s.aiWorkerRunning {
+		s.aiWorkerMutex.Unlock()
+		return
+	}
+	s.aiWorkerRunning = true
+	s.aiWorkerMutex.Unlock()
+
+	s.logger.Infof("starting AI worker for background payload generation")
+	defer s.logger.Infof("AI worker stopped")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.shutdownChan:
+			return
+		case <-s.aiRequestChan:
+			// Generate new payloads
+			if err := s.generatePayloads(ctx); err != nil {
+				s.logger.Errorf("failed to generate payloads: %v", err)
+				// Wait before retrying
+				select {
+				case <-time.After(5 * time.Second):
+				case <-ctx.Done():
+					return
+				case <-s.shutdownChan:
+					return
+				}
+			} else {
+				select {
+				case s.aiReadyChan <- struct{}{}:
+				default:
+				}
+				select {
+				case <-s.aiRequestChan:
+				default:
+				}
+			}
+		}
+	}
+}
+
+// generatePayloads generates new payloads from AI and manages the payload pool
+func (s *Scenario) generatePayloads(ctx context.Context) error {
+	// Check AI limits
+	if s.aiService.GetCallCount() >= s.options.MaxAICalls {
+		s.logger.Warnf("maximum AI calls limit reached (%d)", s.options.MaxAICalls)
+		return fmt.Errorf("maximum AI calls limit reached")
+	}
+
+	if s.aiService.GetTokenCount() >= s.options.MaxTokens {
+		s.logger.Warnf("maximum token limit reached (%d)", s.options.MaxTokens)
+		return fmt.Errorf("maximum token limit reached")
+	}
+
+	// Check if we need to start a new conversation (after 10 responses)
+	if s.conversationResponses >= 10 {
+		s.logger.Infof("resetting conversation after %d responses", s.conversationResponses)
+		s.conversationHistory = nil
+		s.conversationResponses = 0
+	}
+
+	if len(s.conversationHistory) == 0 {
+		s.logger.Infof("making AI call #%d - starting new conversation", s.aiService.GetCallCount()+1)
+	} else {
+		s.logger.Infof("making AI call #%d - continuing conversation with %d messages",
+			s.aiService.GetCallCount()+1, len(s.conversationHistory))
+	}
+
+	// Generate payloads using conversation continuation
+	var response *GenerationResponse
+	var err error
+
+	if len(s.conversationHistory) == 0 {
+		// Start new conversation
+		req := GenerationRequest{
+			TestDirection:       s.options.TestDirection,
+			GenerationMode:      s.options.GenerationMode,
+			PayloadCount:        s.options.PayloadsPerRequest,
+			PreviousSummary:     "",
+			TransactionFeedback: nil,
+		}
+
+		// Add feedback if enabled
+		if s.options.EnableFeedbackLoop {
+			req.TransactionFeedback = s.feedbackCollector.GenerateFeedback()
+		}
+
+		response, s.conversationHistory, err = s.aiService.GeneratePayloadsWithConversation(ctx, req, s.processor, nil)
+	} else {
+		// Continue existing conversation
+		feedback := ""
+		if s.options.EnableFeedbackLoop {
+			txFeedback := s.feedbackCollector.GenerateFeedback()
+			if txFeedback != nil {
+				feedback = fmt.Sprintf("Transaction feedback: %d total (%d success, %d failed), avg gas: %d. Generate more diverse patterns based on this data.",
+					txFeedback.TotalTransactions, txFeedback.SuccessfulTxs, txFeedback.FailedTxs, txFeedback.AverageGasUsed)
+			}
+		}
+
+		if feedback == "" {
+			feedback = fmt.Sprintf("Generate %d more unique geas init_run contracts with different patterns and behaviors.", s.options.PayloadsPerRequest)
+		}
+
+		response, s.conversationHistory, err = s.aiService.GeneratePayloadsWithConversation(ctx, GenerationRequest{}, s.processor, &ConversationContinuation{
+			History:  s.conversationHistory,
+			Feedback: feedback,
+		})
+	}
+
+	if err != nil {
+		return fmt.Errorf("AI payload generation failed: %w", err)
+	}
+
+	// Increment conversation response count
+	s.conversationResponses++
+
+	// Add new payloads to the pool
+	s.addPayloadsToPool(response.Payloads)
+
+	s.logger.Infof("AI call completed, generated %d payloads (conversation: %d responses)",
+		len(response.Payloads), s.conversationResponses)
+
+	return nil
+}
+
+// addPayloadsToPool adds new payloads to the pool and manages the 100-payload limit
+func (s *Scenario) addPayloadsToPool(templates []PayloadTemplate) {
+	s.payloadMutex.Lock()
+	defer s.payloadMutex.Unlock()
+
+	// Add new payloads
+	for _, template := range templates {
+		payloadState := &PayloadState{
+			Template:     template,
+			IsDeployed:   false,
+			SuccessCount: 0,
+			FailCount:    0,
+			LastUsed:     time.Now(),
+		}
+		s.payloadStates = append(s.payloadStates, payloadState)
+	}
+
+	// Clean up if we exceed 100 payloads
+	if len(s.payloadStates) > 100 {
+		s.cleanupPayloads()
+	}
+
+	s.logger.Infof("added %d payloads to pool, total: %d", len(templates), len(s.payloadStates))
+}
+
+// cleanupPayloads removes failing payloads first, then payloads with highest success count
+func (s *Scenario) cleanupPayloads() {
+	// Sort by fail count (descending), then by success count (descending)
+	sort.Slice(s.payloadStates, func(i, j int) bool {
+		if s.payloadStates[i].FailCount != s.payloadStates[j].FailCount {
+			return s.payloadStates[i].FailCount > s.payloadStates[j].FailCount
+		}
+		return s.payloadStates[i].SuccessCount > s.payloadStates[j].SuccessCount
+	})
+
+	// Remove the worst 25% to get back to 75 payloads
+	targetSize := 75
+	if len(s.payloadStates) > targetSize {
+		removedCount := len(s.payloadStates) - targetSize
+		s.payloadStates = s.payloadStates[removedCount:]
+		s.logger.Infof("cleaned up %d payloads, remaining: %d", removedCount, len(s.payloadStates))
+	}
+
+	// Reset round-robin index if needed
+	if s.payloadRoundRobin >= len(s.payloadStates) {
+		s.payloadRoundRobin = 0
+	}
+}
+
+func (s *Scenario) recordPayloadFailure(payloadState *PayloadState, errorType string, errorMsg string) {
+	payloadState.mutex.Lock()
+	payloadState.FailCount++
+	payloadState.mutex.Unlock()
+
+	// Create dummy payload for feedback
+	dummyPayload := &PayloadInstance{
+		Type:        payloadState.Template.Type,
+		Description: payloadState.Template.Description,
+	}
+	s.feedbackCollector.RecordFailure(dummyPayload, errorType, errorMsg)
+
+	s.logger.Debugf("payload failure: %s - %s: %s, success: %d, fail: %d",
+		payloadState.Template.Description, errorType, errorMsg,
+		payloadState.SuccessCount, payloadState.FailCount)
 }
