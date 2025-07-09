@@ -90,10 +90,22 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	if options.WalletPool != nil && options.WalletPool.GetTxPool() != nil {
 		txPool := options.WalletPool.GetTxPool()
 		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats *spamoor.WalletPoolBlockStats) {
-			currentSubmitted := txCount.Load()
-			submittedThisBlock := currentSubmitted - lastSubmittedCount
-			lastSubmittedCount = currentSubmitted
-			pending := pendingCount.Load()
+			pendingCount := uint64(0)
+			submittedCount := uint64(0)
+			for _, wallet := range options.WalletPool.GetAllWallets() {
+				// Get pending count
+				pendingNonce := wallet.GetNonce()
+				confirmedNonce := wallet.GetConfirmedNonce()
+				if pendingNonce > confirmedNonce {
+					pendingCount += pendingNonce - confirmedNonce
+				}
+
+				// Get submitted count
+				submittedCount += wallet.GetSubmittedTxCount()
+			}
+
+			submittedThisBlock := submittedCount - lastSubmittedCount
+			lastSubmittedCount = submittedCount
 
 			// Record confirmed transactions for this block
 			throughputTracker.recordCompletion(blockNumber, walletPoolStats.ConfirmedTxCount)
@@ -105,7 +117,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 
 			options.Logger.WithField("wallets", walletPoolStats.AffectedWallets).Infof(
 				"block %d: submitted=%d, pending=%d, confirmed=%d, throughput: 5B=%.2f tx/B, 20B=%.2f tx/B, 60B=%.2f tx/B",
-				blockNumber, submittedThisBlock, pending, walletPoolStats.ConfirmedTxCount, throughput5B, throughput20B, throughput60B,
+				blockNumber, submittedThisBlock, pendingCount, walletPoolStats.ConfirmedTxCount, throughput5B, throughput20B, throughput60B,
 			)
 		})
 
