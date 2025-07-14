@@ -110,18 +110,10 @@ func NewMultiGranularityMetrics(windowDuration time.Duration, blockGranularity u
 }
 
 // handleBulkBlockUpdate processes each new block via TxPool bulk subscription
-func (mc *TxPoolMetricsCollector) handleBulkBlockUpdate(blockNumber uint64, allWalletPoolStats map[*spamoor.WalletPool]*spamoor.WalletPoolBlockStats) {
+func (mc *TxPoolMetricsCollector) handleBulkBlockUpdate(blockNumber uint64, globalBlockStats *spamoor.GlobalBlockStats) {
 	// Extract block data
-	var block *types.Block
-	var receipts []*types.Receipt
-
-	for _, stats := range allWalletPoolStats {
-		if stats.Block != nil {
-			block = stats.Block
-			receipts = stats.Receipts
-			break
-		}
-	}
+	block := globalBlockStats.Block
+	receipts := globalBlockStats.Receipts
 
 	// If no block data from spammer stats, we need to get block data another way
 	// For now, we'll handle the case where we have spammer data
@@ -131,8 +123,8 @@ func (mc *TxPoolMetricsCollector) handleBulkBlockUpdate(blockNumber uint64, allW
 	}
 
 	// Process the block for both time windows
-	newDataPoint := mc.processBlockForWindow(mc.shortWindow, blockNumber, block, allWalletPoolStats, receipts)
-	mc.processBlockForWindow(mc.longWindow, blockNumber, block, allWalletPoolStats, receipts)
+	newDataPoint := mc.processBlockForWindow(mc.shortWindow, blockNumber, block, globalBlockStats.WalletPoolStats, receipts)
+	mc.processBlockForWindow(mc.longWindow, blockNumber, block, globalBlockStats.WalletPoolStats, receipts)
 
 	// Send real-time update to subscribers (only for short window)
 	if newDataPoint != nil {
