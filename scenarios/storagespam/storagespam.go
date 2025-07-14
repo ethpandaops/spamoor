@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -32,6 +33,7 @@ type ScenarioOptions struct {
 	Timeout        string  `yaml:"timeout"`
 	ClientGroup    string  `yaml:"client_group"`
 	LogTxs         bool    `yaml:"log_txs"`
+	ReuseContract  bool    `yaml:"reuse_contract"`
 }
 
 type Scenario struct {
@@ -55,6 +57,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Timeout:        "",
 	ClientGroup:    "",
 	LogTxs:         false,
+	ReuseContract:  false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -82,11 +85,19 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
+	flags.BoolVar(&s.options.ReuseContract, "reuse-contract", ScenarioDefaultOptions.ReuseContract, "Reuse existing contract deployed at nonce 0 from well-known deployer wallet")
 	return nil
 }
 
 func (s *Scenario) Init(options *scenario.Options) error {
 	s.walletPool = options.WalletPool
+
+	// Register well-known deployer wallet for contract deployment
+	s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
+		Name:          "deployer",
+		RefillAmount:  uint256.NewInt(2000000000000000000), // 2 ETH
+		RefillBalance: uint256.NewInt(1000000000000000000), // 1 ETH
+	})
 
 	if options.Config != "" {
 		// Use the generalized config validation and parsing helper
@@ -134,7 +145,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	s.gasBurnerContractAddr = receipt.ContractAddress
 
-	s.logger.Infof("deployed gas burner contract at %v", s.gasBurnerContractAddr.String())
+	s.logger.Infof("deployed storage spam contract at %v", s.gasBurnerContractAddr.String())
 
 	// send transactions
 	maxPending := s.options.MaxPending
@@ -199,10 +210,45 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamoor.Client, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
+	wallet := s.walletPool.GetWellKnownWallet("deployer")
 
 	if client == nil {
 		return nil, client, fmt.Errorf("no client available")
+	}
+
+	if wallet == nil {
+		return nil, client, fmt.Errorf("no wallet available")
+	}
+
+	// Check if contract reuse is enabled
+	if s.options.ReuseContract {
+		// Calculate contract address at nonce 0
+		contractAddr := crypto.CreateAddress(wallet.GetAddress(), 0)
+
+		// Check if contract already exists
+		codeBytes, err := client.GetEthClient().CodeAt(ctx, contractAddr, nil)
+		if err != nil {
+			return nil, client, fmt.Errorf("failed to check contract existence: %v", err)
+		}
+
+		if len(codeBytes) > 0 {
+			// Contract exists, create a fake receipt for consistency
+			s.logger.Infof("reusing existing contract at %v", contractAddr.String())
+			return &types.Receipt{
+				ContractAddress: contractAddr,
+				Status:          types.ReceiptStatusSuccessful,
+			}, client, nil
+		}
+
+		// Contract doesn't exist, check if deployer wallet is at nonce 0
+		deployerNonce, err := client.GetEthClient().PendingNonceAt(ctx, wallet.GetAddress())
+		if err != nil {
+			return nil, client, fmt.Errorf("failed to get deployer nonce: %v", err)
+		}
+
+		if deployerNonce != 0 {
+			return nil, client, fmt.Errorf("deployer wallet is at nonce %d, expected 0 for contract reuse", deployerNonce)
+		}
 	}
 
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
