@@ -14,8 +14,9 @@
       <thead>
         <tr>
           <th>Address</th>
+          <th>Name</th>
           <th>Balance</th>
-          <th>Nonces</th>
+          <th data-bs-toggle="popover" data-bs-trigger="hover" data-bs-content="Format: [pending nonce] / [confirmed nonce]" style="cursor: help;">Nonces</th>
           <th>Pending TXs</th>
           <th>Used By</th>
           <th>Actions</th>
@@ -25,6 +26,7 @@
         <!-- Root Wallet -->
         <tr class="align-middle wallet-row" data-wallet-address="{{ .RootWallet.Address }}">
           <td class="font-monospace">{{ .RootWallet.Address }}</td>
+          <td>{{ .RootWallet.Name }}</td>
           <td>{{ .RootWallet.Balance }} ETH</td>
           <td>{{ .RootWallet.PendingNonce }} / {{ .RootWallet.ConfirmedNonce }}</td>
           <td>{{ subUI64 .RootWallet.PendingNonce .RootWallet.ConfirmedNonce }}</td>
@@ -40,6 +42,7 @@
         {{ range .SpammerWallets }}
         <tr class="align-middle wallet-row" data-wallet-address="{{ .Address }}">
           <td class="font-monospace">{{ .Address }}</td>
+          <td>{{ .Name }}</td>
           <td>{{ .Balance }} ETH</td>
           <td>{{ .PendingNonce }} / {{ .ConfirmedNonce }}</td>
           <td>{{ subUI64 .PendingNonce .ConfirmedNonce }}</td>
@@ -110,6 +113,11 @@ document.getElementById('transaction-view-btn').addEventListener('click', functi
   showView('transaction');
 });
 
+document.addEventListener('DOMContentLoaded', function() {
+  const popoverTriggerList = document.querySelectorAll('[data-bs-toggle="popover"]');
+  const popoverList = [...popoverTriggerList].map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl));
+});
+
 function showView(viewType) {
   const walletView = document.getElementById('wallet-view');
   const transactionView = document.getElementById('transaction-view');
@@ -155,7 +163,7 @@ function loadWalletTransactions(walletAddress, walletRow) {
       txRow.classList.add('tx-expansion-row');
       
       const txCell = document.createElement('td');
-      txCell.setAttribute('colspan', '6');
+      txCell.setAttribute('colspan', '7');
       txCell.classList.add('p-0');
       
       if (!transactions || transactions.length === 0) {
@@ -179,7 +187,7 @@ function loadWalletTransactions(walletAddress, walletRow) {
       txRow.classList.add('tx-expansion-row');
       
       const txCell = document.createElement('td');
-      txCell.setAttribute('colspan', '6');
+      txCell.setAttribute('colspan', '7');
       txCell.classList.add('p-0');
       txCell.innerHTML = '<div class="p-3 text-danger">Error loading transactions</div>';
       
