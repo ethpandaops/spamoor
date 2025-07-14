@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/daemon/db"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/ethpandaops/spamoor/webui"
@@ -19,17 +20,19 @@ import (
 )
 
 type CliArgs struct {
-	verbose        bool
-	trace          bool
-	debug          bool
-	rpchosts       []string
-	rpchostsFile   string
-	privkey        string
-	port           int
-	dbFile         string
-	startupSpammer string
-	fuluActivation uint64
-	withoutBatcher bool
+	verbose          bool
+	trace            bool
+	debug            bool
+	rpchosts         []string
+	rpchostsFile     string
+	privkey          string
+	port             int
+	dbFile           string
+	startupSpammer   string
+	fuluActivation   uint64
+	withoutBatcher   bool
+	disableTxMetrics bool
+	secondsPerSlot   uint64
 }
 
 func main() {
@@ -47,6 +50,8 @@ func main() {
 	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file or URL with startup spammers configuration")
 	flags.Uint64Var(&cliArgs.fuluActivation, "fulu-activation", 0, "The unix timestamp of the Fulu activation (if activated)")
 	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
+	flags.BoolVar(&cliArgs.disableTxMetrics, "disable-tx-metrics", false, "Disable transaction metrics collection and graphs page (keeps Prometheus metrics)")
+	flags.Uint64Var(&cliArgs.secondsPerSlot, "seconds-per-slot", 12, "Seconds per slot for rate limiting (used for throughput calculation).")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -65,6 +70,9 @@ func main() {
 		"version":   utils.GetBuildVersion(),
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor daemon")
+
+	// Set global seconds per slot
+	scenario.GlobalSecondsPerSlot = cliArgs.secondsPerSlot
 
 	// start client pool
 	rpcHosts := []string{}
@@ -118,6 +126,7 @@ func main() {
 
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
 		Context:    ctx,
+		Logger:     logger.WithField("module", "txpool"),
 		ClientPool: clientPool,
 		GetActiveWalletPools: func() []*spamoor.WalletPool {
 			walletPools := make([]*spamoor.WalletPool, 0)
@@ -143,12 +152,13 @@ func main() {
 
 	// start frontend
 	webui.StartHttpServer(&types.FrontendConfig{
-		Host:     "0.0.0.0",
-		Port:     cliArgs.port,
-		SiteName: "Spamoor",
-		Debug:    cliArgs.debug,
-		Pprof:    true,
-		Minify:   true,
+		Host:             "0.0.0.0",
+		Port:             cliArgs.port,
+		SiteName:         "Spamoor",
+		Debug:            cliArgs.debug,
+		Pprof:            true,
+		Minify:           true,
+		DisableTxMetrics: cliArgs.disableTxMetrics,
 	}, spamoorDaemon)
 
 	// start daemon

@@ -5,9 +5,11 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -29,18 +31,30 @@ type Wallet struct {
 	address          common.Address
 	chainid          *big.Int
 	pendingTxCount   atomic.Uint64
+	submittedTxCount atomic.Uint64
 	confirmedTxCount uint64
 	balance          *big.Int
 
 	txNonceChans     map[uint64]*nonceStatus
 	txNonceMutex     sync.Mutex
 	lastConfirmation uint64
+
+	lowBalanceNotifyChan chan<- struct{}
+	lowBalanceThreshold  *big.Int
 }
 
 // nonceStatus tracks the confirmation status of a transaction with a specific nonce
 type nonceStatus struct {
+	txs     []*PendingTx
 	receipt *types.Receipt
 	channel chan bool
+}
+
+type PendingTx struct {
+	Tx               *types.Transaction
+	Submitted        time.Time
+	LastRebroadcast  time.Time
+	RebroadcastCount uint64
 }
 
 // NewWallet creates a new wallet from a private key string.
@@ -125,12 +139,34 @@ func (wallet *Wallet) GetConfirmedNonce() uint64 {
 	return wallet.confirmedTxCount
 }
 
+// GetSubmittedTxCount returns the total number of transactions submitted by this wallet.
+// This represents the cumulative count of all transactions that have been submitted to the network.
+func (wallet *Wallet) GetSubmittedTxCount() uint64 {
+	return wallet.submittedTxCount.Load()
+}
+
+// IncrementSubmittedTxCount increments the submitted transaction counter.
+// This should be called when a transaction is successfully submitted to the network.
+func (wallet *Wallet) IncrementSubmittedTxCount() {
+	wallet.submittedTxCount.Add(1)
+}
+
 // GetBalance returns the current balance of the wallet.
 // The returned value is thread-safe to read.
 func (wallet *Wallet) GetBalance() *big.Int {
 	wallet.balanceMutex.RLock()
 	defer wallet.balanceMutex.RUnlock()
 	return wallet.balance
+}
+
+// setLowBalanceNotification sets up low balance notification for this wallet.
+// When the balance falls below the threshold, the wallet will send a notification
+// to the channel (non-blocking).
+func (wallet *Wallet) setLowBalanceNotification(notifyChan chan<- struct{}, threshold *big.Int) {
+	wallet.balanceMutex.Lock()
+	defer wallet.balanceMutex.Unlock()
+	wallet.lowBalanceNotifyChan = notifyChan
+	wallet.lowBalanceThreshold = threshold
 }
 
 // SetChainId sets the chain ID for this wallet.
@@ -167,6 +203,7 @@ func (wallet *Wallet) SetBalance(balance *big.Int) {
 	wallet.balanceMutex.Lock()
 	defer wallet.balanceMutex.Unlock()
 	wallet.balance = balance
+	wallet.checkLowBalance()
 }
 
 // SubBalance subtracts the specified amount from the wallet's balance.
@@ -175,6 +212,7 @@ func (wallet *Wallet) SubBalance(amount *big.Int) {
 	wallet.balanceMutex.Lock()
 	defer wallet.balanceMutex.Unlock()
 	wallet.balance = wallet.balance.Sub(wallet.balance, amount)
+	wallet.checkLowBalance()
 }
 
 // AddBalance adds the specified amount to the wallet's balance.
@@ -183,6 +221,23 @@ func (wallet *Wallet) AddBalance(amount *big.Int) {
 	wallet.balanceMutex.Lock()
 	defer wallet.balanceMutex.Unlock()
 	wallet.balance = wallet.balance.Add(wallet.balance, amount)
+}
+
+// checkLowBalance checks if balance has fallen below threshold and sends notification.
+// Must be called with balanceMutex held. Non-blocking - drops notification if channel is full.
+func (wallet *Wallet) checkLowBalance() {
+	if wallet.lowBalanceNotifyChan == nil || wallet.lowBalanceThreshold == nil || wallet.balance == nil {
+		return
+	}
+
+	if wallet.balance.Cmp(wallet.lowBalanceThreshold) < 0 {
+		// Non-blocking send
+		select {
+		case wallet.lowBalanceNotifyChan <- struct{}{}:
+		default:
+			// Channel full, drop notification
+		}
+	}
 }
 
 // BuildDynamicFeeTx builds and signs a dynamic fee (EIP-1559) transaction.
@@ -292,9 +347,11 @@ func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
 // It manages a map of nonce channels used to wait for specific transaction confirmations.
 // Returns the nonce status and a boolean indicating if this is the first pending transaction.
 // If the target nonce is already confirmed, returns nil and false.
-func (wallet *Wallet) getTxNonceChan(targetNonce uint64) (*nonceStatus, bool) {
+func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
+
+	targetNonce := tx.Nonce()
 
 	if wallet.confirmedTxCount > targetNonce {
 		return nil, false
@@ -302,13 +359,68 @@ func (wallet *Wallet) getTxNonceChan(targetNonce uint64) (*nonceStatus, bool) {
 
 	nonceChan := wallet.txNonceChans[targetNonce]
 	if nonceChan != nil {
+		for _, existingTx := range nonceChan.txs {
+			if existingTx.Tx.Hash() == tx.Hash() {
+				return nonceChan, false
+			}
+		}
+
+		nonceChan.txs = append(nonceChan.txs, &PendingTx{
+			Tx:        tx,
+			Submitted: time.Now(),
+		})
 		return nonceChan, false
 	}
 
 	nonceChan = &nonceStatus{
+		txs: []*PendingTx{
+			{
+				Tx:        tx,
+				Submitted: time.Now(),
+			},
+		},
 		channel: make(chan bool),
 	}
 	wallet.txNonceChans[targetNonce] = nonceChan
 
 	return nonceChan, len(wallet.txNonceChans) == 1
+}
+
+func (wallet *Wallet) GetPendingTx(tx *types.Transaction) *PendingTx {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	nonceChan := wallet.txNonceChans[tx.Nonce()]
+	if nonceChan == nil {
+		return nil
+	}
+
+	for _, pendingTx := range nonceChan.txs {
+		if pendingTx.Tx.Hash() == tx.Hash() {
+			return pendingTx
+		}
+	}
+
+	return nil
+}
+
+func (wallet *Wallet) GetPendingTxs() []*PendingTx {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	pendingNonces := []uint64{}
+	for nonce := range wallet.txNonceChans {
+		pendingNonces = append(pendingNonces, nonce)
+	}
+
+	sort.Slice(pendingNonces, func(i, j int) bool {
+		return pendingNonces[i] < pendingNonces[j]
+	})
+
+	pendingTxs := []*PendingTx{}
+	for _, nonce := range pendingNonces {
+		pendingTxs = append(pendingTxs, wallet.txNonceChans[nonce].txs...)
+	}
+
+	return pendingTxs
 }

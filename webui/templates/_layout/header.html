@@ -53,6 +53,13 @@
                 <span class="nav-text">Clients</span>
               </a>
             </li>
+            {{ if not .DisableTxMetrics }}
+            <li class="nav-item px-2">
+              <a class="nav-link" href="/graphs">
+                <span class="nav-text">Graphs</span>
+              </a>
+            </li>
+            {{ end }}
             <li class="nav-item px-2">
               <a class="nav-link" href="/docs/">
                 <span class="nav-text">API</span>

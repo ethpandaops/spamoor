@@ -46,21 +46,18 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/api.Response"
-                        }
+                        "description": "Success"
                     },
                     "400": {
                         "description": "Invalid client index",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "404": {
                         "description": "Client not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -68,7 +65,7 @@ const docTemplate = `{
         },
         "/api/client/{index}/group": {
             "put": {
-                "description": "Updates the group for a specific client",
+                "description": "Updates the group(s) for a specific client. Supports both single group (backward compatibility) and multiple groups.",
                 "consumes": [
                     "application/json"
                 ],
@@ -86,7 +83,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "New group name",
+                        "description": "New group name(s)",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -97,21 +94,66 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/api.Response"
-                        }
+                        "description": "Success"
                     },
                     "400": {
                         "description": "Invalid client index",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "404": {
                         "description": "Client not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/client/{index}/name": {
+            "put": {
+                "description": "Updates the name override for a specific client",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Update client name override",
+                "operationId": "updateClientName",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Client index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New name override",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.UpdateClientNameRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "description": "Invalid client index",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Client not found",
+                        "schema": {
+                            "type": "string"
                         }
                     }
                 }
@@ -132,22 +174,147 @@ const docTemplate = `{
                     "200": {
                         "description": "Success",
                         "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/api.Response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "type": "array",
-                                            "items": {
-                                                "$ref": "#/definitions/api.ClientEntry"
-                                            }
-                                        }
-                                    }
-                                }
-                            ]
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.ClientEntry"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/graphs/dashboard": {
+            "get": {
+                "description": "Returns comprehensive graphs data for the dashboard including all spammers, totals, and time-series data",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Graphs"
+                ],
+                "summary": "Get graphs dashboard data",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.GraphsDashboardResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/graphs/spammer/{id}/timeseries": {
+            "get": {
+                "description": "Returns detailed time-series graphs data for a specific spammer",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Graphs"
+                ],
+                "summary": "Get time-series data for a specific spammer",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Spammer ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.SpammerTimeSeriesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid spammer ID",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Spammer not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/graphs/stream": {
+            "get": {
+                "description": "Provides real-time graphs updates via Server-Sent Events (SSE)",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "Graphs"
+                ],
+                "summary": "Stream real-time graphs updates",
+                "responses": {
+                    "200": {
+                        "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/pending-transactions": {
+            "get": {
+                "description": "Returns a list of pending transactions, optionally filtered by wallet address",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wallet"
+                ],
+                "summary": "Get pending transactions (global or wallet-specific)",
+                "operationId": "getPendingTransactions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wallet address to filter by (optional)",
+                        "name": "wallet",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.PendingTransactionEntry"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid wallet address",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
                         }
                     }
                 }
@@ -168,34 +335,22 @@ const docTemplate = `{
                     "200": {
                         "description": "Success",
                         "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/api.Response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "type": "array",
-                                            "items": {
-                                                "$ref": "#/definitions/api.ScenarioEntries"
-                                            }
-                                        }
-                                    }
-                                }
-                            ]
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.ScenarioEntries"
+                            }
                         }
                     },
                     "400": {
                         "description": "Failure",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -231,13 +386,13 @@ const docTemplate = `{
                     "404": {
                         "description": "Scenario not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -272,31 +427,46 @@ const docTemplate = `{
                     "200": {
                         "description": "Spammer ID",
                         "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/api.Response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "type": "integer"
-                                        }
-                                    }
-                                }
-                            ]
+                            "type": "integer"
                         }
                     },
                     "400": {
                         "description": "Invalid request",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/spammer-library/index": {
+            "get": {
+                "description": "Returns the index of available spammer configurations from GitHub",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SpammerLibrary"
+                ],
+                "summary": "Get spammer library index",
+                "operationId": "getSpammerLibraryIndex",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.SpammerLibraryIndex"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
                         }
                     }
                 }
@@ -326,31 +496,19 @@ const docTemplate = `{
                     "200": {
                         "description": "Success",
                         "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/api.Response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/api.SpammerDetails"
-                                        }
-                                    }
-                                }
-                            ]
+                            "$ref": "#/definitions/api.SpammerDetails"
                         }
                     },
                     "400": {
                         "description": "Invalid spammer ID",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -385,27 +543,24 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/api.Response"
-                        }
+                        "description": "Success"
                     },
                     "400": {
                         "description": "Invalid request",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -428,27 +583,24 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/api.Response"
-                        }
+                        "description": "Success"
                     },
                     "400": {
                         "description": "Invalid spammer ID",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -478,34 +630,22 @@ const docTemplate = `{
                     "200": {
                         "description": "Success",
                         "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/api.Response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "type": "array",
-                                            "items": {
-                                                "$ref": "#/definitions/api.LogEntry"
-                                            }
-                                        }
-                                    }
-                                }
-                            ]
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.LogEntry"
+                            }
                         }
                     },
                     "400": {
                         "description": "Invalid spammer ID",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -547,19 +687,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid spammer ID",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Streaming unsupported",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -584,27 +724,24 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/api.Response"
-                        }
+                        "description": "Success"
                     },
                     "400": {
                         "description": "Invalid spammer ID",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -629,27 +766,24 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/api.Response"
-                        }
+                        "description": "Success"
                     },
                     "400": {
                         "description": "Invalid spammer ID",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -674,27 +808,24 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Success",
-                        "schema": {
-                            "$ref": "#/definitions/api.Response"
-                        }
+                        "description": "Success"
                     },
                     "400": {
                         "description": "Invalid spammer ID",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -715,22 +846,10 @@ const docTemplate = `{
                     "200": {
                         "description": "Success",
                         "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/api.Response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "type": "array",
-                                            "items": {
-                                                "$ref": "#/definitions/api.SpammerListEntry"
-                                            }
-                                        }
-                                    }
-                                }
-                            ]
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.SpammerListEntry"
+                            }
                         }
                     }
                 }
@@ -770,13 +889,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid request",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     }
                 }
@@ -811,31 +930,40 @@ const docTemplate = `{
                     "200": {
                         "description": "Success",
                         "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/api.Response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/daemon.ImportResult"
-                                        }
-                                    }
-                                }
-                            ]
+                            "$ref": "#/definitions/daemon.ImportResult"
                         }
                     },
                     "400": {
                         "description": "Invalid request",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
                         }
                     },
                     "500": {
                         "description": "Server Error",
                         "schema": {
-                            "$ref": "#/definitions/api.Response"
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/version": {
+            "get": {
+                "description": "Returns the current spamoor version information",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Version"
+                ],
+                "summary": "Get spamoor version",
+                "operationId": "getVersion",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.VersionResponse"
                         }
                     }
                 }
@@ -853,12 +981,23 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "group": {
+                    "description": "First group for backward compatibility",
                     "type": "string"
+                },
+                "groups": {
+                    "description": "All groups",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "index": {
                     "type": "integer"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "name_override": {
                     "type": "string"
                 },
                 "ready": {
@@ -904,6 +1043,62 @@ const docTemplate = `{
                 }
             }
         },
+        "api.GraphsDashboardResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.GraphsDataPoint"
+                    }
+                },
+                "others": {
+                    "$ref": "#/definitions/api.OthersMetricsData"
+                },
+                "range": {
+                    "$ref": "#/definitions/api.TimeRange"
+                },
+                "spammers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.SpammerMetricsData"
+                    }
+                },
+                "totals": {
+                    "$ref": "#/definitions/api.TotalMetricsData"
+                }
+            }
+        },
+        "api.GraphsDataPoint": {
+            "type": "object",
+            "properties": {
+                "blocks": {
+                    "type": "integer"
+                },
+                "endBlock": {
+                    "type": "integer"
+                },
+                "othersGas": {
+                    "type": "integer"
+                },
+                "spammers": {
+                    "description": "spammerID -\u003e detailed data",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/api.SpammerBlockData"
+                    }
+                },
+                "startBlock": {
+                    "type": "integer"
+                },
+                "totalGas": {
+                    "type": "integer"
+                },
+                "ts": {
+                    "type": "string"
+                }
+            }
+        },
         "api.ImportSpammersRequest": {
             "type": "object",
             "properties": {
@@ -933,11 +1128,71 @@ const docTemplate = `{
                 }
             }
         },
-        "api.Response": {
+        "api.OthersMetricsData": {
             "type": "object",
             "properties": {
-                "data": {},
-                "error": {
+                "gasUsed": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.PendingTransactionEntry": {
+            "type": "object",
+            "properties": {
+                "base_fee": {
+                    "description": "In wei as string",
+                    "type": "string"
+                },
+                "base_fee_formatted": {
+                    "description": "Formatted for display",
+                    "type": "string"
+                },
+                "fee": {
+                    "description": "In wei as string",
+                    "type": "string"
+                },
+                "fee_formatted": {
+                    "description": "Formatted for display",
+                    "type": "string"
+                },
+                "hash": {
+                    "type": "string"
+                },
+                "last_rebroadcast": {
+                    "description": "RFC3339 timestamp",
+                    "type": "string"
+                },
+                "nonce": {
+                    "type": "integer"
+                },
+                "rebroadcast_count": {
+                    "type": "integer"
+                },
+                "scenario_name": {
+                    "description": "Scenario name (if applicable)",
+                    "type": "string"
+                },
+                "spammer_id": {
+                    "description": "Spammer ID (if applicable)",
+                    "type": "integer"
+                },
+                "submitted_at": {
+                    "description": "RFC3339 timestamp",
+                    "type": "string"
+                },
+                "value": {
+                    "description": "In wei as string",
+                    "type": "string"
+                },
+                "value_formatted": {
+                    "description": "Formatted for display",
+                    "type": "string"
+                },
+                "wallet_address": {
+                    "type": "string"
+                },
+                "wallet_name": {
+                    "description": "Human-readable wallet name",
                     "type": "string"
                 }
             }
@@ -950,6 +1205,23 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "api.SpammerBlockData": {
+            "type": "object",
+            "properties": {
+                "confirmed": {
+                    "type": "integer"
+                },
+                "gas": {
+                    "type": "integer"
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "submitted": {
+                    "type": "integer"
                 }
             }
         },
@@ -973,6 +1245,58 @@ const docTemplate = `{
                 },
                 "status": {
                     "type": "integer"
+                }
+            }
+        },
+        "api.SpammerLibraryEntry": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "file": {
+                    "type": "string"
+                },
+                "min_version": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "scenarios": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "spammer_count": {
+                    "type": "integer"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "api.SpammerLibraryIndex": {
+            "type": "object",
+            "properties": {
+                "base_url": {
+                    "type": "string"
+                },
+                "cached_at": {
+                    "type": "string"
+                },
+                "configs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.SpammerLibraryEntry"
+                    }
+                },
+                "generated": {
+                    "type": "string"
                 }
             }
         },
@@ -1000,6 +1324,104 @@ const docTemplate = `{
                 }
             }
         },
+        "api.SpammerMetricsData": {
+            "type": "object",
+            "properties": {
+                "confirmed": {
+                    "type": "integer"
+                },
+                "gasUsed": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "Running status from daemon",
+                    "type": "integer"
+                },
+                "submitted": {
+                    "type": "integer"
+                },
+                "updated": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.SpammerTimeSeriesPoint": {
+            "type": "object",
+            "properties": {
+                "blockNumber": {
+                    "type": "integer"
+                },
+                "confirmedTxCount": {
+                    "type": "integer"
+                },
+                "gasUsed": {
+                    "type": "integer"
+                },
+                "pendingTxCount": {
+                    "type": "integer"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.SpammerTimeSeriesResponse": {
+            "type": "object",
+            "properties": {
+                "dataPoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.SpammerTimeSeriesPoint"
+                    }
+                },
+                "spammerId": {
+                    "type": "integer"
+                },
+                "spammerName": {
+                    "type": "string"
+                },
+                "timeRange": {
+                    "$ref": "#/definitions/api.TimeRange"
+                }
+            }
+        },
+        "api.TimeRange": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "string"
+                },
+                "start": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.TotalMetricsData": {
+            "type": "object",
+            "properties": {
+                "confirmed": {
+                    "type": "integer"
+                },
+                "gasUsed": {
+                    "type": "integer"
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "submitted": {
+                    "type": "integer"
+                }
+            }
+        },
         "api.UpdateClientEnabledRequest": {
             "type": "object",
             "properties": {
@@ -1012,6 +1434,22 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "group": {
+                    "description": "Single group for backward compatibility",
+                    "type": "string"
+                },
+                "groups": {
+                    "description": "Multiple groups",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "api.UpdateClientNameRequest": {
+            "type": "object",
+            "properties": {
+                "name_override": {
                     "type": "string"
                 }
             }
@@ -1026,6 +1464,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.VersionResponse": {
+            "type": "object",
+            "properties": {
+                "release": {
+                    "type": "string"
+                },
+                "version": {
                     "type": "string"
                 }
             }

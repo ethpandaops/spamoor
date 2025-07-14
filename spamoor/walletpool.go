@@ -76,6 +76,13 @@ type WalletPool struct {
 
 	// Optional callback to track transaction results for metrics
 	transactionTracker func(err error)
+
+	// Spammer ID for metrics tracking
+	spammerID uint64
+
+	// Low balance notification system
+	lowBalanceNotifyChan chan struct{}
+	lastFundingTime      time.Time
 }
 
 // FundingRequest represents a request to fund a wallet with a specific amount.
@@ -101,14 +108,15 @@ func GetDefaultWalletConfig(scenarioName string) *WalletPoolConfig {
 // The pool must be configured and prepared with PrepareWallets() before use.
 func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *RootWallet, clientPool *ClientPool, txpool *TxPool) *WalletPool {
 	return &WalletPool{
-		ctx:              ctx,
-		logger:           logger,
-		rootWallet:       rootWallet,
-		clientPool:       clientPool,
-		txpool:           txpool,
-		childWallets:     make([]*Wallet, 0),
-		wellKnownWallets: make(map[string]*Wallet),
-		runFundings:      true,
+		ctx:                  ctx,
+		logger:               logger,
+		rootWallet:           rootWallet,
+		clientPool:           clientPool,
+		txpool:               txpool,
+		childWallets:         make([]*Wallet, 0),
+		wellKnownWallets:     make(map[string]*Wallet),
+		runFundings:          true,
+		lowBalanceNotifyChan: make(chan struct{}, 100), // buffered channel
 	}
 }
 
@@ -309,11 +317,18 @@ func (pool *WalletPool) GetWalletName(address common.Address) string {
 // GetAllWallets returns a slice containing all wallets (well-known and child wallets).
 // The root wallet is not included in this list.
 func (pool *WalletPool) GetAllWallets() []*Wallet {
-	wallets := make([]*Wallet, len(pool.childWallets)+len(pool.wellKnownWallets))
-	for i, config := range pool.wellKnownNames {
-		wallets[i] = pool.wellKnownWallets[config.Name]
+	if pool.childWallets == nil {
+		return []*Wallet{}
 	}
-	copy(wallets[len(pool.wellKnownWallets):], pool.childWallets)
+
+	wallets := make([]*Wallet, 0, len(pool.childWallets)+len(pool.wellKnownNames))
+	wallets = append(wallets, pool.childWallets...)
+	for _, config := range pool.wellKnownNames {
+		if pool.wellKnownWallets[config.Name] != nil {
+			wallets = append(wallets, pool.wellKnownWallets[config.Name])
+		}
+	}
+
 	return wallets
 }
 
@@ -505,6 +520,11 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 		return nil, nil, err
 	}
 
+	// Set up low balance notification
+	if pool.runFundings {
+		childWallet.setLowBalanceNotification(pool.lowBalanceNotifyChan, refillBalance.ToBig())
+	}
+
 	var fundingReq *FundingRequest
 	if pool.runFundings && childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
 		fundingReq = &FundingRequest{
@@ -517,26 +537,75 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 
 // watchWalletBalancesLoop runs continuously to monitor and refill wallet balances.
 // It periodically checks all wallets and funds those below the refill threshold.
+// Also listens for low balance notifications to trigger immediate checks.
 // Exits when the context is cancelled or funds have been reclaimed.
 func (pool *WalletPool) watchWalletBalancesLoop() {
 	sleepTime := time.Duration(pool.config.RefillInterval) * time.Second
-	for {
-		select {
-		case <-pool.ctx.Done():
-			return
-		case <-time.After(sleepTime):
-		}
+	timer := time.NewTimer(sleepTime)
+	defer timer.Stop()
 
+	// Aggregation timer for notifications
+	var aggregationTimer *time.Timer
+	aggregationChan := make(chan struct{})
+
+	resupplyWallets := func() {
 		if pool.reclaimedFunds {
 			return
 		}
 
+		if time.Since(pool.lastFundingTime) < 30*time.Second {
+			return
+		}
+
+		pool.lastFundingTime = time.Now()
+		if aggregationTimer != nil {
+			aggregationTimer.Stop()
+			aggregationTimer = nil
+		}
+
 		err := pool.resupplyChildWallets()
 		if err != nil {
-			pool.logger.Warnf("could not check & resupply chile wallets: %v", err)
+			pool.logger.Warnf("could not check & resupply child wallets: %v", err)
 			sleepTime = 1 * time.Minute
 		} else {
 			sleepTime = time.Duration(pool.config.RefillInterval) * time.Second
+		}
+		timer.Reset(sleepTime)
+	}
+
+	for {
+		select {
+		case <-pool.ctx.Done():
+			return
+
+		case <-timer.C:
+			// Regular interval check
+			resupplyWallets()
+
+		case <-pool.lowBalanceNotifyChan:
+			// Low balance notification received
+			if aggregationTimer == nil {
+				// First notification, start aggregation timer
+				aggregationTimer = time.AfterFunc(30*time.Second, func() {
+					select {
+					case aggregationChan <- struct{}{}:
+					default:
+					}
+				})
+			}
+			// Drain any additional notifications to avoid blocking
+		drainloop:
+			for {
+				select {
+				case <-pool.lowBalanceNotifyChan:
+				default:
+					break drainloop
+				}
+			}
+
+		case <-aggregationChan:
+			// Aggregation period ended, trigger funding
+			resupplyWallets()
 		}
 	}
 }
@@ -700,32 +769,29 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 			}
 		}
 
-		pool.logger.Infof("funding child wallets... (0/%v)", len(txList))
-		for txIdx := 0; txIdx < len(txList); txIdx += 200 {
-			endIdx := txIdx + 200
-			if txIdx > 0 {
-				pool.logger.Infof("funding child wallets... (%v/%v)", txIdx, len(txList))
-			}
-			if endIdx > len(txList) {
-				endIdx = len(txList)
-			}
-			err := pool.txpool.SendAndAwaitTxRange(pool.ctx, pool.rootWallet.wallet, txList[txIdx:endIdx], &SendTransactionOptions{
+		receipts, err := pool.txpool.SendTransactionBatch(pool.ctx, pool.rootWallet.wallet, txList, &BatchOptions{
+			SendTransactionOptions: SendTransactionOptions{
 				Client: client,
-				OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-					if err != nil {
-						pool.logger.Warnf("could not send funding tx %v: %v", tx.Hash().String(), err)
-					}
+			},
+			MaxRetries:   3,
+			PendingLimit: 200,
+			LogFn: func(confirmedCount int, totalCount int) {
+				pool.logger.Infof("funding child wallets... (%v/%v)", confirmedCount, totalCount)
+			},
+			LogInterval: 200,
+		})
+		if err != nil {
+			return fmt.Errorf("could not send funding txs: %w", err)
+		}
 
-					batch, ok := batchTxMap[tx.Hash()]
-					if ok {
-						for _, req := range batch {
-							req.Wallet.AddBalance(req.Amount.ToBig())
-						}
+		for _, receipt := range receipts {
+			if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+				batch, ok := batchTxMap[receipt.TxHash]
+				if ok {
+					for _, req := range batch {
+						req.Wallet.AddBalance(req.Amount.ToBig())
 					}
-				},
-			})
-			if err != nil {
-				return err
+				}
 			}
 		}
 
@@ -993,31 +1059,29 @@ func (pool *WalletPool) ReclaimFunds(ctx context.Context, client *Client) error 
 		for _, tx := range reclaimTxs {
 			go func(tx *reclaimTx) {
 				pool.logger.Infof("sending reclaim tx %v (%v)", tx.tx.Hash().String(), utils.ReadableAmount(uint256.MustFromBig(tx.tx.Value())))
-				err := pool.txpool.SendTransaction(ctx, tx.wallet, tx.tx, &SendTransactionOptions{
+				pool.txpool.SendTransaction(ctx, tx.wallet, tx.tx, &SendTransactionOptions{
 					Client: client,
-					OnConfirm: func(_ *types.Transaction, receipt *types.Receipt, err error) {
-						defer wg.Done()
+					OnComplete: func(_ *types.Transaction, receipt *types.Receipt, err error) {
+						wg.Done()
 						if err != nil {
 							pool.logger.Warnf("reclaim tx %v failed: %v", tx.tx.Hash().String(), err)
-							return
 						}
-
-						effectiveGasPrice := receipt.EffectiveGasPrice
-						if effectiveGasPrice == nil {
-							effectiveGasPrice = big.NewInt(0)
-						}
-						feeAmount := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
-
-						tx.wallet.SubBalance(big.NewInt(0).Add(tx.tx.Value(), feeAmount))
 					},
 				})
-				if err != nil {
-					pool.logger.Warnf("could not send reclaim tx %v: %v", tx.tx.Hash().String(), err)
-				}
 			}(tx)
 		}
 		wg.Wait()
 	}
 
 	return nil
+}
+
+// SetSpammerID sets the spammer ID for metrics tracking
+func (pool *WalletPool) SetSpammerID(spammerID uint64) {
+	pool.spammerID = spammerID
+}
+
+// GetSpammerID returns the spammer ID for metrics tracking
+func (pool *WalletPool) GetSpammerID() uint64 {
+	return pool.spammerID
 }

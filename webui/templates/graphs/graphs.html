@@ -1,0 +1,1014 @@
+{{ define "page" }}
+  <div class="container mt-2">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h2 class="py-2">Transaction Graphs</h2>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" onclick="refreshDashboard()">
+          <i class="fas fa-sync-alt" id="refreshIcon"></i> Refresh
+        </button>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="realTimeToggle" checked>
+          <label class="form-check-label" for="realTimeToggle">
+            Real-time Updates
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+      <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card bg-primary text-white">
+          <div class="card-body">
+            <div class="d-flex align-items-center">
+              <div class="flex-grow-1">
+                <h5 class="card-title mb-1">Total Confirmed</h5>
+                <h3 class="mb-0" id="totalConfirmed">-</h3>
+              </div>
+              <div class="ms-3">
+                <i class="fas fa-check-circle fa-2x opacity-75"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card bg-warning text-white">
+          <div class="card-body">
+            <div class="d-flex align-items-center">
+              <div class="flex-grow-1">
+                <h5 class="card-title mb-1">Total Pending</h5>
+                <h3 class="mb-0" id="totalPending">-</h3>
+              </div>
+              <div class="ms-3">
+                <i class="fas fa-clock fa-2x opacity-75"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card bg-success text-white">
+          <div class="card-body">
+            <div class="d-flex align-items-center">
+              <div class="flex-grow-1">
+                <h5 class="card-title mb-1">Gas Used (30min)</h5>
+                <h3 class="mb-0" id="totalGasUsed">-</h3>
+              </div>
+              <div class="ms-3">
+                <i class="fas fa-fire fa-2x opacity-75"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="col-lg-3 col-md-6 mb-3">
+        <div class="card bg-info text-white">
+          <div class="card-body">
+            <div class="d-flex align-items-center">
+              <div class="flex-grow-1">
+                <h5 class="card-title mb-1">Active Spammers</h5>
+                <h3 class="mb-0" id="activeSpammers">-</h3>
+              </div>
+              <div class="ms-3">
+                <i class="fas fa-users fa-2x opacity-75"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="row mb-4">
+      <!-- Gas Consumption Chart -->
+      <div class="col-lg-8 mb-4">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Gas Consumption Timeline (Last 30 Minutes)</h5>
+            <div class="btn-group" role="group">
+              <input type="radio" class="btn-check" name="gasChartType" id="stackedChart" value="stacked" checked>
+              <label class="btn btn-outline-secondary btn-sm" for="stackedChart">Stacked</label>
+              
+              <input type="radio" class="btn-check" name="gasChartType" id="lineChart" value="line">
+              <label class="btn btn-outline-secondary btn-sm" for="lineChart">Lines</label>
+            </div>
+          </div>
+          <div class="card-body">
+            <canvas id="gasConsumptionChart" height="300"></canvas>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Spammer Distribution Pie Chart -->
+      <div class="col-lg-4 mb-4">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Gas Distribution</h5>
+            <div class="btn-group" role="group">
+              <input type="radio" class="btn-check" name="gasDistributionPeriod" id="lastBlock" value="1" checked>
+              <label class="btn btn-outline-secondary btn-sm" for="lastBlock">Last Block</label>
+              
+              <input type="radio" class="btn-check" name="gasDistributionPeriod" id="last32Blocks" value="32">
+              <label class="btn btn-outline-secondary btn-sm" for="last32Blocks">32 Blocks</label>
+              
+              <input type="radio" class="btn-check" name="gasDistributionPeriod" id="last256Blocks" value="256">
+              <label class="btn btn-outline-secondary btn-sm" for="last256Blocks">256 Blocks</label>
+            </div>
+          </div>
+          <div class="card-body">
+            <canvas id="gasDistributionChart" height="300"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Transaction Charts with Tabs -->
+    <div class="row mb-4">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center">
+              <h5 class="mb-0">Transaction Analytics (Last 30 Minutes)</h5>
+              <ul class="nav nav-pills nav-pills-sm" id="transactionTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link active" id="submission-tab" data-bs-toggle="pill" data-bs-target="#submission-chart" type="button" role="tab">
+                    Transaction Submission
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" id="pending-tab" data-bs-toggle="pill" data-bs-target="#pending-chart" type="button" role="tab">
+                    Pending Transactions
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="tab-content" id="transactionTabContent">
+              <div class="tab-pane fade show active" id="submission-chart" role="tabpanel">
+                <canvas id="transactionSubmissionChart" height="300"></canvas>
+              </div>
+              <div class="tab-pane fade" id="pending-chart" role="tabpanel">
+                <canvas id="transactionPendingChart" height="300"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Spammer Details Table -->
+    <div class="row">
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Spammer Details</h5>
+            <span class="badge bg-secondary" id="lastUpdate">Never updated</span>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table table-hover" id="spammerTable">
+                <thead>
+                  <tr>
+                    <th>Spammer</th>
+                    <th class="text-end">Pending Txs</th>
+                    <th class="text-end">Confirmed Txs</th>
+                    <th class="text-end">Submitted Txs</th>
+                    <th class="text-end">Gas Used (30min)</th>
+                    <th class="text-end">Gas Used (Last Block)</th>
+                    <th class="text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody id="spammerTableBody">
+                  <tr>
+                    <td colspan="7" class="text-center text-muted">
+                      <div class="spinner-border spinner-border-sm me-2" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                      </div>
+                      Loading metrics data...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connection Status -->
+    <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+      <div class="toast align-items-center" id="connectionToast" role="alert">
+        <div class="d-flex">
+          <div class="toast-body" id="connectionStatus">
+            <i class="fas fa-wifi me-2"></i> Connected
+          </div>
+          <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+{{ end }}
+
+{{ define "css" }}
+<style>
+  .card {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    border: 1px solid rgba(0, 0, 0, 0.125);
+  }
+  
+  .card-header {
+    background-color: rgba(0, 0, 0, 0.03);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+  }
+  
+  .table th {
+    border-top: none;
+    font-weight: 600;
+  }
+  
+  .spinner-border-sm {
+    width: 1rem;
+    height: 1rem;
+  }
+  
+  .toast {
+    --bs-toast-bg: rgba(13, 110, 253, 0.95);
+    --bs-toast-color: white;
+  }
+  
+  .status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 8px;
+  }
+  
+  .status-active {
+    background-color: #28a745;
+    animation: pulse 2s infinite;
+  }
+  
+  .status-inactive {
+    background-color: #6c757d;
+  }
+  
+  @keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+  }
+  
+  .chart-container {
+    position: relative;
+    height: 300px;
+  }
+  
+  .btn-check:checked + .btn {
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: white;
+  }
+  
+  .nav-pills-sm .nav-link {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.875rem;
+  }
+  
+  .tab-content {
+    min-height: 350px;
+  }
+  
+  .tab-content canvas {
+    max-height: 300px !important;
+    height: 300px !important;
+  }
+  
+  .progress-cell {
+    position: relative;
+    min-width: 180px;
+    width: 180px;
+  }
+  
+  .progress-bar-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background-color: rgba(13, 110, 253, 0.1);
+    border-radius: 3px;
+    z-index: 1;
+  }
+  
+  .progress-text {
+    position: relative;
+    z-index: 2;
+    padding: 0.25rem 0.5rem;
+  }
+</style>
+{{ end }}
+
+{{ define "js" }}
+<script src="/js/chart.min.js"></script>
+<script>
+let gasConsumptionChart;
+let gasDistributionChart;
+let transactionSubmissionChart;
+let transactionPendingChart;
+let metricsData = null;
+let eventSource = null;
+let realTimeEnabled = true;
+
+const chartColors = [
+  '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', 
+  '#FF9F40', '#C9CBCF', '#4BC0C0', '#FF6384', '#36A2EB'
+];
+
+document.addEventListener('DOMContentLoaded', function() {
+  initializeCharts();
+  loadDashboard();
+  setupRealTimeUpdates();
+  setupEventListeners();
+});
+
+function setupEventListeners() {
+  document.getElementById('realTimeToggle').addEventListener('change', function() {
+    realTimeEnabled = this.checked;
+    if (realTimeEnabled) {
+      setupRealTimeUpdates();
+      showConnectionStatus('Real-time updates enabled', 'success');
+    } else {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      showConnectionStatus('Real-time updates disabled', 'warning');
+    }
+  });
+  
+  document.querySelectorAll('input[name="gasChartType"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+      updateGasConsumptionChart();
+    });
+  });
+  
+  document.querySelectorAll('input[name="gasDistributionPeriod"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+      updateGasDistributionChart();
+    });
+  });
+}
+
+function initializeCharts() {
+  const gasCtx = document.getElementById('gasConsumptionChart').getContext('2d');
+  gasConsumptionChart = new Chart(gasCtx, {
+    type: 'bar',
+    data: {
+      labels: [],
+      datasets: []
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      transitions: {},
+      scales: {
+        x: {
+          stacked: true,
+          title: {
+            display: true,
+            text: 'Block Number'
+          }
+        },
+        y: {
+          stacked: true,
+          title: {
+            display: true,
+            text: 'Gas Used'
+          },
+          ticks: {
+            callback: function(value) {
+              return formatNumber(value);
+            }
+          }
+        }
+      },
+      plugins: {
+        legend: {
+          position: 'top'
+        },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            label: function(context) {
+              return context.dataset.label + ': ' + formatNumber(context.parsed.y);
+            }
+          }
+        }
+      }
+    }
+  });
+  
+  const distCtx = document.getElementById('gasDistributionChart').getContext('2d');
+  gasDistributionChart = new Chart(distCtx, {
+    type: 'doughnut',
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        backgroundColor: chartColors
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom'
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const total = context.dataset.data.reduce((a, b) => a + b, 0);
+              const percentage = ((context.parsed * 100) / total).toFixed(1);
+              return context.label + ': ' + formatNumber(context.parsed) + ' (' + percentage + '%)';
+            }
+          }
+        }
+      }
+    }
+  });
+  
+  const txSubmissionCtx = document.getElementById('transactionSubmissionChart').getContext('2d');
+  transactionSubmissionChart = new Chart(txSubmissionCtx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: []
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      transitions: {},
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: 'Block Number'
+          }
+        },
+        y: {
+          title: {
+            display: true,
+            text: 'Transaction Count'
+          },
+          beginAtZero: true
+        }
+      },
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            title: function(context) {
+              return 'Block: ' + context[0].label;
+            },
+            label: function(context) {
+              return context.dataset.label + ': ' + formatNumber(context.parsed.y) + ' txs';
+            }
+          }
+        }
+      }
+    }
+  });
+  
+  const txPendingCtx = document.getElementById('transactionPendingChart').getContext('2d');
+  transactionPendingChart = new Chart(txPendingCtx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: []
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      transitions: {},
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: 'Block Number'
+          }
+        },
+        y: {
+          title: {
+            display: true,
+            text: 'Pending Transactions'
+          },
+          beginAtZero: true
+        }
+      },
+      plugins: {
+        legend: {
+          display: false
+        },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            title: function(context) {
+              return 'Block: ' + context[0].label;
+            },
+            label: function(context) {
+              return context.dataset.label + ': ' + formatNumber(context.parsed.y) + ' pending';
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+async function loadDashboard() {
+  try {
+    const response = await fetch('/api/graphs/dashboard');
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    metricsData = await response.json();
+    
+    console.log('Loaded metrics data:', {
+      spammers: metricsData.spammers.length,
+      dataPoints: metricsData.data.length,
+      totalGasUsed: metricsData.totals.gasUsed,
+      sampleDataPoint: metricsData.data[0]
+    });
+    
+    updateDashboard();
+    showConnectionStatus('Dashboard loaded successfully', 'success');
+    
+  } catch (error) {
+    console.error('Failed to load dashboard:', error);
+    showConnectionStatus('Failed to load dashboard: ' + error.message, 'danger');
+  }
+}
+
+function updateDashboard() {
+  if (!metricsData) return;
+  
+  document.getElementById('totalConfirmed').textContent = formatNumber(metricsData.totals.confirmed);
+  document.getElementById('totalPending').textContent = formatNumber(metricsData.totals.pending);
+  document.getElementById('totalGasUsed').textContent = formatNumber(metricsData.totals.gasUsed);
+  document.getElementById('activeSpammers').textContent = metricsData.spammers.length;
+  
+  updateGasConsumptionChart();
+  updateGasDistributionChart();
+  updateTransactionSubmissionChart();
+  updateTransactionPendingChart();
+  
+  updateSpammerTable();
+  
+  document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+function updateGasConsumptionChart() {
+  if (!metricsData || !metricsData.data) return;
+  
+  const chartType = document.querySelector('input[name="gasChartType"]:checked').value;
+  const isStacked = chartType === 'stacked';
+  
+  const labels = metricsData.data.map(point => 
+    `#${point.endBlock}`
+  );
+  
+  const datasets = [];
+  
+  datasets.push({
+    label: 'Others',
+    data: metricsData.data.map(point => point.othersGas),
+    backgroundColor: '#6c757d',
+    borderColor: '#6c757d',
+    borderWidth: isStacked ? 0 : 2,
+    fill: isStacked
+  });
+  
+  metricsData.spammers.forEach((spammer, index) => {
+    const spammerIdStr = spammer.id.toString();
+    const spammerData = metricsData.data.map(point => 
+      point.spammers && point.spammers[spammerIdStr] 
+        ? point.spammers[spammerIdStr].gas 
+        : 0
+    );
+    
+    datasets.push({
+      label: spammer.name,
+      data: spammerData,
+      backgroundColor: chartColors[index % chartColors.length],
+      borderColor: chartColors[index % chartColors.length],
+      borderWidth: isStacked ? 0 : 2,
+      fill: isStacked
+    });
+  });
+  
+  gasConsumptionChart.data.labels = labels;
+  gasConsumptionChart.data.datasets = datasets;
+  gasConsumptionChart.config.type = isStacked ? 'bar' : 'line';
+  gasConsumptionChart.options.scales.x.stacked = isStacked;
+  gasConsumptionChart.options.scales.y.stacked = isStacked;
+  gasConsumptionChart.update();
+}
+
+function updateGasDistributionChart() {
+  if (!metricsData || !metricsData.data) return;
+  
+  const selectedPeriod = parseInt(document.querySelector('input[name="gasDistributionPeriod"]:checked').value);
+  
+  const labels = [];
+  const data = [];
+  const colors = [];
+  
+  const relevantDataPoints = metricsData.data.slice(-selectedPeriod);
+  const spammerGasInPeriod = {};
+  let totalGasInPeriod = 0;
+  
+  relevantDataPoints.forEach(point => {
+    totalGasInPeriod += point.totalGas;
+    
+    if (point.spammers) {
+      Object.keys(point.spammers).forEach(spammerIdStr => {
+        const spammerID = parseInt(spammerIdStr);
+        if (!spammerGasInPeriod[spammerID]) {
+          spammerGasInPeriod[spammerID] = 0;
+        }
+        spammerGasInPeriod[spammerID] += point.spammers[spammerIdStr].gas;
+      });
+    }
+  });
+  
+  let totalSpammerGas = 0;
+  metricsData.spammers.forEach((spammer, index) => {
+    const gasUsed = spammerGasInPeriod[spammer.id] || 0;
+    if (gasUsed > 0) {
+      labels.push(spammer.name);
+      data.push(gasUsed);
+      colors.push(chartColors[index % chartColors.length]);
+      totalSpammerGas += gasUsed;
+    }
+  });
+  
+  const othersGas = totalGasInPeriod > totalSpammerGas ? totalGasInPeriod - totalSpammerGas : 0;
+  if (othersGas > 0) {
+    labels.push('Others');
+    data.push(othersGas);
+    colors.push('#6c757d');
+  }
+  
+  gasDistributionChart.data.labels = labels;
+  gasDistributionChart.data.datasets[0].data = data;
+  gasDistributionChart.data.datasets[0].backgroundColor = colors;
+  gasDistributionChart.update();
+}
+
+function updateTransactionSubmissionChart() {
+  if (!metricsData || !metricsData.data) return;
+  
+  const labels = metricsData.data.map(point => 
+    `#${point.endBlock}`
+  );
+  
+  const datasets = [];
+  
+  metricsData.spammers.forEach((spammer, index) => {
+    const spammerIdStr = spammer.id.toString();
+    
+    const confirmedData = metricsData.data.map(point => 
+      point.spammers && point.spammers[spammerIdStr] 
+        ? point.spammers[spammerIdStr].confirmed 
+        : 0
+    );
+    
+    datasets.push({
+      label: spammer.name + ' (Confirmed)',
+      data: confirmedData,
+      backgroundColor: chartColors[index % chartColors.length],
+      borderColor: chartColors[index % chartColors.length],
+      borderWidth: 2,
+      fill: false,
+      tension: 0.1
+    });
+    
+    const submittedData = [];
+    let prevSubmitted = null;
+    
+    metricsData.data.forEach((point, pointIndex) => {
+      const currentSubmitted = point.spammers && point.spammers[spammerIdStr] 
+        ? point.spammers[spammerIdStr].submitted 
+        : 0;
+      
+      let delta = 0;
+      if (pointIndex > 0 && prevSubmitted !== null) {
+        delta = currentSubmitted - prevSubmitted;
+      }
+      
+      submittedData.push(Math.max(0, delta));
+      prevSubmitted = currentSubmitted;
+    });
+    
+    datasets.push({
+      label: spammer.name + ' (Submitted)',
+      data: submittedData,
+      backgroundColor: chartColors[index % chartColors.length] + '40',
+      borderColor: chartColors[index % chartColors.length],
+      borderWidth: 2,
+      borderDash: [5, 5],
+      fill: false,
+      tension: 0.1
+    });
+  });
+  
+  transactionSubmissionChart.data.labels = labels;
+  transactionSubmissionChart.data.datasets = datasets;
+  transactionSubmissionChart.update();
+}
+
+function updateTransactionPendingChart() {
+  if (!metricsData || !metricsData.data) return;
+  
+  const labels = metricsData.data.map(point => 
+    `#${point.endBlock}`
+  );
+  
+  const datasets = [];
+  
+  metricsData.spammers.forEach((spammer, index) => {
+    const spammerIdStr = spammer.id.toString();
+    
+    const pendingData = metricsData.data.map(point => 
+      point.spammers && point.spammers[spammerIdStr] 
+        ? point.spammers[spammerIdStr].pending 
+        : 0
+    );
+    
+    datasets.push({
+      label: spammer.name,
+      data: pendingData,
+      backgroundColor: chartColors[index % chartColors.length],
+      borderColor: chartColors[index % chartColors.length],
+      borderWidth: 3,
+      fill: false,
+      tension: 0.1
+    });
+  });
+  
+  transactionPendingChart.data.labels = labels;
+  transactionPendingChart.data.datasets = datasets;
+  transactionPendingChart.update();
+}
+
+function updateSpammerTable() {
+  if (!metricsData) return;
+  
+  const tbody = document.getElementById('spammerTableBody');
+  const totalGas = metricsData.totals.gasUsed;
+  
+  if (metricsData.spammers.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" class="text-center text-muted">No active spammers found</td>
+      </tr>
+    `;
+    return;
+  }
+  
+  const sortedSpammers = [...metricsData.spammers].sort((a, b) => b.gasUsed - a.gasUsed);
+  
+  const lastBlockGas = {};
+  let totalLastBlockGas = 0;
+  if (metricsData.data.length > 0) {
+    const lastBlock = metricsData.data[metricsData.data.length - 1];
+    totalLastBlockGas = lastBlock.totalGas;
+    if (lastBlock.spammers) {
+      Object.keys(lastBlock.spammers).forEach(spammerIdStr => {
+        const spammerID = parseInt(spammerIdStr);
+        lastBlockGas[spammerID] = lastBlock.spammers[spammerIdStr].gas;
+      });
+    }
+  }
+  
+  tbody.innerHTML = sortedSpammers.map(spammer => {
+    const gasPercentage30min = totalGas > 0 ? ((spammer.gasUsed / totalGas) * 100).toFixed(1) : '0.0';
+    const gasUsedLastBlock = lastBlockGas[spammer.id] || 0;
+    const gasPercentageLastBlock = totalLastBlockGas > 0 ? ((gasUsedLastBlock / totalLastBlockGas) * 100).toFixed(1) : '0.0';
+    const submittedTxs = spammer.submitted;
+    const isActive = spammer.status === 1;
+    
+    return `
+      <tr>
+        <td>
+          <div class="d-flex align-items-center">
+            <span class="status-indicator ${isActive ? 'status-active' : 'status-inactive'}"></span>
+            <div>
+              <div class="fw-semibold">${escapeHtml(spammer.name)}</div>
+              <small class="text-muted">ID: ${spammer.id}</small>
+            </div>
+          </div>
+        </td>
+        <td class="text-end">${formatNumber(spammer.pending)}</td>
+        <td class="text-end">${formatNumber(spammer.confirmed)}</td>
+        <td class="text-end">${formatNumber(submittedTxs)}</td>
+        <td class="text-end progress-cell">
+          <div class="progress-bar-bg" style="width: ${gasPercentage30min}%"></div>
+          <div class="progress-text">${formatNumber(spammer.gasUsed)} (${gasPercentage30min}%)</div>
+        </td>
+        <td class="text-end progress-cell">
+          <div class="progress-bar-bg" style="width: ${gasPercentageLastBlock}%"></div>
+          <div class="progress-text">${formatNumber(gasUsedLastBlock)} (${gasPercentageLastBlock}%)</div>
+        </td>
+        <td class="text-center">
+          <span class="badge ${isActive ? 'bg-success' : 'bg-secondary'}">
+            ${isActive ? 'Active' : 'Idle'}
+          </span>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function setupRealTimeUpdates() {
+  if (!realTimeEnabled || eventSource) return;
+  
+  try {
+    eventSource = new EventSource('/api/graphs/stream');
+    
+    eventSource.onopen = function() {
+      showConnectionStatus('Real-time connection established', 'success');
+    };
+    
+    eventSource.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        updateRealTimeData(data);
+      } catch (error) {
+        console.error('Failed to parse SSE data:', error);
+      }
+    };
+    
+    eventSource.onerror = function(error) {
+      console.error('SSE connection error:', error);
+      showConnectionStatus('Connection lost, retrying...', 'warning');
+      
+      setTimeout(() => {
+        if (realTimeEnabled && eventSource.readyState === EventSource.CLOSED) {
+          setupRealTimeUpdates();
+        }
+      }, 5000);
+    };
+    
+  } catch (error) {
+    console.error('Failed to setup SSE:', error);
+    showConnectionStatus('Failed to setup real-time updates', 'danger');
+  }
+}
+
+function updateRealTimeData(data) {
+  if (!metricsData || !metricsData.spammers) return;
+  
+  let hasNewDataPoints = false;
+  let hasSpammerUpdates = false;
+  let hasNewSpammers = false;
+  
+  if (data.newDataPoints && Array.isArray(data.newDataPoints)) {
+    metricsData.data.push(...data.newDataPoints);
+    
+    if (metricsData.data.length > 150) {
+      metricsData.data = metricsData.data.slice(-150);
+    }
+    
+    console.log(`Added ${data.newDataPoints.length} new data points, total: ${metricsData.data.length}`);
+    hasNewDataPoints = true;
+  }
+  
+  if (data.newSpammers && Array.isArray(data.newSpammers)) {
+    data.newSpammers.forEach(newSpammerData => {
+      const existingSpammer = metricsData.spammers.find(s => s.id === newSpammerData.id);
+      if (!existingSpammer) {
+        metricsData.spammers.push({
+          id: newSpammerData.id,
+          name: newSpammerData.name,
+          pending: newSpammerData.pending,
+          confirmed: newSpammerData.confirmed,
+          submitted: newSpammerData.submitted,
+          gasUsed: newSpammerData.gasUsed,
+          updated: newSpammerData.updated,
+          status: newSpammerData.status
+        });
+        hasNewSpammers = true;
+        console.log(`Added new spammer: ${newSpammerData.name} (ID: ${newSpammerData.id})`);
+      }
+    });
+  }
+  
+  Object.keys(data).forEach(key => {
+    if (key.startsWith('spammer_')) {
+      const spammerData = data[key];
+      const spammer = metricsData.spammers.find(s => s.id === spammerData.id);
+      
+      if (spammer) {
+        spammer.pending = spammerData.pending;
+        spammer.confirmed = spammerData.confirmed;
+        spammer.submitted = spammerData.submitted;
+        spammer.gasUsed = spammerData.gasUsed;
+        spammer.updated = spammerData.updated;
+        spammer.status = spammerData.status;
+        hasSpammerUpdates = true;
+      }
+    }
+  });
+  
+  if (hasNewDataPoints || hasSpammerUpdates || hasNewSpammers) {
+    metricsData.totals.pending = metricsData.spammers.reduce((sum, s) => sum + s.pending, 0);
+    metricsData.totals.confirmed = metricsData.spammers.reduce((sum, s) => sum + s.confirmed, 0);
+    metricsData.totals.submitted = metricsData.spammers.reduce((sum, s) => sum + s.submitted, 0);
+    metricsData.totals.gasUsed = metricsData.spammers.reduce((sum, s) => sum + s.gasUsed, 0);
+    
+    if (metricsData.data.length > 0) {
+      metricsData.totals.gasUsed = metricsData.data.reduce((sum, point) => sum + point.totalGas, 0);
+    }
+    
+    updateDashboard();
+    
+    if (hasNewSpammers) {
+      showConnectionStatus(`${data.newSpammers.length} new spammer(s) added`, 'success');
+    }
+  }
+}
+
+
+function refreshDashboard() {
+  const refreshIcon = document.getElementById('refreshIcon');
+  refreshIcon.classList.add('fa-spin');
+  
+  loadDashboard().finally(() => {
+    refreshIcon.classList.remove('fa-spin');
+  });
+}
+
+function showConnectionStatus(message, type) {
+  const toast = document.getElementById('connectionToast');
+  const status = document.getElementById('connectionStatus');
+  
+  const icons = {
+    success: 'fa-check-circle',
+    warning: 'fa-exclamation-triangle', 
+    danger: 'fa-times-circle'
+  };
+  
+  const colors = {
+    success: 'rgba(40, 167, 69, 0.95)',
+    warning: 'rgba(255, 193, 7, 0.95)',
+    danger: 'rgba(220, 53, 69, 0.95)'
+  };
+  
+  status.innerHTML = `<i class="fas ${icons[type]} me-2"></i> ${message}`;
+  toast.style.setProperty('--bs-toast-bg', colors[type]);
+  
+  const bsToast = new bootstrap.Toast(toast);
+  bsToast.show();
+}
+
+function formatNumber(num) {
+  if (num >= 1000000000) {
+    return (num / 1000000000).toFixed(1) + 'B';
+  } else if (num >= 1000000) {
+    return (num / 1000000).toFixed(1) + 'M';
+  } else if (num >= 1000) {
+    return (num / 1000).toFixed(1) + 'K';
+  }
+  return num.toString();
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+window.addEventListener('beforeunload', function() {
+  if (eventSource) {
+    eventSource.close();
+  }
+});
+</script>
+{{ end }}

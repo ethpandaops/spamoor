@@ -27,9 +27,16 @@ type CliArgs struct {
 	refillAmount   uint64
 	refillBalance  uint64
 	refillInterval uint64
+	secondsPerSlot uint64
 }
 
 func main() {
+	// Check if "run" subcommand is used
+	if len(os.Args) >= 2 && os.Args[1] == "run" {
+		RunCommand(os.Args[2:])
+		return
+	}
+
 	cliArgs := CliArgs{}
 	flags := pflag.NewFlagSet("main", pflag.ContinueOnError)
 
@@ -42,6 +49,7 @@ func main() {
 	flags.Uint64Var(&cliArgs.refillAmount, "refill-amount", 5, "Amount of ETH to fund/refill each child wallet with.")
 	flags.Uint64Var(&cliArgs.refillBalance, "refill-balance", 2, "Min amount of ETH each child wallet should hold before refilling.")
 	flags.Uint64Var(&cliArgs.refillInterval, "refill-interval", 300, "Interval for child wallet rbalance check and refilling if needed (in sec).")
+	flags.Uint64Var(&cliArgs.secondsPerSlot, "seconds-per-slot", 12, "Seconds per slot for rate limiting (used for throughput calculation).")
 
 	flags.Parse(os.Args)
 
@@ -71,7 +79,10 @@ func main() {
 	}
 	if invalidScenario {
 		fmt.Printf("invalid or missing scenario\n\n")
-		fmt.Printf("implemented scenarios:\n")
+		fmt.Printf("Usage:\n")
+		fmt.Printf("  spamoor <scenario> [options]     Run a specific scenario\n")
+		fmt.Printf("  spamoor run <yaml-file> [options] Run multiple scenarios from YAML config\n\n")
+		fmt.Printf("Implemented scenarios:\n")
 		scenarioNames := scenarios.GetScenarioNames()
 		sort.Slice(scenarioNames, func(a int, b int) bool {
 			return strings.Compare(scenarioNames[a], scenarioNames[b]) > 0
@@ -97,6 +108,9 @@ func main() {
 	} else if cliArgs.verbose {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
+
+	// Set global seconds per slot
+	scenario.GlobalSecondsPerSlot = cliArgs.secondsPerSlot
 
 	// start client pool
 	rpcHosts := []string{}
@@ -136,6 +150,7 @@ func main() {
 
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
 		Context:    ctx,
+		Logger:     logger.WithField("module", "txpool"),
 		ClientPool: clientPool,
 		GetActiveWalletPools: func() []*spamoor.WalletPool {
 			return []*spamoor.WalletPool{walletPool}

@@ -17,8 +17,8 @@ import (
 )
 
 type UniswapOptions struct {
-	BaseFee             uint64
-	TipFee              uint64
+	BaseFee             float64
+	TipFee              float64
 	DaiPairs            uint64
 	EthLiquidityPerPair *uint256.Int
 	DaiLiquidityFactor  uint64
@@ -180,10 +180,10 @@ func (u *Uniswap) getTxFee(ctx context.Context, client *spamoor.Client) (*big.In
 	var tipCap *big.Int
 
 	if u.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(u.options.BaseFee)), big.NewInt(1000000000))
+		feeCap = new(big.Int).SetUint64(uint64(u.options.BaseFee * 1e9))
 	}
 	if u.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(u.options.TipFee)), big.NewInt(1000000000))
+		tipCap = new(big.Int).SetUint64(uint64(u.options.TipFee * 1e9))
 	}
 
 	if feeCap == nil || tipCap == nil {
@@ -192,13 +192,6 @@ func (u *Uniswap) getTxFee(ctx context.Context, client *spamoor.Client) (*big.In
 		if err != nil {
 			return nil, nil, err
 		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
 	}
 
 	return feeCap, tipCap, nil
@@ -371,19 +364,16 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			wg.Add(1)
 
 			go func(tx *types.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
-				err := u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &spamoor.SendTransactionOptions{
-					Client: client,
-					OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &spamoor.SendTransactionOptions{
+					Client:      client,
+					Rebroadcast: true,
+					OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 						if err != nil {
 							u.logger.Errorf("approval tx failed: %v", err)
 						}
 						wg.Done()
 					},
-					Rebroadcast: true,
 				})
-				if err != nil {
-					u.logger.Errorf("failed to send approval tx: %v", err)
-				}
 			}(tx, txClient, approvalWallets[i])
 		}
 

@@ -4,11 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
-	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -26,21 +22,21 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount       uint64 `yaml:"total_count"`
-	Throughput       uint64 `yaml:"throughput"`
-	MaxPending       uint64 `yaml:"max_pending"`
-	MaxWallets       uint64 `yaml:"max_wallets"`
-	Rebroadcast      uint64 `yaml:"rebroadcast"`
-	BaseFee          uint64 `yaml:"base_fee"`
-	TipFee           uint64 `yaml:"tip_fee"`
-	GasLimit         uint64 `yaml:"gas_limit"`
-	FactoryAddress   string `yaml:"factory_address"`
-	InitCode         string `yaml:"init_code"`
-	StartSalt        uint64 `yaml:"start_salt"`
-	WellKnownFactory bool   `yaml:"well_known_factory"`
-	Timeout          string `yaml:"timeout"`
-	ClientGroup      string `yaml:"client_group"`
-	LogTxs           bool   `yaml:"log_txs"`
+	TotalCount       uint64  `yaml:"total_count"`
+	Throughput       uint64  `yaml:"throughput"`
+	MaxPending       uint64  `yaml:"max_pending"`
+	MaxWallets       uint64  `yaml:"max_wallets"`
+	Rebroadcast      uint64  `yaml:"rebroadcast"`
+	BaseFee          float64 `yaml:"base_fee"`
+	TipFee           float64 `yaml:"tip_fee"`
+	GasLimit         uint64  `yaml:"gas_limit"`
+	FactoryAddress   string  `yaml:"factory_address"`
+	InitCode         string  `yaml:"init_code"`
+	StartSalt        uint64  `yaml:"start_salt"`
+	WellKnownFactory bool    `yaml:"well_known_factory"`
+	Timeout          string  `yaml:"timeout"`
+	ClientGroup      string  `yaml:"client_group"`
+	LogTxs           bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -50,8 +46,6 @@ type Scenario struct {
 
 	factoryAddr   common.Address
 	initCodeBytes []byte
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "factorydeploytx"
@@ -92,8 +86,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
 	flags.Uint64Var(&s.options.GasLimit, "gaslimit", ScenarioDefaultOptions.GasLimit, "Gas limit to use in transactions")
 	flags.StringVar(&s.options.FactoryAddress, "factory-address", ScenarioDefaultOptions.FactoryAddress, "Address of existing CREATE2 factory (optional)")
 	flags.StringVar(&s.options.InitCode, "init-code", ScenarioDefaultOptions.InitCode, "Hex-encoded init code of contract to deploy")
@@ -109,9 +103,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	s.walletPool = options.WalletPool
 
 	if options.Config != "" {
-		err := yaml.Unmarshal([]byte(options.Config), &s.options)
+		// Use the generalized config validation and parsing helper
+		err := scenario.ParseAndValidateConfig(&ScenarioDescriptor, options.Config, &s.options, s.logger)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal config: %w", err)
+			return err
 		}
 	}
 
@@ -128,11 +123,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.TotalCount > 0 {
-		if s.options.TotalCount < 1000 {
-			s.walletPool.SetWalletCount(s.options.TotalCount)
-		} else {
-			s.walletPool.SetWalletCount(1000)
+		maxWallets := s.options.TotalCount / 50
+		if maxWallets < 10 {
+			maxWallets = 10
+		} else if maxWallets > 1000 {
+			maxWallets = 1000
 		}
+
+		s.walletPool.SetWalletCount(maxWallets)
 	} else {
 		if s.options.Throughput*10 < 1000 {
 			s.walletPool.SetWalletCount(s.options.Throughput * 10)
@@ -232,9 +230,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.pendingWGroup.Wait()
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-
 	return err
 }
 
@@ -269,29 +264,9 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		}
 	}
 
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return common.Address{}, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return common.Address{}, err
 	}
 
 	tx, err := factoryWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
@@ -308,34 +283,20 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		return common.Address{}, err
 	}
 
-	var txReceipt *types.Receipt
-	var txErr error
-	txWg := sync.WaitGroup{}
-	txWg.Add(1)
-
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, factoryWallet, tx, &spamoor.SendTransactionOptions{
+	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, factoryWallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer txWg.Done()
-			txErr = err
-			txReceipt = receipt
-		},
 	})
 	if err != nil {
 		return common.Address{}, err
 	}
 
-	txWg.Wait()
-	if txErr != nil {
-		return common.Address{}, txErr
-	}
-	if txReceipt == nil {
+	if receipt == nil || receipt.ContractAddress == (common.Address{}) {
 		return common.Address{}, fmt.Errorf("factory deployment failed")
 	}
 
-	s.logger.Infof("deployed CREATE2 factory at: %v (confirmed in block #%v)", txReceipt.ContractAddress.String(), txReceipt.BlockNumber.String())
-	return txReceipt.ContractAddress, nil
+	s.logger.Infof("deployed CREATE2 factory at: %v (confirmed in block #%v)", receipt.ContractAddress.String(), receipt.BlockNumber.String())
+	return receipt.ContractAddress, nil
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
@@ -353,29 +314,9 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, client, wallet, fmt.Errorf("no client available")
 	}
 
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return nil, client, wallet, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return nil, client, wallet, err
 	}
 
 	factory, err := contract.NewCREATE2Factory(s.factoryAddr, client.GetEthClient())
@@ -402,25 +343,14 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		return nil, nil, wallet, err
 	}
 
-	s.pendingWGroup.Add(1)
 	transactionSubmitted = true
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer func() {
-				onComplete()
-				s.pendingWGroup.Done()
-			}()
-
-			if err != nil {
-				s.logger.WithField("rpc", client.GetName()).Warnf("deployment tx %6d: await receipt failed: %v", txIdx+1, err)
-				return
-			}
-			if receipt == nil {
-				return
-			}
-
+		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			onComplete()
+		},
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			// Calculate deployed contract address
 			deployedAddr := common.Address{}
 			if len(receipt.Logs) > 0 {
@@ -434,26 +364,16 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			}
 
 			txFees := utils.GetTransactionFees(tx, receipt)
-			s.logger.WithField("rpc", client.GetName()).Debugf("deployment tx %d confirmed in block #%v. deployed at: %v, total fee: %v gwei (base: %v)",
-				txIdx+1, receipt.BlockNumber.String(), deployedAddr.String(), txFees.TotalFeeGwei(), txFees.TxBaseFeeGwei())
+			s.logger.WithField("rpc", client.GetName()).Debugf(
+				"deployment tx %d confirmed in block #%v. deployed at: %v, total fee: %v gwei (base: %v)",
+				txIdx+1,
+				receipt.BlockNumber.String(),
+				deployedAddr.String(),
+				txFees.TotalFeeGweiString(),
+				txFees.TxBaseFeeGweiString(),
+			)
 		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())
-			if retry == 0 && rebroadcast > 0 {
-				logger.Infof("rebroadcasting tx %6d", txIdx+1)
-			}
-			if retry > 0 {
-				logger = logger.WithField("retry", retry)
-			}
-			if rebroadcast > 0 {
-				logger = logger.WithField("rebroadcast", rebroadcast)
-			}
-			if err != nil {
-				logger.Debugf("failed sending deployment tx %6d: %v", txIdx+1, err)
-			} else if retry > 0 || rebroadcast > 0 {
-				logger.Debugf("successfully sent deployment tx %6d", txIdx+1)
-			}
-		},
+		LogFn: spamoor.GetDefaultLogFn(s.logger, "", fmt.Sprintf("%6d", txIdx+1), tx),
 	})
 	if err != nil {
 		// reset nonce if tx was not sent

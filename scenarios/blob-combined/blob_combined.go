@@ -6,10 +6,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
-	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
@@ -32,8 +29,8 @@ type ScenarioOptions struct {
 	Replace                     uint64                   `yaml:"replace"`
 	MaxReplacements             uint64                   `yaml:"max_replacements"`
 	Rebroadcast                 uint64                   `yaml:"rebroadcast"`
-	BaseFee                     uint64                   `yaml:"base_fee"`
-	TipFee                      uint64                   `yaml:"tip_fee"`
+	BaseFee                     float64                  `yaml:"base_fee"`
+	TipFee                      float64                  `yaml:"tip_fee"`
 	BlobFee                     uint64                   `yaml:"blob_fee"`
 	BlobV1Percent               uint64                   `yaml:"blob_v1_percent"`
 	FuluActivation              utils.FlexibleJsonUInt64 `yaml:"fulu_activation"`
@@ -47,8 +44,6 @@ type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
-
-	pendingWGroup sync.WaitGroup
 }
 
 var ScenarioName = "blob-combined"
@@ -94,8 +89,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Replace, "replace", ScenarioDefaultOptions.Replace, "Number of seconds to wait before replace a transaction")
 	flags.Uint64Var(&s.options.MaxReplacements, "max-replace", ScenarioDefaultOptions.MaxReplacements, "Maximum number of replacement transactions")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
 	flags.Uint64Var((*uint64)(&s.options.FuluActivation), "fulu-activation", uint64(ScenarioDefaultOptions.FuluActivation), "Unix timestamp of the Fulu activation")
@@ -110,9 +105,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	s.walletPool = options.WalletPool
 
 	if options.Config != "" {
-		err := yaml.Unmarshal([]byte(options.Config), &s.options)
+		// Use the generalized config validation and parsing helper
+		err := scenario.ParseAndValidateConfig(&ScenarioDescriptor, options.Config, &s.options, s.logger)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal config: %w", err)
+			return err
 		}
 	}
 
@@ -125,11 +121,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else if s.options.TotalCount > 0 {
-		if s.options.TotalCount < 1000 {
-			s.walletPool.SetWalletCount(s.options.TotalCount)
-		} else {
-			s.walletPool.SetWalletCount(1000)
+		maxWallets := s.options.TotalCount / 50
+		if maxWallets < 10 {
+			maxWallets = 10
+		} else if maxWallets > 1000 {
+			maxWallets = 1000
 		}
+
+		s.walletPool.SetWalletCount(maxWallets)
 	} else {
 		if s.options.Throughput*10 < 1000 {
 			s.walletPool.SetWalletCount(s.options.Throughput * 10)
@@ -183,7 +182,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 		Logger: s.logger,
 		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
 			logger := s.logger
-			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, 0, 0, onComplete)
+			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, nil, 0, 0, onComplete)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -206,15 +205,15 @@ func (s *Scenario) Run(ctx context.Context) error {
 		},
 	})
 
-	s.logger.Infof("finished sending transactions, awaiting block inclusion...")
-	s.pendingWGroup.Wait()
-
 	return err
 }
 
-func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor.Wallet, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
 	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
+	if wallet == nil {
+		wallet = s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
+	}
+
 	transactionSubmitted := false
 
 	defer func() {
@@ -233,37 +232,16 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 		return nil, client, wallet, 0, fmt.Errorf("no client available")
 	}
 
-	var feeCap *big.Int
-	var tipCap *big.Int
-	var blobFee *big.Int
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	if err != nil {
+		return nil, client, wallet, 0, err
+	}
 
-	if s.options.BaseFee > 0 {
-		feeCap = new(big.Int).Mul(big.NewInt(int64(s.options.BaseFee)), big.NewInt(1000000000))
-	}
-	if s.options.TipFee > 0 {
-		tipCap = new(big.Int).Mul(big.NewInt(int64(s.options.TipFee)), big.NewInt(1000000000))
-	}
+	var blobFee *big.Int
 	if s.options.BlobFee > 0 {
 		blobFee = new(big.Int).Mul(big.NewInt(int64(s.options.BlobFee)), big.NewInt(1000000000))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		// get suggested fee from client
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(s.walletPool.GetContext())
-		if err != nil {
-			return nil, client, wallet, 0, err
-		}
-	}
-
-	if feeCap.Cmp(big.NewInt(1000000000)) < 0 {
-		feeCap = big.NewInt(1000000000)
-	}
-	if tipCap.Cmp(big.NewInt(1000000000)) < 0 {
-		tipCap = big.NewInt(1000000000)
-	}
-	if blobFee == nil {
-		blobFee = big.NewInt(1000000000)
+	} else {
+		blobFee = new(big.Int).Mul(feeCap, big.NewInt(1000000000))
 	}
 
 	for i := 0; i < int(replacementIdx); i++ {
@@ -344,55 +322,36 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 		return txBytes, txVersion
 	}
 
-	txBytes, txVersion := getTxBytes()
+	_, txVersion := getTxBytes()
 
 	var awaitConfirmation bool = true
 	transactionSubmitted = true
-	s.pendingWGroup.Add(1)
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			defer func() {
-				awaitConfirmation = false
-				onComplete()
-				s.pendingWGroup.Done()
-			}()
-
-			if err != nil {
-				s.logger.WithField("rpc", client.GetName()).Warnf("blob tx %6d.%v: await receipt failed: %v", txIdx+1, replacementIdx, err)
-				return
-			}
-			if receipt == nil {
-				return
-			}
-
+		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			awaitConfirmation = false
+			onComplete()
+		},
+		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			txFees := utils.GetTransactionFees(tx, receipt)
-			s.logger.WithField("rpc", client.GetName()).Debugf("blob tx %6d.%v confirmed in block #%v!  total fee: %v gwei (tx: %v/%v, blob: %v/%v)", txIdx+1, replacementIdx, receipt.BlockNumber.String(), txFees.TotalFeeGwei(), txFees.TxFeeGwei(), txFees.TxBaseFeeGwei(), txFees.BlobFeeGwei(), txFees.BlobBaseFeeGwei())
+			s.logger.WithField("rpc", client.GetName()).Debugf(
+				"blob tx %6d.%v confirmed in block #%v!  total fee: %v gwei (tx: %v/%v, blob: %v/%v)",
+				txIdx+1,
+				replacementIdx,
+				receipt.BlockNumber.String(),
+				txFees.TotalFeeGweiString(),
+				txFees.TxFeeGweiString(),
+				txFees.TxBaseFeeGweiString(),
+				txFees.BlobFeeGweiString(),
+				txFees.BlobBaseFeeGweiString(),
+			)
 		},
-		LogFn: func(client *spamoor.Client, retry int, rebroadcast int, err error) {
-			logger := s.logger.WithField("rpc", client.GetName()).WithField("nonce", tx.Nonce())
-			if retry == 0 && rebroadcast > 0 {
-				logger.Infof("rebroadcasting blob tx %6d.%v", txIdx+1, replacementIdx)
-			}
-			if retry > 0 {
-				logger = logger.WithField("retry", retry)
-			}
-			if rebroadcast > 0 {
-				logger = logger.WithField("rebroadcast", rebroadcast)
-			}
-			if err != nil {
-				logger.Debugf("failed sending blob tx %6d.%v: %v", txIdx+1, replacementIdx, err)
-			} else if retry > 0 || rebroadcast > 0 {
-				logger.Debugf("successfully sent blob tx %6d.%v", txIdx+1, replacementIdx)
-			}
-		},
-		OnRebroadcast: func(tx *types.Transaction, options *spamoor.SendTransactionOptions, client *spamoor.Client) {
-			// we might need to switch to v1 after fulu activation
+		LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.%v", txIdx+1, replacementIdx), tx),
+		OnEncode: func(tx *types.Transaction) ([]byte, error) {
 			txBytes, _ := getTxBytes()
-			options.TransactionBytes = txBytes
+			return txBytes, nil
 		},
-		TransactionBytes: txBytes,
 	})
 	if err != nil {
 		if replacementIdx == 0 {
@@ -404,27 +363,36 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, replacementIdx 
 	}
 
 	if s.options.Replace > 0 && replacementIdx < s.options.MaxReplacements && rand.Intn(100) < 70 {
-		go s.delayedReplace(ctx, txIdx, tx, &awaitConfirmation, replacementIdx)
+		go s.delayedReplace(ctx, txIdx, tx, wallet, &awaitConfirmation, replacementIdx)
 	}
 
 	return tx, client, wallet, txVersion, nil
 }
 
-func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.Transaction, awaitConfirmation *bool, replacementIdx uint64) {
+func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.Transaction, wallet *spamoor.Wallet, awaitConfirmation *bool, replacementIdx uint64) {
 	time.Sleep(time.Duration(rand.Intn(int(s.options.Replace))+2) * time.Second)
 
 	if !*awaitConfirmation {
 		return
 	}
 
-	replaceTx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, replacementIdx+1, tx.Nonce(), func() {})
+	replaceTx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, wallet, replacementIdx+1, tx.Nonce(), func() {})
 	if err != nil {
 		s.logger.WithField("rpc", client.GetName()).Warnf("blob tx %6d.%v replacement failed: %v", txIdx+1, replacementIdx+1, err)
 		return
 	}
-	s.logger.WithFields(logrus.Fields{
-		"rpc":    client.GetName(),
-		"wallet": s.walletPool.GetWalletName(wallet.GetAddress()),
-		"nonce":  tx.Nonce(),
-	}).Infof("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+
+	if s.options.LogTxs {
+		s.logger.WithFields(logrus.Fields{
+			"rpc":    client.GetName(),
+			"wallet": s.walletPool.GetWalletName(wallet.GetAddress()),
+			"nonce":  tx.Nonce(),
+		}).Infof("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+	} else {
+		s.logger.WithFields(logrus.Fields{
+			"rpc":    client.GetName(),
+			"wallet": s.walletPool.GetWalletName(wallet.GetAddress()),
+			"nonce":  tx.Nonce(),
+		}).Debugf("blob tx %6d.%v sent:  %v (%v sidecars, v%v)", txIdx+1, replacementIdx+1, replaceTx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+	}
 }

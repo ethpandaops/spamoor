@@ -1,0 +1,38 @@
+# Name: Max block receipt size spammer
+# Description: Tests maximum log emission, targeting maximum receipt size per block (max gas per block)
+# Tags: logs, performance, receipt, max-gas
+# Min_Version: v1.1.5
+- scenario: gasburnertx
+  name: Max block receipt size spammer
+  description: "Max block receipt size spammer, max gas per block"
+  config:
+    # wallet settings
+    seed: max-logs-1 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+
+    # scenario: gasburnertx
+    total_count: 0
+    throughput: 2
+    max_pending: 4
+    max_wallets: 0
+    rebroadcast: 120
+    base_fee: 2
+    tip_fee: 1
+    gas_units_to_burn: 0
+    gas_remainder: 800000
+    init_opcodes: |
+      PUSH 0x1337133713371337133713371337133713371337133713371337133713371337
+      PUSH 0
+      MSTORE
+      PUSH 0x4242424242424242424242424242424242424242424242424242424242424242
+      PUSH 32
+      PUSH 100000
+      SUB
+      MSTORE
+    opcodes: |
+      PUSH 100000
+      PUSH 0
+      LOG0
+    client_group: ""

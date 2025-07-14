@@ -18,6 +18,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	contractdeploy "github.com/ethpandaops/spamoor/scenarios/statebloat/contract_deploy"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
+	"github.com/ethpandaops/spamoor/scenarios/taskrunner"
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 	"github.com/ethpandaops/spamoor/scenarios/xentoken"
@@ -41,6 +42,7 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&geastx.ScenarioDescriptor,
 	&setcodetx.ScenarioDescriptor,
 	&storagespam.ScenarioDescriptor,
+	&taskrunner.ScenarioDescriptor,
 	&uniswapswaps.ScenarioDescriptor,
 	&wallets.ScenarioDescriptor,
 	&contractdeploy.ScenarioDescriptor,

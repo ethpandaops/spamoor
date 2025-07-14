@@ -12,7 +12,9 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const SecondsPerSlot uint64 = 12
+// GlobalSecondsPerSlot is the global setting for seconds per slot used in rate limiting.
+// This can be set via CLI flag (--seconds-per-slot) and applies to all scenarios.
+var GlobalSecondsPerSlot uint64 = 12
 
 // TransactionScenarioOptions configures how the transaction scenario is executed.
 type TransactionScenarioOptions struct {
@@ -22,6 +24,7 @@ type TransactionScenarioOptions struct {
 	ThroughputIncrementInterval uint64
 	Timeout                     time.Duration // Maximum duration for scenario execution (0 = no timeout)
 	WalletPool                  *spamoor.WalletPool
+	NoAwaitTransactions         bool // If true, the scenario will not wait for transactions to be included in a block
 
 	// Logger for scenario execution information
 	Logger *logrus.Entry
@@ -47,6 +50,9 @@ type TransactionScenarioOptions struct {
 // Returns an error only if the scenario cannot be started. Transaction failures
 // should be handled within ProcessNextTxFn.
 func RunTransactionScenario(ctx context.Context, options TransactionScenarioOptions) error {
+	// Use global SecondsPerSlot
+	secondsPerSlot := GlobalSecondsPerSlot
+
 	txIdxCounter := uint64(0)
 	pendingCount := atomic.Int64{}
 	txCount := atomic.Uint64{}
@@ -66,12 +72,14 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	var pendingMutex sync.Mutex
 	var pendingCond *sync.Cond
 
+	pendingWg := sync.WaitGroup{}
+
 	if options.MaxPending > 0 {
 		maxPending.Store(options.MaxPending)
 		pendingCond = sync.NewCond(&pendingMutex)
 	}
 
-	initialRate := rate.Limit(float64(options.Throughput) / float64(SecondsPerSlot))
+	initialRate := rate.Limit(float64(options.Throughput) / float64(secondsPerSlot))
 	if initialRate == 0 {
 		initialRate = rate.Inf
 	}
@@ -81,11 +89,23 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	var lastSubmittedCount uint64
 	if options.WalletPool != nil && options.WalletPool.GetTxPool() != nil {
 		txPool := options.WalletPool.GetTxPool()
-		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats spamoor.WalletPoolBlockStats) {
-			currentSubmitted := txCount.Load()
-			submittedThisBlock := currentSubmitted - lastSubmittedCount
-			lastSubmittedCount = currentSubmitted
-			pending := pendingCount.Load()
+		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats *spamoor.WalletPoolBlockStats) {
+			pendingCount := uint64(0)
+			submittedCount := uint64(0)
+			for _, wallet := range options.WalletPool.GetAllWallets() {
+				// Get pending count
+				pendingNonce := wallet.GetNonce()
+				confirmedNonce := wallet.GetConfirmedNonce()
+				if pendingNonce > confirmedNonce {
+					pendingCount += pendingNonce - confirmedNonce
+				}
+
+				// Get submitted count
+				submittedCount += wallet.GetSubmittedTxCount()
+			}
+
+			submittedThisBlock := submittedCount - lastSubmittedCount
+			lastSubmittedCount = submittedCount
 
 			// Record confirmed transactions for this block
 			throughputTracker.recordCompletion(blockNumber, walletPoolStats.ConfirmedTxCount)
@@ -97,7 +117,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 
 			options.Logger.WithField("wallets", walletPoolStats.AffectedWallets).Infof(
 				"block %d: submitted=%d, pending=%d, confirmed=%d, throughput: 5B=%.2f tx/B, 20B=%.2f tx/B, 60B=%.2f tx/B",
-				blockNumber, submittedThisBlock, pending, walletPoolStats.ConfirmedTxCount, throughput5B, throughput20B, throughput60B,
+				blockNumber, submittedThisBlock, pendingCount, walletPoolStats.ConfirmedTxCount, throughput5B, throughput20B, throughput60B,
 			)
 		})
 
@@ -120,7 +140,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 					options.Logger.Infof("Increasing throughput from %.3f to %.3f and max pending from %d to %d",
 						throughput, newThroughput, maxPending.Load(), newMaxPending)
 
-					limiter.SetLimit(rate.Limit(float64(newThroughput) / float64(SecondsPerSlot)))
+					limiter.SetLimit(rate.Limit(float64(newThroughput) / float64(secondsPerSlot)))
 					maxPending.Store(newMaxPending)
 
 					// Signal one waiting goroutine that capacity has increased
@@ -160,17 +180,28 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			pendingMutex.Unlock()
 		}
 		pendingCount.Add(1)
+		pendingWg.Add(1)
 
 		currentChan := make(chan bool, 1)
 
 		go func(txIdx uint64, lastChan, currentChan chan bool) {
 			defer func() {
-				utils.RecoverPanic(options.Logger, "scenario.processNextTxFn")
+				utils.RecoverPanic(options.Logger, "scenario.processNextTxFn", nil)
 				currentChan <- true
 			}()
 
+			completed := false
+
 			logcb, err := options.ProcessNextTxFn(ctx, txIdx, func() {
+				if completed {
+					return
+				}
+
+				completed = true
+
+				pendingWg.Done()
 				pendingCount.Add(-1)
+				txCount.Add(1)
 				if pendingCond != nil {
 					pendingCond.Signal()
 				}
@@ -181,12 +212,10 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 				close(lastChan)
 			}
 
-			if err == nil {
-				txCount.Add(1)
-			}
-
 			if logcb != nil {
 				logcb()
+			} else if err != nil {
+				options.Logger.Warnf("process next tx failed: %v", err)
 			}
 		}(txIdx, lastChan, currentChan)
 
@@ -201,6 +230,10 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	if lastChan != nil {
 		<-lastChan
 		close(lastChan)
+	}
+
+	if !options.NoAwaitTransactions {
+		pendingWg.Wait()
 	}
 
 	return nil

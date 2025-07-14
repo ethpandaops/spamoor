@@ -1,0 +1,37 @@
+# Name: ecAdd precompile performance test
+# Description: Tests ecAdd precompile performance with changing inputs
+# Tags: ecadd, precompile, performance
+# Min_Version: v1.1.5
+- scenario: calltx
+  name: 'ecAdd precompile performance test'
+  description: "ecAdd precompile performance test with changing inputs, 30M gas limit"
+  config:
+    amount: 0
+    base_fee: 2
+    call_abi: ""
+    call_abi_file: ""
+    call_args: ""
+    call_data: ""
+    call_fn_name: ""
+    call_fn_sig: ""
+    client_group: ""
+    contract_addr_path: ""
+    contract_address: ""
+    contract_args: ""
+    contract_code: 0x600b380380600b5f395ff37f1581d9d4d7eb0e3cdc75739f7098479097d579573f23e70b07cbd40a5d97bbc16000527f18da69b1d2cb7b89fdb3bba2524bf135453ce828faea190d8f4d48d572cbe3fe6020527f2034b5942fbdd612f2553a9fd9fa5eb4c3e5ce6a34ed100f62de0e380f4e67f86040527f016027893e1f5082bdc48651667776e2b1e32a85edd33ff430eef15e8e68b3d46060525b604060006080600060066096fa50609056
+    contract_file: ""
+    deploy_gas_limit: 2000000
+    gas_limit: 30000000
+    max_pending: 5
+    max_wallets: 0
+    random_amount: false
+    random_target: false
+    rebroadcast: 120
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: calltx-ecadd-1
+    throughput: 10
+    timeout: ""
+    tip_fee: 1
+    total_count: 0

@@ -1,0 +1,56 @@
+# Name: EIP-7702 Authorizations Max Testing
+# Description: Tests maximum number of EIP-7702 authorizations per block under different gas limits
+# Tags: eip7702, performance, statebloat
+# Min_Version: v1.1.5
+- scenario: setcodetx
+  name: 'EIP7702: Max authorizations (fill up remainder)'
+  description: maximum number of eip7702 authorizations (500k gas / 10 authorizations per tx, lower prio)
+  config:
+    amount: 20
+    base_fee: 20
+    client_group: ""
+    code_addr: ""
+    data: ""
+    gas_limit: 500000
+    max_authorizations: 10
+    max_delegators: 1000
+    max_pending: 10
+    max_wallets: 200
+    min_authorizations: 10
+    random_amount: false
+    random_code_addr: true
+    random_target: true
+    rebroadcast: 120
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: setcodetx-840226
+    throughput: 10
+    tip_fee: 2
+    total_count: 0
+- scenario: setcodetx
+  name: 'EIP7702: Max authorizations'
+  description: maximum number of eip7702 authorizations (10M gas / 399 authorizations per tx, high prio)
+  config:
+    amount: 20
+    base_fee: 20
+    client_group: ""
+    code_addr: ""
+    data: ""
+    gas_limit: 10000000
+    max_authorizations: 399
+    max_delegators: 1000
+    max_pending: 10
+    max_wallets: 200
+    min_authorizations: 399
+    random_amount: false
+    random_code_addr: true
+    random_target: true
+    rebroadcast: 120
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: setcodetx-840225
+    throughput: 10
+    tip_fee: 3
+    total_count: 0

@@ -57,7 +57,7 @@ func (pool *ClientPool) PrepareClients() error {
 	for _, rpcHost := range pool.rpcHosts {
 		client, err := NewClient(rpcHost)
 		if err != nil {
-			pool.logger.Errorf("failed creating client for '%v': %v", client.GetRPCHost(), err.Error())
+			pool.logger.Errorf("failed creating client for '%v': %v", rpcHost, err.Error())
 			continue
 		}
 
