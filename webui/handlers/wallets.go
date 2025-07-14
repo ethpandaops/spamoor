@@ -14,13 +14,14 @@ type WalletsPage struct {
 }
 
 type WalletInfo struct {
-	Address        string  `json:"address"`
-	Balance        float64 `json:"balance"`
-	PendingNonce   uint64  `json:"pending_nonce"`
-	ConfirmedNonce uint64  `json:"confirmed_nonce"`
-	SpammerID      int64   `json:"spammer_id,omitempty"`
-	SpammerName    string  `json:"spammer_name,omitempty"`
-	SpammerStatus  int     `json:"spammer_status,omitempty"`
+	Address        string `json:"address"`
+	Name           string `json:"name"`
+	Balance        string `json:"balance"`
+	PendingNonce   uint64 `json:"pending_nonce"`
+	ConfirmedNonce uint64 `json:"confirmed_nonce"`
+	SpammerID      int64  `json:"spammer_id,omitempty"`
+	SpammerName    string `json:"spammer_name,omitempty"`
+	SpammerStatus  int    `json:"spammer_status,omitempty"`
 }
 
 func (fh *FrontendHandler) Wallets(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +60,8 @@ func (fh *FrontendHandler) getWalletsPageData() (*WalletsPage, error) {
 	data := &WalletsPage{
 		RootWallet: &WalletInfo{
 			Address:        rootAddr.String(),
-			Balance:        weiToEth(rootBalance),
+			Name:           "root",
+			Balance:        weiToEthString(rootBalance),
 			PendingNonce:   rootPendingNonce,
 			ConfirmedNonce: rootConfirmedNonce,
 		},
@@ -82,7 +84,8 @@ func (fh *FrontendHandler) getWalletsPageData() (*WalletsPage, error) {
 
 			data.SpammerWallets = append(data.SpammerWallets, &WalletInfo{
 				Address:        addr.String(),
-				Balance:        weiToEth(balance),
+				Name:           walletPool.GetWalletName(addr),
+				Balance:        weiToEthString(balance),
 				PendingNonce:   pendingNonce,
 				ConfirmedNonce: confirmedNonce,
 				SpammerID:      spammer.GetID(),
@@ -95,13 +98,13 @@ func (fh *FrontendHandler) getWalletsPageData() (*WalletsPage, error) {
 	return data, nil
 }
 
-func weiToEth(wei *big.Int) float64 {
+func weiToEthString(wei *big.Int) string {
 	if wei == nil {
-		return 0
+		return "0"
 	}
 	// Convert wei to eth (1 eth = 10^18 wei)
 	fbalance := new(big.Float).SetInt(wei)
 	ethValue := new(big.Float).Quo(fbalance, new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)))
-	result, _ := ethValue.Float64()
-	return result
+	// Format with fixed decimal places to avoid scientific notation
+	return ethValue.Text('f', 6)
 }

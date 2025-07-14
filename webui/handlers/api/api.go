@@ -717,26 +717,44 @@ func (ah *APIHandler) GetPendingTransactions(w http.ResponseWriter, r *http.Requ
 
 	allPendingTxs := make([]PendingTransactionEntry, 0)
 
-	// Helper function to format wei values to ETH
-	formatWeiToETH := func(wei string) string {
+	// Helper function to format wei values with appropriate units
+	formatWeiSmart := func(wei string) string {
 		if wei == "" || wei == "0" {
-			return "0 ETH"
+			return "0 wei"
 		}
-		// Convert wei to ETH for display
+
+		// Convert to float64 for comparison
 		weiFloat, _ := strconv.ParseFloat(wei, 64)
-		eth := weiFloat / 1e18
-		return fmt.Sprintf("%.6f ETH", eth)
+
+		// Thresholds
+		const (
+			gweiThreshold = 1000       // 1000 wei = switch to gwei
+			ethThreshold  = 1000 * 1e9 // 1000 gwei = switch to eth
+		)
+
+		if weiFloat < gweiThreshold {
+			// Show in wei for very small amounts
+			return fmt.Sprintf("%s wei", wei)
+		} else if weiFloat < ethThreshold {
+			// Show in gwei for medium amounts
+			gwei := weiFloat / 1e9
+			return fmt.Sprintf("%.2f gwei", gwei)
+		} else {
+			// Show in ETH for large amounts
+			eth := weiFloat / 1e18
+			return fmt.Sprintf("%.6f ETH", eth)
+		}
 	}
 
-	// Helper function to format wei values to Gwei
+	// Helper function to format wei values to Gwei (for gas fees)
 	formatWeiToGwei := func(wei string) string {
 		if wei == "" || wei == "0" {
-			return "0 Gwei"
+			return "0 gwei"
 		}
 		// Convert wei to Gwei for display
 		weiFloat, _ := strconv.ParseFloat(wei, 64)
 		gwei := weiFloat / 1e9
-		return fmt.Sprintf("%.2f Gwei", gwei)
+		return fmt.Sprintf("%.2f gwei", gwei)
 	}
 
 	// Helper function to process pending transactions from a wallet
@@ -774,9 +792,9 @@ func (ah *APIHandler) GetPendingTransactions(w http.ResponseWriter, r *http.Requ
 				SpammerID:        spammerID,
 				Nonce:            tx.Nonce(),
 				Value:            tx.Value().String(),
-				ValueFormatted:   formatWeiToETH(tx.Value().String()),
+				ValueFormatted:   formatWeiSmart(tx.Value().String()),
 				Fee:              fee.String(),
-				FeeFormatted:     formatWeiToETH(fee.String()),
+				FeeFormatted:     formatWeiSmart(fee.String()),
 				BaseFee:          baseFee.String(),
 				BaseFeeFormatted: formatWeiToGwei(baseFee.String()),
 				SubmittedAt:      submittedAt,
