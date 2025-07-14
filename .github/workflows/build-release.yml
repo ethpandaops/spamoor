@@ -50,6 +50,41 @@ jobs:
         echo " - ${changelog//$'\n'/$'\n' - }" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
+    - name: "Generate AI release notes"
+      id: ai_release_notes
+      run: |
+        conv=$(cat <<EOF
+        You are a helpful assistant that generates release notes for a software project.
+        You will be given a changelog and you will need to generate release notes for the following changelog:
+        ${{ steps.changelog.outputs.changelog }}
+
+        The release notes will be embedded in the following format:
+        ### Major Changes
+        {{ AI RESPONSE }}
+
+        <details>
+          <summary>Full changelog</summary>
+
+          ### Full changelog
+          ...
+        </details>
+
+        Avoid long release notes. Keep it short and concise, a few bullet points / sentences. Use markdown formatting if needed.
+        EOF
+        )
+
+        conv_json=$(echo "$conv" | jq -R -s '{"model": "${{ vars.OPENROUTER_MODEL }}", "messages": [{"role": "user", "content": .}]}')
+        conv_response=$(curl -X POST -H "Authorization: Bearer ${{ secrets.OPENAI_API_KEY }}" -H "Content-Type: application/json" -d "$conv_json" https://api.openai.com/v1/chat/completions)
+        echo "$conv_response"
+
+        conv_response_text=$(echo "$conv_response" | jq -r '.choices[0].message.content')
+        
+        echo "conv_response<<EOF" >> $GITHUB_OUTPUT
+        echo "$conv_response_text" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
     # download build artifacts
     - name: "Download build artifacts"
       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -65,7 +100,7 @@ jobs:
         tag_name: "v${{ inputs.version }}"
         body: |
           ### Major Changes
-          * ...
+          ${{ steps.ai_release_notes.outputs.conv_response_text }}
 
           <details>
             <summary>Full changelog</summary>
