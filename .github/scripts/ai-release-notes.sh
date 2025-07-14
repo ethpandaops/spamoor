@@ -3,7 +3,7 @@
 # Sanitize the changelog by escaping backticks to prevent command execution
 changelog_safe="${1//\`/\\\`}"
 
-previous_release_notes=$(curl https://api.github.com/repos/$GITHUB_REPOSITORY/releases | jq -c '.[] | {"body": .body, "name": .name}')
+previous_release_notes=$(curl -s https://api.github.com/repos/$GITHUB_REPOSITORY/releases | jq -c '.[0:8][] | {"body": .body, "name": .name}')
 
 conv=$(cat <<EOF
 You are a helpful assistant that generates release notes for a software project.
