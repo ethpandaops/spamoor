@@ -390,7 +390,12 @@ func (wallet *Wallet) GetPendingTx(tx *types.Transaction) *PendingTx {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
-	for _, pendingTx := range wallet.txNonceChans[tx.Nonce()].txs {
+	nonceChan := wallet.txNonceChans[tx.Nonce()]
+	if nonceChan == nil {
+		return nil
+	}
+
+	for _, pendingTx := range nonceChan.txs {
 		if pendingTx.Tx.Hash() == tx.Hash() {
 			return pendingTx
 		}
