@@ -863,7 +863,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 // The wg parameter is signaled when confirmation tracking is set up.
 func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, wg *sync.WaitGroup) (*types.Receipt, error) {
 	txHash := tx.Hash()
-	nonceChan, isFirstPendingTx := wallet.getTxNonceChan(tx.Nonce())
+	nonceChan, isFirstPendingTx := wallet.getTxNonceChan(tx)
 
 	if isFirstPendingTx && pool.lastBlockNumber > wallet.lastConfirmation+1 {
 		wallet.lastConfirmation = pool.lastBlockNumber - 1
@@ -1353,6 +1353,12 @@ func (pool *TxPool) processRebroadcastRequests() time.Time {
 				// Perform rebroadcast
 				go pool.rebroadcastTransaction(req.confirmCtx, req.tx, req.options, req.retryCount)
 				req.retryCount++
+
+				pendingTx := req.fromWallet.GetPendingTx(req.tx)
+				if pendingTx != nil {
+					pendingTx.LastRebroadcast = now
+					pendingTx.RebroadcastCount++
+				}
 
 				// Calculate next attempt time
 				backoffDelay := pool.calculateBackoffDelay(req.retryCount)
