@@ -1,54 +1,100 @@
 {{ define "page" }}
 <div class="container mt-2">
-  <h2 class="py-2">Wallet Overview</h2>
+  <div class="d-flex justify-content-between align-items-center py-2">
+    <h2>Wallet Overview</h2>
+    <div class="btn-group" role="group">
+      <button type="button" class="btn btn-outline-primary active" id="wallet-view-btn">Wallet View</button>
+      <button type="button" class="btn btn-outline-primary" id="transaction-view-btn">Transaction View</button>
+    </div>
+  </div>
   
-  <div class="table-responsive">
+  <!-- Wallet View -->
+  <div id="wallet-view" class="table-responsive">
     <table class="table">
       <thead>
         <tr>
           <th>Address</th>
+          <th>Name</th>
           <th>Balance</th>
-          <th>Nonces</th>
+          <th data-bs-toggle="popover" data-bs-trigger="hover" data-bs-content="Format: [pending nonce] / [confirmed nonce]" style="cursor: help;">Nonces</th>
           <th>Pending TXs</th>
           <th>Used By</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         <!-- Root Wallet -->
-        <tr class="align-middle">
+        <tr class="align-middle wallet-row" data-wallet-address="{{ .RootWallet.Address }}">
           <td class="font-monospace">{{ .RootWallet.Address }}</td>
+          <td>{{ .RootWallet.Name }}</td>
           <td>{{ .RootWallet.Balance }} ETH</td>
           <td>{{ .RootWallet.PendingNonce }} / {{ .RootWallet.ConfirmedNonce }}</td>
           <td>{{ subUI64 .RootWallet.PendingNonce .RootWallet.ConfirmedNonce }}</td>
           <td><span class="badge bg-primary">Root Wallet</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline-secondary expand-btn" data-wallet="{{ .RootWallet.Address }}" title="Toggle Transactions">
+              <i class="fas fa-chevron-down"></i>
+            </button>
+          </td>
         </tr>
         
         <!-- Spammer Wallets -->
         {{ range .SpammerWallets }}
-        <tr class="align-middle">
+        <tr class="align-middle wallet-row" data-wallet-address="{{ .Address }}">
           <td class="font-monospace">{{ .Address }}</td>
+          <td>{{ .Name }}</td>
           <td>{{ .Balance }} ETH</td>
           <td>{{ .PendingNonce }} / {{ .ConfirmedNonce }}</td>
           <td>{{ subUI64 .PendingNonce .ConfirmedNonce }}</td>
-          <td class="d-flex align-items-center gap-2">
-            <a href="/" class="text-decoration-none spammer-name-link">
-              #{{ .SpammerID }}
-              {{ if .SpammerName }}
-                <small class="text-muted">({{ .SpammerName }})</small>
+          <td>
+            <div class="d-flex align-items-center gap-2">
+              <a href="/" class="text-decoration-none spammer-name-link">
+                #{{ .SpammerID }}
+                {{ if .SpammerName }}
+                  <small class="text-muted">({{ .SpammerName }})</small>
+                {{ end }}
+              </a>
+              {{ if eq .SpammerStatus 0 }}
+                <span class="badge bg-warning">Paused</span>
+              {{ else if eq .SpammerStatus 1 }}
+                <span class="badge bg-success">Running</span>
+              {{ else if eq .SpammerStatus 2 }}
+                <span class="badge bg-info">Finished</span>
+              {{ else }}
+                <span class="badge bg-danger">Failed</span>
               {{ end }}
-            </a>
-            {{ if eq .SpammerStatus 0 }}
-              <span class="badge bg-warning">Paused</span>
-            {{ else if eq .SpammerStatus 1 }}
-              <span class="badge bg-success">Running</span>
-            {{ else if eq .SpammerStatus 2 }}
-              <span class="badge bg-info">Finished</span>
-            {{ else }}
-              <span class="badge bg-danger">Failed</span>
-            {{ end }}
+            </div>
+          </td>
+          <td>
+            <button class="btn btn-sm btn-outline-secondary expand-btn" data-wallet="{{ .Address }}" title="Toggle Transactions">
+              <i class="fas fa-chevron-down"></i>
+            </button>
           </td>
         </tr>
         {{ end }}
+      </tbody>
+    </table>
+  </div>
+  
+  <!-- Transaction View -->
+  <div id="transaction-view" class="table-responsive" style="display: none;">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Hash</th>
+          <th>Wallet Address</th>
+          <th>Wallet Name</th>
+          <th>Nonce</th>
+          <th>Value</th>
+          <th>Fee</th>
+          <th>Base Fee</th>
+          <th>Submitted</th>
+          <th>Rebroadcasts</th>
+          <th>Last Rebroadcast</th>
+        </tr>
+      </thead>
+      <tbody id="transaction-list">
+        <!-- Transactions will be loaded here -->
       </tbody>
     </table>
   </div>
@@ -57,7 +103,200 @@
 
 {{ define "js" }}
 <script>
-setTimeout(() => window.location.reload(), 60000);
+/* setTimeout(() => window.location.reload(), 60000); */
+
+document.getElementById('wallet-view-btn').addEventListener('click', function() {
+  showView('wallet');
+});
+
+document.getElementById('transaction-view-btn').addEventListener('click', function() {
+  showView('transaction');
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+  const popoverTriggerList = document.querySelectorAll('[data-bs-toggle="popover"]');
+  const popoverList = [...popoverTriggerList].map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl));
+});
+
+function showView(viewType) {
+  const walletView = document.getElementById('wallet-view');
+  const transactionView = document.getElementById('transaction-view');
+  const walletBtn = document.getElementById('wallet-view-btn');
+  const transactionBtn = document.getElementById('transaction-view-btn');
+  
+  if (viewType === 'wallet') {
+    walletView.style.display = 'block';
+    transactionView.style.display = 'none';
+    walletBtn.classList.add('active');
+    transactionBtn.classList.remove('active');
+  } else {
+    walletView.style.display = 'none';
+    transactionView.style.display = 'block';
+    walletBtn.classList.remove('active');
+    transactionBtn.classList.add('active');
+    loadAllTransactions();
+  }
+}
+
+document.querySelectorAll('.expand-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    const walletAddress = this.getAttribute('data-wallet');
+    const walletRow = this.closest('tr');
+    const existingTxRow = walletRow.nextElementSibling;
+    const icon = this.querySelector('i');
+    
+    if (existingTxRow && existingTxRow.classList.contains('tx-expansion-row')) {
+      existingTxRow.remove();
+      icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+    } else {
+      icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+      loadWalletTransactions(walletAddress, walletRow);
+    }
+  });
+});
+
+function loadWalletTransactions(walletAddress, walletRow) {
+  fetch(`/api/pending-transactions?wallet=${encodeURIComponent(walletAddress)}`)
+    .then(response => response.json())
+    .then(transactions => {
+      const txRow = document.createElement('tr');
+      txRow.classList.add('tx-expansion-row');
+      
+      const txCell = document.createElement('td');
+      txCell.setAttribute('colspan', '7');
+      txCell.classList.add('p-0');
+      
+      if (!transactions || transactions.length === 0) {
+        txCell.innerHTML = '<div class="p-3 text-muted">No pending transactions</div>';
+      } else {
+        const txTable = createTransactionTable(transactions);
+        txCell.appendChild(txTable);
+      }
+      
+      txRow.appendChild(txCell);
+      walletRow.insertAdjacentElement('afterend', txRow);
+    })
+    .catch(error => {
+      console.error('Error loading wallet transactions:', error);
+      
+      const expandBtn = walletRow.querySelector('.expand-btn');
+      const icon = expandBtn.querySelector('i');
+      icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+      
+      const txRow = document.createElement('tr');
+      txRow.classList.add('tx-expansion-row');
+      
+      const txCell = document.createElement('td');
+      txCell.setAttribute('colspan', '7');
+      txCell.classList.add('p-0');
+      txCell.innerHTML = '<div class="p-3 text-danger">Error loading transactions</div>';
+      
+      txRow.appendChild(txCell);
+      walletRow.insertAdjacentElement('afterend', txRow);
+    });
+}
+
+function loadAllTransactions() {
+  const transactionList = document.getElementById('transaction-list');
+  transactionList.innerHTML = '<tr><td colspan="10" class="text-center">Loading...</td></tr>';
+  
+  fetch('/api/pending-transactions')
+    .then(response => response.json())
+    .then(transactions => {
+      transactionList.innerHTML = '';
+      
+      if (!transactions || transactions.length === 0) {
+        transactionList.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No pending transactions</td></tr>';
+      } else {
+        transactions.forEach(tx => {
+          const row = createTransactionRow(tx);
+          transactionList.appendChild(row);
+        });
+      }
+    })
+    .catch(error => {
+      console.error('Error loading transactions:', error);
+      transactionList.innerHTML = '<tr><td colspan="10" class="text-center text-danger">Error loading transactions</td></tr>';
+    });
+}
+
+function createTransactionTable(transactions) {
+  const table = document.createElement('table');
+  table.classList.add('table', 'table-sm', 'mb-0');
+  
+  const thead = document.createElement('thead');
+  thead.innerHTML = `
+    <tr class="child-table-header">
+      <th>Hash</th>
+      <th>Nonce</th>
+      <th>Value</th>
+      <th>Fee</th>
+      <th>Base Fee</th>
+      <th>Submitted</th>
+      <th>Rebroadcasts</th>
+      <th>Last Rebroadcast</th>
+    </tr>
+  `;
+  table.appendChild(thead);
+  
+  const tbody = document.createElement('tbody');
+  transactions.forEach(tx => {
+    const row = createTransactionRow(tx, false);
+    tbody.appendChild(row);
+  });
+  table.appendChild(tbody);
+  
+  return table;
+}
+
+function createTransactionRow(tx, includeWallet = true) {
+  const row = document.createElement('tr');
+  row.classList.add('align-middle');
+  
+  const formatTimestamp = (timestamp) => {
+    const date = new Date(timestamp);
+    return date.toLocaleString();
+  };
+  
+  const truncateHash = (hash) => {
+    return hash.substring(0, 8) + '...' + hash.substring(hash.length - 6);
+  };
+  
+  const truncateAddress = (address) => {
+    return address.substring(0, 6) + '...' + address.substring(address.length - 4);
+  };
+  
+  const formatWalletName = (walletName) => {
+    if (walletName.length > 20) {
+      return walletName.substring(0, 17) + '...';
+    }
+    return walletName;
+  };
+  
+  let innerHTML = `
+    <td class="font-monospace" title="${tx.hash}">${truncateHash(tx.hash)}</td>
+  `;
+  
+  if (includeWallet) {
+    innerHTML += `
+      <td class="font-monospace" title="${tx.wallet_address}">${truncateAddress(tx.wallet_address)}</td>
+      <td title="${tx.wallet_name}">${formatWalletName(tx.wallet_name)}</td>
+    `;
+  }
+  
+  innerHTML += `
+    <td>${tx.nonce}</td>
+    <td>${tx.value_formatted}</td>
+    <td>${tx.fee_formatted}</td>
+    <td>${tx.base_fee_formatted}</td>
+    <td>${formatTimestamp(tx.submitted_at)}</td>
+    <td>${tx.rebroadcast_count}</td>
+    <td>${tx.rebroadcast_count > 0 ? formatTimestamp(tx.last_rebroadcast) : '-'}</td>
+  `;
+  
+  row.innerHTML = innerHTML;
+  return row;
+}
 </script>
 {{ end }} 
 
@@ -70,6 +309,79 @@ setTimeout(() => window.location.reload(), 60000);
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: middle;
+}
+
+.tx-expansion-row {
+  background-color: #f8f9fa;
+  border-top: 1px solid #dee2e6;
+}
+
+.tx-expansion-row td {
+  padding: 0 !important;
+}
+
+.tx-expansion-row table {
+  margin: 0;
+  border: none;
+}
+
+.tx-expansion-row table th,
+.tx-expansion-row table td {
+  border-top: none;
+  border-bottom: 1px solid #dee2e6;
+  padding: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.tx-expansion-row table th {
+  background-color: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  font-weight: 600;
+}
+
+.child-table-header th {
+  background-color: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  font-weight: 600;
+}
+
+.expand-btn {
+  white-space: nowrap;
+  width: 2.5rem;
+  text-align: center;
+}
+
+.expand-btn i {
+  transition: transform 0.2s ease;
+}
+
+.btn-group .btn {
+  min-width: 120px;
+}
+
+.table-responsive {
+  transition: opacity 0.2s ease;
+}
+
+.font-monospace {
+  font-family: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Improve table spacing */
+.table th,
+.table td {
+  vertical-align: middle;
+}
+
+/* Reduce padding for wallet list */
+#wallet-view .table td,
+#wallet-view .table th {
+  padding: 0.175rem 0.75rem;
+}
+
+/* Style for transaction hash and address tooltips */
+[title] {
+  cursor: help;
 }
 </style>
 {{ end }}

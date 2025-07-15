@@ -276,6 +276,50 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/pending-transactions": {
+            "get": {
+                "description": "Returns a list of pending transactions, optionally filtered by wallet address",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wallet"
+                ],
+                "summary": "Get pending transactions (global or wallet-specific)",
+                "operationId": "getPendingTransactions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wallet address to filter by (optional)",
+                        "name": "wallet",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.PendingTransactionEntry"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid wallet address",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/api/scenarios": {
             "get": {
                 "description": "Returns a list of all scenarios",
@@ -1089,6 +1133,67 @@ const docTemplate = `{
             "properties": {
                 "gasUsed": {
                     "type": "integer"
+                }
+            }
+        },
+        "api.PendingTransactionEntry": {
+            "type": "object",
+            "properties": {
+                "base_fee": {
+                    "description": "In wei as string",
+                    "type": "string"
+                },
+                "base_fee_formatted": {
+                    "description": "Formatted for display",
+                    "type": "string"
+                },
+                "fee": {
+                    "description": "In wei as string",
+                    "type": "string"
+                },
+                "fee_formatted": {
+                    "description": "Formatted for display",
+                    "type": "string"
+                },
+                "hash": {
+                    "type": "string"
+                },
+                "last_rebroadcast": {
+                    "description": "RFC3339 timestamp",
+                    "type": "string"
+                },
+                "nonce": {
+                    "type": "integer"
+                },
+                "rebroadcast_count": {
+                    "type": "integer"
+                },
+                "scenario_name": {
+                    "description": "Scenario name (if applicable)",
+                    "type": "string"
+                },
+                "spammer_id": {
+                    "description": "Spammer ID (if applicable)",
+                    "type": "integer"
+                },
+                "submitted_at": {
+                    "description": "RFC3339 timestamp",
+                    "type": "string"
+                },
+                "value": {
+                    "description": "In wei as string",
+                    "type": "string"
+                },
+                "value_formatted": {
+                    "description": "Formatted for display",
+                    "type": "string"
+                },
+                "wallet_address": {
+                    "type": "string"
+                },
+                "wallet_name": {
+                    "description": "Human-readable wallet name",
+                    "type": "string"
                 }
             }
         },

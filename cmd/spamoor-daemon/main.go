@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/daemon/db"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/ethpandaops/spamoor/webui"
@@ -31,6 +32,7 @@ type CliArgs struct {
 	fuluActivation   uint64
 	withoutBatcher   bool
 	disableTxMetrics bool
+	secondsPerSlot   uint64
 }
 
 func main() {
@@ -49,6 +51,7 @@ func main() {
 	flags.Uint64Var(&cliArgs.fuluActivation, "fulu-activation", 0, "The unix timestamp of the Fulu activation (if activated)")
 	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
 	flags.BoolVar(&cliArgs.disableTxMetrics, "disable-tx-metrics", false, "Disable transaction metrics collection and graphs page (keeps Prometheus metrics)")
+	flags.Uint64Var(&cliArgs.secondsPerSlot, "seconds-per-slot", 12, "Seconds per slot for rate limiting (used for throughput calculation).")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -67,6 +70,9 @@ func main() {
 		"version":   utils.GetBuildVersion(),
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor daemon")
+
+	// Set global seconds per slot
+	scenario.GlobalSecondsPerSlot = cliArgs.secondsPerSlot
 
 	// start client pool
 	rpcHosts := []string{}

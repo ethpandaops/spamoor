@@ -5,9 +5,11 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -43,8 +45,16 @@ type Wallet struct {
 
 // nonceStatus tracks the confirmation status of a transaction with a specific nonce
 type nonceStatus struct {
+	txs     []*PendingTx
 	receipt *types.Receipt
 	channel chan bool
+}
+
+type PendingTx struct {
+	Tx               *types.Transaction
+	Submitted        time.Time
+	LastRebroadcast  time.Time
+	RebroadcastCount uint64
 }
 
 // NewWallet creates a new wallet from a private key string.
@@ -337,9 +347,11 @@ func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
 // It manages a map of nonce channels used to wait for specific transaction confirmations.
 // Returns the nonce status and a boolean indicating if this is the first pending transaction.
 // If the target nonce is already confirmed, returns nil and false.
-func (wallet *Wallet) getTxNonceChan(targetNonce uint64) (*nonceStatus, bool) {
+func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
+
+	targetNonce := tx.Nonce()
 
 	if wallet.confirmedTxCount > targetNonce {
 		return nil, false
@@ -347,13 +359,68 @@ func (wallet *Wallet) getTxNonceChan(targetNonce uint64) (*nonceStatus, bool) {
 
 	nonceChan := wallet.txNonceChans[targetNonce]
 	if nonceChan != nil {
+		for _, existingTx := range nonceChan.txs {
+			if existingTx.Tx.Hash() == tx.Hash() {
+				return nonceChan, false
+			}
+		}
+
+		nonceChan.txs = append(nonceChan.txs, &PendingTx{
+			Tx:        tx,
+			Submitted: time.Now(),
+		})
 		return nonceChan, false
 	}
 
 	nonceChan = &nonceStatus{
+		txs: []*PendingTx{
+			{
+				Tx:        tx,
+				Submitted: time.Now(),
+			},
+		},
 		channel: make(chan bool),
 	}
 	wallet.txNonceChans[targetNonce] = nonceChan
 
 	return nonceChan, len(wallet.txNonceChans) == 1
+}
+
+func (wallet *Wallet) GetPendingTx(tx *types.Transaction) *PendingTx {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	nonceChan := wallet.txNonceChans[tx.Nonce()]
+	if nonceChan == nil {
+		return nil
+	}
+
+	for _, pendingTx := range nonceChan.txs {
+		if pendingTx.Tx.Hash() == tx.Hash() {
+			return pendingTx
+		}
+	}
+
+	return nil
+}
+
+func (wallet *Wallet) GetPendingTxs() []*PendingTx {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	pendingNonces := []uint64{}
+	for nonce := range wallet.txNonceChans {
+		pendingNonces = append(pendingNonces, nonce)
+	}
+
+	sort.Slice(pendingNonces, func(i, j int) bool {
+		return pendingNonces[i] < pendingNonces[j]
+	})
+
+	pendingTxs := []*PendingTx{}
+	for _, nonce := range pendingNonces {
+		pendingTxs = append(pendingTxs, wallet.txNonceChans[nonce].txs...)
+	}
+
+	return pendingTxs
 }

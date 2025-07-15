@@ -27,7 +27,7 @@ docs:
 
 generate-spammer-index:
 	@echo "Generating spammer configuration index..."
-	go run scripts/generate-spammer-index.go
+	scripts/generate-spammer-index.sh spammer-configs
 
 clean:
 	rm -f bin/*

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"math/rand"
 	"net/http"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/scenarios"
+	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
@@ -678,6 +680,174 @@ func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) 
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
+}
+
+// PendingTransactionEntry represents a pending transaction in the API response
+type PendingTransactionEntry struct {
+	Hash             string `json:"hash"`
+	WalletAddress    string `json:"wallet_address"`
+	WalletName       string `json:"wallet_name"`   // Human-readable wallet name
+	ScenarioName     string `json:"scenario_name"` // Scenario name (if applicable)
+	SpammerID        int64  `json:"spammer_id"`    // Spammer ID (if applicable)
+	Nonce            uint64 `json:"nonce"`
+	Value            string `json:"value"`              // In wei as string
+	ValueFormatted   string `json:"value_formatted"`    // Formatted for display
+	Fee              string `json:"fee"`                // In wei as string
+	FeeFormatted     string `json:"fee_formatted"`      // Formatted for display
+	BaseFee          string `json:"base_fee"`           // In wei as string
+	BaseFeeFormatted string `json:"base_fee_formatted"` // Formatted for display
+	SubmittedAt      string `json:"submitted_at"`       // RFC3339 timestamp
+	RebroadcastCount uint64 `json:"rebroadcast_count"`
+	LastRebroadcast  string `json:"last_rebroadcast"` // RFC3339 timestamp
+}
+
+// GetPendingTransactions godoc
+// @Id getPendingTransactions
+// @Summary Get pending transactions (global or wallet-specific)
+// @Tags Wallet
+// @Description Returns a list of pending transactions, optionally filtered by wallet address
+// @Produce json
+// @Param wallet query string false "Wallet address to filter by (optional)"
+// @Success 200 {array} PendingTransactionEntry "Success"
+// @Failure 400 {string} string "Invalid wallet address"
+// @Failure 500 {string} string "Server Error"
+// @Router /api/pending-transactions [get]
+func (ah *APIHandler) GetPendingTransactions(w http.ResponseWriter, r *http.Request) {
+	walletFilter := r.URL.Query().Get("wallet")
+
+	allPendingTxs := make([]PendingTransactionEntry, 0)
+
+	// Helper function to format wei values with appropriate units
+	formatWeiSmart := func(wei string) string {
+		if wei == "" || wei == "0" {
+			return "0 wei"
+		}
+
+		// Convert to float64 for comparison
+		weiFloat, _ := strconv.ParseFloat(wei, 64)
+
+		// Thresholds
+		const (
+			gweiThreshold = 1000       // 1000 wei = switch to gwei
+			ethThreshold  = 1000 * 1e9 // 1000 gwei = switch to eth
+		)
+
+		if weiFloat < gweiThreshold {
+			// Show in wei for very small amounts
+			return fmt.Sprintf("%s wei", wei)
+		} else if weiFloat < ethThreshold {
+			// Show in gwei for medium amounts
+			gwei := weiFloat / 1e9
+			return fmt.Sprintf("%.2f gwei", gwei)
+		} else {
+			// Show in ETH for large amounts
+			eth := weiFloat / 1e18
+			return fmt.Sprintf("%.6f ETH", eth)
+		}
+	}
+
+	// Helper function to format wei values to Gwei (for gas fees)
+	formatWeiToGwei := func(wei string) string {
+		if wei == "" || wei == "0" {
+			return "0 gwei"
+		}
+		// Convert wei to Gwei for display
+		weiFloat, _ := strconv.ParseFloat(wei, 64)
+		gwei := weiFloat / 1e9
+		return fmt.Sprintf("%.2f gwei", gwei)
+	}
+
+	// Helper function to process pending transactions from a wallet
+	processPendingTxs := func(wallet *spamoor.Wallet, walletName, scenarioName string, spammerID int64) {
+		walletAddr := wallet.GetAddress().Hex()
+
+		// Skip if wallet filter is specified and doesn't match
+		if walletFilter != "" && walletAddr != walletFilter {
+			return
+		}
+
+		// Get pending transactions for this wallet
+		pendingTxs := wallet.GetPendingTxs()
+
+		for _, pendingTx := range pendingTxs {
+			tx := pendingTx.Tx
+
+			// Calculate fee (gas price * gas limit)
+			gasPrice := tx.GasPrice()
+			gasLimit := tx.Gas()
+			fee := new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gasLimit))
+
+			// Get base fee (assume it's the gas price for now)
+			baseFee := gasPrice
+
+			// Format timestamps
+			submittedAt := pendingTx.Submitted.Format(time.RFC3339)
+			lastRebroadcast := pendingTx.LastRebroadcast.Format(time.RFC3339)
+
+			entry := PendingTransactionEntry{
+				Hash:             tx.Hash().Hex(),
+				WalletAddress:    walletAddr,
+				WalletName:       walletName,
+				ScenarioName:     scenarioName,
+				SpammerID:        spammerID,
+				Nonce:            tx.Nonce(),
+				Value:            tx.Value().String(),
+				ValueFormatted:   formatWeiSmart(tx.Value().String()),
+				Fee:              fee.String(),
+				FeeFormatted:     formatWeiSmart(fee.String()),
+				BaseFee:          baseFee.String(),
+				BaseFeeFormatted: formatWeiToGwei(baseFee.String()),
+				SubmittedAt:      submittedAt,
+				RebroadcastCount: pendingTx.RebroadcastCount,
+				LastRebroadcast:  lastRebroadcast,
+			}
+
+			allPendingTxs = append(allPendingTxs, entry)
+		}
+	}
+
+	// Process root wallet's pending transactions
+	rootWallet := ah.daemon.GetRootWallet()
+	if rootWallet != nil && rootWallet.GetWallet() != nil {
+		processPendingTxs(rootWallet.GetWallet(), "Root Wallet", "", -1)
+	}
+
+	// Process each spammer's wallets
+	spammers := ah.daemon.GetAllSpammers()
+	for _, spammer := range spammers {
+		walletPool := spammer.GetWalletPool()
+		if walletPool == nil {
+			continue
+		}
+
+		// Get spammer information
+		spammerID := spammer.GetID()
+		spammerName := spammer.GetName()
+		scenarioName := spammer.GetScenario()
+
+		// Get all wallets from the pool
+		wallets := walletPool.GetAllWallets()
+
+		for _, wallet := range wallets {
+			// Create a descriptive wallet name
+			walletName := walletPool.GetWalletName(wallet.GetAddress())
+			if spammerName != "" {
+				walletName = fmt.Sprintf("%s (%s)", walletName, spammerName)
+			}
+
+			processPendingTxs(wallet, walletName, scenarioName, spammerID)
+		}
+	}
+
+	// Sort by submission time (newest first)
+	slices.SortFunc(allPendingTxs, func(a, b PendingTransactionEntry) int {
+		timeA, _ := time.Parse(time.RFC3339, a.SubmittedAt)
+		timeB, _ := time.Parse(time.RFC3339, b.SubmittedAt)
+		return timeB.Compare(timeA)
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(allPendingTxs)
 }
 
 // ClientEntry represents a client in the API response
