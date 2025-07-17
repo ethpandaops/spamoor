@@ -16,6 +16,7 @@ import (
 )
 
 type PayloadTemplate struct {
+	ID           string `json:"id"`
 	Type         string `json:"type"`
 	Description  string `json:"description"`
 	InitCode     string `json:"init_code"`
@@ -26,6 +27,7 @@ type PayloadTemplate struct {
 }
 
 type PayloadInstance struct {
+	ID           string
 	Type         string
 	Description  string
 	InitCode     string
@@ -51,6 +53,7 @@ func NewPlaceholderSubstituter(walletPool *spamoor.WalletPool, client *spamoor.C
 
 func (pt *PayloadTemplate) Substitute(substituter *PlaceholderSubstituter) (*PayloadInstance, error) {
 	instance := &PayloadInstance{
+		ID:          pt.ID,
 		Type:        pt.Type,
 		Description: pt.Description,
 	}

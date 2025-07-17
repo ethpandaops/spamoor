@@ -1,6 +1,7 @@
 package aitx
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -68,9 +69,15 @@ type ConversationContinuation struct {
 }
 
 type OpenRouterRequest struct {
-	Model     string    `json:"model"`
-	Messages  []Message `json:"messages"`
-	MaxTokens int       `json:"max_tokens"`
+	Model     string           `json:"model"`
+	Messages  []Message        `json:"messages"`
+	MaxTokens int              `json:"max_tokens"`
+	Stream    bool             `json:"stream,omitempty"`
+	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
+}
+
+type ReasoningConfig struct {
+	MaxTokens int `json:"max_tokens"`
 }
 
 type Message struct {
@@ -79,20 +86,36 @@ type Message struct {
 }
 
 type OpenRouterResponse struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int64  `json:"created"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Index        int     `json:"index"`
-		Message      Message `json:"message"`
-		FinishReason string  `json:"finish_reason"`
+	ID       string `json:"id"`
+	Provider string `json:"provider,omitempty"`
+	Object   string `json:"object"`
+	Created  int64  `json:"created"`
+	Model    string `json:"model"`
+	Choices  []struct {
+		Index              int      `json:"index"`
+		Message            *Message `json:"message,omitempty"`
+		Delta              *Delta   `json:"delta,omitempty"`
+		FinishReason       *string  `json:"finish_reason,omitempty"`
+		NativeFinishReason *string  `json:"native_finish_reason,omitempty"`
+		Logprobs           *string  `json:"logprobs,omitempty"`
 	} `json:"choices"`
-	Usage struct {
+	Usage *struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	} `json:"usage,omitempty"`
+}
+
+type Delta struct {
+	Role             string   `json:"role,omitempty"`
+	Content          string   `json:"content,omitempty"`
+	Reasoning        string   `json:"reasoning,omitempty"`
+	ReasoningDetails []string `json:"reasoning_details,omitempty"`
+}
+
+type StreamingCallback interface {
+	OnContent(content string) error
+	OnComplete(fullContent string) error
 }
 
 func NewAIService(apiKey, model string, logConversations bool, logger logrus.FieldLogger) *AIService {
@@ -102,7 +125,7 @@ func NewAIService(apiKey, model string, logConversations bool, logger logrus.Fie
 
 	return &AIService{
 		client: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: 30 * time.Minute, // Increased timeout for longer AI requests
 		},
 		apiKey:           apiKey,
 		model:            model,
@@ -139,6 +162,9 @@ func (ai *AIService) GeneratePayloads(ctx context.Context, req GenerationRequest
 			Model:     ai.model,
 			Messages:  conversationHistory,
 			MaxTokens: 10000,
+			Reasoning: &ReasoningConfig{
+				MaxTokens: 5000,
+			},
 		}
 
 		response, err := ai.callOpenRouter(ctx, openRouterReq)
@@ -147,9 +173,13 @@ func (ai *AIService) GeneratePayloads(ctx context.Context, req GenerationRequest
 			continue
 		}
 
-		ai.tokenCount += uint64(response.Usage.TotalTokens)
-		ai.logger.Infof("AI call #%d completed: %d tokens used, %d total tokens",
-			ai.callCount, response.Usage.TotalTokens, ai.tokenCount)
+		if response.Usage != nil {
+			ai.tokenCount += uint64(response.Usage.TotalTokens)
+			ai.logger.Infof("AI call #%d completed: %d tokens used, %d total tokens",
+				ai.callCount, response.Usage.TotalTokens, ai.tokenCount)
+		} else {
+			ai.logger.Infof("AI call #%d completed (token usage not available)", ai.callCount)
+		}
 
 		// Try to parse the response
 		result, parseErr := ai.parseResponse(response)
@@ -226,33 +256,56 @@ func (ai *AIService) GeneratePayloadsWithConversation(ctx context.Context, req G
 		openRouterReq := OpenRouterRequest{
 			Model:     ai.model,
 			Messages:  conversationHistory,
-			MaxTokens: 10000,
+			MaxTokens: 50000,
+			Stream:    true,
+			Reasoning: &ReasoningConfig{
+				MaxTokens: 20000,
+			},
 		}
 
-		response, err := ai.callOpenRouter(ctx, openRouterReq)
+		// Create streaming callback for real-time payload processing
+		callback := &PayloadStreamingCallback{
+			processor:     processor,
+			logger:        ai.logger,
+			payloadBuffer: &strings.Builder{},
+		}
+
+		response, fullContent, err := ai.callOpenRouterStreaming(ctx, openRouterReq, callback)
 		if err != nil {
-			lastError = fmt.Errorf("AI API call failed: %w", err)
+			ai.logger.Warnf("AI streaming call failed: %v", err)
+			lastError = fmt.Errorf("AI streaming call failed: %w", err)
 			continue
 		}
 
-		ai.tokenCount += uint64(response.Usage.TotalTokens)
-		ai.logger.Infof("AI call #%d completed: %d tokens used, %d total tokens",
-			ai.callCount, response.Usage.TotalTokens, ai.tokenCount)
+		if response.Usage != nil {
+			ai.tokenCount += uint64(response.Usage.TotalTokens)
+			ai.logger.Infof("AI call #%d completed: %d tokens used, %d total tokens",
+				ai.callCount, response.Usage.TotalTokens, ai.tokenCount)
+		}
 
-		// Try to parse the response
-		result, parseErr := ai.parseResponse(response)
+		// Try to parse the final response
+		mockResponse := &OpenRouterResponse{
+			Choices: []struct {
+				Index              int      `json:"index"`
+				Message            *Message `json:"message,omitempty"`
+				Delta              *Delta   `json:"delta,omitempty"`
+				FinishReason       *string  `json:"finish_reason,omitempty"`
+				NativeFinishReason *string  `json:"native_finish_reason,omitempty"`
+				Logprobs           *string  `json:"logprobs,omitempty"`
+			}{{Message: &Message{Content: fullContent}}},
+		}
+
+		result, parseErr := ai.parseResponse(mockResponse)
 		if parseErr == nil {
 			// Validate payloads (including geas compilation)
 			validPayloads, validationErr := processor.ProcessPayloads(result.Payloads)
 			if validationErr == nil {
 				// Success! Update result with validated payloads and add AI response to history
 				result.Payloads = validPayloads
-				if len(response.Choices) > 0 {
-					conversationHistory = append(conversationHistory, Message{
-						Role:    "assistant",
-						Content: response.Choices[0].Message.Content,
-					})
-				}
+				conversationHistory = append(conversationHistory, Message{
+					Role:    "assistant",
+					Content: fullContent,
+				})
 
 				// Log AI response for debugging if enabled
 				if ai.logConversations {
@@ -270,12 +323,10 @@ func (ai *AIService) GeneratePayloadsWithConversation(ctx context.Context, req G
 		lastError = parseErr
 
 		// Add AI response to conversation history
-		if len(response.Choices) > 0 {
-			conversationHistory = append(conversationHistory, Message{
-				Role:    "assistant",
-				Content: response.Choices[0].Message.Content,
-			})
-		}
+		conversationHistory = append(conversationHistory, Message{
+			Role:    "assistant",
+			Content: fullContent,
+		})
 
 		// Add error feedback for retry
 		errorFeedback := ai.buildErrorFeedback(parseErr, attempt+1, maxRetries)
@@ -301,7 +352,7 @@ func (ai *AIService) buildPrompt(req GenerationRequest) string {
 		promptBuilder.WriteString(fmt.Sprintf("TEST DIRECTION: %s\n\n", req.TestDirection))
 	}
 
-	promptBuilder.WriteString(fmt.Sprintf("Generate %d transaction payload(s).\n", req.PayloadCount))
+	promptBuilder.WriteString(fmt.Sprintf("Generate 10 transaction payload(s) with placeholder variations, so we can test at least %v different patterns.\n", req.PayloadCount))
 
 	if req.TransactionFeedback != nil {
 		promptBuilder.WriteString("FEEDBACK FROM PREVIOUS TRANSACTIONS:\n")
@@ -424,6 +475,7 @@ func (ai *AIService) buildBasePrompt(generationMode string) string {
 	promptBuilder.WriteString("Generate at least 20 separate JSON objects (do not stop before), each wrapped in ```json and ``` tags:\n\n")
 
 	promptBuilder.WriteString(`{
+  "id": "unique_payload_id_1",
   "type": "geas",
   "description": "Brief description of what this contract does",
   "init_code": "PUSH1 0x00\nSSTORE",
@@ -447,6 +499,7 @@ func (ai *AIService) buildBasePrompt(generationMode string) string {
 
 	promptBuilder.WriteString("IMPORTANT:\n")
 	promptBuilder.WriteString("- Generate ONLY geas init_run contracts (type=\\\"geas\\\")\n")
+	promptBuilder.WriteString("- Each payload MUST have a unique 'id' field (e.g., 'payload_1', 'payload_2', etc.)\n")
 	promptBuilder.WriteString("- Focus on diverse EVM testing patterns\n")
 	promptBuilder.WriteString("- Reuse previous iteration results to avoid EVM caching\n")
 	promptBuilder.WriteString("- Use SWAPn to manage persistent values on stack\n")
@@ -496,12 +549,185 @@ func (ai *AIService) callOpenRouter(ctx context.Context, req OpenRouterRequest) 
 	return &openRouterResp, nil
 }
 
+func (ai *AIService) callOpenRouterStreaming(ctx context.Context, req OpenRouterRequest, callback StreamingCallback) (*OpenRouterResponse, string, error) {
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", ai.baseURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+ai.apiKey)
+	httpReq.Header.Set("HTTP-Referer", "https://github.com/ethpandaops/spamoor")
+	httpReq.Header.Set("X-Title", "Spamoor AI Transaction Generator")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq.Header.Set("Cache-Control", "no-cache")
+
+	resp, err := ai.client.Do(httpReq)
+	if err != nil {
+		return nil, "", fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, "", fmt.Errorf("OpenRouter API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	return ai.parseStreamingResponse(ctx, resp.Body, callback)
+}
+
+func (ai *AIService) parseStreamingResponse(ctx context.Context, body io.Reader, callback StreamingCallback) (*OpenRouterResponse, string, error) {
+	scanner := bufio.NewScanner(body)
+	var fullContent strings.Builder
+	var reasoningBuffer strings.Builder
+	var reasoningDetailsBuffer []string
+	var lastResponse *OpenRouterResponse
+
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return nil, fullContent.String(), ctx.Err()
+		default:
+		}
+
+		line := scanner.Text()
+
+		//ai.logger.Debugf("streaming rsp: %s", line)
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+
+		// Parse SSE data line
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+
+			// Check for stream end
+			if data == "[DONE]" {
+				break
+			}
+
+			var streamResp OpenRouterResponse
+			if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
+				ai.logger.Warnf("failed to parse streaming response chunk: %v", err)
+				continue
+			}
+
+			lastResponse = &streamResp
+
+			// Extract content from delta
+			if len(streamResp.Choices) > 0 && streamResp.Choices[0].Delta != nil {
+				delta := streamResp.Choices[0].Delta
+
+				// Buffer reasoning and print complete lines only
+				if delta.Reasoning != "" {
+					reasoningBuffer.WriteString(delta.Reasoning)
+
+					// Check for complete lines in the buffer
+					bufferContent := reasoningBuffer.String()
+					lines := strings.Split(bufferContent, "\n")
+
+					// Print all complete lines (all but the last if it doesn't end with newline)
+					for i := 0; i < len(lines)-1; i++ {
+						if lines[i] != "" {
+							ai.logger.Debugf("AI reasoning: %s", lines[i])
+						}
+					}
+
+					// Keep the incomplete line in the buffer
+					if len(lines) > 0 && !strings.HasSuffix(bufferContent, "\n") {
+						reasoningBuffer.Reset()
+						reasoningBuffer.WriteString(lines[len(lines)-1])
+					} else {
+						reasoningBuffer.Reset()
+					}
+				}
+
+				// Accumulate reasoning details
+				if len(delta.ReasoningDetails) > 0 {
+					reasoningDetailsBuffer = append(reasoningDetailsBuffer, delta.ReasoningDetails...)
+				}
+
+				// Process content
+				if delta.Content != "" {
+					fullContent.WriteString(delta.Content)
+
+					// Call streaming callback with new content
+					if callback != nil {
+						if err := callback.OnContent(delta.Content); err != nil {
+							ai.logger.Warnf("streaming callback error: %v", err)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fullContent.String(), fmt.Errorf("error reading streaming response: %w", err)
+	}
+
+	// Print any remaining reasoning content
+	if reasoningBuffer.Len() > 0 {
+		ai.logger.Debugf("AI reasoning: %s", reasoningBuffer.String())
+	}
+
+	// Print accumulated reasoning details
+	if len(reasoningDetailsBuffer) > 0 {
+		// Join all details and split by lines for cleaner output
+		allDetails := strings.Join(reasoningDetailsBuffer, "\n")
+		lines := strings.Split(allDetails, "\n")
+
+		for _, line := range lines {
+			if line != "" {
+				ai.logger.Debugf("AI reasoning detail: %s", line)
+			}
+		}
+	}
+
+	// Call completion callback
+	if callback != nil {
+		if err := callback.OnComplete(fullContent.String()); err != nil {
+			ai.logger.Warnf("streaming completion callback error: %v", err)
+		}
+	}
+
+	// Return the last response (which should contain usage info) or create a mock response
+	if lastResponse == nil {
+		lastResponse = &OpenRouterResponse{
+			Choices: []struct {
+				Index              int      `json:"index"`
+				Message            *Message `json:"message,omitempty"`
+				Delta              *Delta   `json:"delta,omitempty"`
+				FinishReason       *string  `json:"finish_reason,omitempty"`
+				NativeFinishReason *string  `json:"native_finish_reason,omitempty"`
+				Logprobs           *string  `json:"logprobs,omitempty"`
+			}{{Message: &Message{Content: fullContent.String()}}},
+		}
+	}
+
+	return lastResponse, fullContent.String(), nil
+}
+
 func (ai *AIService) parseResponse(response *OpenRouterResponse) (*GenerationResponse, error) {
 	if len(response.Choices) == 0 {
 		return nil, fmt.Errorf("no choices in AI response")
 	}
 
-	content := response.Choices[0].Message.Content
+	var content string
+	if response.Choices[0].Message != nil {
+		content = response.Choices[0].Message.Content
+	} else if response.Choices[0].Delta != nil {
+		content = response.Choices[0].Delta.Content
+	} else {
+		return nil, fmt.Errorf("no message or delta content in AI response")
+	}
 
 	var payloads []PayloadTemplate
 
@@ -529,10 +755,15 @@ func (ai *AIService) parseResponse(response *OpenRouterResponse) (*GenerationRes
 	ai.logger.Infof("Successfully parsed %d payloads from AI response", len(payloads))
 	summary := fmt.Sprintf("Generated %d payloads using %s", len(payloads), ai.model)
 
+	var tokensUsed uint64
+	if response.Usage != nil {
+		tokensUsed = uint64(response.Usage.TotalTokens)
+	}
+
 	return &GenerationResponse{
 		Payloads:   payloads,
 		Summary:    summary,
-		TokensUsed: uint64(response.Usage.TotalTokens),
+		TokensUsed: tokensUsed,
 	}, nil
 }
 
