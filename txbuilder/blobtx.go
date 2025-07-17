@@ -24,6 +24,9 @@ func BuildBlobTx(txData *TxMetadata, blobRefs [][]string) (*types.BlobTx, error)
 	if txData.To == nil {
 		return nil, fmt.Errorf("to cannot be nil for blob transaction")
 	}
+	if len(blobRefs) > 6 {
+		return nil, fmt.Errorf("maximum of 6 blobs per transaction allowed, got %d", len(blobRefs))
+	}
 	tx := types.BlobTx{
 		GasTipCap:  txData.GasTipCap,
 		GasFeeCap:  txData.GasFeeCap,
