@@ -798,7 +798,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 				return fmt.Errorf("failed to encode transaction: %w", err)
 			}
 
-			if txBytes != nil {
+			if len(txBytes) > 0 {
 				return client.SendRawTransaction(ctx, txBytes)
 			}
 		}

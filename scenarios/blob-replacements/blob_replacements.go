@@ -311,10 +311,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 	getTxBytes := func() ([]byte, uint8) {
 		var txBytes []byte
 		txVersion := uint8(0)
-		sendAsV1 := time.Now().Unix() > int64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
+		sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
 		if sendAsV1 {
 			txBytes, err = txbuilder.MarshalBlobV1Tx(tx, blobCellProofs)
-			if err != nil {
+			if err != nil || (txBytes != nil && len(txBytes) == 0) {
 				s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
 			} else {
 				txVersion = 1
