@@ -126,6 +126,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
+	if s.options.GasLimit > 16777216 {
+		s.logger.Warnf("Gas limit %d exceeds 16,777,216 (2^24) and will most likely be dropped by the execution layer client", s.options.GasLimit)
+	}
+
 	s.bytecodes = [][]byte{}
 	if s.options.Bytecodes != "" {
 		for _, hexStr := range strings.Split(s.options.Bytecodes, ",") {

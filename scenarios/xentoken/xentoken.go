@@ -136,6 +136,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		RefillBalance: uint256.NewInt(2000000000000000000), // 2 ETH
 	})
 
+	if s.options.GasLimit > 16777216 {
+		s.logger.Warnf("Gas limit %d exceeds 16,777,216 (2^24) and will most likely be dropped by the execution layer client", s.options.GasLimit)
+	}
+
 	return nil
 }
 
