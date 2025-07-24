@@ -170,11 +170,11 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if s.options.DeployGasLimit > 16777216 {
-		s.logger.Warnf("Deploy gas limit %d exceeds 16,777,216 (2^24) and will most likely be dropped by the execution layer client", s.options.DeployGasLimit)
+	if s.options.DeployGasLimit > utils.MaxGasLimitPerTx {
+		s.logger.Warnf("Deploy gas limit %d exceeds %d and will most likely be dropped by the execution layer client", s.options.DeployGasLimit, utils.MaxGasLimitPerTx)
 	}
-	if s.options.GasLimit > 16777216 {
-		s.logger.Warnf("Gas limit %d exceeds 16,777,216 (2^24) and will most likely be dropped by the execution layer client", s.options.GasLimit)
+	if s.options.GasLimit > utils.MaxGasLimitPerTx {
+		s.logger.Warnf("Gas limit %d exceeds %d and will most likely be dropped by the execution layer client", s.options.GasLimit, utils.MaxGasLimitPerTx)
 	}
 
 	// Validate contract source options (mutually exclusive)
@@ -434,10 +434,10 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		gasLimit, err = s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
 		if err != nil {
 			s.logger.Warnf("tx %6d: failed to fetch current gas limit: %v, using fallback", txIdx+1, err)
-			gasLimit = 30000000
+			gasLimit = utils.MaxGasLimitPerTx
 		} else if gasLimit == 0 {
 			// Final fallback to a reasonable default if no block gas limit is available
-			gasLimit = 30000000
+			gasLimit = utils.MaxGasLimitPerTx
 			s.logger.Warnf("tx %6d: no gas limit available, using fallback %v", txIdx+1, gasLimit)
 		} else {
 			s.logger.Debugf("tx %6d: using block gas limit %v", txIdx+1, gasLimit)
