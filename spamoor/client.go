@@ -305,7 +305,7 @@ func (client *Client) GetSuggestedFee(ctx context.Context) (*big.Int, *big.Int, 
 	}
 	tipCap, err := client.client.SuggestGasTipCap(ctx)
 	if err != nil {
-		return nil, nil, err
+		tipCap = big.NewInt(2000000000)
 	}
 
 	client.lastGasSuggestion = time.Now()
