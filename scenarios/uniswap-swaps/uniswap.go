@@ -175,28 +175,6 @@ func (u *Uniswap) UpdateTokenBalance(walletAddr common.Address, tokenAddr common
 	u.tokenBalances[walletAddr][tokenAddr] = newBalance
 }
 
-func (u *Uniswap) getTxFee(ctx context.Context, client *spamoor.Client) (*big.Int, *big.Int, error) {
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if u.options.BaseFee > 0 {
-		feeCap = new(big.Int).SetUint64(uint64(u.options.BaseFee * 1e9))
-	}
-	if u.options.TipFee > 0 {
-		tipCap = new(big.Int).SetUint64(uint64(u.options.TipFee * 1e9))
-	}
-
-	if feeCap == nil || tipCap == nil {
-		var err error
-		feeCap, tipCap, err = client.GetSuggestedFee(u.ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	return feeCap, tipCap, nil
-}
-
 // Set unlimited allowances for all wallets to both routers
 func (u *Uniswap) SetUnlimitedAllowances() error {
 	u.logger.Infof("Setting unlimited allowances for all wallets...")
@@ -213,7 +191,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 		return fmt.Errorf("no client available")
 	}
 
-	feeCap, tipCap, err := u.getTxFee(u.ctx, client)
+	feeCap, tipCap, err := u.walletPool.GetTxPool().GetSuggestedFees(client, u.options.BaseFee, u.options.TipFee)
 	if err != nil {
 		return fmt.Errorf("could not get tx fee: %v", err)
 	}
