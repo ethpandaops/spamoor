@@ -130,8 +130,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if s.options.GasUnitsToBurn > 16777216 {
-		s.logger.Warnf("Gas units to burn %d exceeds 16,777,216 (2^24) and will most likely be dropped by the execution layer client", s.options.GasUnitsToBurn)
+	if s.options.GasUnitsToBurn > utils.MaxGasLimitPerTx {
+		s.logger.Warnf("Gas units to burn %d exceeds %d and will most likely be dropped by the execution layer client", s.options.GasUnitsToBurn, utils.MaxGasLimitPerTx)
 	}
 
 	return nil

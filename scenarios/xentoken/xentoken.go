@@ -52,7 +52,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Rebroadcast: 1,
 	BaseFee:     20,
 	TipFee:      2,
-	GasLimit:    30000000,
+	GasLimit:    utils.MaxGasLimitPerTx,
 	XenAddress:  "",
 	ClaimTerm:   1,
 	Timeout:     "",
@@ -136,8 +136,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		RefillBalance: uint256.NewInt(2000000000000000000), // 2 ETH
 	})
 
-	if s.options.GasLimit > 16777216 {
-		s.logger.Warnf("Gas limit %d exceeds 16,777,216 (2^24) and will most likely be dropped by the execution layer client", s.options.GasLimit)
+	if s.options.GasLimit > utils.MaxGasLimitPerTx {
+		s.logger.Warnf("Gas limit %d exceeds %d and will most likely be dropped by the execution layer client", s.options.GasLimit, utils.MaxGasLimitPerTx)
 	}
 
 	return nil
