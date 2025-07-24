@@ -828,8 +828,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 			if options.LogFn != nil {
 				options.LogFn(client, i, 0, err)
 			}
-
-			if err == nil {
+			if err == nil || (strings.Contains(err.Error(), "already known") || strings.Contains(err.Error(), "Known transaction")) {
 				success = true
 				submitCount--
 				if submitCount == 0 {
