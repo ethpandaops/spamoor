@@ -135,6 +135,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
+	if s.options.Sidecars > 6 {
+		s.logger.Warnf("Transactions with more than 6 blobs will most likely be dropped by the execution layer client. Got %d sidecars, limiting to 6.", s.options.Sidecars)
+	}
+
 	return nil
 }
 
