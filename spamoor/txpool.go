@@ -1283,17 +1283,18 @@ func (pool *TxPool) isTransactionBlocking(wallet *Wallet, txNonce uint64) bool {
 // This method encapsulates the existing rebroadcast logic for reuse.
 func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transaction, options *SendTransactionOptions, retryCount uint64) {
 	submitTx := func(client *Client) error {
-		var err error
 		if options.OnEncode != nil {
-			txBytes, encodeErr := options.OnEncode(tx)
-			if encodeErr != nil {
-				return fmt.Errorf("failed to encode transaction: %w", encodeErr)
+			txBytes, err := options.OnEncode(tx)
+			if err != nil {
+				return fmt.Errorf("failed to encode transaction: %w", err)
 			}
-			err = client.SendRawTransaction(ctx, txBytes)
-		} else {
-			err = client.SendTransaction(ctx, tx)
+
+			if len(txBytes) > 0 {
+				return client.SendRawTransaction(ctx, txBytes)
+			}
 		}
-		return err
+
+		return client.SendTransaction(ctx, tx)
 	}
 
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())

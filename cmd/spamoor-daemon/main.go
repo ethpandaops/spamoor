@@ -37,7 +37,7 @@ type CliArgs struct {
 
 func main() {
 	cliArgs := CliArgs{}
-	flags := pflag.NewFlagSet("main", pflag.ContinueOnError)
+	flags := pflag.NewFlagSet("main", pflag.PanicOnError)
 
 	flags.BoolVarP(&cliArgs.verbose, "verbose", "v", false, "Run the tool with verbose output")
 	flags.BoolVar(&cliArgs.trace, "trace", false, "Run the tool with tracing output")
