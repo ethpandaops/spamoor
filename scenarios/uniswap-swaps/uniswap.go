@@ -344,6 +344,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			go func(tx *types.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
 				u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &spamoor.SendTransactionOptions{
 					Client:      client,
+					ClientGroup: u.options.ClientGroup,
 					Rebroadcast: true,
 					OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 						if err != nil {

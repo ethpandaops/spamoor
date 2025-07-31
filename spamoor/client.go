@@ -41,6 +41,12 @@ type Client struct {
 
 	clientVersion     string
 	clientVersionTime time.Time
+
+	// Request statistics
+	statsMutex       sync.Mutex
+	totalRequests    uint64
+	totalTxRequests  uint64
+	totalRpcFailures uint64
 }
 
 // NewClient creates a new Client instance with the specified RPC host URL.
@@ -256,7 +262,9 @@ func (client *Client) GetChainId(ctx context.Context) (*big.Int, error) {
 	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
-	return client.client.ChainID(ctx)
+	chainId, err := client.client.ChainID(ctx)
+	client.incrementRequestStats(false, err != nil)
+	return chainId, err
 }
 
 // GetNonceAt returns the nonce for the given address at the specified block number.
@@ -265,7 +273,9 @@ func (client *Client) GetNonceAt(ctx context.Context, wallet common.Address, blo
 	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
-	return client.client.NonceAt(ctx, wallet, blockNumber)
+	nonce, err := client.client.NonceAt(ctx, wallet, blockNumber)
+	client.incrementRequestStats(false, err != nil)
+	return nonce, err
 }
 
 // GetPendingNonceAt returns the pending nonce for the given address,
@@ -274,7 +284,9 @@ func (client *Client) GetPendingNonceAt(ctx context.Context, wallet common.Addre
 	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
-	return client.client.PendingNonceAt(ctx, wallet)
+	nonce, err := client.client.PendingNonceAt(ctx, wallet)
+	client.incrementRequestStats(false, err != nil)
+	return nonce, err
 }
 
 // GetBalanceAt returns the balance of the given address at the latest block.
@@ -282,7 +294,9 @@ func (client *Client) GetBalanceAt(ctx context.Context, wallet common.Address) (
 	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
-	return client.client.BalanceAt(ctx, wallet, nil)
+	balance, err := client.client.BalanceAt(ctx, wallet, nil)
+	client.incrementRequestStats(false, err != nil)
+	return balance, err
 }
 
 // GetSuggestedFee returns suggested gas price and tip cap for transactions.
@@ -300,10 +314,12 @@ func (client *Client) GetSuggestedFee(ctx context.Context) (*big.Int, *big.Int, 
 	defer cancel()
 
 	gasCap, err := client.client.SuggestGasPrice(ctx)
+	client.incrementRequestStats(false, err != nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	tipCap, err := client.client.SuggestGasTipCap(ctx)
+	client.incrementRequestStats(false, err != nil)
 	if err != nil {
 		tipCap = big.NewInt(2000000000)
 	}
@@ -319,12 +335,16 @@ func (client *Client) GetSuggestedFee(ctx context.Context) (*big.Int, *big.Int, 
 func (client *Client) SendTransaction(ctx context.Context, tx *types.Transaction) error {
 	client.logger.Tracef("submitted transaction %v", tx.Hash().String())
 
-	return client.client.SendTransaction(ctx, tx)
+	err := client.client.SendTransaction(ctx, tx)
+	client.incrementRequestStats(true, err != nil)
+	return err
 }
 
 // SendRawTransaction submits a raw transaction bytes to the network using eth_sendRawTransaction RPC call.
 func (client *Client) SendRawTransaction(ctx context.Context, tx []byte) error {
-	return client.client.Client().CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(tx))
+	err := client.client.Client().CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(tx))
+	client.incrementRequestStats(true, err != nil)
+	return err
 }
 
 // GetTransactionReceipt retrieves the receipt for a given transaction hash.
@@ -332,7 +352,9 @@ func (client *Client) SendRawTransaction(ctx context.Context, tx []byte) error {
 func (client *Client) GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	client.logger.Tracef("get receipt: 0x%x", txHash.Bytes())
 
-	return client.client.TransactionReceipt(ctx, txHash)
+	receipt, err := client.client.TransactionReceipt(ctx, txHash)
+	client.incrementRequestStats(false, err != nil)
+	return receipt, err
 }
 
 // GetBlockHeight returns the current block number.
@@ -351,6 +373,7 @@ func (client *Client) GetBlockHeight(ctx context.Context) (uint64, error) {
 	defer cancel()
 
 	blockHeight, err := client.client.BlockNumber(ctx)
+	client.incrementRequestStats(false, err != nil)
 	if err != nil {
 		return blockHeight, err
 	}
@@ -375,6 +398,7 @@ func (client *Client) GetClientVersion(ctx context.Context) (string, error) {
 
 	var result string
 	err := client.rpcClient.CallContext(ctx, &result, "web3_clientVersion")
+	client.incrementRequestStats(false, err != nil)
 	if err != nil {
 		return client.clientVersion, err
 	}
@@ -383,4 +407,26 @@ func (client *Client) GetClientVersion(ctx context.Context) (string, error) {
 	client.clientVersionTime = time.Now()
 
 	return result, nil
+}
+
+// GetRequestStats returns the current request statistics for this client.
+// Returns total requests, transaction requests, and RPC failures.
+func (client *Client) GetRequestStats() (total, txRequests, rpcFailures uint64) {
+	client.statsMutex.Lock()
+	defer client.statsMutex.Unlock()
+	return client.totalRequests, client.totalTxRequests, client.totalRpcFailures
+}
+
+// incrementRequestStats updates the request statistics based on the request type and outcome.
+func (client *Client) incrementRequestStats(isTxRequest bool, failed bool) {
+	client.statsMutex.Lock()
+	defer client.statsMutex.Unlock()
+
+	client.totalRequests++
+	if isTxRequest {
+		client.totalTxRequests++
+	}
+	if failed {
+		client.totalRpcFailures++
+	}
 }
