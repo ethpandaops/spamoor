@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,6 +86,12 @@ func (d *Daemon) Run() (bool, error) {
 	// check if this is the first launch
 	var notFirstLaunch bool
 	d.db.GetSpamoorState("first_launch", &notFirstLaunch)
+
+	// load and apply client configs from database
+	err := d.loadAndApplyClientConfigs()
+	if err != nil {
+		d.logger.Warnf("failed to load client configs: %v", err)
+	}
 
 	// restore all spammer from db
 	spammerList, err := d.db.GetSpammers()
@@ -361,4 +369,155 @@ func (d *Daemon) Shutdown() {
 	}
 
 	d.logger.Info("shutdown complete")
+}
+
+// loadAndApplyClientConfigs retrieves client configurations from the database
+// and applies them to the corresponding clients in the client pool.
+// This merges database settings with flag-provided settings according to the rules:
+// - Name and enabled state from DB take precedence over flags
+// - Tags are combined (flags + database tags)
+func (d *Daemon) loadAndApplyClientConfigs() error {
+	// Get all client configs from database
+	configs, err := d.db.GetClientConfigs()
+	if err != nil {
+		return fmt.Errorf("failed to get client configs: %w", err)
+	}
+
+	// Create a map for quick lookup
+	configMap := make(map[string]*db.ClientConfig)
+	for _, config := range configs {
+		configMap[config.RpcUrl] = config
+	}
+
+	// Apply configs to clients in the pool
+	allClients := d.clientPool.GetAllClients()
+	for _, client := range allClients {
+		rpcUrl := client.GetRPCHost()
+		config, exists := configMap[rpcUrl]
+
+		if exists {
+			// Apply enabled state from database
+			client.SetEnabled(config.Enabled)
+
+			// Apply name override from database
+			if config.Name != "" {
+				client.SetNameOverride(config.Name)
+			}
+
+			// Merge tags (combine flag groups with database tags)
+			currentGroups := client.GetClientGroups()
+			dbTags := config.GetTagsAsSlice()
+
+			// Create combined groups (current groups + database tags)
+			combinedGroups := make([]string, 0)
+			groupSet := make(map[string]bool)
+
+			// Add current groups first
+			for _, group := range currentGroups {
+				if !groupSet[group] {
+					combinedGroups = append(combinedGroups, group)
+					groupSet[group] = true
+				}
+			}
+
+			// Add database tags
+			for _, tag := range dbTags {
+				if !groupSet[tag] {
+					combinedGroups = append(combinedGroups, tag)
+					groupSet[tag] = true
+				}
+			}
+
+			// Set combined groups if we have any
+			if len(combinedGroups) > 0 {
+				client.SetClientGroups(combinedGroups)
+			}
+
+			d.logger.Debugf("Applied config for client %s: enabled=%v, name=%s, groups=%v",
+				rpcUrl, config.Enabled, config.Name, client.GetClientGroups())
+		}
+	}
+
+	return nil
+}
+
+// UpdateClientConfig updates the configuration for a specific client
+// and persists the changes to the database.
+func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags string, enabled bool) error {
+	// Find the client in the pool
+	allClients := d.clientPool.GetAllClients()
+	var targetClient *spamoor.Client
+	for _, client := range allClients {
+		if client.GetRPCHost() == rpcUrl {
+			targetClient = client
+			break
+		}
+	}
+
+	if targetClient == nil {
+		return fmt.Errorf("client with RPC URL %s not found", rpcUrl)
+	}
+
+	// Update the client configuration
+	targetClient.SetEnabled(enabled)
+
+	// Apply name override
+	targetClient.SetNameOverride(name)
+
+	// Parse tags and set as client groups
+	tagSlice := strings.Split(tags, ",")
+	for i, tag := range tagSlice {
+		tagSlice[i] = strings.TrimSpace(tag)
+	}
+
+	// Remove empty tags
+	filteredTags := make([]string, 0)
+	for _, tag := range tagSlice {
+		if tag != "" {
+			filteredTags = append(filteredTags, tag)
+		}
+	}
+
+	if len(filteredTags) > 0 {
+		targetClient.SetClientGroups(filteredTags)
+	}
+
+	// Persist to database
+	config := &db.ClientConfig{
+		RpcUrl:  rpcUrl,
+		Name:    name,
+		Tags:    tags,
+		Enabled: enabled,
+	}
+
+	err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
+		return d.db.UpsertClientConfig(tx, config)
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to update client config in database: %w", err)
+	}
+
+	d.logger.Infof("Updated client config: %s (enabled=%v, name=%s, tags=%s)",
+		rpcUrl, enabled, name, tags)
+
+	return nil
+}
+
+// GetClientConfig retrieves the configuration for a specific client from the database.
+func (d *Daemon) GetClientConfig(rpcUrl string) (*db.ClientConfig, error) {
+	config, err := d.db.GetClientConfig(rpcUrl)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Return default config if not found in database
+			return &db.ClientConfig{
+				RpcUrl:  rpcUrl,
+				Name:    "",
+				Tags:    "",
+				Enabled: true,
+			}, nil
+		}
+		return nil, fmt.Errorf("failed to get client config: %w", err)
+	}
+	return config, nil
 }

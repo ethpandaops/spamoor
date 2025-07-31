@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -956,12 +957,30 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 	client := allClients[index]
 
 	// Handle both single group (backward compatibility) and multiple groups
+	var groups []string
 	if len(req.Groups) > 0 {
+		groups = req.Groups
 		client.SetClientGroups(req.Groups)
 	} else if req.Group != "" {
+		groups = []string{req.Group}
 		client.SetClientGroups([]string{req.Group})
 	} else {
 		http.Error(w, "Either 'group' or 'groups' must be provided", http.StatusBadRequest)
+		return
+	}
+
+	// Get existing config or create default
+	existingConfig, err := ah.daemon.GetClientConfig(client.GetRPCHost())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update client config with new groups as tags
+	tagsStr := strings.Join(groups, ",")
+	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, tagsStr, existingConfig.Enabled)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -1003,6 +1022,20 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 	client := allClients[index]
 	client.SetEnabled(req.Enabled)
 
+	// Get existing config or create default
+	existingConfig, err := ah.daemon.GetClientConfig(client.GetRPCHost())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update client config with new enabled state
+	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, existingConfig.Tags, req.Enabled)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1040,6 +1073,20 @@ func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
 
 	client := allClients[index]
 	client.SetNameOverride(req.NameOverride)
+
+	// Get existing config or create default
+	existingConfig, err := ah.daemon.GetClientConfig(client.GetRPCHost())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update client config with new name override
+	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), req.NameOverride, existingConfig.Tags, existingConfig.Enabled)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusOK)
 }
