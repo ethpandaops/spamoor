@@ -277,6 +277,7 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 			// Send and await this transaction immediately
 			receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 				Client:      client,
+				ClientGroup: s.options.ClientGroup,
 				Rebroadcast: s.options.Rebroadcast > 0,
 			})
 			if err != nil {
@@ -319,6 +320,7 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 
 			receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 				Client:      client,
+				ClientGroup: s.options.ClientGroup,
 				Rebroadcast: s.options.Rebroadcast > 0,
 			})
 			if err != nil {
@@ -345,6 +347,7 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 			receipts, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, wallet, transactions, &spamoor.BatchOptions{
 				SendTransactionOptions: spamoor.SendTransactionOptions{
 					Client:      client,
+					ClientGroup: s.options.ClientGroup,
 					Rebroadcast: s.options.Rebroadcast > 0,
 				},
 			})

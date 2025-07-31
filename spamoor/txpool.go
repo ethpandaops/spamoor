@@ -1126,6 +1126,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 			// add tx as pending tx
 			txOptions := &SendTransactionOptions{
 				Client:      client,
+				ClientGroup: tx.Options.ClientGroup,
 				Rebroadcast: true,
 				OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 					if err == nil {

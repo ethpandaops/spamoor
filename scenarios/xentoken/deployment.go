@@ -145,7 +145,8 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 	if len(deploymentTxs) > 0 {
 		_, err := s.walletPool.GetTxPool().SendMultiTransactionBatch(ctx, deploymentTxs, &spamoor.BatchOptions{
 			SendTransactionOptions: spamoor.SendTransactionOptions{
-				Client: client,
+				Client:      client,
+				ClientGroup: s.options.ClientGroup,
 			},
 			MaxRetries:   3,
 			PendingLimit: 10,

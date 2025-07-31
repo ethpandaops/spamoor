@@ -319,7 +319,8 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	if len(deploymentTxs) > 0 {
 		_, err := u.walletPool.GetTxPool().SendTransactionBatch(u.ctx, deployerWallet, deploymentTxs, &spamoor.BatchOptions{
 			SendTransactionOptions: spamoor.SendTransactionOptions{
-				Client: client,
+				Client:      client,
+				ClientGroup: u.options.ClientGroup,
 			},
 			MaxRetries:   3,
 			PendingLimit: 10,
@@ -361,7 +362,8 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 		if len(liquidityTxs) > 0 {
 			_, err := u.walletPool.GetTxPool().SendTransactionBatch(u.ctx, rootWallet.GetWallet(), liquidityTxs, &spamoor.BatchOptions{
 				SendTransactionOptions: spamoor.SendTransactionOptions{
-					Client: client,
+					Client:      client,
+					ClientGroup: u.options.ClientGroup,
 				},
 				MaxRetries:   3,
 				PendingLimit: 10,

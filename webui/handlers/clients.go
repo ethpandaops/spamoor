@@ -16,15 +16,18 @@ type ClientsPage struct {
 }
 
 type ClientsPageClient struct {
-	Index        int      `json:"index"`
-	Name         string   `json:"name"`
-	Group        string   `json:"group"`  // First group for backward compatibility
-	Groups       []string `json:"groups"` // All groups
-	Version      string   `json:"version"`
-	BlockHeight  uint64   `json:"block_height"`
-	IsReady      bool     `json:"ready"`
-	Enabled      bool     `json:"enabled"`
-	NameOverride string   `json:"name_override,omitempty"`
+	Index         int      `json:"index"`
+	Name          string   `json:"name"`
+	Group         string   `json:"group"`  // First group for backward compatibility
+	Groups        []string `json:"groups"` // All groups
+	Version       string   `json:"version"`
+	BlockHeight   uint64   `json:"block_height"`
+	IsReady       bool     `json:"ready"`
+	Enabled       bool     `json:"enabled"`
+	NameOverride  string   `json:"name_override,omitempty"`
+	TotalRequests uint64   `json:"total_requests"`
+	TxRequests    uint64   `json:"tx_requests"`
+	RpcFailures   uint64   `json:"rpc_failures"`
 }
 
 // Clients will return the "clients" page using a go template
@@ -63,16 +66,20 @@ func (fh *FrontendHandler) getClientsPageData(ctx context.Context) (*ClientsPage
 	// Get all clients from pool
 	for idx, client := range fh.daemon.GetClientPool().GetAllClients() {
 		blockHeight, _ := client.GetLastBlockHeight()
+		totalReqs, txReqs, rpcFails := client.GetRequestStats()
 
 		clientData := &ClientsPageClient{
-			Index:        idx,
-			Name:         client.GetName(),
-			Group:        client.GetClientGroup(),
-			Groups:       client.GetClientGroups(),
-			BlockHeight:  blockHeight,
-			IsReady:      slices.Contains(goodClients, client),
-			Enabled:      client.IsEnabled(),
-			NameOverride: client.GetNameOverride(),
+			Index:         idx,
+			Name:          client.GetName(),
+			Group:         client.GetClientGroup(),
+			Groups:        client.GetClientGroups(),
+			BlockHeight:   blockHeight,
+			IsReady:       slices.Contains(goodClients, client),
+			Enabled:       client.IsEnabled(),
+			NameOverride:  client.GetNameOverride(),
+			TotalRequests: totalReqs,
+			TxRequests:    txReqs,
+			RpcFailures:   rpcFails,
 		}
 
 		wg.Add(1)

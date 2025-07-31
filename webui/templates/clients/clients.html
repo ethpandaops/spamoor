@@ -13,6 +13,15 @@
                 <th>Status</th>
                 <th>Enabled</th>
                 <th>Block Height</th>
+                <th>
+                  Stats
+                  <i class="fas fa-info-circle text-muted ms-1" 
+                     data-bs-toggle="popover" 
+                     data-bs-trigger="hover" 
+                     data-bs-placement="top"
+                     data-bs-content="Total Requests / TX Requests / RPC Failures"
+                     style="cursor: help;"></i>
+                </th>
                 <th>Version</th>
                 <th style="width: 120px;">Actions</th>
               </tr>
@@ -49,6 +58,9 @@
                       {{ end }}
                     </td>
                     <td>{{ $client.BlockHeight }}</td>
+                    <td>
+                      <span class="font-monospace">{{ $client.TotalRequests }} / {{ $client.TxRequests }} / {{ $client.RpcFailures }}</span>
+                    </td>
                     <td>
                       <span class="text-truncate d-inline-block" style="max-width: 400px">{{ $client.Version }}</span>
                       <i class="fa fa-copy text-muted p-1" role="button" data-bs-toggle="tooltip" title="Copy to clipboard" data-clipboard-text="{{ $client.Version }}"></i>
@@ -337,6 +349,9 @@ async function toggleClientEnabled(index, currentEnabled) {
 document.addEventListener('DOMContentLoaded', () => {
   const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
   tooltipTriggerList.map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+  
+  const popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
+  popoverTriggerList.map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl));
   
   document.querySelectorAll('.edit-name-btn').forEach(button => {
     button.addEventListener('click', () => {
