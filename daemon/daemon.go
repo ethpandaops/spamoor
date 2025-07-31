@@ -414,7 +414,7 @@ func (d *Daemon) loadAndApplyClientConfigs() error {
 
 			// Add current groups first
 			for _, group := range currentGroups {
-				if group != "default" && !groupSet[group] {
+				if !groupSet[group] {
 					combinedGroups = append(combinedGroups, group)
 					groupSet[group] = true
 				}
@@ -431,10 +431,6 @@ func (d *Daemon) loadAndApplyClientConfigs() error {
 			// Set combined groups if we have any
 			if len(combinedGroups) > 0 {
 				client.SetClientGroups(combinedGroups)
-			} else {
-				// If no non-default groups exist, keep the current groups (including default)
-				// This preserves the default group when it's the only group
-				client.SetClientGroups(currentGroups)
 			}
 
 			d.logger.Debugf("Applied config for client %s: enabled=%v, name=%s, groups=%v",
