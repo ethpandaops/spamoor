@@ -24,12 +24,13 @@ CREATE TABLE IF NOT EXISTS "client_configs"
 // Maps to the "client_configs" table with RPC URL as primary key and persistent
 // settings for name, tags, and enabled state.
 type ClientConfig struct {
-	RpcUrl    string `db:"rpc_url"`    // RPC URL used as primary key identifier
-	Name      string `db:"name"`       // Human-readable name for the client
-	Tags      string `db:"tags"`       // Comma-separated tags for client categorization
-	Enabled   bool   `db:"enabled"`    // Whether the client is enabled for use
-	CreatedAt int64  `db:"created_at"` // Unix timestamp when the config was created
-	UpdatedAt int64  `db:"updated_at"` // Unix timestamp when the config was last modified
+	RpcUrl     string `db:"rpc_url"`     // RPC URL used as primary key identifier
+	Name       string `db:"name"`        // Human-readable name for the client
+	Tags       string `db:"tags"`        // Comma-separated tags for client categorization
+	ClientType string `db:"client_type"` // Type of client: 'client' or 'builder'
+	Enabled    bool   `db:"enabled"`     // Whether the client is enabled for use
+	CreatedAt  int64  `db:"created_at"`  // Unix timestamp when the config was created
+	UpdatedAt  int64  `db:"updated_at"`  // Unix timestamp when the config was last modified
 }
 
 // GetClientConfig retrieves a single client config by RPC URL from the database.
@@ -37,7 +38,7 @@ type ClientConfig struct {
 func (d *Database) GetClientConfig(rpcUrl string) (*ClientConfig, error) {
 	config := &ClientConfig{}
 	err := d.ReaderDb.Get(config, `
-		SELECT rpc_url, name, tags, enabled, created_at, updated_at
+		SELECT rpc_url, name, tags, client_type, enabled, created_at, updated_at
 		FROM client_configs WHERE rpc_url = $1`, rpcUrl)
 	if err != nil {
 		return nil, err
@@ -50,7 +51,7 @@ func (d *Database) GetClientConfig(rpcUrl string) (*ClientConfig, error) {
 func (d *Database) GetClientConfigs() ([]*ClientConfig, error) {
 	configs := []*ClientConfig{}
 	err := d.ReaderDb.Select(&configs, `
-		SELECT rpc_url, name, tags, enabled, created_at, updated_at 
+		SELECT rpc_url, name, tags, client_type, enabled, created_at, updated_at 
 		FROM client_configs ORDER BY created_at ASC`)
 	return configs, err
 }
@@ -64,11 +65,12 @@ func (d *Database) InsertClientConfig(tx *sqlx.Tx, config *ClientConfig) error {
 	config.UpdatedAt = now
 
 	_, err := tx.Exec(`
-		INSERT INTO client_configs (rpc_url, name, tags, enabled, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
+		INSERT INTO client_configs (rpc_url, name, tags, client_type, enabled, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		config.RpcUrl,
 		config.Name,
 		config.Tags,
+		config.ClientType,
 		config.Enabled,
 		config.CreatedAt,
 		config.UpdatedAt,
@@ -84,10 +86,11 @@ func (d *Database) UpdateClientConfig(tx *sqlx.Tx, config *ClientConfig) error {
 
 	_, err := tx.Exec(`
 		UPDATE client_configs 
-		SET name = $1, tags = $2, enabled = $3, updated_at = $4
-		WHERE rpc_url = $5`,
+		SET name = $1, tags = $2, client_type = $3, enabled = $4, updated_at = $5
+		WHERE rpc_url = $6`,
 		config.Name,
 		config.Tags,
+		config.ClientType,
 		config.Enabled,
 		config.UpdatedAt,
 		config.RpcUrl,
@@ -105,10 +108,11 @@ func (d *Database) UpsertClientConfig(tx *sqlx.Tx, config *ClientConfig) error {
 	// Try to update first
 	result, err := tx.Exec(`
 		UPDATE client_configs 
-		SET name = $1, tags = $2, enabled = $3, updated_at = $4
-		WHERE rpc_url = $5`,
+		SET name = $1, tags = $2, client_type = $3, enabled = $4, updated_at = $5
+		WHERE rpc_url = $6`,
 		config.Name,
 		config.Tags,
+		config.ClientType,
 		config.Enabled,
 		config.UpdatedAt,
 		config.RpcUrl,
@@ -127,11 +131,12 @@ func (d *Database) UpsertClientConfig(tx *sqlx.Tx, config *ClientConfig) error {
 	if rowsAffected == 0 {
 		config.CreatedAt = now
 		_, err = tx.Exec(`
-			INSERT INTO client_configs (rpc_url, name, tags, enabled, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6)`,
+			INSERT INTO client_configs (rpc_url, name, tags, client_type, enabled, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 			config.RpcUrl,
 			config.Name,
 			config.Tags,
+			config.ClientType,
 			config.Enabled,
 			config.CreatedAt,
 			config.UpdatedAt,

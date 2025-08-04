@@ -213,7 +213,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor.Wallet, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
+		spamoor.WithClientGroup(s.options.ClientGroup),
+	)
 	if wallet == nil {
 		wallet = s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
 	}
@@ -229,7 +232,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 	if rand.Intn(100) < 20 {
 		// 20% chance to send transaction via another client
 		// will cause some replacement txs being sent via different clients than the original tx
-		client = s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
+		client = s.walletPool.GetClient(
+			spamoor.WithClientSelectionMode(spamoor.SelectClientRandom),
+			spamoor.WithClientGroup(s.options.ClientGroup),
+		)
 	}
 
 	if client == nil {

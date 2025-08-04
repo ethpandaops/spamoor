@@ -247,7 +247,10 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		return common.Address{}, fmt.Errorf("factory deployer wallet not available")
 	}
 
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientGroup(s.options.ClientGroup),
+	)
 	if client == nil {
 		return common.Address{}, fmt.Errorf("no client available")
 	}
@@ -305,7 +308,10 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
+		spamoor.WithClientGroup(s.options.ClientGroup),
+	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	transactionSubmitted := false
 

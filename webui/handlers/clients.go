@@ -20,6 +20,7 @@ type ClientsPageClient struct {
 	Name          string   `json:"name"`
 	Group         string   `json:"group"`  // First group for backward compatibility
 	Groups        []string `json:"groups"` // All groups
+	Type          string   `json:"type"`   // Client type (client, builder)
 	Version       string   `json:"version"`
 	BlockHeight   uint64   `json:"block_height"`
 	IsReady       bool     `json:"ready"`
@@ -73,6 +74,7 @@ func (fh *FrontendHandler) getClientsPageData(ctx context.Context) (*ClientsPage
 			Name:          client.GetName(),
 			Group:         client.GetClientGroup(),
 			Groups:        client.GetClientGroups(),
+			Type:          client.GetClientType().String(),
 			BlockHeight:   blockHeight,
 			IsReady:       slices.Contains(goodClients, client),
 			Enabled:       client.IsEnabled(),

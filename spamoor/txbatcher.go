@@ -156,7 +156,7 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 	deployData := append(initcode, batcherGeasCode...)
 
 	if client == nil {
-		client = b.txpool.options.ClientPool.GetClient(SelectClientByIndex, 0, "")
+		client = b.txpool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
 		if client == nil {
 			return fmt.Errorf("no client available")
 		}

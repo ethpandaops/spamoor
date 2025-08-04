@@ -2,6 +2,7 @@ package spamoor
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"net/url"
 	"strings"
@@ -16,6 +17,29 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// ClientType represents the type of Ethereum client
+type ClientType string
+
+const (
+	ClientTypeClient  ClientType = "client"
+	ClientTypeBuilder ClientType = "builder"
+)
+
+// String returns the string representation of the client type
+func (ct ClientType) String() string {
+	return string(ct)
+}
+
+// IsValid checks if the client type is valid
+func (ct ClientType) IsValid() bool {
+	switch ct {
+	case ClientTypeClient, ClientTypeBuilder:
+		return true
+	default:
+		return false
+	}
+}
+
 // Client represents an Ethereum RPC client with additional functionality for transaction management,
 // gas estimation caching, and block height tracking. It wraps the standard go-ethereum ethclient
 // with enhanced features for spam testing and transaction automation.
@@ -26,9 +50,11 @@ type Client struct {
 	rpcClient *rpc.Client
 	logger    *logrus.Entry
 
-	clientGroups []string
-	enabled      bool
-	nameOverride string
+	clientGroups     []string
+	clientType       ClientType
+	clientTypeFromDB ClientType // Override from database
+	enabled          bool
+	nameOverride     string
 
 	gasSuggestionMutex sync.Mutex
 	lastGasSuggestion  time.Time
@@ -55,13 +81,16 @@ type Client struct {
 //   - group(name) - assigns the client to a named group (can be used multiple times)
 //   - group(name1,name2,name3) - assigns the client to multiple groups (comma-separated)
 //   - name(custom_name) - sets a custom display name override
+//   - type(client_type) - sets the client type (e.g., "builder" for builder clients)
 //
 // Example: "headers(Authorization:Bearer token|User-Agent:MyApp)group(mainnet)group(primary)name(My Custom Node)http://localhost:8545"
 // Example: "group(mainnet,primary,backup)name(MainNet Primary)http://localhost:8545"
+// Example: "type(builder)group(builders)name(Builder Node)http://localhost:8545"
 func NewClient(rpchost string) (*Client, error) {
 	headers := map[string]string{}
 	clientGroups := []string{"default"}
 	nameOverride := ""
+	clientType := ClientTypeClient
 
 	for {
 		if strings.HasPrefix(rpchost, "headers(") {
@@ -100,6 +129,16 @@ func NewClient(rpchost string) (*Client, error) {
 			nameEnd := strings.Index(rpchost, ")")
 			nameOverride = rpchost[5:nameEnd]
 			rpchost = rpchost[nameEnd+1:]
+		} else if strings.HasPrefix(rpchost, "type(") {
+			typeEnd := strings.Index(rpchost, ")")
+			typeStr := rpchost[5:typeEnd]
+			rpchost = rpchost[typeEnd+1:]
+
+			parsedType := ClientType(typeStr)
+			if !parsedType.IsValid() {
+				return nil, fmt.Errorf("invalid client type '%s', supported types: client, builder", typeStr)
+			}
+			clientType = parsedType
 		} else {
 			break
 		}
@@ -121,6 +160,7 @@ func NewClient(rpchost string) (*Client, error) {
 		rpchost:      rpchost,
 		logger:       logrus.WithField("rpc", rpchost),
 		clientGroups: clientGroups,
+		clientType:   clientType,
 		enabled:      true,
 		nameOverride: nameOverride,
 	}, nil
@@ -166,6 +206,21 @@ func (client *Client) HasGroup(group string) bool {
 		}
 	}
 	return false
+}
+
+// GetClientType returns the client type.
+// If a database override is set, it returns the override; otherwise returns the parsed type.
+func (client *Client) GetClientType() ClientType {
+	if client.clientTypeFromDB != "" {
+		return client.clientTypeFromDB
+	}
+	return client.clientType
+}
+
+// IsBuilder returns true if the client is a builder type.
+// Uses the database override if available, otherwise the parsed type.
+func (client *Client) IsBuilder() bool {
+	return client.GetClientType() == ClientTypeBuilder
 }
 
 // GetEthClient returns the underlying go-ethereum ethclient.Client instance.
@@ -248,6 +303,20 @@ func (client *Client) GetNameOverride() string {
 // If set, this name will be used instead of the auto-generated name from the RPC host.
 func (client *Client) SetNameOverride(name string) {
 	client.nameOverride = name
+}
+
+// SetClientTypeOverride sets a client type override from the database.
+// If set, this type will be used instead of the type parsed from the RPC URL.
+func (client *Client) SetClientTypeOverride(clientType string) {
+	if clientType == "" {
+		client.clientTypeFromDB = ""
+		return
+	}
+
+	parsedType := ClientType(clientType)
+	if parsedType.IsValid() {
+		client.clientTypeFromDB = parsedType
+	}
 }
 
 func (client *Client) getContext(ctx context.Context) (context.Context, context.CancelFunc) {

@@ -324,7 +324,12 @@ func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*W
 
 						// Override client if assigned
 						if opts.ClientPool != nil {
-							sendOpts.Client = opts.ClientPool.GetClient(SelectClientByIndex, walletIndexMap[wallet]+attempt, opts.ClientGroup)
+							var clientOpts []ClientSelectionOption
+							if opts.ClientGroup != "" {
+								clientOpts = append(clientOpts, WithClientGroup(opts.ClientGroup))
+							}
+							clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, walletIndexMap[wallet]+attempt))
+							sendOpts.Client = opts.ClientPool.GetClient(clientOpts...)
 						}
 
 						completed := make(chan struct {

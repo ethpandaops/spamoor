@@ -408,6 +408,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 // getHighestBlockNumber queries all good clients to find the highest block number.
 // It runs concurrent queries to all available clients and returns the highest
 // block number found along with the clients that reported that height.
+// Builder clients are excluded as they don't support eth_blockNumber.
 func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 	wg := &sync.WaitGroup{}
@@ -420,8 +421,13 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 	highestBlockNumberClients := []*Client{}
 
 	for i := 0; i < clientCount; i++ {
-		client := pool.options.ClientPool.GetClient(SelectClientByIndex, i, "")
+		client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, i))
 		if client == nil {
+			continue
+		}
+
+		// Skip builder clients as they don't support eth_blockNumber
+		if client.IsBuilder() {
 			continue
 		}
 
@@ -450,7 +456,13 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 
 // getBlockBody retrieves a block body from the specified client.
 // It uses a 5-second timeout and returns the block if successful, nil otherwise.
+// Builder clients are not supported as they don't provide eth_getBlockByNumber.
 func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumber uint64) *types.Block {
+	// Builder clients don't support eth_getBlockByNumber
+	if client.IsBuilder() {
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -465,7 +477,13 @@ func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumbe
 // getBlockReceipts retrieves all transaction receipts for a block.
 // It validates that the number of receipts matches the expected transaction count
 // and uses a 5-second timeout for the request.
+// Builder clients are not supported as they don't provide eth_getBlockReceipts.
 func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockHash common.Hash, txCount int) ([]*types.Receipt, error) {
+	// Builder clients don't support eth_getBlockReceipts
+	if client.IsBuilder() {
+		return nil, fmt.Errorf("builder clients do not support eth_getBlockReceipts")
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -817,7 +835,12 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 		for i := 0; i < clientCount; i++ {
 			client := options.Client
 			if client == nil || i > 0 {
-				client = pool.options.ClientPool.GetClient(SelectClientByIndex, i+options.ClientsStartOffset, options.ClientGroup)
+				var clientOpts []ClientSelectionOption
+				if options.ClientGroup != "" {
+					clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
+				}
+				clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, i+options.ClientsStartOffset))
+				client = pool.options.ClientPool.GetClient(clientOpts...)
 			}
 			if client == nil {
 				continue
@@ -962,7 +985,7 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 		var lastNonce uint64
 		var err error
 		for retry := 0; retry < 3; retry++ {
-			client := pool.options.ClientPool.GetClient(SelectClientRandom, retry, "")
+			client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
 			if client == nil {
 				continue
 			}
@@ -1005,7 +1028,7 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 	retryCount := uint64(0)
 
 	for {
-		client := pool.options.ClientPool.GetClient(SelectClientRandom, int(retryCount), "")
+		client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
 		if client == nil {
 			return nil
 		}
@@ -1210,10 +1233,10 @@ func (pool *TxPool) initBlockStats() error {
 		return nil
 	}
 
-	// Try to get a client to fetch the latest block
-	client := pool.options.ClientPool.GetClient(SelectClientRandom, 0, "")
+	// Try to get a non-builder client to fetch the latest block
+	client := pool.options.ClientPool.GetClient(WithoutBuilder())
 	if client == nil {
-		return fmt.Errorf("no client available to fetch gas limit")
+		return fmt.Errorf("no non-builder client available to fetch gas limit")
 	}
 
 	// Fetch the latest block to get the gas limit
@@ -1299,7 +1322,12 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 	for j := 0; j < clientCount; j++ {
-		client := pool.options.ClientPool.GetClient(SelectClientByIndex, j+options.ClientsStartOffset+1, options.ClientGroup)
+		var clientOpts []ClientSelectionOption
+		if options.ClientGroup != "" {
+			clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
+		}
+		clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, j+options.ClientsStartOffset+1))
+		client := pool.options.ClientPool.GetClient(clientOpts...)
 		if client == nil {
 			continue
 		}

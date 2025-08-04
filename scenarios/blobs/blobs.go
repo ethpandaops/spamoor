@@ -207,7 +207,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
+		spamoor.WithClientGroup(s.options.ClientGroup),
+	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
 	transactionSubmitted := false
 

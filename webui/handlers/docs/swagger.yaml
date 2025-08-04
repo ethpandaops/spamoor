@@ -23,6 +23,9 @@ definitions:
         type: boolean
       rpc_host:
         type: string
+      type:
+        description: Client type (client, builder)
+        type: string
       version:
         type: string
     type: object
@@ -320,6 +323,11 @@ definitions:
       name_override:
         type: string
     type: object
+  api.UpdateClientTypeRequest:
+    properties:
+      client_type:
+        type: string
+    type: object
   api.UpdateSpammerRequest:
     properties:
       config:
@@ -500,6 +508,38 @@ paths:
           schema:
             type: string
       summary: Update client name override
+      tags:
+      - Client
+  /api/client/{index}/type:
+    put:
+      consumes:
+      - application/json
+      description: Updates the type for a specific client (e.g., 'client' or 'builder')
+      operationId: updateClientType
+      parameters:
+      - description: Client index
+        in: path
+        name: index
+        required: true
+        type: integer
+      - description: New client type
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateClientTypeRequest'
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Invalid client index or type
+          schema:
+            type: string
+        "404":
+          description: Client not found
+          schema:
+            type: string
+      summary: Update client type
       tags:
       - Client
   /api/clients:

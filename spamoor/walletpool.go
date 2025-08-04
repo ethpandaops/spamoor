@@ -213,9 +213,9 @@ func (pool *WalletPool) GetTransactionTracker() func(err error) {
 	return pool.transactionTracker
 }
 
-// GetClient returns a client from the client pool using the specified selection strategy.
-func (pool *WalletPool) GetClient(mode ClientSelectionMode, input int, group string) *Client {
-	return pool.clientPool.GetClient(mode, input, group)
+// GetClient returns a client from the client pool using the specified options.
+func (pool *WalletPool) GetClient(options ...ClientSelectionOption) *Client {
+	return pool.clientPool.GetClient(options...)
 }
 
 // GetWallet returns a wallet from the pool using the specified selection strategy.
@@ -360,7 +360,7 @@ func (pool *WalletPool) PrepareWallets() error {
 		var fundingReqs []*FundingRequest
 
 		for i := 0; i < 3; i++ {
-			client = pool.clientPool.GetClient(SelectClientRandom, 0, "") // send all preparation transactions via this client to avoid rejections due to nonces
+			client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientRandom), WithoutBuilder()) // send all preparation transactions via this client to avoid rejections due to nonces
 			if client == nil {
 				return fmt.Errorf("no client available")
 			}
@@ -613,7 +613,7 @@ func (pool *WalletPool) watchWalletBalancesLoop() {
 // resupplyChildWallets checks all wallets and creates funding requests for those below the refill threshold.
 // It updates wallet states from the blockchain and processes any needed funding requests in batch.
 func (pool *WalletPool) resupplyChildWallets() error {
-	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
+	client := pool.clientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
@@ -724,7 +724,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 // It can use either individual transactions or batch transactions via the batcher contract for efficiency.
 // Processes transactions in chunks to avoid overwhelming the network.
 func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) error {
-	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
+	client := pool.clientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
@@ -803,7 +803,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 // It gets suggested fees from the client and builds a dynamic fee transaction.
 func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client, refillAmount *uint256.Int) (*types.Transaction, error) {
 	if client == nil {
-		client = pool.clientPool.GetClient(SelectClientByIndex, 0, "")
+		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
 		if client == nil {
 			return nil, fmt.Errorf("no client available")
 		}
@@ -842,7 +842,7 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client
 // and builds a transaction to the batcher contract with appropriate gas limits.
 func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, client *Client, batcher *TxBatcher) (*types.Transaction, error) {
 	if client == nil {
-		client = pool.clientPool.GetClient(SelectClientByIndex, 0, "")
+		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
 		if client == nil {
 			return nil, fmt.Errorf("no client available")
 		}
@@ -898,7 +898,7 @@ type reclaimTx struct {
 // Returns nil if the wallet doesn't have enough balance to cover fees.
 func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *Wallet, client *Client, target common.Address) (*types.Transaction, error) {
 	if client == nil {
-		client = pool.clientPool.GetClient(SelectClientByIndex, 0, "")
+		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
 		if client == nil {
 			return nil, fmt.Errorf("no client available")
 		}
@@ -955,7 +955,7 @@ func (pool *WalletPool) collectPoolWallets(walletMap map[common.Address]*Wallet)
 // CheckChildWalletBalance checks and refills a specific wallet if needed.
 // This can be used to manually trigger funding for a single wallet.
 func (pool *WalletPool) CheckChildWalletBalance(childWallet *Wallet) error {
-	client := pool.clientPool.GetClient(SelectClientRandom, 0, "")
+	client := pool.clientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
@@ -1000,7 +1000,7 @@ func (pool *WalletPool) ReclaimFunds(ctx context.Context, client *Client) error 
 	pool.reclaimedFunds = true
 
 	if client == nil {
-		client = pool.clientPool.GetClient(SelectClientRandom, 0, "")
+		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
 	}
 	if client == nil {
 		return fmt.Errorf("no client available")

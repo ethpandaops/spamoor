@@ -23,6 +23,84 @@ var (
 	SelectClientRoundRobin ClientSelectionMode = 2
 )
 
+// ClientSelectionOption represents an option that can be passed to GetClient.
+type ClientSelectionOption interface {
+	apply(*clientSelectionOptions)
+}
+
+// clientSelectionOptions holds the parsed options for GetClient.
+type clientSelectionOptions struct {
+	selectionMode ClientSelectionMode
+	index         int
+	group         string
+	excludeTypes  map[ClientType]bool
+}
+
+// Default client options - round-robin selection, default group, no exclusions.
+func defaultClientSelectionOptions() *clientSelectionOptions {
+	return &clientSelectionOptions{
+		selectionMode: SelectClientRoundRobin,
+		index:         0,
+		group:         "",
+		excludeTypes:  make(map[ClientType]bool),
+	}
+}
+
+// selectionModeOption implements ClientOption for selection mode.
+type selectionModeOption struct {
+	mode  ClientSelectionMode
+	index int
+}
+
+func (o selectionModeOption) apply(opts *clientSelectionOptions) {
+	opts.selectionMode = o.mode
+	opts.index = o.index
+}
+
+// WithClientSelectionMode sets the client selection mode.
+// For SelectClientByIndex mode, provide the index as the second parameter.
+func WithClientSelectionMode(mode ClientSelectionMode, args ...int) ClientSelectionOption {
+	index := 0
+	if len(args) > 0 {
+		index = args[0]
+	}
+	return selectionModeOption{mode: mode, index: index}
+}
+
+// groupOption implements ClientOption for group filtering.
+type groupOption struct {
+	group string
+}
+
+func (o groupOption) apply(opts *clientSelectionOptions) {
+	opts.group = o.group
+}
+
+// WithClientGroup sets the client group filter.
+// Use "" for default group, "*" for any group, or specify a group name.
+func WithClientGroup(group string) ClientSelectionOption {
+	return groupOption{group: group}
+}
+
+// excludeTypeOption implements ClientOption for excluding client types.
+type excludeTypeOption struct {
+	clientType ClientType
+}
+
+func (o excludeTypeOption) apply(opts *clientSelectionOptions) {
+	opts.excludeTypes[o.clientType] = true
+}
+
+// WithoutBuilder excludes builder clients from selection.
+func WithoutBuilder() ClientSelectionOption {
+	return excludeTypeOption{clientType: ClientTypeBuilder}
+}
+
+// WithoutClientType excludes clients of the specified type from selection.
+func WithoutClientType(clientType ClientType) ClientSelectionOption {
+	return excludeTypeOption{clientType: clientType}
+}
+
 // ClientPool manages a pool of Ethereum RPC clients with health monitoring and selection strategies.
 // It automatically monitors client health by checking block heights and maintains a list of "good" clients
 // that are within 2 blocks of the highest observed block height.
@@ -121,14 +199,20 @@ func (pool *ClientPool) watchClientStatusLoop() {
 
 // watchClientStatus checks the health of all clients by querying their current block height.
 // It runs concurrent health checks and updates the goodClients list with clients that are
-// within 2 blocks of the highest observed block height. Logs the results of the health check.
+// within 2 blocks of the highest observed block height. Builder clients are assumed to always
+// be online and skip the eth_blockNumber check. Logs the results of the health check.
 func (pool *ClientPool) watchClientStatus() error {
 	wg := &sync.WaitGroup{}
 	mtx := sync.Mutex{}
 	clientHeads := map[int]uint64{}
 	highestHead := uint64(0)
 
+	// First, check all non-builder clients to determine the highest block height
 	for idx, client := range pool.allClients {
+		if client.IsBuilder() {
+			continue // Skip builders in the initial pass
+		}
+
 		wg.Add(1)
 		go func(idx int, client *Client) {
 			defer wg.Done()
@@ -148,13 +232,20 @@ func (pool *ClientPool) watchClientStatus() error {
 	}
 	wg.Wait()
 
+	// Now mark all builder clients as healthy with the highest block height
+	for idx, client := range pool.allClients {
+		if client.IsBuilder() {
+			clientHeads[idx] = highestHead // Assume builders are at the latest block
+		}
+	}
+
 	goodClients := make([]*Client, 0)
 	goodHead := highestHead
 	if goodHead > 2 {
 		goodHead -= 2
 	}
 	for idx, client := range pool.allClients {
-		if clientHeads[idx] >= goodHead {
+		if client.IsBuilder() || clientHeads[idx] >= goodHead {
 			goodClients = append(goodClients, client)
 		}
 	}
@@ -164,14 +255,24 @@ func (pool *ClientPool) watchClientStatus() error {
 	return nil
 }
 
-// GetClient returns a client from the pool based on the specified selection mode.
-// Parameters:
-//   - mode: how to select the client (by index, random, or round-robin)
-//   - input: used as index when mode is SelectClientByIndex
-//   - group: client group filter ("" for default, "*" for any, or specific group name)
+// GetClient returns a client from the pool based on the specified options.
+// By default, it uses round-robin selection with the default group and no type exclusions.
+//
+// Available options:
+//   - WithSelectionMode(mode, index...): Set selection mode (ByIndex, Random, RoundRobin), index optional for ByIndex
+//   - WithClientGroup(group): Set group filter ("" for default, "*" for any, or group name)
+//   - WithoutBuilder(): Exclude builder clients
+//   - WithoutClientType(type): Exclude clients of specified type
+//
+// Examples:
+//   - pool.GetClient() // Round-robin from default group
+//   - pool.GetClient(WithSelectionMode(SelectClientRandom)) // Random from default group
+//   - pool.GetClient(WithClientGroup("builders")) // Round-robin from builders group
+//   - pool.GetClient(WithoutBuilder()) // Round-robin excluding builders
+//   - pool.GetClient(WithSelectionMode(SelectClientByIndex, 2)) // Select by index 2
 //
 // Returns nil if no suitable clients are available.
-func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group string) *Client {
+func (pool *ClientPool) GetClient(options ...ClientSelectionOption) *Client {
 	pool.selectionMutex.Lock()
 	defer pool.selectionMutex.Unlock()
 
@@ -179,48 +280,69 @@ func (pool *ClientPool) GetClient(mode ClientSelectionMode, input int, group str
 		return nil
 	}
 
+	// Parse options
+	opts := defaultClientSelectionOptions()
+	for _, option := range options {
+		option.apply(opts)
+	}
+
+	// Build list of candidate clients
 	clientCandidates := make([]*Client, 0)
 
-	if group == "" {
-		// Empty group means default group
-		for _, client := range pool.goodClients {
-			if client.IsEnabled() && client.HasGroup("default") {
-				clientCandidates = append(clientCandidates, client)
+	for _, client := range pool.goodClients {
+		// Check if client is enabled
+		if !client.IsEnabled() {
+			continue
+		}
+
+		// Check group filter
+		if opts.group == "" {
+			// Empty group means default group
+			if !client.HasGroup("default") {
+				continue
+			}
+		} else if opts.group != "*" {
+			// Specific group name (wildcard "*" accepts any group)
+			if !client.HasGroup(opts.group) {
+				continue
 			}
 		}
-	} else if group == "*" {
-		// Wildcard means any group
-		for _, client := range pool.goodClients {
-			if client.IsEnabled() {
-				clientCandidates = append(clientCandidates, client)
-			}
+
+		// Check type exclusions
+		if opts.excludeTypes[client.GetClientType()] {
+			continue
 		}
-	} else {
-		// Specific group name
-		for _, client := range pool.goodClients {
-			if client.IsEnabled() && client.HasGroup(group) {
-				clientCandidates = append(clientCandidates, client)
-			}
-		}
+
+		clientCandidates = append(clientCandidates, client)
 	}
 
 	if len(clientCandidates) == 0 {
 		return nil
 	}
 
-	switch mode {
+	// Select client based on mode
+	var selectedIndex int
+	switch opts.selectionMode {
 	case SelectClientByIndex:
-		input = input % len(clientCandidates)
+		selectedIndex = opts.index % len(clientCandidates)
 	case SelectClientRandom:
-		input = rand.Intn(len(clientCandidates))
+		selectedIndex = rand.Intn(len(clientCandidates))
 	case SelectClientRoundRobin:
-		input = pool.rrClientIdx
+		selectedIndex = pool.rrClientIdx
+		pool.rrClientIdx++
+		if pool.rrClientIdx >= len(clientCandidates) {
+			pool.rrClientIdx = 0
+		}
+	default:
+		// Fallback to round-robin
+		selectedIndex = pool.rrClientIdx
 		pool.rrClientIdx++
 		if pool.rrClientIdx >= len(clientCandidates) {
 			pool.rrClientIdx = 0
 		}
 	}
-	return clientCandidates[input]
+
+	return clientCandidates[selectedIndex]
 }
 
 // GetAllClients returns a copy of all clients in the pool, regardless of their health status.

@@ -9,6 +9,7 @@
               <tr>
                 <th>#</th>
                 <th>Name</th>
+                <th>Type</th>
                 <th>Groups</th>
                 <th>Status</th>
                 <th>Enabled</th>
@@ -34,6 +35,13 @@
                       <span class="client-name">{{ $client.Name }}</span>
                       {{ if $client.NameOverride }}
                         <i class="fas fa-edit text-muted ms-1" title="Custom name set" data-bs-toggle="tooltip"></i>
+                      {{ end }}
+                    </td>
+                    <td>
+                      {{ if eq $client.Type "builder" }}
+                        <span class="badge rounded-pill text-bg-warning">{{ $client.Type }}</span>
+                      {{ else }}
+                        <span class="badge rounded-pill text-bg-info">{{ $client.Type }}</span>
                       {{ end }}
                     </td>
                     <td>
@@ -73,6 +81,12 @@
                                 data-name-override="{{ $client.NameOverride | html }}"
                                 title="Edit Name" data-bs-toggle="tooltip" data-bs-placement="top">
                           <i class="fas fa-tag"></i>
+                        </button>
+                        <button class="btn btn-sm btn-secondary edit-type-btn" 
+                                data-index="{{ $client.Index }}" 
+                                data-type="{{ $client.Type }}"
+                                title="Change Client Type" data-bs-toggle="tooltip" data-bs-placement="top">
+                          <i class="fas fa-cogs"></i>
                         </button>
                         <button class="btn btn-sm btn-primary edit-groups-btn" 
                                 data-index="{{ $client.Index }}" 
@@ -167,6 +181,56 @@
       </div>
     </div>
   </div>
+
+  <!-- Edit Client Type Modal -->
+  <div class="modal fade" id="editClientTypeModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Select Client Type</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="editClientTypeForm">
+            <input type="hidden" name="index">
+            <div class="mb-3">
+              <label class="form-label">Choose the type of client:</label>
+              <div class="list-group">
+                <label class="list-group-item d-flex gap-2">
+                  <input class="form-check-input me-1" type="radio" name="clientType" value="client" id="clientTypeClient">
+                  <div class="d-flex gap-2 w-100 justify-content-between">
+                    <div>
+                      <h6 class="mb-0">Regular Client</h6>
+                      <p class="mb-0 opacity-75">Standard Ethereum execution client (Geth, Nethermind, Besu, etc.)</p>
+                    </div>
+                    <span class="badge rounded-pill text-bg-info align-self-start">client</span>
+                  </div>
+                </label>
+                <label class="list-group-item d-flex gap-2">
+                  <input class="form-check-input me-1" type="radio" name="clientType" value="builder" id="clientTypeBuilder">
+                  <div class="d-flex gap-2 w-100 justify-content-between">
+                    <div>
+                      <h6 class="mb-0">Builder Client</h6>
+                      <p class="mb-0 opacity-75">MEV-Boost builder or block building service. Limited RPC methods available.</p>
+                    </div>
+                    <span class="badge rounded-pill text-bg-warning align-self-start">builder</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+            <div class="alert alert-info" role="alert">
+              <i class="fas fa-info-circle me-2"></i>
+              <strong>Note:</strong> Builder clients don't support certain RPC methods like <code>eth_blockNumber</code>, <code>eth_getBlockByNumber</code>, and <code>eth_getBlockReceipts</code>. They are automatically excluded from operations requiring these methods.
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="submitClientTypeEdit()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
 {{ end }}
 
 {{ define "js" }}
@@ -175,6 +239,7 @@ let currentClientIndex = null;
 let currentGroups = [];
 let currentClientName = null;
 let currentNameOverride = null;
+let currentClientType = null;
 
 function editClientGroups(index, groupsStr) {
   currentClientIndex = index;
@@ -346,6 +411,63 @@ async function toggleClientEnabled(index, currentEnabled) {
   }
 }
 
+function editClientType(index, currentType) {
+  currentClientIndex = index;
+  currentClientType = currentType;
+  
+  const form = document.getElementById('editClientTypeForm');
+  form.querySelector('[name="index"]').value = index;
+  
+  const radioButton = form.querySelector(`input[value="${currentType}"]`);
+  if (radioButton) {
+    radioButton.checked = true;
+  }
+  
+  new bootstrap.Modal(document.getElementById('editClientTypeModal')).show();
+}
+
+async function submitClientTypeEdit() {
+  const form = document.getElementById('editClientTypeForm');
+  const selectedType = form.querySelector('input[name="clientType"]:checked');
+  
+  if (!selectedType) {
+    alert('Please select a client type');
+    return;
+  }
+  
+  const newType = selectedType.value;
+  
+  try {
+    const url = '/api/client/' + currentClientIndex + '/type';
+    await fetch(url, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({client_type: newType})
+    });
+    
+    const tableRows = document.querySelectorAll('#clients tbody tr');
+    const targetRow = tableRows[parseInt(currentClientIndex)];
+    const typeCell = targetRow.querySelector('td:nth-child(3) span');
+    const typeButton = targetRow.querySelector('.edit-type-btn');
+    
+    if (newType === 'builder') {
+      typeCell.textContent = 'builder';
+      typeCell.className = 'badge rounded-pill text-bg-warning';
+    } else {
+      typeCell.textContent = 'client';
+      typeCell.className = 'badge rounded-pill text-bg-info';
+    }
+    
+    typeButton.dataset.type = newType;
+    
+    bootstrap.Modal.getInstance(document.getElementById('editClientTypeModal')).hide();
+    
+    alert('Client type changed to ' + newType + ' successfully');
+  } catch (err) {
+    alert('Failed to update client type: ' + err.message);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
   tooltipTriggerList.map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
@@ -367,6 +489,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const index = button.dataset.index;
       const groups = button.dataset.groups;
       editClientGroups(index, groups);
+    });
+  });
+  
+  document.querySelectorAll('.edit-type-btn').forEach(button => {
+    button.addEventListener('click', () => {
+      const index = button.dataset.index;
+      const type = button.dataset.type;
+      editClientType(index, type);
     });
   });
   

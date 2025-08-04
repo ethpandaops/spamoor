@@ -857,6 +857,7 @@ type ClientEntry struct {
 	Name         string   `json:"name"`
 	Group        string   `json:"group"`  // First group for backward compatibility
 	Groups       []string `json:"groups"` // All groups
+	Type         string   `json:"type"`   // Client type (client, builder)
 	Version      string   `json:"version"`
 	BlockHeight  uint64   `json:"block_height"`
 	IsReady      bool     `json:"ready"`
@@ -879,6 +880,11 @@ type UpdateClientEnabledRequest struct {
 // UpdateClientNameRequest represents the request body for updating a client's name override
 type UpdateClientNameRequest struct {
 	NameOverride string `json:"name_override"`
+}
+
+// UpdateClientTypeRequest represents the request body for updating a client's type
+type UpdateClientTypeRequest struct {
+	ClientType string `json:"client_type"`
 }
 
 // GetClients godoc
@@ -909,6 +915,7 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 			Name:         client.GetName(),
 			Group:        client.GetClientGroup(),
 			Groups:       client.GetClientGroups(),
+			Type:         client.GetClientType().String(),
 			Version:      version,
 			BlockHeight:  blockHeight,
 			IsReady:      slices.Contains(goodClients, client),
@@ -978,7 +985,7 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 
 	// Update client config with new groups as tags
 	tagsStr := strings.Join(groups, ",")
-	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, tagsStr, existingConfig.Enabled)
+	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, tagsStr, existingConfig.ClientType, existingConfig.Enabled)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1030,7 +1037,7 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 	}
 
 	// Update client config with new enabled state
-	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, existingConfig.Tags, req.Enabled)
+	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, existingConfig.Tags, existingConfig.ClientType, req.Enabled)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1082,7 +1089,65 @@ func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update client config with new name override
-	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), req.NameOverride, existingConfig.Tags, existingConfig.Enabled)
+	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), req.NameOverride, existingConfig.Tags, existingConfig.ClientType, existingConfig.Enabled)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// UpdateClientType godoc
+// @Id updateClientType
+// @Summary Update client type
+// @Tags Client
+// @Description Updates the type for a specific client (e.g., 'client' or 'builder')
+// @Accept json
+// @Param index path int true "Client index"
+// @Param request body UpdateClientTypeRequest true "New client type"
+// @Success 200 "Success"
+// @Failure 400 {string} string "Invalid client index or type"
+// @Failure 404 {string} string "Client not found"
+// @Router /api/client/{index}/type [put]
+func (ah *APIHandler) UpdateClientType(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	index, err := strconv.Atoi(vars["index"])
+	if err != nil {
+		http.Error(w, "Invalid client index", http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateClientTypeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate client type
+	if req.ClientType != "" && req.ClientType != "client" && req.ClientType != "builder" {
+		http.Error(w, "Invalid client type. Must be 'client' or 'builder'", http.StatusBadRequest)
+		return
+	}
+
+	allClients := ah.daemon.GetClientPool().GetAllClients()
+	if index < 0 || index >= len(allClients) {
+		http.Error(w, "Client not found", http.StatusNotFound)
+		return
+	}
+
+	client := allClients[index]
+	client.SetClientTypeOverride(req.ClientType)
+
+	// Get existing config or create default
+	existingConfig, err := ah.daemon.GetClientConfig(client.GetRPCHost())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update client config with new type
+	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, existingConfig.Tags, req.ClientType, existingConfig.Enabled)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

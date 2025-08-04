@@ -57,7 +57,10 @@ func NewUniswap(ctx context.Context, walletPool *spamoor.WalletPool, logger *log
 func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) error {
 	u.deploymentInfo = deploymentInfo
 
-	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup)
+	client := u.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithoutBuilder(), // avoid using builders for eth_calls
+	)
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
@@ -186,7 +189,10 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 	maxAllowance := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 
 	// Get a client for fee calculation
-	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup)
+	client := u.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientGroup(u.options.ClientGroup),
+	)
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
@@ -334,7 +340,10 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 		// Send each transaction to a different client
 		for i, tx := range approvalTxs {
 			// Get a different client for each transaction
-			txClient := u.walletPool.GetClient(spamoor.SelectClientByIndex, i, u.options.ClientGroup)
+			txClient := u.walletPool.GetClient(
+				spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, i),
+				spamoor.WithClientGroup(u.options.ClientGroup),
+			)
 			if txClient == nil {
 				txClient = client
 			}

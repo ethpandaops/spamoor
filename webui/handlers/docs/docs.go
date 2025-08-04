@@ -159,6 +159,54 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/client/{index}/type": {
+            "put": {
+                "description": "Updates the type for a specific client (e.g., 'client' or 'builder')",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Client"
+                ],
+                "summary": "Update client type",
+                "operationId": "updateClientType",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Client index",
+                        "name": "index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New client type",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.UpdateClientTypeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "description": "Invalid client index or type",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Client not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/api/clients": {
             "get": {
                 "description": "Returns a list of all clients with their details",
@@ -1006,6 +1054,10 @@ const docTemplate = `{
                 "rpc_host": {
                     "type": "string"
                 },
+                "type": {
+                    "description": "Client type (client, builder)",
+                    "type": "string"
+                },
                 "version": {
                     "type": "string"
                 }
@@ -1450,6 +1502,14 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "name_override": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.UpdateClientTypeRequest": {
+            "type": "object",
+            "properties": {
+                "client_type": {
                     "type": "string"
                 }
             }
