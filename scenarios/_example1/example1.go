@@ -25,19 +25,19 @@ import (
 
 // ScenarioOptions defines the configuration options for the example scenario
 type ScenarioOptions struct {
-	TotalCount      uint64 `yaml:"total_count"`
-	Throughput      uint64 `yaml:"throughput"`
-	MaxPending      uint64 `yaml:"max_pending"`
-	MaxWallets      uint64 `yaml:"max_wallets"`
-	Rebroadcast     uint64 `yaml:"rebroadcast"`
-	BaseFee         uint64 `yaml:"base_fee"`
-	TipFee          uint64 `yaml:"tip_fee"`
-	InitialValue    uint64 `yaml:"initial_value"`
-	MaxIncrement    uint64 `yaml:"max_increment"`
-	RandomizeValues bool   `yaml:"randomize_values"`
-	Timeout         string `yaml:"timeout"`
-	ClientGroup     string `yaml:"client_group"`
-	LogTxs          bool   `yaml:"log_txs"`
+	TotalCount      uint64  `yaml:"total_count"`
+	Throughput      uint64  `yaml:"throughput"`
+	MaxPending      uint64  `yaml:"max_pending"`
+	MaxWallets      uint64  `yaml:"max_wallets"`
+	Rebroadcast     uint64  `yaml:"rebroadcast"`
+	BaseFee         float64 `yaml:"base_fee"`
+	TipFee          float64 `yaml:"tip_fee"`
+	InitialValue    uint64  `yaml:"initial_value"`
+	MaxIncrement    uint64  `yaml:"max_increment"`
+	RandomizeValues bool    `yaml:"randomize_values"`
+	Timeout         string  `yaml:"timeout"`
+	ClientGroup     string  `yaml:"client_group"`
+	LogTxs          bool    `yaml:"log_txs"`
 }
 
 // Scenario represents the example scenario implementation
@@ -86,8 +86,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
 	flags.Uint64Var(&s.options.InitialValue, "initial-value", ScenarioDefaultOptions.InitialValue, "Initial value for the storage contract")
 	flags.Uint64Var(&s.options.MaxIncrement, "max-increment", ScenarioDefaultOptions.MaxIncrement, "Maximum increment value for random increments")
 	flags.BoolVar(&s.options.RandomizeValues, "randomize-values", ScenarioDefaultOptions.RandomizeValues, "Use random values for contract interactions")
@@ -222,7 +222,10 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, error) {
 	}
 
 	// Get a client for deployment
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientGroup(s.options.ClientGroup),
+	)
 	if client == nil {
 		return nil, fmt.Errorf("no client available")
 	}
@@ -288,7 +291,10 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 		return nil, nil, nil, fmt.Errorf("no wallet available")
 	}
 
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
+		spamoor.WithClientGroup(s.options.ClientGroup),
+	)
 	if client == nil {
 		return nil, client, wallet, fmt.Errorf("no client available")
 	}

@@ -106,7 +106,7 @@ func RunCommand(args []string) {
 	}
 
 	// Initialize root wallet
-	client := clientPool.GetClient(spamoor.SelectClientRandom, 0, "")
+	client := clientPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientRandom))
 	if client == nil {
 		logger.Fatal("No client available")
 	}

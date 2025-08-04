@@ -40,7 +40,10 @@ type PairDeploymentInfo struct {
 }
 
 func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
-	client := u.walletPool.GetClient(spamoor.SelectClientByIndex, 0, u.options.ClientGroup)
+	client := u.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientGroup(u.options.ClientGroup),
+	)
 	if client == nil {
 		return nil, fmt.Errorf("no client available")
 	}

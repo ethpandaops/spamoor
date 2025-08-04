@@ -240,7 +240,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 func (s *Scenario) executeInitTasks(ctx context.Context) error {
 	// Use the registered well-known wallet for init tasks to avoid conflicts with numbered wallets
 	wallet := s.walletPool.GetWellKnownWallet("taskrunner-init")
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientGroup(s.options.ClientGroup),
+	)
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
@@ -413,7 +416,10 @@ func (s *Scenario) processExecutionTx(ctx context.Context, txIdx uint64, onCompl
 
 	// Get wallet and client for this transaction
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, int(txIdx), s.options.ClientGroup)
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
+		spamoor.WithClientGroup(s.options.ClientGroup),
+	)
 
 	if client == nil {
 		onComplete()

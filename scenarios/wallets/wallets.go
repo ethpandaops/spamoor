@@ -75,7 +75,7 @@ func (s *Scenario) Init(options *scenario.Options) error {
 func (s *Scenario) Run(ctx context.Context) error {
 	wallet := s.walletPool.GetRootWallet().GetWallet()
 	s.logger.Infof("Root Wallet  %v  nonce: %6d  balance: %v ETH", wallet.GetAddress().String(), wallet.GetNonce(), utils.WeiToEther(uint256.MustFromBig(wallet.GetBalance())))
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
+	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
 
 	if client == nil {
 		return fmt.Errorf("no client available")

@@ -433,8 +433,13 @@ func (d *Daemon) loadAndApplyClientConfigs() error {
 				client.SetClientGroups(combinedGroups)
 			}
 
-			d.logger.Debugf("Applied config for client %s: enabled=%v, name=%s, groups=%v",
-				rpcUrl, config.Enabled, config.Name, client.GetClientGroups())
+			// Apply client type override from database
+			if config.ClientType != "" {
+				client.SetClientTypeOverride(config.ClientType)
+			}
+
+			d.logger.Debugf("Applied config for client %s: enabled=%v, name=%s, type=%s, groups=%v",
+				rpcUrl, config.Enabled, config.Name, config.ClientType, client.GetClientGroups())
 		}
 	}
 
@@ -443,7 +448,7 @@ func (d *Daemon) loadAndApplyClientConfigs() error {
 
 // UpdateClientConfig updates the configuration for a specific client
 // and persists the changes to the database.
-func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags string, enabled bool) error {
+func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags, clientType string, enabled bool) error {
 	// Find the client in the pool
 	allClients := d.clientPool.GetAllClients()
 	var targetClient *spamoor.Client
@@ -482,12 +487,18 @@ func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags string, enabled bool) err
 		targetClient.SetClientGroups(filteredTags)
 	}
 
+	// Apply client type override
+	if clientType != "" {
+		targetClient.SetClientTypeOverride(clientType)
+	}
+
 	// Persist to database
 	config := &db.ClientConfig{
-		RpcUrl:  rpcUrl,
-		Name:    name,
-		Tags:    tags,
-		Enabled: enabled,
+		RpcUrl:     rpcUrl,
+		Name:       name,
+		Tags:       tags,
+		ClientType: clientType,
+		Enabled:    enabled,
 	}
 
 	err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
@@ -498,8 +509,8 @@ func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags string, enabled bool) err
 		return fmt.Errorf("failed to update client config in database: %w", err)
 	}
 
-	d.logger.Infof("Updated client config: %s (enabled=%v, name=%s, tags=%s)",
-		rpcUrl, enabled, name, tags)
+	d.logger.Infof("Updated client config: %s (enabled=%v, name=%s, type=%s, tags=%s)",
+		rpcUrl, enabled, name, clientType, tags)
 
 	return nil
 }
@@ -511,10 +522,11 @@ func (d *Daemon) GetClientConfig(rpcUrl string) (*db.ClientConfig, error) {
 		if err == sql.ErrNoRows {
 			// Return default config if not found in database
 			return &db.ClientConfig{
-				RpcUrl:  rpcUrl,
-				Name:    "",
-				Tags:    "",
-				Enabled: true,
+				RpcUrl:     rpcUrl,
+				Name:       "",
+				Tags:       "",
+				ClientType: "",
+				Enabled:    true,
 			}, nil
 		}
 		return nil, fmt.Errorf("failed to get client config: %w", err)

@@ -27,7 +27,10 @@ type DeploymentInfo struct {
 }
 
 func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.Address, redeploy bool) (*DeploymentInfo, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientGroup(s.options.ClientGroup),
+	)
 	if client == nil {
 		return nil, fmt.Errorf("no client available")
 	}
