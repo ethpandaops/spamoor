@@ -65,6 +65,8 @@ func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) error {
 		return fmt.Errorf("no client available")
 	}
 
+	u.logger.Infof("Using client for static calls: %s", client.GetName())
+
 	// Initialize router A
 	routerA, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterAAddr, client.GetEthClient())
 	if err != nil {
