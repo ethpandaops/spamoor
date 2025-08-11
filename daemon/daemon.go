@@ -625,11 +625,19 @@ func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags, clientType string, enabl
 					changes["enabled"] = map[string]interface{}{"old": existingConfig.Enabled, "new": enabled}
 				}
 			} else {
-				// New client config - use database defaults
-				changes["name"] = map[string]interface{}{"old": "", "new": name}
-				changes["tags"] = map[string]interface{}{"old": "", "new": tags}
-				changes["client_type"] = map[string]interface{}{"old": "", "new": clientType}
-				changes["enabled"] = map[string]interface{}{"old": true, "new": enabled}
+				// New client config - only log fields that differ from defaults
+				if name != "" {
+					changes["name"] = map[string]interface{}{"old": "", "new": name}
+				}
+				if tags != "" {
+					changes["tags"] = map[string]interface{}{"old": "", "new": tags}
+				}
+				if clientType != "" {
+					changes["client_type"] = map[string]interface{}{"old": "", "new": clientType}
+				}
+				if enabled != true {
+					changes["enabled"] = map[string]interface{}{"old": true, "new": enabled}
+				}
 			}
 
 			if len(changes) > 0 {
