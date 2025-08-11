@@ -635,7 +635,7 @@ func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags, clientType string, enabl
 				if clientType != "" {
 					changes["client_type"] = map[string]interface{}{"old": "", "new": clientType}
 				}
-				if enabled != true {
+				if !enabled {
 					changes["enabled"] = map[string]interface{}{"old": true, "new": enabled}
 				}
 			}
