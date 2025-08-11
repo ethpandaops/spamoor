@@ -31,6 +31,7 @@ type PageData struct {
 	Debug            bool
 	DebugTemplates   []string
 	DisableTxMetrics bool
+	DisableAuditLogs bool
 }
 
 type Meta struct {
@@ -83,6 +84,7 @@ func InitPageData(r *http.Request, active, path, title string, mainTemplates []s
 		Lang:             "en-US",
 		Debug:            frontendConfig.Debug,
 		DisableTxMetrics: frontendConfig.DisableTxMetrics,
+		DisableAuditLogs: frontendConfig.DisableAuditLogs,
 	}
 
 	if r != nil {

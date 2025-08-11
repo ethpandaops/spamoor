@@ -8,4 +8,5 @@ type FrontendConfig struct {
 	Pprof            bool
 	Minify           bool
 	DisableTxMetrics bool
+	DisableAuditLogs bool
 }

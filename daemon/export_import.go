@@ -68,7 +68,7 @@ func (d *Daemon) ExportSpammers(spammerIDs ...int64) (string, error) {
 // ImportSpammers imports spammers from YAML data, file path, or URL.
 // Handles deduplication by checking name combinations and validates before importing.
 // Returns validation results and the number of spammers imported.
-func (d *Daemon) ImportSpammers(input string) (*ImportResult, error) {
+func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, error) {
 	// Resolve all includes and get the final spammer configs
 	importConfigs, err := configs.ResolveConfigImports(input, "", make(map[string]bool))
 	if err != nil {
@@ -118,13 +118,15 @@ func (d *Daemon) ImportSpammers(input string) (*ImportResult, error) {
 			continue
 		}
 
-		// Create the spammer (never start immediately for safety)
+		// Create the spammer (never start immediately for safety, pass isImport=true)
 		spammer, err := d.NewSpammer(
 			importConfig.Scenario,
 			configYAML,
 			finalName,
 			importConfig.Description,
 			false,
+			userEmail,
+			true, // isImport=true
 		)
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to create spammer '%s': %v", finalName, err)
@@ -141,14 +143,25 @@ func (d *Daemon) ImportSpammers(input string) (*ImportResult, error) {
 		})
 	}
 
-	return &ImportResult{
+	result := &ImportResult{
 		ImportedCount: imported,
 		Validation:    validation,
 		Imported:      importedSpammers,
 		Errors:        importErrors,
 		Warnings:      importWarnings,
 		Message:       fmt.Sprintf("Successfully imported %d out of %d spammers", imported, validation.TotalSpammers),
-	}, nil
+	}
+
+	// Audit log the import
+	if d.auditLogger != nil && userEmail != "" {
+		skippedCount := validation.TotalSpammers - validation.ValidSpammers
+		err := d.auditLogger.LogSpammersImport(userEmail, imported, skippedCount, input)
+		if err != nil {
+			d.logger.Errorf("Failed to create audit log for spammers import: %v", err)
+		}
+	}
+
+	return result, nil
 }
 
 // validateImportConfigs validates spammer configurations

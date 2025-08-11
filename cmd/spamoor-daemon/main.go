@@ -32,7 +32,9 @@ type CliArgs struct {
 	fuluActivation   uint64
 	withoutBatcher   bool
 	disableTxMetrics bool
+	disableAuditLogs bool
 	secondsPerSlot   uint64
+	auditUserHeader  string
 }
 
 func main() {
@@ -51,7 +53,9 @@ func main() {
 	flags.Uint64Var(&cliArgs.fuluActivation, "fulu-activation", 0, "The unix timestamp of the Fulu activation (if activated)")
 	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
 	flags.BoolVar(&cliArgs.disableTxMetrics, "disable-tx-metrics", false, "Disable transaction metrics collection and graphs page (keeps Prometheus metrics)")
+	flags.BoolVar(&cliArgs.disableAuditLogs, "disable-audit-logs", false, "Disable audit logs")
 	flags.Uint64Var(&cliArgs.secondsPerSlot, "seconds-per-slot", 12, "Seconds per slot for rate limiting (used for throughput calculation).")
+	flags.StringVar(&cliArgs.auditUserHeader, "audit-user-header", "Cf-Access-Authenticated-User-Email", "HTTP header containing the authenticated user email for audit logs")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -150,6 +154,10 @@ func main() {
 		spamoorDaemon.SetGlobalCfg("fulu_activation", cliArgs.fuluActivation)
 	}
 
+	// init audit logger
+	auditLogger := daemon.NewAuditLogger(spamoorDaemon, cliArgs.auditUserHeader, "user")
+	spamoorDaemon.SetAuditLogger(auditLogger)
+
 	// start frontend
 	webui.StartHttpServer(&types.FrontendConfig{
 		Host:             "0.0.0.0",
@@ -159,6 +167,7 @@ func main() {
 		Pprof:            true,
 		Minify:           true,
 		DisableTxMetrics: cliArgs.disableTxMetrics,
+		DisableAuditLogs: cliArgs.disableAuditLogs,
 	}, spamoorDaemon)
 
 	// start daemon
