@@ -14,7 +14,7 @@ func (d *Daemon) ImportSpammersOnStartup(source string, logger logrus.FieldLogge
 	logger.Infof("importing startup spammers from %s", source)
 
 	// Import the spammers using the unified import functionality
-	result, err := d.ImportSpammers(source)
+	result, err := d.ImportSpammers(source, "system")
 	if err != nil {
 		return fmt.Errorf("failed to import startup spammers: %w", err)
 	}

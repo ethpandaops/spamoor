@@ -1,4 +1,65 @@
 definitions:
+  api.AuditLogEntry:
+    properties:
+      action_type:
+        type: string
+      diff:
+        type: string
+      entity_id:
+        type: string
+      entity_name:
+        type: string
+      entity_type:
+        type: string
+      id:
+        type: integer
+      metadata:
+        type: string
+      timestamp:
+        type: integer
+      user_email:
+        type: string
+    type: object
+  api.AuditLogResponse:
+    properties:
+      logs:
+        items:
+          $ref: '#/definitions/api.AuditLogEntry'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total_count:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  api.AuditLogStatsResponse:
+    properties:
+      logs_by_action_type:
+        additionalProperties:
+          type: integer
+        type: object
+      logs_by_entity_type:
+        additionalProperties:
+          type: integer
+        type: object
+      logs_by_user:
+        additionalProperties:
+          type: integer
+        type: object
+      recent_activity:
+        items:
+          $ref: '#/definitions/api.AuditLogEntry'
+        type: array
+      time_range:
+        additionalProperties:
+          type: string
+        type: object
+      total_logs:
+        type: integer
+    type: object
   api.ClientEntry:
     properties:
       block_height:
@@ -413,6 +474,117 @@ definitions:
 info:
   contact: {}
 paths:
+  /api/audit-logs:
+    get:
+      description: Returns paginated audit logs with optional filtering
+      operationId: getAuditLogs
+      parameters:
+      - description: Filter by user email
+        in: query
+        name: user_email
+        type: string
+      - description: Filter by action type
+        in: query
+        name: action_type
+        type: string
+      - description: Filter by entity type (spammer, client, system)
+        in: query
+        name: entity_type
+        type: string
+      - description: Filter by entity ID
+        in: query
+        name: entity_id
+        type: string
+      - description: Start time (unix timestamp)
+        in: query
+        name: start_time
+        type: integer
+      - description: End time (unix timestamp)
+        in: query
+        name: end_time
+        type: integer
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Page size (default: 50, max: 1000)'
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.AuditLogResponse'
+        "400":
+          description: Invalid parameters
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get audit logs
+      tags:
+      - Audit
+  /api/audit-logs/{id}:
+    get:
+      description: Returns a specific audit log entry by ID
+      operationId: getAuditLog
+      parameters:
+      - description: Audit log ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.AuditLogEntry'
+        "400":
+          description: Invalid audit log ID
+          schema:
+            type: string
+        "404":
+          description: Audit log not found
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get a specific audit log entry
+      tags:
+      - Audit
+  /api/audit-logs/stats:
+    get:
+      description: Returns statistics about audit logs including counts by type and
+        recent activity
+      operationId: getAuditLogStats
+      parameters:
+      - description: 'Number of days to include in stats (default: 30)'
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.AuditLogStatsResponse'
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get audit log statistics
+      tags:
+      - Audit
   /api/client/{index}/enabled:
     put:
       consumes:

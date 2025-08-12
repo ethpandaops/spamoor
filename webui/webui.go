@@ -55,6 +55,9 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	router.HandleFunc("/", frontendHandler.Index).Methods("GET")
 	router.HandleFunc("/clients", frontendHandler.Clients).Methods("GET")
 	router.HandleFunc("/wallets", frontendHandler.Wallets).Methods("GET")
+	if !config.DisableAuditLogs {
+		router.HandleFunc("/audit", frontendHandler.Audit).Methods("GET")
+	}
 	if !config.DisableTxMetrics {
 		router.HandleFunc("/graphs", frontendHandler.Graphs).Methods("GET")
 	}
@@ -75,6 +78,9 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/spammer/{id}", apiHandler.GetSpammerDetails).Methods("GET")
 	apiRouter.HandleFunc("/spammer/{id}", apiHandler.UpdateSpammer).Methods("PUT")
 	apiRouter.HandleFunc("/spammer/{id}/logs/stream", apiHandler.StreamSpammerLogs).Methods("GET")
+	apiRouter.HandleFunc("/spammers/export", apiHandler.ExportSpammers).Methods("POST")
+	apiRouter.HandleFunc("/spammers/import", apiHandler.ImportSpammers).Methods("POST")
+	apiRouter.HandleFunc("/spammers/library", apiHandler.GetSpammerLibraryIndex).Methods("GET")
 	apiRouter.HandleFunc("/clients", apiHandler.GetClients).Methods("GET")
 	apiRouter.HandleFunc("/client/{index}/group", apiHandler.UpdateClientGroup).Methods("PUT")
 	apiRouter.HandleFunc("/client/{index}/enabled", apiHandler.UpdateClientEnabled).Methods("PUT")
@@ -82,16 +88,18 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/client/{index}/type", apiHandler.UpdateClientType).Methods("PUT")
 	apiRouter.HandleFunc("/pending-transactions", apiHandler.GetPendingTransactions).Methods("GET")
 
-	// Export/Import routes
-	apiRouter.HandleFunc("/spammers/export", apiHandler.ExportSpammers).Methods("POST")
-	apiRouter.HandleFunc("/spammers/import", apiHandler.ImportSpammers).Methods("POST")
-	apiRouter.HandleFunc("/spammers/library", apiHandler.GetSpammerLibraryIndex).Methods("GET")
-
 	// Graphs routes (only if tx metrics are enabled)
 	if !config.DisableTxMetrics {
 		apiRouter.HandleFunc("/graphs/dashboard", apiHandler.GetGraphsDashboard).Methods("GET")
 		apiRouter.HandleFunc("/graphs/spammer/{id}/timeseries", apiHandler.GetSpammerTimeSeries).Methods("GET")
 		apiRouter.HandleFunc("/graphs/stream", apiHandler.StreamGraphs).Methods("GET")
+	}
+
+	// Audit log routes
+	if !config.DisableAuditLogs {
+		apiRouter.HandleFunc("/audit-logs", apiHandler.GetAuditLogs).Methods("GET")
+		apiRouter.HandleFunc("/audit-logs/{id}", apiHandler.GetAuditLog).Methods("GET")
+		apiRouter.HandleFunc("/audit-logs/stats", apiHandler.GetAuditLogStats).Methods("GET")
 	}
 
 	// metrics endpoint

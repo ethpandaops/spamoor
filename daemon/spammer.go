@@ -88,7 +88,7 @@ func (d *Daemon) restoreSpammer(dbEntity *db.Spammer) (*Spammer, error) {
 // NewSpammer creates a new spammer instance with the specified configuration.
 // It validates the config, generates a unique ID (starting from 100), persists to database,
 // and optionally starts execution immediately. The ID counter is stored in database state.
-func (d *Daemon) NewSpammer(scenarioName string, config string, name string, description string, startImmediately bool) (*Spammer, error) {
+func (d *Daemon) NewSpammer(scenarioName string, config string, name string, description string, startImmediately bool, userEmail string, isImport bool) (*Spammer, error) {
 	// parse config for sanity checks
 	yaml.Unmarshal([]byte(config), &SpammerConfig{})
 
@@ -127,7 +127,16 @@ func (d *Daemon) NewSpammer(scenarioName string, config string, name string, des
 	}
 
 	err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
-		return d.db.InsertSpammer(tx, dbEntity)
+		if err := d.db.InsertSpammer(tx, dbEntity); err != nil {
+			return err
+		}
+
+		// Audit log the creation (skip for imports as they have their own import log)
+		if d.auditLogger != nil && !isImport {
+			return d.auditLogger.LogSpammerCreate(tx, userEmail, dbEntity.ID, name, scenarioName, config)
+		}
+
+		return nil
 	})
 	if err != nil {
 		return nil, err

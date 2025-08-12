@@ -41,6 +41,9 @@ type Daemon struct {
 
 	// TxPool metrics collector for advanced transaction metrics
 	txPoolMetricsCollector *TxPoolMetricsCollector
+
+	// Audit logger for tracking actions
+	auditLogger *AuditLogger
 }
 
 // NewDaemon creates a new daemon instance with the provided components.
@@ -149,7 +152,7 @@ func (d *Daemon) GetAllSpammers() []*Spammer {
 // DeleteSpammer removes a spammer from both the daemon and database.
 // If the spammer is running, it will be paused first before deletion.
 // Returns an error if the spammer is not found or if database deletion fails.
-func (d *Daemon) DeleteSpammer(id int64) error {
+func (d *Daemon) DeleteSpammer(id int64, userEmail string) error {
 	d.spammerMapMtx.Lock()
 	defer d.spammerMapMtx.Unlock()
 
@@ -158,6 +161,9 @@ func (d *Daemon) DeleteSpammer(id int64) error {
 		return fmt.Errorf("spammer not found")
 	}
 
+	// Capture name for audit log
+	spammerName := spammer.GetName()
+
 	// Stop if running
 	if spammer.scenarioCancel != nil {
 		spammer.Pause()
@@ -165,7 +171,16 @@ func (d *Daemon) DeleteSpammer(id int64) error {
 
 	// Delete from DB
 	err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
-		return d.db.DeleteSpammer(tx, id)
+		if err := d.db.DeleteSpammer(tx, id); err != nil {
+			return err
+		}
+
+		// Audit log the deletion
+		if d.auditLogger != nil {
+			return d.auditLogger.LogSpammerDelete(tx, userEmail, id, spammerName)
+		}
+
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("failed to delete spammer: %w", err)
@@ -179,7 +194,7 @@ func (d *Daemon) DeleteSpammer(id int64) error {
 // UpdateSpammer modifies the name, description, and configuration of an existing spammer.
 // The configuration is validated by attempting to unmarshal it into SpammerConfig.
 // Returns an error if the spammer is not found, config is invalid, or database update fails.
-func (d *Daemon) UpdateSpammer(id int64, name string, description string, config string) error {
+func (d *Daemon) UpdateSpammer(id int64, name string, description string, config string, userEmail string) error {
 	d.spammerMapMtx.Lock()
 	defer d.spammerMapMtx.Unlock()
 
@@ -193,16 +208,74 @@ func (d *Daemon) UpdateSpammer(id int64, name string, description string, config
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
+	// Capture old values for audit logging
+	oldName := spammer.dbEntity.Name
+	oldDescription := spammer.dbEntity.Description
+	oldConfig := spammer.dbEntity.Config
+
 	// Update DB
 	spammer.dbEntity.Name = name
 	spammer.dbEntity.Description = description
 	spammer.dbEntity.Config = config
 
 	err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
-		return d.db.UpdateSpammer(tx, spammer.dbEntity)
+		if err := d.db.UpdateSpammer(tx, spammer.dbEntity); err != nil {
+			return err
+		}
+
+		// Audit log the update
+		if d.auditLogger != nil {
+			return d.auditLogger.LogSpammerUpdate(tx, userEmail, id, oldName, name, oldDescription, description, oldConfig, config)
+		}
+
+		return nil
 	})
 	if err != nil {
+		// Revert changes on error
+		spammer.dbEntity.Name = oldName
+		spammer.dbEntity.Description = oldDescription
+		spammer.dbEntity.Config = oldConfig
 		return fmt.Errorf("failed to update spammer: %w", err)
+	}
+
+	return nil
+}
+
+// StartSpammer starts a spammer and logs the action
+func (d *Daemon) StartSpammer(id int64, userEmail string) error {
+	spammer := d.GetSpammer(id)
+	if spammer == nil {
+		return fmt.Errorf("spammer not found")
+	}
+
+	err := spammer.Start()
+	if err != nil {
+		return err
+	}
+
+	// Audit log the start action
+	if d.auditLogger != nil && userEmail != "" {
+		return d.auditLogger.LogSpammerAction(userEmail, db.AuditActionSpammerStart, id, spammer.GetName(), nil)
+	}
+
+	return nil
+}
+
+// PauseSpammer pauses a spammer and logs the action
+func (d *Daemon) PauseSpammer(id int64, userEmail string) error {
+	spammer := d.GetSpammer(id)
+	if spammer == nil {
+		return fmt.Errorf("spammer not found")
+	}
+
+	err := spammer.Pause()
+	if err != nil {
+		return err
+	}
+
+	// Audit log the pause action
+	if d.auditLogger != nil && userEmail != "" {
+		return d.auditLogger.LogSpammerAction(userEmail, db.AuditActionSpammerPause, id, spammer.GetName(), nil)
 	}
 
 	return nil
@@ -211,7 +284,7 @@ func (d *Daemon) UpdateSpammer(id int64, name string, description string, config
 // ReclaimSpammer reclaims funds from all wallets in the spammer's wallet pool.
 // This transfers remaining ETH back to the root wallet for reuse.
 // Returns an error if the spammer is not found or if fund reclamation fails.
-func (d *Daemon) ReclaimSpammer(id int64) error {
+func (d *Daemon) ReclaimSpammer(id int64, userEmail string) error {
 	spammer := d.GetSpammer(id)
 	if spammer == nil {
 		return fmt.Errorf("spammer not found")
@@ -221,13 +294,38 @@ func (d *Daemon) ReclaimSpammer(id int64) error {
 		return nil
 	}
 
-	return spammer.walletPool.ReclaimFunds(d.ctx, nil)
+	err := spammer.walletPool.ReclaimFunds(d.ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	// Audit log the reclaim action
+	if d.auditLogger != nil && userEmail != "" {
+		return d.auditLogger.LogSpammerAction(userEmail, db.AuditActionSpammerReclaim, id, spammer.GetName(), nil)
+	}
+
+	return nil
 }
 
 // GetRootWallet returns the root wallet used for funding spammer wallets.
 // This provides access to the main wallet that distributes funds to child wallets.
 func (d *Daemon) GetRootWallet() *spamoor.RootWallet {
 	return d.rootWallet
+}
+
+// SetAuditLogger sets the audit logger for the daemon
+func (d *Daemon) SetAuditLogger(logger *AuditLogger) {
+	d.auditLogger = logger
+}
+
+// GetAuditLogger returns the audit logger
+func (d *Daemon) GetAuditLogger() *AuditLogger {
+	return d.auditLogger
+}
+
+// GetDatabase returns the database instance
+func (d *Daemon) GetDatabase() *db.Database {
+	return d.db
 }
 
 // TrackTransactionSent records a successful transaction send for metrics
@@ -448,7 +546,7 @@ func (d *Daemon) loadAndApplyClientConfigs() error {
 
 // UpdateClientConfig updates the configuration for a specific client
 // and persists the changes to the database.
-func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags, clientType string, enabled bool) error {
+func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags, clientType string, enabled bool, userEmail string) error {
 	// Find the client in the pool
 	allClients := d.clientPool.GetAllClients()
 	var targetClient *spamoor.Client
@@ -501,8 +599,53 @@ func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags, clientType string, enabl
 		Enabled:    enabled,
 	}
 
+	// Get existing config for audit logging
+	existingConfig, _ := d.db.GetClientConfig(rpcUrl)
+
 	err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
-		return d.db.UpsertClientConfig(tx, config)
+		if err := d.db.UpsertClientConfig(tx, config); err != nil {
+			return err
+		}
+
+		// Audit log the client update
+		if d.auditLogger != nil && userEmail != "" {
+			changes := make(map[string]interface{})
+
+			if existingConfig != nil {
+				if existingConfig.Name != name {
+					changes["name"] = map[string]interface{}{"old": existingConfig.Name, "new": name}
+				}
+				if existingConfig.Tags != tags {
+					changes["tags"] = map[string]interface{}{"old": existingConfig.Tags, "new": tags}
+				}
+				if existingConfig.ClientType != clientType {
+					changes["client_type"] = map[string]interface{}{"old": existingConfig.ClientType, "new": clientType}
+				}
+				if existingConfig.Enabled != enabled {
+					changes["enabled"] = map[string]interface{}{"old": existingConfig.Enabled, "new": enabled}
+				}
+			} else {
+				// New client config - only log fields that differ from defaults
+				if name != "" {
+					changes["name"] = map[string]interface{}{"old": "", "new": name}
+				}
+				if tags != "" {
+					changes["tags"] = map[string]interface{}{"old": "", "new": tags}
+				}
+				if clientType != "" {
+					changes["client_type"] = map[string]interface{}{"old": "", "new": clientType}
+				}
+				if !enabled {
+					changes["enabled"] = map[string]interface{}{"old": true, "new": enabled}
+				}
+			}
+
+			if len(changes) > 0 {
+				return d.auditLogger.LogClientUpdate(tx, userEmail, rpcUrl, targetClient.GetName(), changes)
+			}
+		}
+
+		return nil
 	})
 
 	if err != nil {
