@@ -229,6 +229,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		return nil, client, wallet, 0, fmt.Errorf("no client available")
 	}
 
+	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
+		return nil, client, wallet, 0, err
+	}
+
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
 	if err != nil {
 		return nil, client, wallet, 0, err
@@ -380,7 +384,12 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	}
 	if errCount == 2 {
 		// reset nonce if tx was not sent
-		wallet.ResetPendingNonce(s.walletPool.GetContext(), client)
+		wallet.ResetPendingNonce(s.walletPool.GetContext(), client, func() *spamoor.Client {
+			return s.walletPool.GetClient(
+				spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
+				spamoor.WithClientGroup(s.options.ClientGroup),
+			)
+		})
 	}
 	if errCount == 0 {
 		return nil, nil, wallet, 0, err1

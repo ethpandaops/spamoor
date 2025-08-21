@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"errors"
+	"fmt"
 	"math/big"
 	"sort"
 	"strings"
@@ -34,6 +35,7 @@ type Wallet struct {
 	submittedTxCount atomic.Uint64
 	confirmedTxCount uint64
 	balance          *big.Int
+	needNonceResync  bool
 
 	txNonceChans     map[uint64]*nonceStatus
 	txNonceMutex     sync.Mutex
@@ -312,23 +314,64 @@ func (wallet *Wallet) ReplaceBlobTx(txData *types.BlobTx, nonce uint64) (*types.
 	return wallet.signTx(txData)
 }
 
+func (wallet *Wallet) ResetNoncesIfNeeded(ctx context.Context, client *Client) error {
+	if !wallet.needNonceResync {
+		return nil
+	}
+
+	if !wallet.ResetPendingNonce(ctx, client, nil) {
+		return fmt.Errorf("failed to reset pending nonce")
+	}
+
+	return nil
+}
+
 // ResetPendingNonce syncs the wallet's pending nonce with the blockchain.
 // This is useful for recovering from nonce mismatches or wallet state corruption.
 // It queries the pending nonce from the client and updates the wallet accordingly.
-func (wallet *Wallet) ResetPendingNonce(ctx context.Context, client *Client) {
+func (wallet *Wallet) ResetPendingNonce(ctx context.Context, client *Client, selectClientFn func() *Client) bool {
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
 
-	nonce, err := client.GetPendingNonceAt(ctx, wallet.address)
+	var err error
+	var nonce uint64
+
+	retry := 0
+	for retry < 3 {
+		if retry > 0 {
+			if selectClientFn == nil {
+				break
+			}
+			client = selectClientFn()
+			if client == nil {
+				break
+			}
+		}
+
+		nonce, err = client.GetPendingNonceAt(ctx, wallet.address)
+		if err == nil {
+			break
+		}
+	}
+
+	if err != nil {
+		logrus.Errorf("failed to get pending nonce for %v: %v", wallet.address.String(), err)
+		wallet.needNonceResync = true
+		return false
+	}
+
 	if err == nil && nonce < wallet.confirmedTxCount {
-		logrus.Errorf("Resyncing confirmed nonce for %v from %d to %d (this should never happen)", wallet.address.String(), wallet.confirmedTxCount, nonce)
+		logrus.Errorf("resyncing confirmed nonce for %v from %d to %d (this should never happen)", wallet.address.String(), wallet.confirmedTxCount, nonce)
 		wallet.confirmedTxCount = nonce
 	}
 
 	if err == nil && wallet.pendingTxCount.Load() != nonce {
-		logrus.Warnf("Resyncing pending nonce for %v from %d to %d", wallet.address.String(), wallet.pendingTxCount.Load(), nonce)
+		logrus.Warnf("resyncing pending nonce for %v from %d to %d", wallet.address.String(), wallet.pendingTxCount.Load(), nonce)
 		wallet.pendingTxCount.Store(nonce)
 	}
+
+	wallet.needNonceResync = false
+	return true
 }
 
 // signTx signs a transaction using the wallet's private key and chain ID.
@@ -384,6 +427,24 @@ func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool)
 	wallet.txNonceChans[targetNonce] = nonceChan
 
 	return nonceChan, len(wallet.txNonceChans) == 1
+}
+
+func (wallet *Wallet) dropPendingTx(tx *types.Transaction) {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	nonceChan := wallet.txNonceChans[tx.Nonce()]
+	if nonceChan == nil {
+		return
+	}
+
+	txs := make([]*PendingTx, 0, len(nonceChan.txs))
+	for _, pendingTx := range nonceChan.txs {
+		if pendingTx.Tx != tx {
+			txs = append(txs, pendingTx)
+		}
+	}
+	nonceChan.txs = txs
 }
 
 func (wallet *Wallet) GetPendingTx(tx *types.Transaction) *PendingTx {

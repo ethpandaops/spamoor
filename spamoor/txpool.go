@@ -758,6 +758,8 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 			submissionError := <-submissionComplete
 			if submissionError != nil {
 				err = submissionError
+				// special case: since we never sucessfully submitted the tx, we need to drop it from the pending txs as it is not known to the network
+				wallet.dropPendingTx(tx)
 			} else if options.OnConfirm != nil && receipt != nil {
 				options.OnConfirm(tx, receipt)
 			}
@@ -765,10 +767,8 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 			if options.OnComplete != nil {
 				options.OnComplete(tx, receipt, err)
 			}
-		}()
 
-		// Track transaction result for metrics
-		defer func() {
+			// Track transaction result for metrics
 			walletPools := pool.options.GetActiveWalletPools()
 			for _, walletPool := range walletPools {
 				if tracker := walletPool.GetTransactionTracker(); tracker != nil {
@@ -873,26 +873,6 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 
 	if submitErr != nil {
 		confirmCancel()
-
-		// Track initial transaction submission failure for metrics
-		walletPools := pool.options.GetActiveWalletPools()
-		for _, walletPool := range walletPools {
-			if tracker := walletPool.GetTransactionTracker(); tracker != nil {
-				// Check if this wallet belongs to this pool
-				allWallets := walletPool.GetAllWallets()
-				for _, poolWallet := range allWallets {
-					if poolWallet == nil {
-						continue
-					}
-
-					if poolWallet.GetAddress() == wallet.GetAddress() {
-						tracker(submitErr)
-						break
-					}
-				}
-			}
-		}
-
 		return submitErr
 	}
 
