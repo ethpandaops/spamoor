@@ -3,6 +3,7 @@ package spamoor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethpandaops/spamoor/utils"
@@ -273,7 +275,7 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 		return nil
 	}
 
-	blockBody := pool.getBlockBody(ctx, client, blockNumber)
+	blockBody, txSkipMap := pool.getBlockBody(ctx, client, blockNumber)
 	if blockBody == nil {
 		return fmt.Errorf("could not load block body")
 	}
@@ -313,17 +315,17 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 	pool.blocksMutex.Unlock()
 
-	return pool.processBlockTxs(ctx, client, blockNumber, blockBody, chainId, walletMap)
+	return pool.processBlockTxs(ctx, client, blockNumber, blockBody, chainId, walletMap, txSkipMap)
 }
 
 // processBlockTxs processes all transactions in a block for confirmation tracking.
 // It loads block receipts, decodes transaction senders, updates wallet states for
 // confirmed transactions, and tracks transaction information for reorg recovery.
 // Also handles cleanup of old confirmed transaction data.
-func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockBody *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
+func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockBody *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet, txSkipMap map[uint32]bool) error {
 	t1 := time.Now()
 	txCount := len(blockBody.Transactions())
-	receipts, err := pool.getBlockReceipts(ctx, client, blockBody.Hash(), txCount)
+	receipts, err := pool.getBlockReceipts(ctx, client, blockBody.Hash(), txCount, txSkipMap)
 	if err != nil {
 		return fmt.Errorf("could not load block receipts: %w", err)
 	}
@@ -457,28 +459,90 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 // getBlockBody retrieves a block body from the specified client.
 // It uses a 5-second timeout and returns the block if successful, nil otherwise.
 // Builder clients are not supported as they don't provide eth_getBlockByNumber.
-func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumber uint64) *types.Block {
+func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumber uint64) (*types.Block, map[uint32]bool) {
 	// Builder clients don't support eth_getBlockByNumber
 	if client.IsBuilder() {
-		return nil
+		return nil, nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	blockBody, err := client.client.BlockByNumber(ctx, big.NewInt(int64(blockNumber)))
-	if err == nil {
-		return blockBody
+	/*
+		blockBody, err := client.client.BlockByNumber(ctx, big.NewInt(int64(blockNumber)))
+		if err == nil {
+			return blockBody
+		}
+	*/
+
+	var raw json.RawMessage
+	err := client.client.Client().CallContext(ctx, &raw, "eth_getBlockByNumber", rpc.BlockNumber(blockNumber), true)
+	if err != nil {
+		return nil, nil
 	}
 
-	return nil
+	// Decode header and transactions.
+	var head *types.Header
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return nil, nil
+	}
+	// When the block is not found, the API returns JSON null.
+	if head == nil {
+		return nil, nil
+	}
+
+	var body struct {
+		Hash         common.Hash       `json:"hash"`
+		Transactions []json.RawMessage `json:"transactions"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, nil
+	}
+
+	transactions := make([]*types.Transaction, 0, len(body.Transactions))
+	txSkipMap := make(map[uint32]bool)
+	for idx, rawTx := range body.Transactions {
+		var txHeader struct {
+			Type hexutil.Uint64 `json:"type"`
+		}
+
+		isValid := false
+
+		if err := json.Unmarshal(rawTx, &txHeader); err == nil {
+			switch txHeader.Type {
+			case types.LegacyTxType, types.AccessListTxType, types.DynamicFeeTxType, types.BlobTxType, types.SetCodeTxType:
+				isValid = true
+			}
+		}
+
+		if isValid {
+			var tx types.Transaction
+			if err := json.Unmarshal(rawTx, &tx); err != nil {
+				isValid = false
+			}
+			transactions = append(transactions, &tx)
+		}
+
+		if !isValid {
+			txSkipMap[uint32(idx)] = true
+			continue
+		}
+	}
+
+	block := types.NewBlockWithHeader(head).WithBody(
+		types.Body{
+			Transactions: transactions,
+		},
+	)
+
+	return block, txSkipMap
 }
 
 // getBlockReceipts retrieves all transaction receipts for a block.
 // It validates that the number of receipts matches the expected transaction count
 // and uses a 5-second timeout for the request.
 // Builder clients are not supported as they don't provide eth_getBlockReceipts.
-func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockHash common.Hash, txCount int) ([]*types.Receipt, error) {
+func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockHash common.Hash, txCount int, txSkipMap map[uint32]bool) ([]*types.Receipt, error) {
 	// Builder clients don't support eth_getBlockReceipts
 	if client.IsBuilder() {
 		return nil, fmt.Errorf("builder clients do not support eth_getBlockReceipts")
@@ -495,6 +559,16 @@ func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockH
 	if err != nil {
 		receiptErr = err
 	} else {
+		if len(txSkipMap) > 0 {
+			filteredBlockReceipts := make([]*types.Receipt, 0, txCount)
+			for idx, receipt := range blockReceipts {
+				if !txSkipMap[uint32(idx)] {
+					filteredBlockReceipts = append(filteredBlockReceipts, receipt)
+				}
+			}
+			blockReceipts = filteredBlockReceipts
+		}
+
 		if len(blockReceipts) != txCount {
 			return nil, fmt.Errorf("block %v has %v receipts, expected %v", blockHash.Hex(), len(blockReceipts), txCount)
 		}
@@ -1048,7 +1122,12 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 // It finds the common ancestor, identifies reorged-out transactions, resets wallet nonces,
 // and re-submits the affected transactions as pending. Also processes the new canonical blocks.
 func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlock *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
-	newBlockParents := []*types.Block{}
+	type newBlockInfo struct {
+		block     *types.Block
+		txSkipMap map[uint32]bool
+	}
+
+	newBlockParents := []newBlockInfo{}
 
 	// let's assume a reorg of 2 blocks:
 	// old chain: 1 -> 2 -> 3a -> 4a
@@ -1078,12 +1157,15 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 			break
 		}
 
-		parentBlockBody := pool.getBlockBody(ctx, client, blockNumber)
+		parentBlockBody, txSkipMap := pool.getBlockBody(ctx, client, blockNumber)
 		if parentBlockBody == nil {
 			return fmt.Errorf("could not load block body for new parent block %v", blockNumber)
 		}
 
-		newBlockParents = append(newBlockParents, parentBlockBody)
+		newBlockParents = append(newBlockParents, newBlockInfo{
+			block:     parentBlockBody,
+			txSkipMap: txSkipMap,
+		})
 		block = parentBlockBody
 	}
 
@@ -1156,8 +1238,8 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 
 	// re-process the new parent blocks
 	slices.Reverse(newBlockParents)
-	for _, parentBlock := range newBlockParents {
-		pool.processBlockTxs(ctx, client, parentBlock.NumberU64(), parentBlock, chainId, walletMap)
+	for _, parentBlockInfo := range newBlockParents {
+		pool.processBlockTxs(ctx, client, parentBlockInfo.block.NumberU64(), parentBlockInfo.block, chainId, walletMap, parentBlockInfo.txSkipMap)
 	}
 
 	return nil
