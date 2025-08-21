@@ -2,6 +2,17 @@
   <div class="container mt-2">
     <h2 class="py-2">Spamoor Dashboard</h2>
     
+    {{ if .StartupDelayActive }}
+    <div class="alert alert-warning alert-dismissible fade show" role="alert" id="startupDelayAlert">
+      <h4 class="alert-heading">
+        <i class="fas fa-clock me-2"></i>Startup Delay Active
+      </h4>
+      <p>Spammers are in startup delay mode to prevent crash loops. 
+         Spammers will start automatically in <span id="countdownTimer">{{ .StartupDelayRemaining }}</span> seconds.</p>
+      <p class="mb-0">You can pause any spammer during this time to prevent it from starting.</p>
+    </div>
+    {{ end }}
+    
     <div class="d-flex justify-content-between align-items-center mb-3">
       <div class="d-flex align-items-center gap-3">
         <!-- Mass actions controls -->
@@ -74,8 +85,10 @@
                 <span class="badge bg-success">Running</span>
               {{ else if eq .Status 2 }}
                 <span class="badge bg-secondary">Finished</span>
-              {{ else }}
+              {{ else if eq .Status 3 }}
                 <span class="badge bg-danger">Failed</span>
+              {{ else }}
+                <span class="badge bg-danger">Unknown</span>
               {{ end }}
             </td>
             <td>
@@ -1410,6 +1423,33 @@ async function importFromLibrary(filename) {
     alert('Import failed: ' + error.message);
   }
 }
+
+{{ if .StartupDelayActive }}
+let startupDelayRemaining = {{ .StartupDelayRemaining }};
+const countdownElement = document.getElementById('countdownTimer');
+const alertElement = document.getElementById('startupDelayAlert');
+
+function updateCountdown() {
+  if (startupDelayRemaining <= 0) {
+    if (alertElement) {
+      alertElement.style.display = 'none';
+    } else {
+      location.reload();
+    }
+    return;
+  }
+  
+  if (countdownElement) {
+    countdownElement.textContent = startupDelayRemaining;
+  }
+  
+  startupDelayRemaining--;
+  setTimeout(updateCountdown, 1000);
+}
+
+updateCountdown();
+{{ end }}
+
 </script>
 {{ end }}
 

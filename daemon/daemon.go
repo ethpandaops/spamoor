@@ -44,6 +44,10 @@ type Daemon struct {
 
 	// Audit logger for tracking actions
 	auditLogger *AuditLogger
+
+	// Startup delay configuration
+	startupDelay time.Duration
+	startupTime  time.Time
 }
 
 // NewDaemon creates a new daemon instance with the provided components.
@@ -86,6 +90,9 @@ func (d *Daemon) GetClientPool() *spamoor.ClientPool {
 // Returns true if this is the first launch, false if spammers were restored.
 // Marks the first launch state in the database to track initialization status.
 func (d *Daemon) Run() (bool, error) {
+	// Set startup delay time
+	d.startupTime = time.Now()
+
 	// check if this is the first launch
 	var notFirstLaunch bool
 	d.db.GetSpamoorState("first_launch", &notFirstLaunch)
@@ -675,4 +682,32 @@ func (d *Daemon) GetClientConfig(rpcUrl string) (*db.ClientConfig, error) {
 		return nil, fmt.Errorf("failed to get client config: %w", err)
 	}
 	return config, nil
+}
+
+// SetStartupDelay sets the startup delay duration for the daemon.
+// This delay prevents spammers from running immediately on startup to allow cancellation.
+func (d *Daemon) SetStartupDelay(delay time.Duration) {
+	d.startupDelay = delay
+}
+
+// IsInStartupDelay checks if the daemon is still within the startup delay period.
+// Returns true if we're still within the delay period, false otherwise.
+func (d *Daemon) IsInStartupDelay() bool {
+	if d.startupDelay == 0 {
+		return false
+	}
+	return time.Since(d.startupTime) < d.startupDelay
+}
+
+// GetStartupDelayRemaining returns the remaining time in the startup delay period.
+// Returns 0 if the delay has expired or was not set.
+func (d *Daemon) GetStartupDelayRemaining() time.Duration {
+	if d.startupDelay == 0 {
+		return 0
+	}
+	elapsed := time.Since(d.startupTime)
+	if elapsed >= d.startupDelay {
+		return 0
+	}
+	return d.startupDelay - elapsed
 }

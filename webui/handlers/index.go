@@ -8,7 +8,9 @@ import (
 )
 
 type IndexPage struct {
-	Spammers []*IndexPageSpammer
+	Spammers              []*IndexPageSpammer
+	StartupDelayActive    bool
+	StartupDelayRemaining int64
 }
 
 type IndexPageSpammer struct {
@@ -58,7 +60,16 @@ func (fh *FrontendHandler) getIndexPageData() (*IndexPage, error) {
 		}
 	}
 
+	// Check if startup delay is active
+	startupDelayActive := fh.daemon.IsInStartupDelay()
+	startupDelayRemaining := int64(0)
+	if startupDelayActive {
+		startupDelayRemaining = int64(fh.daemon.GetStartupDelayRemaining().Seconds())
+	}
+
 	return &IndexPage{
-		Spammers: models,
+		Spammers:              models,
+		StartupDelayActive:    startupDelayActive,
+		StartupDelayRemaining: startupDelayRemaining,
 	}, nil
 }

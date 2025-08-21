@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -35,6 +36,7 @@ type CliArgs struct {
 	disableAuditLogs bool
 	secondsPerSlot   uint64
 	auditUserHeader  string
+	startupDelay     uint64
 }
 
 func main() {
@@ -56,6 +58,7 @@ func main() {
 	flags.BoolVar(&cliArgs.disableAuditLogs, "disable-audit-logs", false, "Disable audit logs")
 	flags.Uint64Var(&cliArgs.secondsPerSlot, "seconds-per-slot", 12, "Seconds per slot for rate limiting (used for throughput calculation).")
 	flags.StringVar(&cliArgs.auditUserHeader, "audit-user-header", "Cf-Access-Authenticated-User-Email", "HTTP header containing the authenticated user email for audit logs")
+	flags.Uint64Var(&cliArgs.startupDelay, "startup-delay", 30, "Delay in seconds before starting spammers on daemon startup (to allow cancellation)")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -152,6 +155,9 @@ func main() {
 	spamoorDaemon = daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, rootWallet, txpool, database)
 	if cliArgs.fuluActivation > 0 {
 		spamoorDaemon.SetGlobalCfg("fulu_activation", cliArgs.fuluActivation)
+	}
+	if cliArgs.startupDelay > 0 {
+		spamoorDaemon.SetStartupDelay(time.Duration(cliArgs.startupDelay) * time.Second)
 	}
 
 	// init audit logger

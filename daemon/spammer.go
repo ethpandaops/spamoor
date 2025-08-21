@@ -282,6 +282,24 @@ func (s *Spammer) runScenario() {
 		}
 	}
 
+	// Wait for startup delay if this spammer was started from startup
+	if s.daemon.IsInStartupDelay() {
+		s.logger.Info("waiting for startup delay before executing scenario")
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		for s.daemon.IsInStartupDelay() {
+			select {
+			case <-s.scenarioCtx.Done():
+				// Spammer was paused or daemon is shutting down
+				return
+			case <-ticker.C:
+				// Continue waiting
+			}
+		}
+		s.logger.Info("startup delay expired, executing scenario")
+	}
+
 	err = s.walletPool.PrepareWallets()
 	if err != nil {
 		scenarioErr = fmt.Errorf("failed to prepare wallets: %w", err)

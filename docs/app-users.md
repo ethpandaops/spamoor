@@ -320,6 +320,7 @@ spamoor-daemon \
 | `--port`, `-P` | Web interface port | 8080 |
 | `--db`, `-d` | SQLite database file | spamoor.db |
 | `--startup-spammer` | YAML file with startup spammer configurations | |
+| `--startup-delay` | Delay in seconds before starting spammers on startup | 30 |
 | `--without-batcher` | Disable transaction batching | false |
 | `--debug` | Enable debug mode | false |
 
@@ -426,6 +427,18 @@ spamoor-daemon \
   --rpchost "http://localhost:8545" \
   --startup-spammer startup-spammers.yaml
 ```
+
+#### Startup Delay Protection
+
+To prevent crash loops from problematic configurations, spammers automatically restored from the database or loaded from startup configurations are subject to a startup delay:
+
+- **Default Delay**: 30 seconds (configurable with `--startup-delay`)
+- **Purpose**: Allows time to review and cancel potentially problematic spammers
+- **Behavior**: Spammers appear as "Running" but wait before executing scenarios
+- **UI Indicator**: Warning banner shows countdown timer during active delay
+- **User Control**: Spammers can be paused during delay to prevent execution
+
+This safety feature is especially useful in production environments where daemon restarts should not immediately trigger problematic transaction patterns.
 
 ## Available Scenarios
 
