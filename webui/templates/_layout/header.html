@@ -60,6 +60,13 @@
               </a>
             </li>
             {{ end }}
+            {{ if not .DisableAuditLogs }}
+            <li class="nav-item px-2">
+              <a class="nav-link" href="/audit">
+                <span class="nav-text">Audit</span>
+              </a>
+            </li>
+            {{ end }}
             <li class="nav-item px-2">
               <a class="nav-link" href="/docs/">
                 <span class="nav-text">API</span>

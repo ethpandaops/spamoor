@@ -12,6 +12,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/holiman/uint256 v1.3.2
 	github.com/jmoiron/sqlx v1.4.0
+	github.com/pmezard/go-difflib v1.0.0
 	github.com/pressly/goose/v3 v3.24.3
 	github.com/prometheus/client_golang v1.23.0
 	github.com/sirupsen/logrus v1.9.3

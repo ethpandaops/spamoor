@@ -720,13 +720,53 @@ async function editSpammer(id) {
     form.querySelector('[name="description"]').value = spammer.description;
     form.querySelector('[name="scenario"]').value = spammer.scenario;
     form.querySelector('[name="config"]').value = spammer.config;
+    
+    const modalFooter = document.querySelector('#editSpammerModal .modal-footer');
+    let saveRestartBtn = document.getElementById('saveRestartBtn');
+    let saveStartBtn = document.getElementById('saveStartBtn');
+    
+    if (!saveRestartBtn) {
+      saveRestartBtn = document.createElement('button');
+      saveRestartBtn.type = 'button';
+      saveRestartBtn.className = 'btn btn-warning';
+      saveRestartBtn.id = 'saveRestartBtn';
+      saveRestartBtn.textContent = 'Save & Restart';
+      saveRestartBtn.onclick = function() { submitEditSpammer('restart'); };
+      
+      const saveBtn = modalFooter.querySelector('.btn-primary');
+      modalFooter.insertBefore(saveRestartBtn, saveBtn);
+    }
+    
+    if (!saveStartBtn) {
+      saveStartBtn = document.createElement('button');
+      saveStartBtn.type = 'button';
+      saveStartBtn.className = 'btn btn-success';
+      saveStartBtn.id = 'saveStartBtn';
+      saveStartBtn.textContent = 'Save & Start';
+      saveStartBtn.onclick = function() { submitEditSpammer('start'); };
+      
+      const saveBtn = modalFooter.querySelector('.btn-primary');
+      modalFooter.insertBefore(saveStartBtn, saveBtn);
+    }
+    
+    if (spammer.status === 1) {
+      saveRestartBtn.style.display = 'inline-block';
+      saveStartBtn.style.display = 'none';
+    } else if (spammer.status === 0) {
+      saveRestartBtn.style.display = 'none';
+      saveStartBtn.style.display = 'inline-block';
+    } else {
+      saveRestartBtn.style.display = 'none';
+      saveStartBtn.style.display = 'none';
+    }
+    
     new bootstrap.Modal(document.getElementById('editSpammerModal')).show();
   } catch (err) {
     alert('Failed to load spammer details: ' + err.message);
   }
 }
 
-async function submitEditSpammer() {
+async function submitEditSpammer(action) {
   const form = document.getElementById('editSpammerForm');
   const id = form.querySelector('[name="id"]').value;
   const data = {
@@ -745,6 +785,28 @@ async function submitEditSpammer() {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
+    
+    if (action === 'restart') {
+      const pauseResponse = await fetch(`/api/spammer/${id}/pause`, {method: 'POST'});
+      if (!pauseResponse.ok) {
+        console.error('Failed to pause spammer before restart');
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      const startResponse = await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
+      if (!startResponse.ok) {
+        const errorText = await startResponse.text();
+        throw new Error(`Failed to restart spammer: ${errorText}`);
+      }
+    } else if (action === 'start') {
+      const startResponse = await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
+      if (!startResponse.ok) {
+        const errorText = await startResponse.text();
+        throw new Error(`Failed to start spammer: ${errorText}`);
+      }
+    }
+    
     window.location.reload();
   } catch (err) {
     alert('Failed to update spammer: ' + err.message);

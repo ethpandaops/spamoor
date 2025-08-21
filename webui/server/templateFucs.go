@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"math"
@@ -33,9 +34,10 @@ func GetTemplateFuncs() template.FuncMap {
 		"round": func(i float64, n int) float64 {
 			return math.Round(i*math.Pow10(n)) / math.Pow10(n)
 		},
-		"percent":        func(i float64) float64 { return i * 100 },
-		"contains":       strings.Contains,
-		"formatTimeDiff": FormatTimeDiff,
+		"percent":                func(i float64) float64 { return i * 100 },
+		"contains":               strings.Contains,
+		"formatTimeDiff":         FormatTimeDiff,
+		"UnmarshalAuditMetadata": UnmarshalAuditMetadata,
 	}
 }
 
@@ -78,4 +80,14 @@ func FormatTimeDiff(ts time.Time) template.HTML {
 	} else {
 		return template.HTML(fmt.Sprintf("in %v", timeStr))
 	}
+}
+
+// UnmarshalAuditMetadata parses audit metadata JSON string into a map
+func UnmarshalAuditMetadata(metadataStr string) map[string]interface{} {
+	var metadata map[string]interface{}
+	if metadataStr == "" {
+		return metadata
+	}
+	json.Unmarshal([]byte(metadataStr), &metadata)
+	return metadata
 }
