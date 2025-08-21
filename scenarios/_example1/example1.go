@@ -299,6 +299,10 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 		return nil, client, wallet, fmt.Errorf("no client available")
 	}
 
+	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
+		return nil, client, wallet, err
+	}
+
 	// Get suggested fees
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
 	if err != nil {
@@ -389,8 +393,13 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 
 	if err != nil {
 		// Reset nonce if transaction was not sent
-		wallet.ResetPendingNonce(ctx, client)
-		return nil, client, wallet, fmt.Errorf("failed to send transaction: %w", err)
+		wallet.ResetPendingNonce(ctx, client, func() *spamoor.Client {
+			return s.walletPool.GetClient(
+				spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
+				spamoor.WithClientGroup(s.options.ClientGroup),
+			)
+		})
+		return tx, client, wallet, fmt.Errorf("failed to send transaction: %w", err)
 	}
 
 	return tx, client, wallet, nil

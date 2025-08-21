@@ -248,6 +248,10 @@ func (s *Scenario) executeInitTasks(ctx context.Context) error {
 		return fmt.Errorf("no client available")
 	}
 
+	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
+		return err
+	}
+
 	// Execute all init tasks using the unified sequence method
 	return s.executeTaskSequence(ctx, s.initTasks, 0, wallet, client, s.initRegistry, 0)
 }
@@ -285,7 +289,12 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 			})
 			if err != nil {
 				s.logger.Warnf("task %d (%s) failed: %v", baseTaskIndex+i+1, taskName, err)
-				wallet.ResetPendingNonce(ctx, client)
+				wallet.ResetPendingNonce(ctx, client, func() *spamoor.Client {
+					return s.walletPool.GetClient(
+						spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
+						spamoor.WithClientGroup(s.options.ClientGroup),
+					)
+				})
 				return err
 			}
 
@@ -327,7 +336,12 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 				Rebroadcast: s.options.Rebroadcast > 0,
 			})
 			if err != nil {
-				wallet.ResetPendingNonce(ctx, client)
+				wallet.ResetPendingNonce(ctx, client, func() *spamoor.Client {
+					return s.walletPool.GetClient(
+						spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
+						spamoor.WithClientGroup(s.options.ClientGroup),
+					)
+				})
 				return err
 			}
 
@@ -355,7 +369,12 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 				},
 			})
 			if err != nil {
-				wallet.ResetPendingNonce(ctx, client)
+				wallet.ResetPendingNonce(ctx, client, func() *spamoor.Client {
+					return s.walletPool.GetClient(
+						spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
+						spamoor.WithClientGroup(s.options.ClientGroup),
+					)
+				})
 				return err
 			}
 
@@ -424,6 +443,11 @@ func (s *Scenario) processExecutionTx(ctx context.Context, txIdx uint64, onCompl
 	if client == nil {
 		onComplete()
 		return nil, fmt.Errorf("no client available")
+	}
+
+	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
+		onComplete()
+		return nil, err
 	}
 
 	// Execute all execution tasks using the unified method
