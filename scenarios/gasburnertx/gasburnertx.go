@@ -227,7 +227,11 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
 	if client == nil {
-		return nil, client, fmt.Errorf("no client available")
+		return nil, client, scenario.ErrNoClients
+	}
+
+	if wallet == nil {
+		return nil, client, scenario.ErrNoWallet
 	}
 
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
@@ -382,7 +386,11 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	}()
 
 	if client == nil {
-		return nil, client, wallet, fmt.Errorf("no client available")
+		return nil, client, wallet, scenario.ErrNoClients
+	}
+
+	if wallet == nil {
+		return nil, client, wallet, scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {

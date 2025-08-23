@@ -85,6 +85,9 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	}
 	limiter := rate.NewLimiter(initialRate, 1)
 
+	isErrorMode := false
+	errorLimiter := rate.NewLimiter(rate.Limit(0.5), 1) // 2 sec interval when in error mode
+
 	// Subscribe to block updates for stats reporting
 	var lastSubmittedCount uint64
 	if options.WalletPool != nil && options.WalletPool.GetTxPool() != nil {
@@ -165,6 +168,18 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			continue
 		}
 
+		if isErrorMode {
+			if err := errorLimiter.Wait(ctx); err != nil {
+				if ctx.Err() != nil {
+					break
+				}
+
+				options.Logger.Debugf("rate limited: %s", err.Error())
+				time.Sleep(100 * time.Millisecond)
+				continue // retry
+			}
+		}
+
 		txIdx := txIdxCounter
 		txIdxCounter++
 
@@ -206,6 +221,12 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 					pendingCond.Signal()
 				}
 			})
+
+			if err == ErrNoClients {
+				isErrorMode = true
+			} else if isErrorMode {
+				isErrorMode = false
+			}
 
 			if lastChan != nil {
 				<-lastChan

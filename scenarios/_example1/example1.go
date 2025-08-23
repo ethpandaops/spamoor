@@ -227,7 +227,7 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, error) {
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {
-		return nil, fmt.Errorf("no client available")
+		return nil, scenario.ErrNoClients
 	}
 
 	// Get suggested fees
@@ -288,7 +288,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 	// Select wallet and client for this transaction
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
 	if wallet == nil {
-		return nil, nil, nil, fmt.Errorf("no wallet available")
+		return nil, nil, nil, scenario.ErrNoWallet
 	}
 
 	client := s.walletPool.GetClient(
@@ -296,7 +296,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {
-		return nil, client, wallet, fmt.Errorf("no client available")
+		return nil, client, wallet, scenario.ErrNoClients
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {

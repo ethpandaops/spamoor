@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios/xentoken/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
@@ -32,7 +33,7 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {
-		return nil, fmt.Errorf("no client available")
+		return nil, scenario.ErrNoClients
 	}
 
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)

@@ -252,7 +252,7 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {
-		return common.Address{}, fmt.Errorf("no client available")
+		return common.Address{}, scenario.ErrNoClients
 	}
 
 	// Check if factory already exists by checking deployer nonce
@@ -322,7 +322,11 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	}()
 
 	if client == nil {
-		return nil, client, wallet, fmt.Errorf("no client available")
+		return nil, client, wallet, scenario.ErrNoClients
+	}
+
+	if wallet == nil {
+		return nil, client, wallet, scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
