@@ -188,7 +188,7 @@ func (pool *TxPool) runTxPoolLoop() {
 				for _, client := range clients {
 					err := pool.processBlock(pool.options.Context, client, blockNumber)
 					if err != nil {
-						logrus.WithError(err).Errorf("error processing block %v", blockNumber)
+						logrus.WithField("client", client.GetName()).WithError(err).Errorf("error processing block %v", blockNumber)
 						continue
 					}
 
