@@ -245,7 +245,11 @@ func (s *Scenario) executeInitTasks(ctx context.Context) error {
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {
-		return fmt.Errorf("no client available")
+		return scenario.ErrNoClients
+	}
+
+	if wallet == nil {
+		return scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
@@ -442,7 +446,12 @@ func (s *Scenario) processExecutionTx(ctx context.Context, txIdx uint64, onCompl
 
 	if client == nil {
 		onComplete()
-		return nil, fmt.Errorf("no client available")
+		return nil, scenario.ErrNoClients
+	}
+
+	if wallet == nil {
+		onComplete()
+		return nil, scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {

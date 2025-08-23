@@ -265,7 +265,11 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	}()
 
 	if client == nil {
-		return nil, client, wallet, fmt.Errorf("no client available")
+		return nil, client, wallet, scenario.ErrNoClients
+	}
+
+	if wallet == nil {
+		return nil, client, wallet, scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {

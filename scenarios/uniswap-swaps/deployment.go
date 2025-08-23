@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios/uniswap-swaps/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
@@ -45,11 +46,17 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 		spamoor.WithClientGroup(u.options.ClientGroup),
 	)
 	if client == nil {
-		return nil, fmt.Errorf("no client available")
+		return nil, scenario.ErrNoClients
 	}
 
 	deployerWallet := u.walletPool.GetWellKnownWallet("deployer")
 	ownerWallet := u.walletPool.GetWellKnownWallet("owner")
+	if deployerWallet == nil {
+		return nil, scenario.ErrNoWallet
+	}
+	if ownerWallet == nil {
+		return nil, scenario.ErrNoWallet
+	}
 
 	feeCap, tipCap, err := u.walletPool.GetTxPool().GetSuggestedFees(client, u.options.BaseFee, u.options.TipFee)
 	if err != nil {

@@ -122,6 +122,12 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		}
 	}
 
+	s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
+		Name:          "deployer",
+		RefillAmount:  uint256.NewInt(1000000000000000000), // 1 ETH
+		RefillBalance: uint256.NewInt(500000000000000000),  // 0.5 ETH
+	})
+
 	if s.options.TotalCount == 0 && s.options.Throughput == 0 {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
@@ -211,13 +217,17 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
+	wallet := s.walletPool.GetWellKnownWallet("deployer")
 
 	var feeCap *big.Int
 	var tipCap *big.Int
 
 	if client == nil {
-		return nil, client, fmt.Errorf("no client available")
+		return nil, client, scenario.ErrNoClients
+	}
+
+	if wallet == nil {
+		return nil, client, scenario.ErrNoWallet
 	}
 
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
@@ -266,7 +276,11 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	}()
 
 	if client == nil {
-		return nil, client, wallet, fmt.Errorf("no client available")
+		return nil, client, wallet, scenario.ErrNoClients
+	}
+
+	if wallet == nil {
+		return nil, client, wallet, scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
