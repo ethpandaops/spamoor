@@ -348,10 +348,18 @@ func (wallet *Wallet) ResetPendingNonce(ctx context.Context, client *Client, sel
 			}
 		}
 
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+
 		nonce, err = client.GetPendingNonceAt(ctx, wallet.address)
 		if err == nil {
 			break
 		}
+
+		retry++
 	}
 
 	if err != nil {
