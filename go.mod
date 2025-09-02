@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.1
 
 require (
-	github.com/crate-crypto/go-eth-kzg v1.3.0
+	github.com/crate-crypto/go-eth-kzg v1.4.0
 	github.com/ethereum/go-ethereum v1.15.8
 	github.com/fjl/geas v0.2.2
 	github.com/glebarez/go-sqlite v1.22.0
@@ -16,7 +16,7 @@ require (
 	github.com/pressly/goose/v3 v3.25.0
 	github.com/prometheus/client_golang v1.23.0
 	github.com/sirupsen/logrus v1.9.3
-	github.com/spf13/pflag v1.0.7
+	github.com/spf13/pflag v1.0.9
 	github.com/swaggo/http-swagger v1.3.4
 	github.com/swaggo/swag v1.16.6
 	github.com/tdewolff/minify v2.3.6+incompatible
