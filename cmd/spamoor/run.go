@@ -116,6 +116,13 @@ func RunCommand(args []string) {
 		logger.WithError(err).Fatal("Failed to init root wallet")
 	}
 
+	// Validate root wallet funding before starting scenarios
+	logger.Info("Validating root wallet funding...")
+	err = rootWallet.ValidateFunding(ctx, client, nil, logger)
+	if err != nil {
+		logger.WithError(err).Fatal("Root wallet funding validation failed")
+	}
+
 	// Load and parse YAML file using scenario config logic
 	spammerConfigs, err := configs.ResolveConfigImports(yamlFile, "", make(map[string]bool))
 	if err != nil {

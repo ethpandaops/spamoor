@@ -2,7 +2,10 @@ package spamoor
 
 import (
 	"context"
+	"fmt"
+	"math/big"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
@@ -126,4 +129,101 @@ func (wallet *RootWallet) GetTxBatcher() *TxBatcher {
 // This enables batched transaction processing for improved efficiency.
 func (wallet *RootWallet) InitTxBatcher(ctx context.Context, txpool *TxPool) {
 	wallet.txbatcher = NewTxBatcher(txpool)
+}
+
+// ValidateFundingOptions contains configuration for root wallet funding validation.
+type ValidateFundingOptions struct {
+	MinBalance      *big.Int      // Minimum required balance in Wei
+	RetryInterval   time.Duration // Time to wait between balance checks
+	MaxRetries      int           // Maximum number of retry attempts (0 = unlimited)
+	TimeoutDuration time.Duration // Maximum time to wait for funding (0 = unlimited)
+}
+
+// GetDefaultValidateFundingOptions returns default options for root wallet funding validation.
+func GetDefaultValidateFundingOptions() *ValidateFundingOptions {
+	minBalance := new(big.Int)
+	minBalance.SetString("10000000000000000000", 10)
+
+	return &ValidateFundingOptions{
+		MinBalance:      minBalance,
+		RetryInterval:   30 * time.Second,
+		MaxRetries:      0,
+		TimeoutDuration: 0,
+	}
+}
+
+// ValidateFunding validates that the root wallet has sufficient funds before starting scenarios.
+// It checks the wallet balance against the minimum required balance and waits for funding if needed.
+// The function respects context cancellation and returns an error if funding validation fails.
+func (wallet *RootWallet) ValidateFunding(ctx context.Context, client *Client, options *ValidateFundingOptions, logger logrus.FieldLogger) error {
+	if options == nil {
+		options = GetDefaultValidateFundingOptions()
+	}
+
+	if options.TimeoutDuration > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, options.TimeoutDuration)
+		defer cancel()
+
+		if logger != nil {
+			logger.Infof("root wallet funding validation will timeout after %v", options.TimeoutDuration)
+		}
+	}
+
+	retryCount := 0
+	for {
+		if ctx.Err() != nil {
+			return fmt.Errorf("context cancelled while waiting for root wallet funding: %w", ctx.Err())
+		}
+
+		err := client.UpdateWallet(ctx, wallet.wallet)
+		if err != nil {
+			if logger != nil {
+				logger.WithError(err).Warnf("failed to update root wallet balance, retrying in %v", options.RetryInterval)
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled while updating root wallet: %w", ctx.Err())
+			case <-time.After(options.RetryInterval):
+				retryCount++
+				if options.MaxRetries > 0 && retryCount >= options.MaxRetries {
+					return fmt.Errorf("failed to update root wallet balance after %d retries: %w", retryCount, err)
+				}
+				continue
+			}
+		}
+
+		balance := wallet.wallet.GetBalance()
+		balanceETH := utils.WeiToEther(uint256.MustFromBig(balance))
+
+		if balance.Cmp(options.MinBalance) >= 0 {
+			if logger != nil {
+				logger.Infof("root wallet funding validation successful (balance: %v ETH, required: %v ETH)",
+					balanceETH,
+					utils.WeiToEther(uint256.MustFromBig(options.MinBalance)))
+			}
+			return nil
+		}
+
+		requiredETH := utils.WeiToEther(uint256.MustFromBig(options.MinBalance))
+		if logger != nil {
+			if retryCount == 0 {
+				logger.Warnf("root wallet has insufficient funds (balance: %v ETH, required: %v ETH)", balanceETH, requiredETH)
+				logger.Infof("waiting for root wallet funding (address: %s)...", wallet.wallet.GetAddress().String())
+			} else {
+				logger.Debugf("root wallet still underfunded (balance: %v ETH, required: %v ETH), continuing to wait...", balanceETH, requiredETH)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while waiting for root wallet funding: %w", ctx.Err())
+		case <-time.After(options.RetryInterval):
+			retryCount++
+			if options.MaxRetries > 0 && retryCount >= options.MaxRetries {
+				return fmt.Errorf("root wallet funding validation failed after %d retries (balance: %v ETH, required: %v ETH)",
+					retryCount, balanceETH, requiredETH)
+			}
+		}
+	}
 }
