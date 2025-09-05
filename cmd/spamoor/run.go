@@ -106,15 +106,11 @@ func RunCommand(args []string) {
 	}
 
 	// Initialize root wallet
-	client := clientPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientRandom))
-	if client == nil {
-		logger.Fatal("No client available")
-	}
-
-	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, client, logger)
+	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, logger)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to init root wallet")
 	}
+	defer rootWallet.Shutdown()
 
 	// Load and parse YAML file using scenario config logic
 	spammerConfigs, err := configs.ResolveConfigImports(yamlFile, "", make(map[string]bool))

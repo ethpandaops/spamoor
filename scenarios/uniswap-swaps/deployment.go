@@ -232,6 +232,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	// deploy tokens and uniswap pairs
 	pairInitCode := common.FromHex(contract.UniswapV2PairBin)
 	pairInitHash := crypto.Keccak256(pairInitCode)
+	pairFundingAmount := uint256.NewInt(0)
 	var pairSalt [32]byte
 
 	for i := uint64(0); i < u.options.DaiPairs; i++ {
@@ -323,6 +324,11 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 		}
 
 		deploymentInfo.Pairs = append(deploymentInfo.Pairs, *pairInfo)
+
+		pairFundingAmount = pairFundingAmount.Add(pairFundingAmount, u.options.EthLiquidityPerPair)
+		fundingFees := uint256.NewInt(6000000)
+		fundingFees = fundingFees.Mul(fundingFees, uint256.MustFromBig(feeCap))
+		pairFundingAmount = pairFundingAmount.Add(pairFundingAmount, fundingFees)
 	}
 
 	// submit & await all deployment transactions
@@ -347,8 +353,8 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	// provide liquidity to the pairs
 	rootWallet := u.walletPool.GetRootWallet()
-	err = rootWallet.WithWalletLock(u.ctx, len(deploymentInfo.Pairs), func() {
-		u.logger.Infof("root wallet is locked, waiting for other funding txs to finish...")
+	err = rootWallet.WithWalletLock(u.ctx, len(deploymentInfo.Pairs), pairFundingAmount, u.walletPool.GetClientPool(), func(reason string) {
+		u.logger.Infof("root wallet is locked, %s", reason)
 	}, func() error {
 		liquidityTxs := []*types.Transaction{}
 		daiLiquidity := new(big.Int).Mul(u.options.EthLiquidityPerPair.ToBig(), big.NewInt(int64(u.options.DaiLiquidityFactor)))

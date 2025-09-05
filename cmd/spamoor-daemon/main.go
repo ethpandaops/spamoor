@@ -104,15 +104,11 @@ func main() {
 	}
 
 	// init root wallet
-	client := clientPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientRandom))
-	if client == nil {
-		panic(fmt.Errorf("no client available"))
-	}
-
-	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, client, logger)
+	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, logger)
 	if err != nil {
 		panic(fmt.Errorf("failed to init root wallet: %v", err))
 	}
+	defer rootWallet.Shutdown()
 
 	// init db
 	database := db.NewDatabase(&db.SqliteDatabaseConfig{
@@ -195,5 +191,6 @@ func main() {
 	signal.Notify(c, os.Interrupt)
 	<-c
 
+	// Shutdown components
 	spamoorDaemon.Shutdown()
 }
