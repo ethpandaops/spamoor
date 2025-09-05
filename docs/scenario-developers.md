@@ -811,8 +811,9 @@ For scenarios that need large funding transactions (like providing liquidity), u
 ```go
 // Lock root wallet for exclusive use
 rootWallet := s.walletPool.GetRootWallet()
-err := rootWallet.WithWalletLock(ctx, expectedTxCount, func() {
-    s.logger.Infof("Root wallet is locked, waiting for other funding operations...")
+clientPool := s.walletPool.GetClientPool()
+err := rootWallet.WithWalletLock(ctx, expectedTxCount, expectedTotalAmount, clientPool, func(reason string) {
+    s.logger.Infof("Root wallet is locked, %s", reason)
 }, func() error {
     // Perform large funding operations here
     tx, err := rootWallet.GetWallet().BuildBoundTx(ctx, &txbuilder.TxMetadata{

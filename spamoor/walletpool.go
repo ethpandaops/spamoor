@@ -723,30 +723,54 @@ func (pool *WalletPool) resupplyChildWallets() error {
 // processFundingRequests handles a batch of funding requests by creating and sending transactions.
 // It can use either individual transactions or batch transactions via the batcher contract for efficiency.
 // Processes transactions in chunks to avoid overwhelming the network.
+// It now checks if the root wallet has sufficient balance before attempting to send funding transactions.
 func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) error {
 	client := pool.clientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
 
+	// Calculate total funding amount needed
+	totalFundingAmount := uint256.NewInt(0)
+	for _, req := range fundingReqs {
+		totalFundingAmount = totalFundingAmount.Add(totalFundingAmount, req.Amount)
+	}
+
+	feeCap, _, err := client.GetSuggestedFee(pool.ctx)
+	if err != nil {
+		return err
+	}
+
 	reqTxCount := len(fundingReqs)
 	batchTxCount := reqTxCount
+	feeAmount := big.NewInt(0).Set(feeCap)
 	batcher := pool.rootWallet.GetTxBatcher()
 	if batcher != nil {
-		err := batcher.Deploy(pool.ctx, pool.rootWallet.wallet, client)
-		if err != nil {
-			return fmt.Errorf("failed to deploy batcher: %v", err)
-		}
-
 		batchTxCount = len(fundingReqs) / BatcherTxLimit
 		if len(fundingReqs)%BatcherTxLimit != 0 {
 			batchTxCount++
 		}
+		if batchTxCount > 1 {
+			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64((BatcherBaseGas+BatcherGasPerTx*BatcherTxLimit)*batchTxCount)))
+		} else {
+			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(BatcherBaseGas+BatcherGasPerTx*uint64(reqTxCount))))
+		}
+	} else {
+		feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(reqTxCount*21000)))
 	}
 
-	return pool.rootWallet.WithWalletLock(pool.ctx, batchTxCount, func() {
-		pool.logger.Infof("root wallet is locked, waiting for other funding txs to finish...")
+	totalFundingAmount = totalFundingAmount.Add(totalFundingAmount, uint256.MustFromBig(feeAmount))
+
+	return pool.rootWallet.WithWalletLock(pool.ctx, batchTxCount, totalFundingAmount, pool.clientPool, func(reason string) {
+		pool.logger.Infof("root wallet is locked, %s", reason)
 	}, func() error {
+		if batcher != nil {
+			err := batcher.Deploy(pool.ctx, pool.rootWallet.wallet, client)
+			if err != nil {
+				return fmt.Errorf("failed to deploy batcher: %v", err)
+			}
+		}
+
 		txList := make([]*types.Transaction, 0, batchTxCount)
 		batchTxMap := map[common.Hash][]*FundingRequest{}
 		if batcher != nil {
