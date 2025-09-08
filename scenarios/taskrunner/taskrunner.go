@@ -293,12 +293,8 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 			})
 			if err != nil {
 				s.logger.Warnf("task %d (%s) failed: %v", baseTaskIndex+i+1, taskName, err)
-				wallet.ResetPendingNonce(ctx, client, func() *spamoor.Client {
-					return s.walletPool.GetClient(
-						spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
-						spamoor.WithClientGroup(s.options.ClientGroup),
-					)
-				})
+				// mark nonce as skipped if tx was not sent
+				wallet.MarkSkippedNonce(tx.Nonce())
 				return err
 			}
 
@@ -340,12 +336,8 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 				Rebroadcast: s.options.Rebroadcast > 0,
 			})
 			if err != nil {
-				wallet.ResetPendingNonce(ctx, client, func() *spamoor.Client {
-					return s.walletPool.GetClient(
-						spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
-						spamoor.WithClientGroup(s.options.ClientGroup),
-					)
-				})
+				// mark nonce as skipped if tx was not sent
+				wallet.MarkSkippedNonce(tx.Nonce())
 				return err
 			}
 
@@ -373,12 +365,8 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 				},
 			})
 			if err != nil {
-				wallet.ResetPendingNonce(ctx, client, func() *spamoor.Client {
-					return s.walletPool.GetClient(
-						spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
-						spamoor.WithClientGroup(s.options.ClientGroup),
-					)
-				})
+				// mark nonce as skipped if tx was not sent
+				wallet.MarkNeedResync()
 				return err
 			}
 

@@ -30,12 +30,13 @@ type Wallet struct {
 	balanceMutex     sync.RWMutex
 	privkey          *ecdsa.PrivateKey
 	address          common.Address
+	needNonceResync  bool
 	chainid          *big.Int
 	pendingTxCount   atomic.Uint64
 	submittedTxCount atomic.Uint64
 	confirmedTxCount uint64
+	skippedNonces    []uint64
 	balance          *big.Int
-	needNonceResync  bool
 
 	txNonceChans     map[uint64]*nonceStatus
 	txNonceMutex     sync.Mutex
@@ -193,9 +194,41 @@ func (wallet *Wallet) SetNonce(nonce uint64) {
 
 // GetNextNonce atomically increments and returns the next available nonce.
 // This is used when building transactions to ensure unique nonces.
+// It first checks for any skipped nonces that can be reused.
 func (wallet *Wallet) GetNextNonce() uint64 {
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
+
+	if len(wallet.skippedNonces) > 0 {
+		// Sort skipped nonces to use the lowest one first
+		sort.Slice(wallet.skippedNonces, func(i, j int) bool {
+			return wallet.skippedNonces[i] < wallet.skippedNonces[j]
+		})
+
+		lowestIndex := -1
+
+		for idx, skipped := range wallet.skippedNonces {
+			if skipped < wallet.confirmedTxCount {
+				continue
+			}
+
+			lowestIndex = idx
+			break
+		}
+
+		if lowestIndex > -1 {
+			// Take the lowest skipped nonce
+			nonce := wallet.skippedNonces[lowestIndex]
+			wallet.skippedNonces = wallet.skippedNonces[lowestIndex+1:]
+
+			logrus.Infof("Reusing skipped nonce %d for wallet %s", nonce, wallet.address.Hex())
+			return nonce
+		} else {
+			wallet.skippedNonces = wallet.skippedNonces[:0]
+		}
+	}
+
+	// No skipped nonces, use the next sequential nonce
 	return wallet.pendingTxCount.Add(1) - 1
 }
 
@@ -275,12 +308,9 @@ func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMeta
 		return nil, err
 	}
 
-	wallet.nonceMutex.Lock()
-	defer wallet.nonceMutex.Unlock()
-
 	transactor.Context = ctx
 	transactor.From = wallet.address
-	nonce := wallet.pendingTxCount.Add(1) - 1
+	nonce := wallet.GetNextNonce()
 	transactor.Nonce = big.NewInt(0).SetUint64(nonce)
 
 	transactor.GasTipCap = txData.GasTipCap.ToBig()
@@ -291,7 +321,7 @@ func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMeta
 
 	tx, err := buildFn(transactor)
 	if err != nil {
-		wallet.pendingTxCount.Store(nonce)
+		wallet.MarkSkippedNonce(nonce)
 		return nil, err
 	}
 
@@ -319,67 +349,37 @@ func (wallet *Wallet) ResetNoncesIfNeeded(ctx context.Context, client *Client) e
 		return nil
 	}
 
-	if !wallet.ResetPendingNonce(ctx, client, nil) {
-		return fmt.Errorf("failed to reset pending nonce")
+	err := client.UpdateWallet(ctx, wallet)
+	if err != nil {
+		return fmt.Errorf("failed to refresh wallet state: %v", err)
 	}
+
+	wallet.needNonceResync = false
 
 	return nil
 }
 
-// ResetPendingNonce syncs the wallet's pending nonce with the blockchain.
-// This is useful for recovering from nonce mismatches or wallet state corruption.
-// It queries the pending nonce from the client and updates the wallet accordingly.
-func (wallet *Wallet) ResetPendingNonce(ctx context.Context, client *Client, selectClientFn func() *Client) bool {
+// MarkSkippedNonce marks a nonce as skipped/failed so it can be reused later.
+// This should be called when a transaction fails to submit.
+func (wallet *Wallet) MarkSkippedNonce(nonce uint64) {
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
 
-	var err error
-	var nonce uint64
+	if nonce >= wallet.confirmedTxCount {
+		return
+	}
 
-	retry := 0
-	for retry < 3 {
-		if retry > 0 {
-			if selectClientFn == nil {
-				break
-			}
-			client = selectClientFn()
-			if client == nil {
-				break
-			}
+	for _, skipped := range wallet.skippedNonces {
+		if skipped == nonce {
+			return
 		}
-
-		select {
-		case <-ctx.Done():
-			return false
-		default:
-		}
-
-		nonce, err = client.GetPendingNonceAt(ctx, wallet.address)
-		if err == nil {
-			break
-		}
-
-		retry++
 	}
 
-	if err != nil {
-		logrus.Errorf("failed to get pending nonce for %v: %v", wallet.address.String(), err)
-		wallet.needNonceResync = true
-		return false
-	}
+	wallet.skippedNonces = append(wallet.skippedNonces, nonce)
+}
 
-	if err == nil && nonce < wallet.confirmedTxCount {
-		logrus.Errorf("resyncing confirmed nonce for %v from %d to %d (this should never happen)", wallet.address.String(), wallet.confirmedTxCount, nonce)
-		wallet.confirmedTxCount = nonce
-	}
-
-	if err == nil && wallet.pendingTxCount.Load() != nonce {
-		logrus.Warnf("resyncing pending nonce for %v from %d to %d", wallet.address.String(), wallet.pendingTxCount.Load(), nonce)
-		wallet.pendingTxCount.Store(nonce)
-	}
-
-	wallet.needNonceResync = false
-	return true
+func (wallet *Wallet) MarkNeedResync() {
+	wallet.needNonceResync = true
 }
 
 // signTx signs a transaction using the wallet's private key and chain ID.

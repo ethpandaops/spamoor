@@ -375,13 +375,8 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 	})
 	if err != nil {
 		if replacementIdx == 0 {
-			// reset nonce if tx was not sent
-			wallet.ResetPendingNonce(s.walletPool.GetContext(), client, func() *spamoor.Client {
-				return s.walletPool.GetClient(
-					spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
-					spamoor.WithClientGroup(s.options.ClientGroup),
-				)
-			})
+			// mark nonce as skipped if tx was not sent
+			wallet.MarkSkippedNonce(tx.Nonce())
 		}
 
 		return nil, client, wallet, 0, err
