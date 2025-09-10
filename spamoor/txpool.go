@@ -1383,6 +1383,10 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 	}
 
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
+	if clientCount > 5 {
+		clientCount = 5
+	}
+
 	for j := 0; j < clientCount; j++ {
 		if ctx.Err() != nil {
 			break
