@@ -396,13 +396,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		LogFn: spamoor.GetDefaultLogFn(s.logger, "", fmt.Sprintf("%6d", txIdx+1), tx),
 	})
 	if err != nil {
-		// reset nonce if tx was not sent
-		wallet.ResetPendingNonce(ctx, client, func() *spamoor.Client {
-			return s.walletPool.GetClient(
-				spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
-				spamoor.WithClientGroup(s.options.ClientGroup),
-			)
-		})
+		// mark nonce as skipped if tx was not sent
+		wallet.MarkSkippedNonce(tx.Nonce())
 
 		return tx, client, wallet, err
 	}

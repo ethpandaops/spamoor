@@ -1383,7 +1383,15 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 	}
 
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
+	if clientCount > 5 {
+		clientCount = 5
+	}
+
 	for j := 0; j < clientCount; j++ {
+		if ctx.Err() != nil {
+			break
+		}
+
 		var clientOpts []ClientSelectionOption
 		if options.ClientGroup != "" {
 			clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
@@ -1391,7 +1399,7 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 		clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, j+options.ClientsStartOffset+1))
 		client := pool.options.ClientPool.GetClient(clientOpts...)
 		if client == nil {
-			continue
+			break
 		}
 
 		err := submitTx(client)
