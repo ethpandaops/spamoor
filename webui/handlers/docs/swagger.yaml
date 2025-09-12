@@ -103,6 +103,11 @@ definitions:
       startImmediately:
         type: boolean
     type: object
+  api.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
   api.ExportSpammersRequest:
     properties:
       spammer_ids:
@@ -224,6 +229,37 @@ definitions:
       description:
         type: string
       name:
+        type: string
+    type: object
+  api.SendTransactionRequest:
+    properties:
+      data:
+        description: 'Hex encoded calldata (optional, default: "0x")'
+        type: string
+      gasLimit:
+        description: 'Gas limit (optional, default: 21000 for simple transfers)'
+        type: integer
+      maxFee:
+        description: Max fee per gas in gwei (optional)
+        type: string
+      maxTip:
+        description: Max priority fee per gas in gwei (optional)
+        type: string
+      to:
+        description: Target address (required)
+        type: string
+      unit:
+        description: 'Unit: "eth", "gwei", or "wei" (required)'
+        type: string
+      value:
+        description: Amount in specified unit (required)
+        type: string
+    type: object
+  api.SendTransactionResponse:
+    properties:
+      nonce:
+        type: integer
+      txHash:
         type: string
     type: object
   api.SpammerBlockData:
@@ -823,6 +859,37 @@ paths:
           schema:
             type: string
       summary: Get pending transactions (global or wallet-specific)
+      tags:
+      - Wallet
+  /api/root-wallet/send-transaction:
+    post:
+      consumes:
+      - application/json
+      description: Sends a transaction from the root wallet with specified parameters
+      operationId: sendTransaction
+      parameters:
+      - description: Transaction parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.SendTransactionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.SendTransactionResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Send a transaction from the root wallet
       tags:
       - Wallet
   /api/scenarios:

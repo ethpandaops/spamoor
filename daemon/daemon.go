@@ -411,6 +411,11 @@ func (d *Daemon) GetMetricsCollector() *TxPoolMetricsCollector {
 	return d.txPoolMetricsCollector
 }
 
+// GetTxPool returns the transaction pool for sending transactions
+func (d *Daemon) GetTxPool() *spamoor.TxPool {
+	return d.txpool
+}
+
 // No longer need RegisterSpammerForMetrics/UnregisterSpammerFromMetrics
 // Spammer metrics are automatically tracked via WalletPool.GetSpammerID()
 

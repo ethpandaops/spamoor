@@ -87,6 +87,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/client/{index}/name", apiHandler.UpdateClientName).Methods("PUT")
 	apiRouter.HandleFunc("/client/{index}/type", apiHandler.UpdateClientType).Methods("PUT")
 	apiRouter.HandleFunc("/pending-transactions", apiHandler.GetPendingTransactions).Methods("GET")
+	apiRouter.HandleFunc("/root-wallet/send-transaction", apiHandler.SendTransaction).Methods("POST")
 
 	// Graphs routes (only if tx metrics are enabled)
 	if !config.DisableTxMetrics {
