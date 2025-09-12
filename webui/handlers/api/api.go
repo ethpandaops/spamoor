@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -724,6 +725,7 @@ type PendingTransactionEntry struct {
 	SubmittedAt      string `json:"submitted_at"`       // RFC3339 timestamp
 	RebroadcastCount uint64 `json:"rebroadcast_count"`
 	LastRebroadcast  string `json:"last_rebroadcast"` // RFC3339 timestamp
+	RLPEncoded       string `json:"rlp_encoded"`      // RLP encoded transaction as hex string
 }
 
 // GetPendingTransactions godoc
@@ -809,6 +811,13 @@ func (ah *APIHandler) GetPendingTransactions(w http.ResponseWriter, r *http.Requ
 			submittedAt := pendingTx.Submitted.Format(time.RFC3339)
 			lastRebroadcast := pendingTx.LastRebroadcast.Format(time.RFC3339)
 
+			// Encode transaction to RLP
+			rlpBytes, err := tx.MarshalBinary()
+			rlpHex := ""
+			if err == nil {
+				rlpHex = "0x" + hex.EncodeToString(rlpBytes)
+			}
+
 			entry := PendingTransactionEntry{
 				Hash:             tx.Hash().Hex(),
 				WalletAddress:    walletAddr,
@@ -825,6 +834,7 @@ func (ah *APIHandler) GetPendingTransactions(w http.ResponseWriter, r *http.Requ
 				SubmittedAt:      submittedAt,
 				RebroadcastCount: pendingTx.RebroadcastCount,
 				LastRebroadcast:  lastRebroadcast,
+				RLPEncoded:       rlpHex,
 			}
 
 			allPendingTxs = append(allPendingTxs, entry)
