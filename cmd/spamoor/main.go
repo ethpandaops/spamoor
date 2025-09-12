@@ -128,8 +128,14 @@ func main() {
 		rpcHosts = append(rpcHosts, fileLines...)
 	}
 
-	clientPool := spamoor.NewClientPool(ctx, rpcHosts, logger.WithField("module", "clientpool"))
-	err := clientPool.PrepareClients()
+	clientPool := spamoor.NewClientPool(ctx, logger.WithField("module", "clientpool"))
+
+	err := clientPool.InitClients(rpcHosts)
+	if err != nil {
+		panic(fmt.Errorf("failed to init clients: %v", err))
+	}
+
+	err = clientPool.PrepareClients()
 	if err != nil {
 		panic(fmt.Errorf("failed to prepare clients: %v", err))
 	}

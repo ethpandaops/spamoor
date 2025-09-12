@@ -97,18 +97,11 @@ func main() {
 		rpcHosts = append(rpcHosts, fileLines...)
 	}
 
-	clientPool := spamoor.NewClientPool(ctx, rpcHosts, logger.WithField("module", "clientpool"))
-	err := clientPool.PrepareClients()
+	clientPool := spamoor.NewClientPool(ctx, logger.WithField("module", "clientpool"))
+	err := clientPool.InitClients(rpcHosts)
 	if err != nil {
-		panic(fmt.Errorf("failed to prepare clients: %v", err))
+		panic(fmt.Errorf("failed to init clients: %v", err))
 	}
-
-	// init root wallet
-	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, logger)
-	if err != nil {
-		panic(fmt.Errorf("failed to init root wallet: %v", err))
-	}
-	defer rootWallet.Shutdown()
 
 	// init db
 	database := db.NewDatabase(&db.SqliteDatabaseConfig{
@@ -143,12 +136,8 @@ func main() {
 		},
 	})
 
-	if !cliArgs.withoutBatcher {
-		rootWallet.InitTxBatcher(ctx, txpool)
-	}
-
 	// init daemon
-	spamoorDaemon = daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, rootWallet, txpool, database)
+	spamoorDaemon = daemon.NewDaemon(ctx, logger.WithField("module", "daemon"), clientPool, txpool, database)
 	if cliArgs.fuluActivation > 0 {
 		spamoorDaemon.SetGlobalCfg("fulu_activation", cliArgs.fuluActivation)
 	}
@@ -172,7 +161,32 @@ func main() {
 		DisableAuditLogs: cliArgs.disableAuditLogs,
 	}, spamoorDaemon)
 
-	// start daemon
+	// load and apply client configs from database
+	err = spamoorDaemon.LoadAndApplyClientConfigs()
+	if err != nil {
+		logger.Warnf("failed to load client configs: %v", err)
+	}
+
+	// prepare clients after DB settings have been applied
+	err = clientPool.PrepareClients()
+	if err != nil {
+		panic(fmt.Errorf("failed to prepare clients: %v", err))
+	}
+
+	// init root wallet
+	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, logger)
+	if err != nil {
+		panic(fmt.Errorf("failed to init root wallet: %v", err))
+	}
+	defer rootWallet.Shutdown()
+
+	if !cliArgs.withoutBatcher {
+		rootWallet.InitTxBatcher(ctx, txpool)
+	}
+
+	spamoorDaemon.SetRootWallet(rootWallet)
+
+	// start daemon & spammers
 	firstLaunch, err := spamoorDaemon.Run()
 	if err != nil {
 		panic(err)
