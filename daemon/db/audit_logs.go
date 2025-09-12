@@ -43,15 +43,19 @@ const (
 	// Import/Export actions
 	AuditActionSpammersImport AuditActionType = "spammers_import"
 	AuditActionSpammersExport AuditActionType = "spammers_export"
+
+	// Root wallet actions
+	AuditActionRootWalletSend AuditActionType = "root_wallet_send"
 )
 
 // AuditEntityType defines the types of entities that can be logged
 type AuditEntityType string
 
 const (
-	AuditEntitySpammer AuditEntityType = "spammer"
-	AuditEntityClient  AuditEntityType = "client"
-	AuditEntitySystem  AuditEntityType = "system"
+	AuditEntitySpammer    AuditEntityType = "spammer"
+	AuditEntityClient     AuditEntityType = "client"
+	AuditEntitySystem     AuditEntityType = "system"
+	AuditEntityRootWallet AuditEntityType = "root_wallet"
 )
 
 // AuditMetadata represents additional metadata for an audit log entry

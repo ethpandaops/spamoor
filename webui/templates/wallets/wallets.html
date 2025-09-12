@@ -30,7 +30,12 @@
           <td>{{ .RootWallet.Balance }} ETH</td>
           <td>{{ .RootWallet.PendingNonce }} / {{ .RootWallet.ConfirmedNonce }}</td>
           <td>{{ subUI64 .RootWallet.PendingNonce .RootWallet.ConfirmedNonce }}</td>
-          <td><span class="badge bg-primary">Root Wallet</span></td>
+          <td>
+            <span class="badge bg-primary">Root Wallet</span>
+            <button class="btn btn-sm btn-success ms-2" id="send-funds-btn" title="Send Funds">
+              <i class="fas fa-paper-plane"></i> Send
+            </button>
+          </td>
           <td>
             <button class="btn btn-sm btn-outline-secondary expand-btn" data-wallet="{{ .RootWallet.Address }}" title="Toggle Transactions">
               <i class="fas fa-chevron-down"></i>
@@ -100,6 +105,78 @@
     </table>
   </div>
 </div>
+
+<!-- Send Funds Modal -->
+<div class="modal fade" id="sendFundsModal" tabindex="-1" aria-labelledby="sendFundsModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="sendFundsModalLabel">Send Funds from Root Wallet</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="sendFundsForm">
+          <div class="mb-3">
+            <label for="targetAddress" class="form-label">Target Address <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="targetAddress" placeholder="0x..." required>
+            <div class="form-text">Ethereum address to send funds to</div>
+          </div>
+          
+          <div class="row mb-3">
+            <div class="col-8">
+              <label for="amount" class="form-label">Amount <span class="text-danger">*</span></label>
+              <input type="number" class="form-control" id="amount" step="any" placeholder="0.0" required>
+            </div>
+            <div class="col-4">
+              <label for="unit" class="form-label">Unit <span class="text-danger">*</span></label>
+              <select class="form-select" id="unit" required>
+                <option value="eth">ETH</option>
+                <option value="gwei">Gwei</option>
+                <option value="wei">Wei</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label for="calldata" class="form-label">Call Data (Optional)</label>
+            <input type="text" class="form-control" id="calldata" placeholder="0x">
+            <div class="form-text">Hex encoded data to include in the transaction</div>
+          </div>
+
+          <div class="mb-3">
+            <label for="gasLimit" class="form-label">Gas Limit</label>
+            <input type="number" class="form-control" id="gasLimit" placeholder="21000">
+            <div class="form-text">Leave empty for automatic estimation (21000 for transfers, 100000 for contract calls)</div>
+          </div>
+
+          <div class="row mb-3">
+            <div class="col-6">
+              <label for="maxFee" class="form-label">Max Fee (Gwei)</label>
+              <input type="number" class="form-control" id="maxFee" step="0.1" placeholder="Auto">
+              <div class="form-text">Maximum fee per gas</div>
+            </div>
+            <div class="col-6">
+              <label for="maxTip" class="form-label">Max Tip (Gwei)</label>
+              <input type="number" class="form-control" id="maxTip" step="0.1" placeholder="2.0">
+              <div class="form-text">Maximum priority fee</div>
+            </div>
+          </div>
+
+          <div class="alert alert-info">
+            <i class="fas fa-info-circle"></i> 
+            <strong>Note:</strong> This transaction will be sent from the root wallet and logged in the audit logs.
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="submitSendFunds">
+          <i class="fas fa-paper-plane"></i> Send Transaction
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 {{ end }}
 
 {{ define "js" }}
@@ -117,6 +194,8 @@ document.getElementById('transaction-view-btn').addEventListener('click', functi
 document.addEventListener('DOMContentLoaded', function() {
   const popoverTriggerList = document.querySelectorAll('[data-bs-toggle="popover"]');
   const popoverList = [...popoverTriggerList].map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl));
+  
+  initSendFundsModal();
 });
 
 function copyToClipboard(text, button) {
@@ -341,6 +420,279 @@ function createTransactionRow(tx, includeWallet = true) {
   }
   
   return row;
+}
+
+function initSendFundsModal() {
+  const sendFundsBtn = document.getElementById('send-funds-btn');
+  const sendFundsModal = new bootstrap.Modal(document.getElementById('sendFundsModal'));
+  const submitBtn = document.getElementById('submitSendFunds');
+  
+  sendFundsBtn.addEventListener('click', function() {
+    resetSendFundsForm();
+    sendFundsModal.show();
+  });
+  
+  submitBtn.addEventListener('click', function() {
+    handleSendFunds(sendFundsModal);
+  });
+  
+  document.getElementById('targetAddress').addEventListener('input', validateTargetAddress);
+  document.getElementById('amount').addEventListener('input', validateAmount);
+  document.getElementById('calldata').addEventListener('input', validateCalldata);
+  document.getElementById('maxFee').addEventListener('input', validateGasFees);
+  document.getElementById('maxTip').addEventListener('input', validateGasFees);
+}
+
+function resetSendFundsForm() {
+  const form = document.getElementById('sendFundsForm');
+  form.reset();
+  
+  form.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
+  form.querySelectorAll('.invalid-feedback').forEach(el => el.remove());
+  
+  document.getElementById('unit').value = 'eth';
+  document.getElementById('maxTip').placeholder = '2.0';
+}
+
+function validateTargetAddress() {
+  const input = document.getElementById('targetAddress');
+  const value = input.value.trim();
+  
+  const isValid = /^0x[a-fA-F0-9]{40}$/.test(value);
+  updateValidationState(input, isValid, 'Please enter a valid Ethereum address (0x followed by 40 hex characters)');
+  
+  return isValid;
+}
+
+function validateAmount() {
+  const input = document.getElementById('amount');
+  const value = parseFloat(input.value);
+  
+  const isValid = !isNaN(value) && value > 0;
+  updateValidationState(input, isValid, 'Please enter a positive number');
+  
+  return isValid;
+}
+
+function validateCalldata() {
+  const input = document.getElementById('calldata');
+  const value = input.value.trim();
+  
+  if (value === '' || value === '0x') {
+    updateValidationState(input, true);
+    return true;
+  }
+  
+  const isValid = /^0x[a-fA-F0-9]*$/.test(value) && value.length % 2 === 0;
+  updateValidationState(input, isValid, 'Please enter valid hex data (0x followed by even number of hex characters)');
+  
+  return isValid;
+}
+
+function validateGasFees() {
+  const maxFeeInput = document.getElementById('maxFee');
+  const maxTipInput = document.getElementById('maxTip');
+  
+  const maxFeeValue = maxFeeInput.value.trim();
+  const maxTipValue = maxTipInput.value.trim();
+  
+  updateValidationState(maxFeeInput, true);
+  updateValidationState(maxTipInput, true);
+  
+  if (maxFeeValue) {
+    const maxFee = parseFloat(maxFeeValue);
+    if (isNaN(maxFee) || maxFee <= 0) {
+      updateValidationState(maxFeeInput, false, 'Please enter a positive number');
+      return false;
+    }
+  }
+  
+  if (maxTipValue) {
+    const maxTip = parseFloat(maxTipValue);
+    if (isNaN(maxTip) || maxTip <= 0) {
+      updateValidationState(maxTipInput, false, 'Please enter a positive number');
+      return false;
+    }
+  }
+  
+  if (maxFeeValue && maxTipValue) {
+    const maxFee = parseFloat(maxFeeValue);
+    const maxTip = parseFloat(maxTipValue);
+    
+    if (!isNaN(maxFee) && !isNaN(maxTip) && maxTip > maxFee) {
+      updateValidationState(maxTipInput, false, 'Priority fee cannot be higher than max fee');
+      updateValidationState(maxFeeInput, false, 'Max fee must be at least equal to priority fee');
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+function updateValidationState(input, isValid, errorMessage = '') {
+  const existingFeedback = input.nextElementSibling?.classList.contains('invalid-feedback') 
+    ? input.nextElementSibling : null;
+  
+  if (existingFeedback) {
+    existingFeedback.remove();
+  }
+  
+  if (isValid) {
+    input.classList.remove('is-invalid');
+  } else {
+    input.classList.add('is-invalid');
+    if (errorMessage) {
+      const feedback = document.createElement('div');
+      feedback.className = 'invalid-feedback';
+      feedback.textContent = errorMessage;
+      input.insertAdjacentElement('afterend', feedback);
+    }
+  }
+}
+
+function validateForm() {
+  const targetValid = validateTargetAddress();
+  const amountValid = validateAmount();
+  const calldataValid = validateCalldata();
+  
+  const gasLimitInput = document.getElementById('gasLimit');
+  let gasLimitValid = true;
+  if (gasLimitInput.value.trim()) {
+    const gasLimit = parseInt(gasLimitInput.value);
+    gasLimitValid = !isNaN(gasLimit) && gasLimit > 0;
+    updateValidationState(gasLimitInput, gasLimitValid, 'Please enter a positive number');
+  }
+  
+  const maxFeeInput = document.getElementById('maxFee');
+  const maxTipInput = document.getElementById('maxTip');
+  let maxFeeValid = true;
+  let maxTipValid = true;
+  let gasFeeRelationValid = true;
+  
+  if (maxFeeInput.value.trim()) {
+    const maxFee = parseFloat(maxFeeInput.value);
+    maxFeeValid = !isNaN(maxFee) && maxFee > 0;
+    updateValidationState(maxFeeInput, maxFeeValid, 'Please enter a positive number');
+  }
+  
+  if (maxTipInput.value.trim()) {
+    const maxTip = parseFloat(maxTipInput.value);
+    maxTipValid = !isNaN(maxTip) && maxTip > 0;
+    updateValidationState(maxTipInput, maxTipValid, 'Please enter a positive number');
+  }
+  
+  if (maxFeeInput.value.trim() && maxTipInput.value.trim()) {
+    const maxFee = parseFloat(maxFeeInput.value);
+    const maxTip = parseFloat(maxTipInput.value);
+    
+    if (!isNaN(maxFee) && !isNaN(maxTip) && maxTip > maxFee) {
+      gasFeeRelationValid = false;
+      updateValidationState(maxTipInput, false, 'Priority fee cannot be higher than max fee');
+      updateValidationState(maxFeeInput, false, 'Max fee must be at least equal to priority fee');
+    }
+  }
+  
+  return targetValid && amountValid && calldataValid && gasLimitValid && maxFeeValid && maxTipValid && gasFeeRelationValid;
+}
+
+function handleSendFunds(modal) {
+  if (!validateForm()) {
+    return;
+  }
+  
+  const submitBtn = document.getElementById('submitSendFunds');
+  const originalHTML = submitBtn.innerHTML;
+  
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+  
+  const data = {
+    to: document.getElementById('targetAddress').value.trim(),
+    value: document.getElementById('amount').value,
+    unit: document.getElementById('unit').value
+  };
+  
+  const calldata = document.getElementById('calldata').value.trim();
+  if (calldata && calldata !== '0x') {
+    data.data = calldata;
+  }
+  
+  const gasLimit = document.getElementById('gasLimit').value.trim();
+  if (gasLimit) {
+    data.gasLimit = parseInt(gasLimit);
+  }
+  
+  const maxFee = document.getElementById('maxFee').value.trim();
+  if (maxFee) {
+    data.maxFee = maxFee;
+  }
+  
+  const maxTip = document.getElementById('maxTip').value.trim();
+  if (maxTip) {
+    data.maxTip = maxTip;
+  }
+  
+  fetch('/api/root-wallet/send-transaction', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(data)
+  })
+  .then(response => response.json().then(data => ({ status: response.status, data: data })))
+  .then(result => {
+    if (result.status === 200) {
+      showTransactionResult(result.data, true);
+      modal.hide();
+      
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+    } else {
+      const errorMessage = result.data.error || result.data || 'Unknown error';
+      showTransactionResult({ error: errorMessage }, false);
+    }
+  })
+  .catch(error => {
+    console.error('Error sending transaction:', error);
+    showTransactionResult({ error: 'Network error: ' + error.message }, false);
+  })
+  .finally(() => {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = originalHTML;
+  });
+}
+
+function showTransactionResult(result, success) {
+  const alertDiv = document.createElement('div');
+  alertDiv.className = `alert alert-${success ? 'success' : 'danger'} alert-dismissible fade show position-fixed`;
+  alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+  
+  if (success) {
+    alertDiv.innerHTML = `
+      <i class="fas fa-check-circle"></i>
+      <strong>Transaction Sent!</strong><br>
+      Hash: <code class="font-monospace">${result.txHash}</code><br>
+      Nonce: <code>${result.nonce}</code>
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+  } else {
+    const errorMsg = typeof result.error === 'string' ? result.error : 'Unknown error';
+    alertDiv.innerHTML = `
+      <i class="fas fa-exclamation-circle"></i>
+      <strong>Transaction Failed!</strong><br>
+      ${errorMsg}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+  }
+  
+  document.body.appendChild(alertDiv);
+  
+  setTimeout(() => {
+    if (alertDiv.parentNode) {
+      alertDiv.remove();
+    }
+  }, 5000);
 }
 </script>
 {{ end }} 

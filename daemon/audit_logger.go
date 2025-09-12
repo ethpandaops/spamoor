@@ -287,6 +287,33 @@ func (al *AuditLogger) LogSpammersExport(userEmail string, exportedIDs []int64) 
 	})
 }
 
+// LogRootWalletTransaction logs a transaction sent from the root wallet
+func (al *AuditLogger) LogRootWalletTransaction(userEmail string, toAddress string, valueWei string, txHash string, gasLimit uint64, maxFee string, maxTip string, data string) error {
+	metadata := db.AuditMetadata{
+		"to_address": toAddress,
+		"value_wei":  valueWei,
+		"tx_hash":    txHash,
+		"gas_limit":  gasLimit,
+		"max_fee":    maxFee,
+		"max_tip":    maxTip,
+		"data":       data,
+	}
+
+	log := &db.AuditLog{
+		UserEmail:  userEmail,
+		ActionType: string(db.AuditActionRootWalletSend),
+		EntityType: string(db.AuditEntityRootWallet),
+		EntityID:   "root",
+		EntityName: "Root Wallet Transaction",
+		Diff:       fmt.Sprintf("Sent %s wei to %s\nTransaction Hash: %s\nGas Limit: %d\nMax Fee: %s\nMax Tip: %s", valueWei, toAddress, txHash, gasLimit, maxFee, maxTip),
+		Metadata:   db.MarshalAuditMetadata(metadata),
+	}
+
+	return al.daemon.db.RunDBTransaction(func(tx *sqlx.Tx) error {
+		return al.daemon.db.InsertAuditLog(tx, log)
+	})
+}
+
 // generateConfigDiff generates a unified diff for configuration changes
 func (al *AuditLogger) generateConfigDiff(oldConfig, newConfig, filename string) string {
 	if oldConfig == "" && newConfig == "" {

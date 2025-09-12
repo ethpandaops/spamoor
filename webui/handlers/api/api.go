@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -1227,6 +1229,23 @@ type ImportSpammersRequest struct {
 	Input string `json:"input"` // Can be YAML data or a URL
 }
 
+// SendTransactionRequest represents the request body for sending a transaction from root wallet
+type SendTransactionRequest struct {
+	To       string `json:"to"`                 // Target address (required)
+	Value    string `json:"value"`              // Amount in specified unit (required)
+	Unit     string `json:"unit"`               // Unit: "eth", "gwei", or "wei" (required)
+	Data     string `json:"data,omitempty"`     // Hex encoded calldata (optional, default: "0x")
+	GasLimit uint64 `json:"gasLimit,omitempty"` // Gas limit (optional, default: 21000 for simple transfers)
+	MaxFee   string `json:"maxFee,omitempty"`   // Max fee per gas in gwei (optional)
+	MaxTip   string `json:"maxTip,omitempty"`   // Max priority fee per gas in gwei (optional)
+}
+
+// SendTransactionResponse represents the response after sending a transaction
+type SendTransactionResponse struct {
+	TxHash string `json:"txHash"`
+	Nonce  uint64 `json:"nonce"`
+}
+
 // ExportSpammers godoc
 // @Id exportSpammers
 // @Summary Export spammers to YAML
@@ -1927,4 +1946,233 @@ func (ah *APIHandler) sendMetricsUpdateWithState(w http.ResponseWriter, flusher 
 
 	fmt.Fprintf(w, "data: %s\n\n", jsonData)
 	flusher.Flush()
+}
+
+// ErrorResponse represents an error response
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// sendError sends a JSON error response
+func sendError(w http.ResponseWriter, message string, statusCode int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(ErrorResponse{Error: message})
+}
+
+// SendTransaction godoc
+// @Id sendTransaction
+// @Summary Send a transaction from the root wallet
+// @Tags Wallet
+// @Description Sends a transaction from the root wallet with specified parameters
+// @Accept json
+// @Produce json
+// @Param request body SendTransactionRequest true "Transaction parameters"
+// @Success 200 {object} SendTransactionResponse "Success"
+// @Failure 400 {object} ErrorResponse "Invalid request"
+// @Failure 500 {object} ErrorResponse "Server Error"
+// @Router /api/root-wallet/send-transaction [post]
+func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
+	var req SendTransactionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.To == "" {
+		sendError(w, "target address is required", http.StatusBadRequest)
+		return
+	}
+	if req.Value == "" {
+		sendError(w, "value is required", http.StatusBadRequest)
+		return
+	}
+	if req.Unit == "" {
+		sendError(w, "unit is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate unit
+	if req.Unit != "eth" && req.Unit != "gwei" && req.Unit != "wei" {
+		sendError(w, "unit must be 'eth', 'gwei', or 'wei'", http.StatusBadRequest)
+		return
+	}
+
+	// Get root wallet
+	rootWallet := ah.daemon.GetRootWallet()
+	if rootWallet == nil || rootWallet.GetWallet() == nil {
+		sendError(w, "root wallet not available", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert value to wei
+	valueFloat, err := strconv.ParseFloat(req.Value, 64)
+	if err != nil {
+		sendError(w, "invalid value format", http.StatusBadRequest)
+		return
+	}
+
+	var valueWei *big.Int
+	switch req.Unit {
+	case "eth":
+		// Convert ETH to wei (1 ETH = 10^18 wei)
+		ethInWei := new(big.Float).Mul(big.NewFloat(valueFloat), big.NewFloat(1e18))
+		valueWei = new(big.Int)
+		ethInWei.Int(valueWei)
+	case "gwei":
+		// Convert gwei to wei (1 gwei = 10^9 wei)
+		gweiInWei := new(big.Float).Mul(big.NewFloat(valueFloat), big.NewFloat(1e9))
+		valueWei = new(big.Int)
+		gweiInWei.Int(valueWei)
+	case "wei":
+		// Already in wei
+		valueWei = new(big.Int)
+		valueWei.SetString(req.Value, 10)
+	}
+
+	// Parse calldata
+	var calldata []byte
+	if req.Data != "" {
+		// Remove 0x prefix if present
+		dataStr := strings.TrimPrefix(req.Data, "0x")
+		calldata, err = hex.DecodeString(dataStr)
+		if err != nil {
+			sendError(w, "invalid calldata format", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Set default gas limit if not provided
+	gasLimit := req.GasLimit
+	if gasLimit == 0 {
+		if len(calldata) > 0 {
+			gasLimit = 100000 // Higher limit for contract calls
+		} else {
+			gasLimit = 21000 // Standard transfer
+		}
+	}
+
+	// Get user email for audit logging
+	userEmail := "api"
+	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
+		userEmail = auditLogger.GetUserFromRequest(r.Header)
+	}
+
+	// Build and send transaction
+	wallet := rootWallet.GetWallet()
+	toAddr := common.HexToAddress(req.To)
+
+	// Get current gas prices if not specified
+	ctx := r.Context()
+	client := ah.daemon.GetClientPool().GetClient()
+	if client == nil {
+		sendError(w, "no available client", http.StatusInternalServerError)
+		return
+	}
+
+	// Get suggested gas prices
+	var maxFeePerGas *big.Int
+	var maxPriorityFeePerGas *big.Int
+
+	if req.MaxFee != "" || req.MaxTip != "" {
+		// Use provided values - if only one is provided, get the other from network
+		baseFee, err := client.GetEthClient().SuggestGasPrice(ctx)
+		if err != nil {
+			sendError(w, fmt.Sprintf("failed to get gas price: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		if req.MaxFee != "" {
+			maxFeeFloat, err := strconv.ParseFloat(req.MaxFee, 64)
+			if err != nil {
+				sendError(w, "invalid maxFee format", http.StatusBadRequest)
+				return
+			}
+			maxFeePerGas = new(big.Int).SetUint64(uint64(maxFeeFloat * 1e9)) // Convert gwei to wei
+		} else {
+			// Default max fee if not provided
+			defaultTip := big.NewInt(2e9)
+			maxFeePerGas = new(big.Int).Add(baseFee, defaultTip)
+		}
+
+		if req.MaxTip != "" {
+			maxTipFloat, err := strconv.ParseFloat(req.MaxTip, 64)
+			if err != nil {
+				sendError(w, "invalid maxTip format", http.StatusBadRequest)
+				return
+			}
+			maxPriorityFeePerGas = new(big.Int).SetUint64(uint64(maxTipFloat * 1e9)) // Convert gwei to wei
+		} else {
+			// Default tip if not provided
+			maxPriorityFeePerGas = big.NewInt(2e9)
+		}
+
+		// Ensure priority fee doesn't exceed max fee
+		if maxPriorityFeePerGas.Cmp(maxFeePerGas) > 0 {
+			sendError(w, "max priority fee per gas cannot be higher than max fee per gas", http.StatusBadRequest)
+			return
+		}
+	} else {
+		// Get suggested values from network
+		baseFee, err := client.GetEthClient().SuggestGasPrice(ctx)
+		if err != nil {
+			sendError(w, fmt.Sprintf("failed to get gas price: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Set priority fee to 2 gwei by default
+		maxPriorityFeePerGas = big.NewInt(2e9)
+
+		// Add 10% buffer to base fee + priority fee for maxFeePerGas
+		maxFeePerGas = new(big.Int).Add(baseFee, maxPriorityFeePerGas)
+		maxFeePerGas = new(big.Int).Mul(maxFeePerGas, big.NewInt(110))
+		maxFeePerGas.Div(maxFeePerGas, big.NewInt(100))
+	}
+
+	// Build transaction
+	txData := &types.DynamicFeeTx{
+		To:        &toAddr,
+		Value:     valueWei,
+		Gas:       gasLimit,
+		GasFeeCap: maxFeePerGas,
+		GasTipCap: maxPriorityFeePerGas,
+		Data:      calldata,
+	}
+
+	tx, err := wallet.BuildDynamicFeeTx(txData)
+	if err != nil {
+		sendError(w, fmt.Sprintf("failed to build transaction: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Send transaction
+	err = ah.daemon.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+		Client:      client,
+		Rebroadcast: true,
+	})
+	if err != nil {
+		sendError(w, fmt.Sprintf("failed to send transaction: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Log to audit log
+	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
+		maxFeeStr := fmt.Sprintf("%.2f gwei", float64(maxFeePerGas.Uint64())/1e9)
+		maxTipStr := fmt.Sprintf("%.2f gwei", float64(maxPriorityFeePerGas.Uint64())/1e9)
+		dataStr := req.Data
+		if dataStr == "" {
+			dataStr = "0x"
+		}
+		auditLogger.LogRootWalletTransaction(userEmail, toAddr.Hex(), valueWei.String(), tx.Hash().Hex(), gasLimit, maxFeeStr, maxTipStr, dataStr)
+	}
+
+	// Return response
+	response := SendTransactionResponse{
+		TxHash: tx.Hash().Hex(),
+		Nonce:  tx.Nonce(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }

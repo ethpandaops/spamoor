@@ -534,6 +534,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/root-wallet/send-transaction": {
+            "post": {
+                "description": "Sends a transaction from the root wallet with specified parameters",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wallet"
+                ],
+                "summary": "Send a transaction from the root wallet",
+                "operationId": "sendTransaction",
+                "parameters": [
+                    {
+                        "description": "Transaction parameters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.SendTransactionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.SendTransactionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/scenarios": {
             "get": {
                 "description": "Returns a list of all scenarios",
@@ -1342,6 +1389,14 @@ const docTemplate = `{
                 }
             }
         },
+        "api.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
         "api.ExportSpammersRequest": {
             "type": "object",
             "properties": {
@@ -1519,6 +1574,50 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.SendTransactionRequest": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "Hex encoded calldata (optional, default: \"0x\")",
+                    "type": "string"
+                },
+                "gasLimit": {
+                    "description": "Gas limit (optional, default: 21000 for simple transfers)",
+                    "type": "integer"
+                },
+                "maxFee": {
+                    "description": "Max fee per gas in gwei (optional)",
+                    "type": "string"
+                },
+                "maxTip": {
+                    "description": "Max priority fee per gas in gwei (optional)",
+                    "type": "string"
+                },
+                "to": {
+                    "description": "Target address (required)",
+                    "type": "string"
+                },
+                "unit": {
+                    "description": "Unit: \"eth\", \"gwei\", or \"wei\" (required)",
+                    "type": "string"
+                },
+                "value": {
+                    "description": "Amount in specified unit (required)",
+                    "type": "string"
+                }
+            }
+        },
+        "api.SendTransactionResponse": {
+            "type": "object",
+            "properties": {
+                "nonce": {
+                    "type": "integer"
+                },
+                "txHash": {
                     "type": "string"
                 }
             }
