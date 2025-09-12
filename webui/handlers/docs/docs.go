@@ -1479,6 +1479,10 @@ const docTemplate = `{
                 "rebroadcast_count": {
                     "type": "integer"
                 },
+                "rlp_encoded": {
+                    "description": "RLP encoded transaction as hex string",
+                    "type": "string"
+                },
                 "scenario_name": {
                     "description": "Scenario name (if applicable)",
                     "type": "string"

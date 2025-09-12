@@ -91,6 +91,7 @@
           <th>Submitted</th>
           <th>Rebroadcasts</th>
           <th>Last Rebroadcast</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="transaction-list">
@@ -117,6 +118,33 @@ document.addEventListener('DOMContentLoaded', function() {
   const popoverTriggerList = document.querySelectorAll('[data-bs-toggle="popover"]');
   const popoverList = [...popoverTriggerList].map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl));
 });
+
+function copyToClipboard(text, button) {
+  navigator.clipboard.writeText(text).then(function() {
+    const originalHTML = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-check"></i> Copied!';
+    button.classList.remove('btn-outline-secondary');
+    button.classList.add('btn-success');
+    
+    setTimeout(function() {
+      button.innerHTML = originalHTML;
+      button.classList.remove('btn-success');
+      button.classList.add('btn-outline-secondary');
+    }, 2000);
+  }).catch(function(err) {
+    console.error('Failed to copy text: ', err);
+    const originalHTML = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-times"></i> Failed';
+    button.classList.remove('btn-outline-secondary');
+    button.classList.add('btn-danger');
+    
+    setTimeout(function() {
+      button.innerHTML = originalHTML;
+      button.classList.remove('btn-danger');
+      button.classList.add('btn-outline-secondary');
+    }, 2000);
+  });
+}
 
 function showView(viewType) {
   const walletView = document.getElementById('wallet-view');
@@ -198,7 +226,7 @@ function loadWalletTransactions(walletAddress, walletRow) {
 
 function loadAllTransactions() {
   const transactionList = document.getElementById('transaction-list');
-  transactionList.innerHTML = '<tr><td colspan="10" class="text-center">Loading...</td></tr>';
+  transactionList.innerHTML = '<tr><td colspan="11" class="text-center">Loading...</td></tr>';
   
   fetch('/api/pending-transactions')
     .then(response => response.json())
@@ -206,7 +234,7 @@ function loadAllTransactions() {
       transactionList.innerHTML = '';
       
       if (!transactions || transactions.length === 0) {
-        transactionList.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No pending transactions</td></tr>';
+        transactionList.innerHTML = '<tr><td colspan="11" class="text-center text-muted">No pending transactions</td></tr>';
       } else {
         transactions.forEach(tx => {
           const row = createTransactionRow(tx);
@@ -216,7 +244,7 @@ function loadAllTransactions() {
     })
     .catch(error => {
       console.error('Error loading transactions:', error);
-      transactionList.innerHTML = '<tr><td colspan="10" class="text-center text-danger">Error loading transactions</td></tr>';
+      transactionList.innerHTML = '<tr><td colspan="11" class="text-center text-danger">Error loading transactions</td></tr>';
     });
 }
 
@@ -235,6 +263,7 @@ function createTransactionTable(transactions) {
       <th>Submitted</th>
       <th>Rebroadcasts</th>
       <th>Last Rebroadcast</th>
+      <th>Actions</th>
     </tr>
   `;
   table.appendChild(thead);
@@ -292,9 +321,25 @@ function createTransactionRow(tx, includeWallet = true) {
     <td>${formatTimestamp(tx.submitted_at)}</td>
     <td>${tx.rebroadcast_count}</td>
     <td>${tx.rebroadcast_count > 0 ? formatTimestamp(tx.last_rebroadcast) : '-'}</td>
+    <td>
+      <button class="btn btn-sm btn-outline-secondary copy-rlp-btn" 
+              data-rlp="${tx.rlp_encoded || ''}" 
+              title="Copy RLP encoded transaction"
+              ${!tx.rlp_encoded ? 'disabled' : ''}>
+        <i class="fas fa-copy"></i> RLP
+      </button>
+    </td>
   `;
   
   row.innerHTML = innerHTML;
+  
+  const copyBtn = row.querySelector('.copy-rlp-btn');
+  if (copyBtn && tx.rlp_encoded) {
+    copyBtn.addEventListener('click', function() {
+      copyToClipboard(tx.rlp_encoded, this);
+    });
+  }
+  
   return row;
 }
 </script>
