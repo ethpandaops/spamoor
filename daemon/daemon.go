@@ -53,14 +53,13 @@ type Daemon struct {
 // NewDaemon creates a new daemon instance with the provided components.
 // It initializes a cancellable context, spammer map, and global configuration map.
 // The daemon manages spammer instances and handles their lifecycle.
-func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool *spamoor.ClientPool, rootWallet *spamoor.RootWallet, txpool *spamoor.TxPool, db *db.Database) *Daemon {
+func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool *spamoor.ClientPool, txpool *spamoor.TxPool, db *db.Database) *Daemon {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &Daemon{
 		ctx:        ctx,
 		cancel:     cancel,
 		logger:     logger,
 		clientPool: clientPool,
-		rootWallet: rootWallet,
 		txpool:     txpool,
 		db:         db,
 		spammerMap: make(map[int64]*Spammer),
@@ -96,12 +95,6 @@ func (d *Daemon) Run() (bool, error) {
 	// check if this is the first launch
 	var notFirstLaunch bool
 	d.db.GetSpamoorState("first_launch", &notFirstLaunch)
-
-	// load and apply client configs from database
-	err := d.loadAndApplyClientConfigs()
-	if err != nil {
-		d.logger.Warnf("failed to load client configs: %v", err)
-	}
 
 	// restore all spammer from db
 	spammerList, err := d.db.GetSpammers()
@@ -314,6 +307,12 @@ func (d *Daemon) ReclaimSpammer(id int64, userEmail string) error {
 	return nil
 }
 
+// SetRootWallet sets the root wallet for the daemon.
+// This is used to set the root wallet for the daemon.
+func (d *Daemon) SetRootWallet(rootWallet *spamoor.RootWallet) {
+	d.rootWallet = rootWallet
+}
+
 // GetRootWallet returns the root wallet used for funding spammer wallets.
 // This provides access to the main wallet that distributes funds to child wallets.
 func (d *Daemon) GetRootWallet() *spamoor.RootWallet {
@@ -481,12 +480,12 @@ func (d *Daemon) Shutdown() {
 	d.logger.Info("shutdown complete")
 }
 
-// loadAndApplyClientConfigs retrieves client configurations from the database
+// LoadAndApplyClientConfigs retrieves client configurations from the database
 // and applies them to the corresponding clients in the client pool.
 // This merges database settings with flag-provided settings according to the rules:
 // - Name and enabled state from DB take precedence over flags
 // - Tags are combined (flags + database tags)
-func (d *Daemon) loadAndApplyClientConfigs() error {
+func (d *Daemon) LoadAndApplyClientConfigs() error {
 	// Get all client configs from database
 	configs, err := d.db.GetClientConfigs()
 	if err != nil {

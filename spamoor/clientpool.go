@@ -106,7 +106,6 @@ func WithoutClientType(clientType ClientType) ClientSelectionOption {
 // that are within 2 blocks of the highest observed block height.
 type ClientPool struct {
 	ctx            context.Context
-	rpcHosts       []string
 	logger         logrus.FieldLogger
 	allClients     []*Client
 	goodClients    []*Client
@@ -116,23 +115,20 @@ type ClientPool struct {
 }
 
 // NewClientPool creates a new ClientPool with the specified RPC hosts and logger.
-// The pool must be initialized with PrepareClients() before use.
-func NewClientPool(ctx context.Context, rpcHosts []string, logger logrus.FieldLogger) *ClientPool {
+// The pool must be initialized with InitClients() and prepared with PrepareClients() before use.
+func NewClientPool(ctx context.Context, logger logrus.FieldLogger) *ClientPool {
 	return &ClientPool{
-		ctx:      ctx,
-		rpcHosts: rpcHosts,
-		logger:   logger,
+		ctx:    ctx,
+		logger: logger,
 	}
 }
 
-// PrepareClients initializes all clients in the pool and starts health monitoring.
-// It creates Client instances for each RPC host, determines the chain ID,
-// and begins periodic health checks. Returns an error if no usable clients are found.
-func (pool *ClientPool) PrepareClients() error {
+// InitClients initializes the clients in the pool.
+func (pool *ClientPool) InitClients(rpcHosts []string) error {
 	pool.allClients = make([]*Client, 0)
 
 	var chainId *big.Int
-	for _, rpcHost := range pool.rpcHosts {
+	for _, rpcHost := range rpcHosts {
 		client, err := NewClient(rpcHost)
 		if err != nil {
 			pool.logger.Errorf("failed creating client for '%v': %v", rpcHost, err.Error())
@@ -165,6 +161,13 @@ func (pool *ClientPool) PrepareClients() error {
 
 	pool.logger.Infof("initialized client pool with %v clients (chain id: %v)", len(pool.allClients), pool.chainId)
 
+	return nil
+}
+
+// PrepareClients initializes all clients in the pool and starts health monitoring.
+// It creates Client instances for each RPC host, determines the chain ID,
+// and begins periodic health checks. Returns an error if no usable clients are found.
+func (pool *ClientPool) PrepareClients() error {
 	err := pool.watchClientStatus()
 	if err != nil {
 		return err
