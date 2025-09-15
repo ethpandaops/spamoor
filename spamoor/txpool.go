@@ -815,6 +815,10 @@ func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxMap map[common.Hash]*
 // and optionally sets up automatic rebroadcasting. The submitNow parameter controls
 // whether to immediately submit or just set up confirmation tracking.
 func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, submitNow bool) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	confirmCtx, confirmCancel := context.WithCancel(ctx)
 	wg := &sync.WaitGroup{}
 	wg.Add(1)

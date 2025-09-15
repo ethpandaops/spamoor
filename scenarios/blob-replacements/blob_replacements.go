@@ -390,7 +390,11 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 }
 
 func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.Transaction, wallet *spamoor.Wallet, awaitConfirmation *bool, replacementIdx uint64) {
-	time.Sleep(time.Duration(rand.Intn(int(s.options.Replace))+2) * time.Second)
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(time.Duration(rand.Intn(int(s.options.Replace))+2) * time.Second):
+	}
 
 	if !*awaitConfirmation {
 		return
