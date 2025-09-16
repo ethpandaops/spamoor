@@ -421,41 +421,36 @@ func (s *Scenario) executeRecurringTasks(ctx context.Context) error {
 	})
 }
 
-func (s *Scenario) processExecutionTx(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
+func (s *Scenario) processExecutionTx(ctx context.Context, params *scenario.ProcessNextTxParams) error {
 	// Create execution-scoped registry that inherits from init registry
 	execRegistry := s.initRegistry.Clone()
 
 	// Get wallet and client for this transaction
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(params.TxIdx))
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(params.TxIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 
 	if client == nil {
-		onComplete()
-		return nil, scenario.ErrNoClients
+		return scenario.ErrNoClients
 	}
 
 	if wallet == nil {
-		onComplete()
-		return nil, scenario.ErrNoWallet
+		return scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
-		onComplete()
-		return nil, err
+		return err
 	}
 
 	// Execute all execution tasks using the unified method
-	err := s.executeTaskSequence(ctx, s.executionTasks, 0, wallet, client, execRegistry, txIdx)
+	err := s.executeTaskSequence(ctx, s.executionTasks, 0, wallet, client, execRegistry, params.TxIdx)
 	if err != nil {
-		onComplete()
-		return nil, err
+		return err
 	}
 
-	onComplete()
-	return func() {}, nil // No additional callback needed since unified method handles all processing
+	return nil // No additional callback needed since unified method handles all processing
 }
 
 // buildTaskTransaction builds a transaction for a task with proper placeholder processing

@@ -182,9 +182,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 		WalletPool:                  s.walletPool,
 
 		Logger: s.logger,
-		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
+		ProcessNextTxFn: func(ctx context.Context, params *scenario.ProcessNextTxParams) error {
 			logger := s.logger
-			tx, client, wallet, err := s.sendTx(ctx, txIdx, onComplete)
+			receiptChan, tx, client, wallet, err := s.sendTx(ctx, params.TxIdx)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -195,15 +195,23 @@ func (s *Scenario) Run(ctx context.Context) error {
 				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 			}
 
-			return func() {
+			params.NotifySubmitted()
+			params.OrderedLogCb(func() {
 				if err != nil {
 					logger.Warnf("could not send transaction: %v", err)
 				} else if s.options.LogTxs {
-					logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+					logger.Infof("sent tx #%6d: %v", params.TxIdx+1, tx.Hash().String())
 				} else {
-					logger.Debugf("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+					logger.Debugf("sent tx #%6d: %v", params.TxIdx+1, tx.Hash().String())
 				}
-			}, err
+			})
+
+			// wait for receipt
+			if _, err := receiptChan.Wait(ctx); err != nil {
+				return err
+			}
+
+			return err
 		},
 	})
 
@@ -371,35 +379,28 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 	return receipt, client, nil
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
-	transactionSubmitted := false
-
-	defer func() {
-		if !transactionSubmitted {
-			onComplete()
-		}
-	}()
 
 	if client == nil {
-		return nil, client, wallet, scenario.ErrNoClients
+		return nil, nil, client, wallet, scenario.ErrNoClients
 	}
 
 	if wallet == nil {
-		return nil, client, wallet, scenario.ErrNoWallet
+		return nil, nil, client, wallet, scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
-		return nil, client, wallet, err
+		return nil, nil, client, wallet, err
 	}
 
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
 	if err != nil {
-		return nil, client, wallet, err
+		return nil, nil, client, wallet, err
 	}
 
 	txIdBytes := make([]byte, 4)
@@ -434,21 +435,21 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		Data:      txIdBytes,
 	})
 	if err != nil {
-		return nil, nil, wallet, err
+		return nil, nil, client, wallet, err
 	}
 
 	tx, err := wallet.BuildDynamicFeeTx(txData)
 	if err != nil {
-		return nil, nil, wallet, err
+		return nil, nil, client, wallet, err
 	}
 
-	transactionSubmitted = true
+	receiptChan := make(scenario.ReceiptChan, 1)
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			onComplete()
+			receiptChan <- receipt
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			txFees := utils.GetTransactionFees(tx, receipt)
@@ -467,8 +468,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		// mark nonce as skipped if tx was not sent
 		wallet.MarkSkippedNonce(tx.Nonce())
 
-		return tx, client, wallet, err
+		return nil, nil, client, wallet, err
 	}
 
-	return tx, client, wallet, nil
+	return receiptChan, tx, client, wallet, nil
 }

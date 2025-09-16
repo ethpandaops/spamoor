@@ -179,9 +179,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 		WalletPool:                  s.walletPool,
 
 		Logger: s.logger,
-		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
+		ProcessNextTxFn: func(ctx context.Context, params *scenario.ProcessNextTxParams) error {
 			logger := s.logger
-			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, onComplete)
+			receiptChan, tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, params.TxIdx)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -192,22 +192,30 @@ func (s *Scenario) Run(ctx context.Context) error {
 				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 			}
 
-			return func() {
+			params.NotifySubmitted()
+			params.OrderedLogCb(func() {
 				if err != nil {
-					logger.Warnf("could not send blob transaction: %v", err)
+					logger.Warnf("blob tx %6d.0 failed: %v", params.TxIdx+1, err)
 				} else if s.options.LogTxs {
-					logger.Infof("sent blob tx #%6d: %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+					logger.Infof("blob tx %6d.0 sent:  %v (%v sidecars, v%v)", params.TxIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
 				} else {
-					logger.Debugf("sent blob tx #%6d: %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+					logger.Debugf("blob tx %6d.0 sent:  %v (%v sidecars, v%v)", params.TxIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
 				}
-			}, err
+			})
+
+			// wait for receipt
+			if _, err := receiptChan.Wait(ctx); err != nil {
+				return err
+			}
+
+			return err
 		},
 	})
 
 	return err
 }
 
-func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
@@ -217,29 +225,22 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
-	transactionSubmitted := false
-
-	defer func() {
-		if !transactionSubmitted {
-			onComplete()
-		}
-	}()
 
 	if client == nil || client2 == nil {
-		return nil, client, wallet, 0, scenario.ErrNoClients
+		return nil, nil, client, wallet, 0, scenario.ErrNoClients
 	}
 
 	if wallet == nil {
-		return nil, client, wallet, 0, scenario.ErrNoWallet
+		return nil, nil, client, wallet, 0, scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
-		return nil, client, wallet, 0, err
+		return nil, nil, client, wallet, 0, err
 	}
 
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
 	if err != nil {
-		return nil, client, wallet, 0, err
+		return nil, nil, client, wallet, 0, err
 	}
 
 	var blobFee *big.Int
@@ -282,7 +283,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		Value:      uint256.NewInt(0),
 	}, blobRefs)
 	if err != nil {
-		return nil, nil, wallet, 0, err
+		return nil, nil, client, wallet, 0, err
 	}
 	normalTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
@@ -292,16 +293,16 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		Value:     uint256.NewInt(0),
 	})
 	if err != nil {
-		return nil, nil, wallet, 0, err
+		return nil, nil, client, wallet, 0, err
 	}
 
 	tx1, err := wallet.BuildBlobTx(blobTx)
 	if err != nil {
-		return nil, nil, wallet, 0, err
+		return nil, nil, client, wallet, 0, err
 	}
 	tx2, err := wallet.ReplaceDynamicFeeTx(normalTx, tx1.Nonce())
 	if err != nil {
-		return nil, nil, wallet, 0, err
+		return nil, nil, client, wallet, 0, err
 	}
 
 	var blobCellProofs []kzg4844.Proof
@@ -334,7 +335,8 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 	// send both tx at exactly the same time
 	wg := sync.WaitGroup{}
 	wg.Add(2)
-	transactionSubmitted = true
+	receiptChan := make(scenario.ReceiptChan, 1)
+
 	var err1, err2 error
 	go func() {
 		err1 = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx1, &spamoor.SendTransactionOptions{
@@ -343,7 +345,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 			Rebroadcast: s.options.Rebroadcast > 0,
 			SubmitCount: 1,
 			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-				onComplete()
+				receiptChan <- receipt
 			},
 			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 				s.processTxReceipt(txIdx, tx, receipt, client, "blob")
@@ -391,10 +393,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, onComplete func
 		wallet.MarkSkippedNonce(tx1.Nonce())
 	}
 	if errCount == 0 {
-		return nil, nil, wallet, 0, err1
+		return nil, nil, client, wallet, 0, err1
 	}
 
-	return tx1, client, wallet, txVersion, nil
+	return receiptChan, tx1, client, wallet, txVersion, nil
 }
 
 func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *spamoor.Client, txLabel string) {

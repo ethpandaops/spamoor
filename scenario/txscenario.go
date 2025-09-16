@@ -33,8 +33,13 @@ type TransactionScenarioOptions struct {
 	// It should return:
 	// - A callback function to log transaction results (can be nil)
 	// - An error if transaction creation failed
-	// - The onComplete callback must be called when transaction processing is complete
-	ProcessNextTxFn func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error)
+	ProcessNextTxFn func(ctx context.Context, params *ProcessNextTxParams) error
+}
+
+type ProcessNextTxParams struct {
+	TxIdx           uint64
+	OrderedLogCb    func(logFunc func())
+	NotifySubmitted func()
 }
 
 // RunTransactionScenario executes a controlled transaction scenario with rate limiting
@@ -67,7 +72,45 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 		options.Logger.Infof("scenario will timeout after %v", options.Timeout)
 	}
 
-	var lastChan chan bool
+	// Logging synchronization structures
+	type txState struct {
+		logCb     []func()
+		submitted bool
+		done      bool
+	}
+
+	txStates := make(map[uint64]*txState)
+	txStatesMutex := sync.Mutex{}
+	nextLogIdx := uint64(0)
+
+	// Helper function to process pending logs in order
+	processPendingLogs := func() {
+		txStatesMutex.Lock()
+		defer txStatesMutex.Unlock()
+
+		for {
+			state, exists := txStates[nextLogIdx]
+			if !exists || !state.submitted {
+				break
+			}
+
+			// Execute the log callback
+			if len(state.logCb) > 0 {
+				for _, logcb := range state.logCb {
+					logcb()
+				}
+				state.logCb = nil
+			}
+
+			// Clean up if the transaction is done
+			if state.done {
+				delete(txStates, nextLogIdx)
+			}
+
+			nextLogIdx++
+		}
+	}
+
 	var maxPending atomic.Uint64
 	var pendingMutex sync.Mutex
 	var pendingCond *sync.Cond
@@ -197,60 +240,74 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 		pendingCount.Add(1)
 		pendingWg.Add(1)
 
-		currentChan := make(chan bool, 1)
+		// Initialize state for this transaction
+		state := &txState{
+			submitted: false,
+			done:      false,
+		}
 
-		go func(txIdx uint64, lastChan, currentChan chan bool) {
+		// Register the transaction state
+		txStatesMutex.Lock()
+		txStates[txIdx] = state
+		txStatesMutex.Unlock()
+
+		go func(txIdx uint64, state *txState) {
 			defer func() {
 				utils.RecoverPanic(options.Logger, "scenario.processNextTxFn", nil)
-				currentChan <- true
-			}()
 
-			completed := false
+				// Mark transaction as done
+				state.done = true
 
-			logcb, err := options.ProcessNextTxFn(ctx, txIdx, func() {
-				if completed {
-					return
+				// If not submitted yet, mark as submitted to unblock logging
+				if !state.submitted {
+					state.submitted = true
+					processPendingLogs()
 				}
-
-				completed = true
 
 				pendingWg.Done()
 				pendingCount.Add(-1)
-				txCount.Add(1)
 				if pendingCond != nil {
 					pendingCond.Signal()
 				}
-			})
+			}()
+
+			params := &ProcessNextTxParams{
+				TxIdx: txIdx,
+				NotifySubmitted: func() {
+					if state.submitted {
+						return
+					}
+
+					state.submitted = true
+					processPendingLogs()
+				},
+				OrderedLogCb: func(logcb func()) {
+					// If already submitted, process logs immediately
+					if state.submitted {
+						logcb()
+					} else {
+						state.logCb = append(state.logCb, logcb)
+					}
+				},
+			}
+
+			err := options.ProcessNextTxFn(ctx, params)
+
+			if err != nil || state.submitted {
+				txCount.Add(1)
+			}
 
 			if err == ErrNoClients {
 				isErrorMode = true
 			} else if isErrorMode {
 				isErrorMode = false
 			}
-
-			if lastChan != nil {
-				<-lastChan
-				close(lastChan)
-			}
-
-			if logcb != nil {
-				logcb()
-			} else if err != nil {
-				options.Logger.Warnf("process next tx failed: %v", err)
-			}
-		}(txIdx, lastChan, currentChan)
-
-		lastChan = currentChan
+		}(txIdx, state)
 
 		count := txCount.Load() + uint64(pendingCount.Load())
 		if options.TotalCount > 0 && count >= options.TotalCount {
 			break
 		}
-	}
-
-	if lastChan != nil {
-		<-lastChan
-		close(lastChan)
 	}
 
 	if !options.NoAwaitTransactions {
