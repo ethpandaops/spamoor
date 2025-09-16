@@ -184,9 +184,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 		WalletPool:                  s.walletPool,
 
 		Logger: s.logger,
-		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
+		ProcessNextTxFn: func(ctx context.Context, params *scenario.ProcessNextTxParams) error {
 			logger := s.logger
-			tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, nil, 0, 0, onComplete)
+			receiptChan, tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, params.TxIdx, nil, 0, 0)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -197,22 +197,30 @@ func (s *Scenario) Run(ctx context.Context) error {
 				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 			}
 
-			return func() {
+			params.NotifySubmitted()
+			params.OrderedLogCb(func() {
 				if err != nil {
-					logger.Warnf("blob tx %6d.0 failed: %v", txIdx+1, err)
+					logger.Warnf("blob tx %6d.0 failed: %v", params.TxIdx+1, err)
 				} else if s.options.LogTxs {
-					logger.Infof("blob tx %6d.0 sent:  %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+					logger.Infof("blob tx %6d.0 sent:  %v (%v sidecars, v%v)", params.TxIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
 				} else {
-					logger.Debugf("blob tx %6d.0 sent:  %v (%v sidecars, v%v)", txIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
+					logger.Debugf("blob tx %6d.0 sent:  %v (%v sidecars, v%v)", params.TxIdx+1, tx.Hash().String(), len(tx.BlobTxSidecar().Blobs), txVersion)
 				}
-			}, err
+			})
+
+			// wait for receipt
+			if _, err := receiptChan.Wait(ctx); err != nil {
+				return err
+			}
+
+			return err
 		},
 	})
 
 	return err
 }
 
-func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor.Wallet, replacementIdx uint64, txNonce uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor.Wallet, replacementIdx uint64, txNonce uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
@@ -220,14 +228,6 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 	if wallet == nil {
 		wallet = s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
 	}
-
-	transactionSubmitted := false
-
-	defer func() {
-		if !transactionSubmitted {
-			onComplete()
-		}
-	}()
 
 	if rand.Intn(100) < 20 {
 		// 20% chance to send transaction via another client
@@ -239,20 +239,20 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 	}
 
 	if client == nil {
-		return nil, client, wallet, 0, scenario.ErrNoClients
+		return nil, nil, client, wallet, 0, scenario.ErrNoClients
 	}
 
 	if wallet == nil {
-		return nil, client, wallet, 0, scenario.ErrNoWallet
+		return nil, nil, client, wallet, 0, scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
-		return nil, client, wallet, 0, err
+		return nil, nil, client, wallet, 0, err
 	}
 
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
 	if err != nil {
-		return nil, client, wallet, 0, err
+		return nil, nil, client, wallet, 0, err
 	}
 
 	var blobFee *big.Int
@@ -302,7 +302,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 		Value:      uint256.NewInt(0),
 	}, blobRefs)
 	if err != nil {
-		return nil, client, wallet, 0, err
+		return nil, nil, client, wallet, 0, err
 	}
 
 	var tx *types.Transaction
@@ -312,7 +312,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 		tx, err = wallet.ReplaceBlobTx(blobTx, txNonce)
 	}
 	if err != nil {
-		return nil, client, wallet, 0, err
+		return nil, nil, client, wallet, 0, err
 	}
 
 	var blobCellProofs []kzg4844.Proof
@@ -341,16 +341,16 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 	}
 
 	_, txVersion := getTxBytes()
+	awaitConfirmation := true
+	receiptChan := make(scenario.ReceiptChan, 1)
 
-	var awaitConfirmation bool = true
-	transactionSubmitted = true
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			awaitConfirmation = false
-			onComplete()
+			receiptChan <- receipt
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			txFees := utils.GetTransactionFees(tx, receipt)
@@ -378,14 +378,12 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 			wallet.MarkSkippedNonce(tx.Nonce())
 		}
 
-		return nil, client, wallet, 0, err
-	}
-
-	if s.options.Replace > 0 && replacementIdx < s.options.MaxReplacements && rand.Intn(100) < 70 {
+		return nil, nil, client, wallet, 0, err
+	} else if s.options.Replace > 0 && replacementIdx < s.options.MaxReplacements && rand.Intn(100) < 70 {
 		go s.delayedReplace(ctx, txIdx, tx, wallet, &awaitConfirmation, replacementIdx)
 	}
 
-	return tx, client, wallet, txVersion, nil
+	return receiptChan, tx, client, wallet, txVersion, nil
 }
 
 func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.Transaction, wallet *spamoor.Wallet, awaitConfirmation *bool, replacementIdx uint64) {
@@ -395,7 +393,7 @@ func (s *Scenario) delayedReplace(ctx context.Context, txIdx uint64, tx *types.T
 		return
 	}
 
-	replaceTx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, wallet, replacementIdx+1, tx.Nonce(), func() {})
+	_, replaceTx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx, wallet, replacementIdx+1, tx.Nonce())
 
 	logger := s.logger
 	if client != nil {

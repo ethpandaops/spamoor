@@ -222,9 +222,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 		WalletPool:                  s.walletPool,
 
 		Logger: s.logger,
-		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
+		ProcessNextTxFn: func(ctx context.Context, params *scenario.ProcessNextTxParams) error {
 			logger := s.logger
-			tx, client, wallet, err := s.sendTx(ctx, txIdx, onComplete)
+			receiptChan, tx, client, wallet, err := s.sendTx(ctx, params.TxIdx)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -235,50 +235,51 @@ func (s *Scenario) Run(ctx context.Context) error {
 				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 			}
 
-			return func() {
+			params.NotifySubmitted()
+			params.OrderedLogCb(func() {
 				if err != nil {
 					logger.Warnf("could not send transaction: %v", err)
 				} else if s.options.LogTxs {
-					logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+					logger.Infof("sent tx #%6d: %v", params.TxIdx+1, tx.Hash().String())
 				} else {
-					logger.Debugf("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+					logger.Debugf("sent tx #%6d: %v", params.TxIdx+1, tx.Hash().String())
 				}
-			}, err
+			})
+
+			// wait for receipt
+			if _, err := receiptChan.Wait(ctx); err != nil {
+				return err
+			}
+
+			return err
 		},
 	})
 
 	return err
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
-	transactionSubmitted := false
-
-	defer func() {
-		if !transactionSubmitted {
-			onComplete()
-		}
-	}()
 
 	if client == nil {
-		return nil, client, wallet, scenario.ErrNoClients
+		return nil, nil, client, wallet, scenario.ErrNoClients
 	}
 
 	if wallet == nil {
-		return nil, client, wallet, scenario.ErrNoWallet
+		return nil, nil, client, wallet, scenario.ErrNoWallet
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
-		return nil, client, wallet, err
+		return nil, nil, client, wallet, err
 	}
 
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
 	if err != nil {
-		return nil, client, wallet, err
+		return nil, nil, client, wallet, err
 	}
 
 	// Select random pair
@@ -288,12 +289,12 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	// Parse min and max swap amounts
 	minAmount, ok := new(big.Int).SetString(s.options.MinSwapAmount, 10)
 	if !ok {
-		return nil, client, wallet, fmt.Errorf("invalid min swap amount: %s", s.options.MinSwapAmount)
+		return nil, nil, client, wallet, fmt.Errorf("invalid min swap amount: %s", s.options.MinSwapAmount)
 	}
 
 	maxAmount, ok := new(big.Int).SetString(s.options.MaxSwapAmount, 10)
 	if !ok {
-		return nil, client, wallet, fmt.Errorf("invalid max swap amount: %s", s.options.MaxSwapAmount)
+		return nil, nil, client, wallet, fmt.Errorf("invalid max swap amount: %s", s.options.MaxSwapAmount)
 	}
 
 	// Calculate random swap amount
@@ -315,7 +316,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	// Parse sell threshold
 	sellThreshold, ok := new(big.Int).SetString(s.options.SellThreshold, 10)
 	if !ok {
-		return nil, client, wallet, fmt.Errorf("invalid sell threshold: %s", s.options.SellThreshold)
+		return nil, nil, client, wallet, fmt.Errorf("invalid sell threshold: %s", s.options.SellThreshold)
 	}
 
 	// If we have a lot of DAI, force a sell to avoid depleting the pool
@@ -345,7 +346,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			// Calculate how much WETH we need to spend to get the desired amount of DAI
 			amounts, err := router.GetAmountsIn(&bind.CallOpts{}, randomAmount, []common.Address{s.deploymentInfo.Weth9Addr, pair.DaiAddr})
 			if err != nil {
-				return nil, nil, wallet, err
+				return nil, nil, client, wallet, err
 			}
 
 			wethAmount := amounts[0]
@@ -369,7 +370,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 					return router.SwapExactTokensForTokens(transactOpts, wethAmount, minDaiAmount, []common.Address{s.deploymentInfo.Weth9Addr, pair.DaiAddr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
 				})
 				if err != nil {
-					return nil, nil, wallet, err
+					return nil, nil, client, wallet, err
 				}
 
 				// Update balances in local cache
@@ -391,14 +392,14 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 			// Calculate how much ETH we need to spend to get the desired amount of DAI
 			amounts, err := router.GetAmountsIn(&bind.CallOpts{}, randomAmount, []common.Address{s.deploymentInfo.Weth9Addr, pair.DaiAddr})
 			if err != nil {
-				return nil, nil, wallet, err
+				return nil, nil, client, wallet, err
 			}
 
 			ethAmount := amounts[0]
 
 			// Check if we have enough ETH
 			if ethBalance.Cmp(ethAmount) < 0 {
-				return nil, client, wallet, fmt.Errorf("insufficient ETH balance for swap")
+				return nil, nil, client, wallet, fmt.Errorf("insufficient ETH balance for swap")
 			}
 
 			// Calculate minimum DAI amount to receive (with slippage)
@@ -415,7 +416,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 				return router.SwapExactETHForTokens(transactOpts, minDaiAmount, []common.Address{s.deploymentInfo.Weth9Addr, pair.DaiAddr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
 			})
 			if err != nil {
-				return nil, nil, wallet, err
+				return nil, nil, client, wallet, err
 			}
 
 			// Update balances in local cache
@@ -435,13 +436,13 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		if keepWeth {
 			// Selling DAI for WETH
 			if tokenBalance.Cmp(randomAmount) < 0 {
-				return nil, client, wallet, fmt.Errorf("insufficient DAI balance for swap")
+				return nil, nil, client, wallet, fmt.Errorf("insufficient DAI balance for swap")
 			}
 
 			// Calculate minimum WETH amount to receive (with slippage)
 			amounts, err := router.GetAmountsOut(&bind.CallOpts{}, randomAmount, []common.Address{pair.DaiAddr, s.deploymentInfo.Weth9Addr})
 			if err != nil {
-				return nil, nil, wallet, err
+				return nil, nil, client, wallet, err
 			}
 			minWethAmount := new(big.Int).Mul(amounts[1], big.NewInt(10000-int64(s.options.Slippage)))
 			minWethAmount = minWethAmount.Div(minWethAmount, big.NewInt(10000))
@@ -456,7 +457,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 				return router.SwapExactTokensForTokens(transactOpts, randomAmount, minWethAmount, []common.Address{pair.DaiAddr, s.deploymentInfo.Weth9Addr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
 			})
 			if err != nil {
-				return nil, nil, wallet, err
+				return nil, nil, client, wallet, err
 			}
 
 			// Update balances in local cache
@@ -472,13 +473,13 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		} else {
 			// Selling DAI for ETH
 			if tokenBalance.Cmp(randomAmount) < 0 {
-				return nil, client, wallet, fmt.Errorf("insufficient DAI balance for swap")
+				return nil, nil, client, wallet, fmt.Errorf("insufficient DAI balance for swap")
 			}
 
 			// Calculate minimum ETH amount to receive (with slippage)
 			amounts, err := router.GetAmountsOut(&bind.CallOpts{}, randomAmount, []common.Address{pair.DaiAddr, s.deploymentInfo.Weth9Addr})
 			if err != nil {
-				return nil, nil, wallet, err
+				return nil, nil, client, wallet, err
 			}
 			minEthAmount := new(big.Int).Mul(amounts[1], big.NewInt(10000-int64(s.options.Slippage)))
 			minEthAmount = minEthAmount.Div(minEthAmount, big.NewInt(10000))
@@ -493,7 +494,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 				return router.SwapExactTokensForETH(transactOpts, randomAmount, minEthAmount, []common.Address{pair.DaiAddr, s.deploymentInfo.Weth9Addr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
 			})
 			if err != nil {
-				return nil, nil, wallet, err
+				return nil, nil, client, wallet, err
 			}
 
 			// Update balances in local cache
@@ -509,16 +510,16 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 	}
 
 	if err != nil {
-		return nil, nil, wallet, err
+		return nil, nil, client, wallet, err
 	}
 
-	transactionSubmitted = true
+	receiptChan := make(scenario.ReceiptChan, 1)
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			onComplete()
+			receiptChan <- receipt
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			txFees := utils.GetTransactionFees(tx, receipt)
@@ -537,8 +538,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64, onComplete func()) 
 		// mark nonce as skipped if tx was not sent
 		wallet.MarkSkippedNonce(tx.Nonce())
 
-		return tx, client, wallet, err
+		return nil, nil, client, wallet, err
 	}
 
-	return tx, client, wallet, nil
+	return receiptChan, tx, client, wallet, nil
 }
