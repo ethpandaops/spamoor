@@ -38,8 +38,8 @@ type TransactionScenarioOptions struct {
 
 type ProcessNextTxParams struct {
 	TxIdx           uint64
-	OrderedLogCb    func(logFunc func())
-	NotifySubmitted func()
+	OrderedLogCb    func(logFunc func()) // Optional callback to log transaction results in order
+	NotifySubmitted func()               // Optional callback to notify that the transaction has been submitted
 }
 
 // RunTransactionScenario executes a controlled transaction scenario with rate limiting
