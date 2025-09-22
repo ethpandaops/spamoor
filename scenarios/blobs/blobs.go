@@ -35,6 +35,7 @@ type ScenarioOptions struct {
 	ThroughputIncrementInterval uint64                   `yaml:"throughput_increment_interval"`
 	Timeout                     string                   `yaml:"timeout"`
 	ClientGroup                 string                   `yaml:"client_group"`
+	SubmitCount                 uint64                   `yaml:"submit_count"`
 	LogTxs                      bool                     `yaml:"log_txs"`
 }
 
@@ -60,6 +61,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	FuluActivation:              math.MaxInt64,
 	Timeout:                     "",
 	ClientGroup:                 "",
+	SubmitCount:                 3,
 	LogTxs:                      false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
@@ -91,6 +93,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.ThroughputIncrementInterval, "throughput-increment-interval", ScenarioDefaultOptions.ThroughputIncrementInterval, "Increment the throughput every interval (in sec).")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.Uint64Var(&s.options.SubmitCount, "submit-count", ScenarioDefaultOptions.SubmitCount, "Number of times to submit each transaction (to increase chance of inclusion)")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
 }
@@ -318,6 +321,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
+		SubmitCount: int(s.options.SubmitCount),
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			receiptChan <- receipt
 		},
