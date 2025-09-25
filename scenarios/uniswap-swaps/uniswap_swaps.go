@@ -21,22 +21,23 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount    uint64  `yaml:"total_count"`
-	Throughput    uint64  `yaml:"throughput"`
-	MaxPending    uint64  `yaml:"max_pending"`
-	MaxWallets    uint64  `yaml:"max_wallets"`
-	Rebroadcast   uint64  `yaml:"rebroadcast"`
-	BaseFee       float64 `yaml:"base_fee"`
-	TipFee        float64 `yaml:"tip_fee"`
-	PairCount     uint64  `yaml:"pair_count"`
-	MinSwapAmount string  `yaml:"min_swap_amount"`
-	MaxSwapAmount string  `yaml:"max_swap_amount"`
-	BuyRatio      uint64  `yaml:"buy_ratio"`
-	Slippage      uint64  `yaml:"slippage"`
-	SellThreshold string  `yaml:"sell_threshold"`
-	Timeout       string  `yaml:"timeout"`
-	ClientGroup   string  `yaml:"client_group"`
-	LogTxs        bool    `yaml:"log_txs"`
+	TotalCount        uint64  `yaml:"total_count"`
+	Throughput        uint64  `yaml:"throughput"`
+	MaxPending        uint64  `yaml:"max_pending"`
+	MaxWallets        uint64  `yaml:"max_wallets"`
+	Rebroadcast       uint64  `yaml:"rebroadcast"`
+	BaseFee           float64 `yaml:"base_fee"`
+	TipFee            float64 `yaml:"tip_fee"`
+	PairCount         uint64  `yaml:"pair_count"`
+	MinSwapAmount     string  `yaml:"min_swap_amount"`
+	MaxSwapAmount     string  `yaml:"max_swap_amount"`
+	BuyRatio          uint64  `yaml:"buy_ratio"`
+	Slippage          uint64  `yaml:"slippage"`
+	SellThreshold     string  `yaml:"sell_threshold"`
+	Timeout           string  `yaml:"timeout"`
+	ClientGroup       string  `yaml:"client_group"`
+	DeployClientGroup string  `yaml:"deploy_client_group"`
+	LogTxs            bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -50,22 +51,23 @@ type Scenario struct {
 
 var ScenarioName = "uniswap-swaps"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:    0,
-	Throughput:    10,
-	MaxPending:    0,
-	MaxWallets:    0,
-	Rebroadcast:   1,
-	BaseFee:       20,
-	TipFee:        2,
-	PairCount:     1,
-	MinSwapAmount: "100000000000000000",     // 0.1 DAI
-	MaxSwapAmount: "1000000000000000000000", // 1000 DAI
-	BuyRatio:      50,
-	Slippage:      50,
-	SellThreshold: "100000000000000000000000", // 10000 DAI
-	Timeout:       "",
-	ClientGroup:   "",
-	LogTxs:        false,
+	TotalCount:        0,
+	Throughput:        10,
+	MaxPending:        0,
+	MaxWallets:        0,
+	Rebroadcast:       1,
+	BaseFee:           20,
+	TipFee:            2,
+	PairCount:         1,
+	MinSwapAmount:     "100000000000000000",     // 0.1 DAI
+	MaxSwapAmount:     "1000000000000000000000", // 1000 DAI
+	BuyRatio:          50,
+	Slippage:          50,
+	SellThreshold:     "100000000000000000000000", // 10000 DAI
+	Timeout:           "",
+	ClientGroup:       "",
+	DeployClientGroup: "",
+	LogTxs:            false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -97,6 +99,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.SellThreshold, "sell-threshold", ScenarioDefaultOptions.SellThreshold, "DAI balance threshold to force sell (in wei)")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.StringVar(&s.options.DeployClientGroup, "deploy-client-group", ScenarioDefaultOptions.DeployClientGroup, "Client group to use for deployments")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
 }
@@ -154,6 +157,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
+	deployClientGroup := s.options.DeployClientGroup
+	if deployClientGroup == "" {
+		deployClientGroup = s.options.ClientGroup
+	}
+
 	// deploy uniswap pairs
 	s.uniswap = NewUniswap(ctx, s.walletPool, s.logger, UniswapOptions{
 		BaseFee:             s.options.BaseFee,
@@ -161,7 +169,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 		DaiPairs:            s.options.PairCount,
 		EthLiquidityPerPair: uint256.NewInt(0).Mul(uint256.NewInt(2000), uint256.NewInt(1000000000000000000)),
 		DaiLiquidityFactor:  10000,
-		ClientGroup:         s.options.ClientGroup,
+		ClientGroup:         deployClientGroup,
 	})
 
 	deploymentInfo, err := s.uniswap.DeployUniswapPairs(false)

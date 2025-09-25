@@ -45,8 +45,13 @@ tip_fee: 2
 gas_limit: 21000
 amount: 20
 data: ""
+to: ""
+timeout: ""
 random_amount: false
 random_target: false
+self_tx_only: false
+client_group: ""
+log_txs: false
 ', 0, 0, '{}'),
 
 -- ERC20 Transaction Spammer
@@ -67,6 +72,10 @@ tip_fee: 2
 amount: 20
 random_amount: false
 random_target: false
+timeout: ""
+client_group: ""
+deploy_client_group: ""
+log_txs: false
 ', 0, 0, '{}'),
 
 -- Blob Transaction Spammer
@@ -84,10 +93,16 @@ max_pending: 6
 max_wallets: 10
 replace: 30
 max_replacements: 4
-rebroadcast: 30
+rebroadcast: 1
 base_fee: 20
 tip_fee: 2
 blob_fee: 20
+blob_v1_percent: 100
+fulu_activation: 9223372036854775807
+throughput_increment_interval: 0
+timeout: ""
+client_group: ""
+log_txs: false
 ', 0, 0, '{}'),
 
 -- Big Block Spammer
@@ -102,14 +117,19 @@ total_count: 0
 throughput: 200
 max_pending: 400
 max_wallets: 200
-rebroadcast: 120
+rebroadcast: 1
 base_fee: 10
 tip_fee: 2
-gas_limit: 300000
+gas_limit: 50000
 amount: 20
-data: "repeat:0x00:25000"
+data: ""
+to: ""
+timeout: ""
 random_amount: false
 random_target: false
+self_tx_only: false
+client_group: ""
+log_txs: false
 ', 0, 0, '{}'),
 
 -- Gas Burner Spammer
@@ -124,11 +144,17 @@ total_count: 0
 throughput: 20
 max_pending: 20
 max_wallets: 40
-rebroadcast: 120
+rebroadcast: 1
 base_fee: 20
 tip_fee: 2
 gas_units_to_burn: 2000000
+gas_remainder: 10000
+timeout: ""
+opcodes: ""
+init_opcodes: ""
 client_group: ""
+deploy_client_group: ""
+log_txs: false
 ', 0, 0, '{}'),
 
 -- Uniswap V2 Swap Spammer
@@ -143,7 +169,7 @@ total_count: 0
 throughput: 200
 max_pending: 200
 max_wallets: 200
-rebroadcast: 120
+rebroadcast: 1
 base_fee: 20
 tip_fee: 2
 pair_count: 1
@@ -152,7 +178,10 @@ max_swap_amount: "1000000000000000000000"
 buy_ratio: 50
 slippage: 50
 sell_threshold: "100000000000000000000000"
+timeout: ""
 client_group: ""
+deploy_client_group: ""
+log_txs: false
 ', 0, 0, '{}');
 
 

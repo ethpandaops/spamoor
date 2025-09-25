@@ -33,6 +33,7 @@ spamoor storagespam [flags]
 
 ### Client Settings
 - `--client-group` - Client group to use for sending transactions
+- `--deploy-client-group` - Client group to use for deployment transactions (same as --client-group if empty)
 
 ### Debug Options
 - `-v, --verbose` - Enable verbose output

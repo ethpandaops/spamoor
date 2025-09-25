@@ -22,19 +22,20 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount   uint64  `yaml:"total_count"`
-	Throughput   uint64  `yaml:"throughput"`
-	MaxPending   uint64  `yaml:"max_pending"`
-	MaxWallets   uint64  `yaml:"max_wallets"`
-	Rebroadcast  uint64  `yaml:"rebroadcast"`
-	BaseFee      float64 `yaml:"base_fee"`
-	TipFee       float64 `yaml:"tip_fee"`
-	Amount       uint64  `yaml:"amount"`
-	GasLimit     uint64  `yaml:"gas_limit"`
-	RandomAmount bool    `yaml:"random_amount"`
-	Timeout      string  `yaml:"timeout"`
-	ClientGroup  string  `yaml:"client_group"`
-	LogTxs       bool    `yaml:"log_txs"`
+	TotalCount        uint64  `yaml:"total_count"`
+	Throughput        uint64  `yaml:"throughput"`
+	MaxPending        uint64  `yaml:"max_pending"`
+	MaxWallets        uint64  `yaml:"max_wallets"`
+	Rebroadcast       uint64  `yaml:"rebroadcast"`
+	BaseFee           float64 `yaml:"base_fee"`
+	TipFee            float64 `yaml:"tip_fee"`
+	Amount            uint64  `yaml:"amount"`
+	GasLimit          uint64  `yaml:"gas_limit"`
+	RandomAmount      bool    `yaml:"random_amount"`
+	Timeout           string  `yaml:"timeout"`
+	ClientGroup       string  `yaml:"client_group"`
+	DeployClientGroup string  `yaml:"deploy_client_group"`
+	LogTxs            bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -47,19 +48,20 @@ type Scenario struct {
 
 var ScenarioName = "deploy-destruct"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:   0,
-	Throughput:   10,
-	MaxPending:   0,
-	MaxWallets:   0,
-	Rebroadcast:  1,
-	BaseFee:      20,
-	TipFee:       2,
-	Amount:       20,
-	GasLimit:     10000000,
-	RandomAmount: false,
-	Timeout:      "",
-	ClientGroup:  "",
-	LogTxs:       false,
+	TotalCount:        0,
+	Throughput:        10,
+	MaxPending:        0,
+	MaxWallets:        0,
+	Rebroadcast:       1,
+	BaseFee:           20,
+	TipFee:            2,
+	Amount:            20,
+	GasLimit:          10000000,
+	RandomAmount:      false,
+	Timeout:           "",
+	ClientGroup:       "",
+	DeployClientGroup: "",
+	LogTxs:            false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -88,6 +90,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.StringVar(&s.options.DeployClientGroup, "deploy-client-group", ScenarioDefaultOptions.DeployClientGroup, "Client group to use for deployments")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
 }
@@ -219,9 +222,14 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamoor.Client, error) {
+	deployClientGroup := s.options.DeployClientGroup
+	if deployClientGroup == "" {
+		deployClientGroup = s.options.ClientGroup
+	}
+
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
-		spamoor.WithClientGroup(s.options.ClientGroup),
+		spamoor.WithClientGroup(deployClientGroup),
 	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
@@ -254,7 +262,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 
 	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
-		ClientGroup: s.options.ClientGroup,
+		ClientGroup: deployClientGroup,
 		Rebroadcast: true,
 	})
 	if err != nil {
