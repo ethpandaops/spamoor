@@ -175,9 +175,9 @@ tip_fee: 2
 pair_count: 1
 min_swap_amount: "100000000000000000"
 max_swap_amount: "1000000000000000000000"
-buy_ratio: 50
+buy_ratio: 40
 slippage: 50
-sell_threshold: "100000000000000000000000"
+sell_threshold: "50000000000000000000000"
 timeout: ""
 client_group: ""
 deploy_client_group: ""

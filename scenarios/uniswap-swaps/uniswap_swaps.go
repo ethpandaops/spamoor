@@ -61,9 +61,9 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	PairCount:         1,
 	MinSwapAmount:     "100000000000000000",     // 0.1 DAI
 	MaxSwapAmount:     "1000000000000000000000", // 1000 DAI
-	BuyRatio:          50,
+	BuyRatio:          40,
 	Slippage:          50,
-	SellThreshold:     "100000000000000000000000", // 10000 DAI
+	SellThreshold:     "50000000000000000000000", // 50000 DAI
 	Timeout:           "",
 	ClientGroup:       "",
 	DeployClientGroup: "",
@@ -347,7 +347,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 
 	if isBuy {
 		// Decide whether to use ETH or WETH for buying
-		useWeth := wethBalance.Cmp(randomAmount) >= 0 && mathrand.Intn(100) < 50 // 50% chance to use WETH if available
+		useWeth := wethBalance.Cmp(randomAmount) >= 0 && mathrand.Intn(100) < 60 // 60% chance to use WETH if available
 
 		if useWeth {
 			// Buying DAI with WETH
