@@ -347,7 +347,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 
 	if isBuy {
 		// Decide whether to use ETH or WETH for buying
-		useWeth := wethBalance.Cmp(randomAmount) >= 0 && mathrand.Intn(100) < 60 // 60% chance to use WETH if available
+		useWeth := mathrand.Intn(100) < 60 // 60% chance to use WETH if available
 
 		if useWeth {
 			// Buying DAI with WETH
