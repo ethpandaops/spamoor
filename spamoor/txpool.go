@@ -31,6 +31,12 @@ type BlockInfo struct {
 	GasLimit   uint64
 }
 
+// BlockWithHash represents a block with its hash.
+type BlockWithHash struct {
+	Hash  common.Hash
+	Block *types.Block
+}
+
 // TxInfo represents information about a confirmed transaction including
 // the transaction details, associated wallets, and send options.
 type TxInfo struct {
@@ -275,8 +281,8 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 		return nil
 	}
 
-	blockBody, txSkipMap := pool.getBlockBody(ctx, client, blockNumber)
-	if blockBody == nil {
+	blockWithHash, txSkipMap := pool.getBlockBody(ctx, client, blockNumber)
+	if blockWithHash == nil {
 		return fmt.Errorf("could not load block body")
 	}
 
@@ -285,28 +291,28 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	lastBlock, hasLastBlock := pool.blocks[blockNumber-1]
 	pool.blocksMutex.RUnlock()
 
-	if hasLastBlock && lastBlock.Hash != blockBody.ParentHash() {
+	if hasLastBlock && lastBlock.Hash != blockWithHash.Block.ParentHash() {
 		logrus.Warnf("Detected chain reorganization at block %d. Parent hash mismatch: expected %s, got %s",
-			blockNumber, lastBlock.Hash.Hex(), blockBody.ParentHash().Hex())
+			blockNumber, lastBlock.Hash.Hex(), blockWithHash.Block.ParentHash().Hex())
 
 		// Handle reorg
-		pool.handleReorg(ctx, client, blockNumber, blockBody, chainId, walletMap)
+		pool.handleReorg(ctx, client, blockNumber, blockWithHash, chainId, walletMap)
 	}
 
 	// Store block info
 	pool.blocksMutex.Lock()
 	pool.blocks[blockNumber] = &BlockInfo{
 		Number:     blockNumber,
-		Hash:       blockBody.Hash(),
-		ParentHash: blockBody.ParentHash(),
-		Timestamp:  blockBody.Time(),
-		GasLimit:   blockBody.GasLimit(),
+		Hash:       blockWithHash.Hash,
+		ParentHash: blockWithHash.Block.ParentHash(),
+		Timestamp:  blockWithHash.Block.Time(),
+		GasLimit:   blockWithHash.Block.GasLimit(),
 	}
 
 	// Update current gas limit
 	pool.blockStatsMutex.Lock()
-	pool.currentGasLimit = blockBody.GasLimit()
-	pool.currentBaseFee = blockBody.BaseFee()
+	pool.currentGasLimit = blockWithHash.Block.GasLimit()
+	pool.currentBaseFee = blockWithHash.Block.BaseFee()
 	pool.blockStatsMutex.Unlock()
 
 	// Clean up old blocks
@@ -315,17 +321,17 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 	pool.blocksMutex.Unlock()
 
-	return pool.processBlockTxs(ctx, client, blockNumber, blockBody, chainId, walletMap, txSkipMap)
+	return pool.processBlockTxs(ctx, client, blockNumber, blockWithHash, chainId, walletMap, txSkipMap)
 }
 
 // processBlockTxs processes all transactions in a block for confirmation tracking.
 // It loads block receipts, decodes transaction senders, updates wallet states for
 // confirmed transactions, and tracks transaction information for reorg recovery.
 // Also handles cleanup of old confirmed transaction data.
-func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockBody *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet, txSkipMap map[uint32]bool) error {
+func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, chainId *big.Int, walletMap map[common.Address]*Wallet, txSkipMap map[uint32]bool) error {
 	t1 := time.Now()
-	txCount := len(blockBody.Transactions())
-	receipts, err := pool.getBlockReceipts(ctx, client, blockBody.Hash(), txCount, txSkipMap)
+	txCount := len(blockWithHash.Block.Transactions())
+	receipts, err := pool.getBlockReceipts(ctx, client, blockWithHash.Hash, txCount, txSkipMap)
 	if err != nil {
 		return fmt.Errorf("could not load block receipts: %w", err)
 	}
@@ -340,7 +346,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 	pool.confirmedTxs[blockNumber] = []*TxInfo{}
 	pool.txsMutex.Unlock()
 
-	for idx, tx := range blockBody.Transactions() {
+	for idx, tx := range blockWithHash.Block.Transactions() {
 		receipt := receipts[idx]
 		if receipt == nil {
 			logrus.Warnf("missing receipt for tx %v in block %v", idx, blockNumber)
@@ -402,7 +408,7 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 	logrus.Infof("processed block %v:  %v total tx, %v tx confirmed from %v wallets (%v, %v)", blockNumber, txCount, confirmCount, len(affectedWalletMap), loadingTime, time.Since(t1))
 
 	// Notify block subscribers with wallet-specific stats
-	pool.notifyBlockSubscribers(blockNumber, blockBody, receipts)
+	pool.notifyBlockSubscribers(blockNumber, blockWithHash.Block, receipts)
 
 	return nil
 }
@@ -459,7 +465,7 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 // getBlockBody retrieves a block body from the specified client.
 // It uses a 5-second timeout and returns the block if successful, nil otherwise.
 // Builder clients are not supported as they don't provide eth_getBlockByNumber.
-func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumber uint64) (*types.Block, map[uint32]bool) {
+func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumber uint64) (*BlockWithHash, map[uint32]bool) {
 	// Builder clients don't support eth_getBlockByNumber
 	if client.IsBuilder() {
 		return nil, nil
@@ -535,7 +541,14 @@ func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumbe
 		},
 	)
 
-	return block, txSkipMap
+	if body.Hash.Cmp(common.Hash{}) == 0 {
+		body.Hash = block.Hash()
+	}
+
+	return &BlockWithHash{
+		Hash:  body.Hash,
+		Block: block,
+	}, txSkipMap
 }
 
 // getBlockReceipts retrieves all transaction receipts for a block.
@@ -1125,10 +1138,10 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 // handleReorg handles a detected chain reorganization by re-submitting affected transactions.
 // It finds the common ancestor, identifies reorged-out transactions, resets wallet nonces,
 // and re-submits the affected transactions as pending. Also processes the new canonical blocks.
-func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlock *types.Block, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
+func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlockWithHash *BlockWithHash, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
 	type newBlockInfo struct {
-		block     *types.Block
-		txSkipMap map[uint32]bool
+		blockWithHash *BlockWithHash
+		txSkipMap     map[uint32]bool
 	}
 
 	newBlockParents := []newBlockInfo{}
@@ -1146,18 +1159,18 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	// 5. re-process block 3b (4b will be processed after the reorg processing completes)
 
 	// find the common ancestor
-	block := newBlock
+	block := newBlockWithHash
 	for {
-		if block.NumberU64() == 0 {
+		if block.Block.NumberU64() == 0 {
 			break
 		}
 
-		blockNumber := block.NumberU64() - 1
+		blockNumber := block.Block.NumberU64() - 1
 		if pool.blocks[blockNumber] == nil {
 			break
 		}
 
-		if pool.blocks[blockNumber].Hash == block.ParentHash() {
+		if pool.blocks[blockNumber].Hash == block.Block.ParentHash() {
 			break
 		}
 
@@ -1167,8 +1180,8 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 		}
 
 		newBlockParents = append(newBlockParents, newBlockInfo{
-			block:     parentBlockBody,
-			txSkipMap: txSkipMap,
+			blockWithHash: parentBlockBody,
+			txSkipMap:     txSkipMap,
 		})
 		block = parentBlockBody
 	}
@@ -1178,7 +1191,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	// find all the transactions that were reorged out
 	pool.txsMutex.Lock()
 	reorgedOutTxs := []*TxInfo{}
-	for blockNum := reorgBaseBlock.NumberU64(); blockNum <= blockNumber; blockNum++ {
+	for blockNum := reorgBaseBlock.Block.NumberU64(); blockNum <= blockNumber; blockNum++ {
 		blockTxs := pool.confirmedTxs[blockNum]
 		if blockTxs == nil {
 			continue
@@ -1189,7 +1202,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 
 	// remove reorged out blocks & txs from cache
 	pool.blocksMutex.Lock()
-	for blockNum := reorgBaseBlock.NumberU64() + 1; blockNum <= blockNumber; blockNum++ {
+	for blockNum := reorgBaseBlock.Block.NumberU64() + 1; blockNum <= blockNumber; blockNum++ {
 		delete(pool.blocks, blockNum)
 		delete(pool.confirmedTxs, blockNum)
 	}
@@ -1243,7 +1256,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	// re-process the new parent blocks
 	slices.Reverse(newBlockParents)
 	for _, parentBlockInfo := range newBlockParents {
-		pool.processBlockTxs(ctx, client, parentBlockInfo.block.NumberU64(), parentBlockInfo.block, chainId, walletMap, parentBlockInfo.txSkipMap)
+		pool.processBlockTxs(ctx, client, parentBlockInfo.blockWithHash.Block.NumberU64(), parentBlockInfo.blockWithHash, chainId, walletMap, parentBlockInfo.txSkipMap)
 	}
 
 	return nil
