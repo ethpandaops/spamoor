@@ -1,0 +1,105 @@
+- scenario: geastx
+  name: Trigger planned chain split (Nethermind only)
+  description: 'WARNING: Chain split ahead when running this!'
+  start: false
+  config:
+    amount: 0
+    base_fee: 20
+    client_group: ""
+    deploy_gas_limit: 1000000
+    gas_limit: 1000000
+    geas_code: |
+        ; planned-iszero-split.geas
+        ; split chain via bad ISZERO opcode:
+        ;  0x1611161116111611 => 1 on geth
+        ;  0x1611161116111612 => 1 on nethermind
+        ;  0x1611161116111642 => 1 on geth & nethermind
+        ; --------------------------------------------------------------------------------
+        PUSH8 0x1611161116111612
+        ISZERO
+        PUSH0
+        PUSH0
+        LOG1
+    geas_file: ""
+    log_txs: true
+    max_pending: 1
+    max_wallets: 1
+    rebroadcast: 1
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: geastx-83188
+    throughput: 10
+    timeout: ""
+    tip_fee: 2
+    total_count: 1
+- scenario: geastx
+  name: Trigger planned chain split (Geth only)
+  description: 'WARNING: Chain split ahead when running this!'
+  start: false
+  config:
+    amount: 0
+    base_fee: 20
+    client_group: ""
+    deploy_gas_limit: 1000000
+    gas_limit: 1000000
+    geas_code: |
+        ; planned-iszero-split.geas
+        ; split chain via bad ISZERO opcode:
+        ;  0x1611161116111611 => 1 on geth
+        ;  0x1611161116111612 => 1 on nethermind
+        ;  0x1611161116111642 => 1 on geth & nethermind
+        ; --------------------------------------------------------------------------------
+        PUSH8 0x1611161116111611
+        ISZERO
+        PUSH0
+        PUSH0
+        LOG1
+    geas_file: ""
+    log_txs: true
+    max_pending: 1
+    max_wallets: 1
+    rebroadcast: 1
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: geastx-83188
+    throughput: 10
+    timeout: ""
+    tip_fee: 2
+    total_count: 1
+- scenario: geastx
+  name: Trigger planned chain split (Geth+Nethermind)
+  description: 'WARNING: Chain split ahead when running this!'
+  start: false
+  config:
+    amount: 0
+    base_fee: 20
+    client_group: ""
+    deploy_gas_limit: 1000000
+    gas_limit: 1000000
+    geas_code: |
+        ; planned-iszero-split.geas
+        ; split chain via bad ISZERO opcode:
+        ;  0x1611161116111611 => 1 on geth
+        ;  0x1611161116111612 => 1 on nethermind
+        ;  0x1611161116111642 => 1 on geth & nethermind
+        ; --------------------------------------------------------------------------------
+        PUSH8 0x1611161116111642
+        ISZERO
+        PUSH0
+        PUSH0
+        LOG1
+    geas_file: ""
+    log_txs: true
+    max_pending: 1
+    max_wallets: 1
+    rebroadcast: 1
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    seed: geastx-83188
+    throughput: 10
+    timeout: ""
+    tip_fee: 2
+    total_count: 1
