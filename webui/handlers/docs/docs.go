@@ -1976,6 +1976,9 @@ const docTemplate = `{
                 },
                 "scenario": {
                     "type": "string"
+                },
+                "start": {
+                    "type": "boolean"
                 }
             }
         },

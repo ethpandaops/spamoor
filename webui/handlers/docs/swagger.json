@@ -1965,6 +1965,9 @@
                 },
                 "scenario": {
                     "type": "string"
+                },
+                "start": {
+                    "type": "boolean"
                 }
             }
         },

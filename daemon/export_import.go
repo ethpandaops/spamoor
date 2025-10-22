@@ -140,6 +140,7 @@ func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, 
 			Name:        finalName,
 			Scenario:    importConfig.Scenario,
 			Description: importConfig.Description,
+			Start:       importConfig.Start,
 		})
 	}
 
@@ -239,6 +240,7 @@ type ImportedSpammerInfo struct {
 	Name        string `json:"name"`
 	Scenario    string `json:"scenario"`
 	Description string `json:"description"`
+	Start       *bool  `json:"start,omitempty"`
 }
 
 // ImportValidationResult contains validation results for import data

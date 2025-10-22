@@ -494,6 +494,8 @@ definitions:
         type: string
       scenario:
         type: string
+      start:
+        type: boolean
     type: object
   daemon.SpammerValidationInfo:
     properties:
