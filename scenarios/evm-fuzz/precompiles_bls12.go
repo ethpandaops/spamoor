@@ -30,13 +30,13 @@ func (g *OpcodeGenerator) generateValidBLS12G1PointUncompressed() []byte {
 			point[0] |= 0xE0  // Ensure x >= modulus
 			point[64] |= 0xE0 // Ensure y >= modulus
 		}
-		return point
+		return g.transformer.TransformPrecompileInput(point, 0x0b)
 	}
 
 	if choice < 15 {
 		// 10% chance of zero point (point at infinity)
 		// Zero point: all zeros represents point at infinity in uncompressed format
-		return point
+		return g.transformer.TransformPrecompileInput(point, 0x0b)
 	}
 
 	// 85% of the time: Generate random valid points using gnark-crypto library
@@ -57,7 +57,7 @@ func (g *OpcodeGenerator) generateValidBLS12G1PointUncompressed() []byte {
 	// Extract X and Y coordinates with consistent 48-byte field elements
 	xBytes := g1Point.X.Bytes()
 	yBytes := g1Point.Y.Bytes()
-	
+
 	// Always place field elements at the end of 64-byte slots with proper padding
 	// Field elements should be exactly 48 bytes, placed at bytes [16:64] and [80:128]
 	if len(xBytes) == 48 {
@@ -66,7 +66,7 @@ func (g *OpcodeGenerator) generateValidBLS12G1PointUncompressed() []byte {
 		// Handle variable length by right-aligning
 		copy(point[64-len(xBytes):64], xBytes[:])
 	}
-	
+
 	if len(yBytes) == 48 {
 		copy(point[80:128], yBytes[:])
 	} else {
@@ -74,7 +74,7 @@ func (g *OpcodeGenerator) generateValidBLS12G1PointUncompressed() []byte {
 		copy(point[128-len(yBytes):128], yBytes[:])
 	}
 
-	return point
+	return g.transformer.TransformPrecompileInput(point, 0x0b)
 }
 
 // generateBLS12G1FieldElements generates raw BLS12-381 G1 field elements (48 bytes each)
@@ -90,12 +90,18 @@ func (g *OpcodeGenerator) generateBLS12G1FieldElements() ([]byte, []byte) {
 		// Ensure they're > modulus
 		invalidX[0] |= 0xE0
 		invalidY[0] |= 0xE0
-		return invalidX, invalidY
+		transformedX := g.transformer.TransformPrecompileInput(invalidX, 0x0b)
+		transformedY := g.transformer.TransformPrecompileInput(invalidY, 0x0b)
+		return transformedX, transformedY
 	}
 
 	if choice < 15 {
 		// 10% chance of zero point (point at infinity)
-		return make([]byte, 48), make([]byte, 48)
+		zeroX := make([]byte, 48)
+		zeroY := make([]byte, 48)
+		transformedX := g.transformer.TransformPrecompileInput(zeroX, 0x0b)
+		transformedY := g.transformer.TransformPrecompileInput(zeroY, 0x0b)
+		return transformedX, transformedY
 	}
 
 	// 85% of the time: Generate random valid points using gnark-crypto library
@@ -116,7 +122,9 @@ func (g *OpcodeGenerator) generateBLS12G1FieldElements() ([]byte, []byte) {
 	xBytes := g1Point.X.Bytes()
 	yBytes := g1Point.Y.Bytes()
 
-	return xBytes[:], yBytes[:]
+	transformedX := g.transformer.TransformPrecompileInput(xBytes[:], 0x0b)
+	transformedY := g.transformer.TransformPrecompileInput(yBytes[:], 0x0b)
+	return transformedX, transformedY
 }
 
 // generateValidBLS12G2PointUncompressed generates a BLS12-381 G2 point using gnark-crypto library
@@ -141,13 +149,13 @@ func (g *OpcodeGenerator) generateValidBLS12G2PointUncompressed() []byte {
 				point[i*64] |= 0xE0 // Ensure all field elements >= modulus
 			}
 		}
-		return point
+		return g.transformer.TransformPrecompileInput(point, 0x0d)
 	}
 
 	if choice < 15 {
 		// 10% chance of zero point (point at infinity)
 		// Zero point: all zeros represents point at infinity in uncompressed format
-		return point
+		return g.transformer.TransformPrecompileInput(point, 0x0d)
 	}
 
 	// 85% of the time: Generate random valid points using gnark-crypto library
@@ -170,7 +178,7 @@ func (g *OpcodeGenerator) generateValidBLS12G2PointUncompressed() []byte {
 	xc1Bytes := g2Point.X.A1.Bytes()
 	yc0Bytes := g2Point.Y.A0.Bytes()
 	yc1Bytes := g2Point.Y.A1.Bytes()
-	
+
 	// Always place field elements with proper padding
 	// Place each 48-byte field element at the end of its 64-byte slot
 	copy(point[16:64], xc0Bytes[:])   // X_c0: bytes 16-63
@@ -178,7 +186,7 @@ func (g *OpcodeGenerator) generateValidBLS12G2PointUncompressed() []byte {
 	copy(point[144:192], yc0Bytes[:]) // Y_c0: bytes 144-191
 	copy(point[208:256], yc1Bytes[:]) // Y_c1: bytes 208-255
 
-	return point
+	return g.transformer.TransformPrecompileInput(point, 0x0d)
 }
 
 // generateBLS12G1AddCall creates a BLS12-381 G1 addition call using gnark-crypto library
@@ -240,7 +248,7 @@ func (g *OpcodeGenerator) generateBLS12G1MSMCall() []byte {
 
 		// Store point coordinates directly with proper alignment
 		// Each coordinate is 64 bytes, stored as 2 x 32-byte chunks
-		
+
 		// Store X coordinate (bytes 0-63 of point)
 		for j := 0; j < 2; j++ {
 			bytecode = append(bytecode, 0x7f) // PUSH32
@@ -515,8 +523,8 @@ func (g *OpcodeGenerator) generateBLS12MapFp2G2Call() []byte {
 		c0Result := fp2.A0.Bytes()
 		c1Result := fp2.A1.Bytes()
 		// Pad to 64 bytes each: place 48-byte field elements at end
-		copy(fieldElement[64-len(c0Result):64], c0Result[:])     // First 64 bytes: c0 component
-		copy(fieldElement[128-len(c1Result):128], c1Result[:])   // Second 64 bytes: c1 component
+		copy(fieldElement[64-len(c0Result):64], c0Result[:])   // First 64 bytes: c0 component
+		copy(fieldElement[128-len(c1Result):128], c1Result[:]) // Second 64 bytes: c1 component
 	}
 
 	// Store field extension element in memory (128 bytes = 4 x 32-byte chunks)

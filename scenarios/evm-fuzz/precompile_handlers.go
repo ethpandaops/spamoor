@@ -77,12 +77,12 @@ func (g *OpcodeGenerator) generateValidBN256Point() []byte {
 			point[31] += byte(g.rng.Intn(10) + 1)
 			point[63] += byte(g.rng.Intn(10) + 1)
 		}
-		return point
+		return g.transformer.TransformPrecompileInput(point, 0x06)
 	}
 
 	// 10% chance of zero point (point at infinity)
 	if g.rng.Float64() < 0.1 {
-		return point // All zeros = point at infinity
+		return g.transformer.TransformPrecompileInput(point, 0x06) // All zeros = point at infinity
 	}
 
 	// Generate mostly valid curve point by trying random x values
@@ -100,11 +100,11 @@ func (g *OpcodeGenerator) generateValidBN256Point() []byte {
 			yBytes := make([]byte, 32)
 			x.FillBytes(xBytes)
 			y.FillBytes(yBytes)
-			return append(xBytes, yBytes...)
+			return g.transformer.TransformPrecompileInput(append(xBytes, yBytes...), 0x06)
 		},
 		// Pattern 2: Use generator point multiples
 		func() []byte {
-			return g.getBN256Generator()
+			return g.transformer.TransformPrecompileInput(g.getBN256Generator(), 0x06)
 		},
 		// Pattern 3: Use modular reduction of random values
 		func() []byte {
@@ -112,13 +112,13 @@ func (g *OpcodeGenerator) generateValidBN256Point() []byte {
 			x := new(big.Int).Mod(randomX, bn256FieldModulus)
 			y := g.calculateBN256Y(x)
 			if y == nil {
-				return g.getBN256Generator()
+				return g.transformer.TransformPrecompileInput(g.getBN256Generator(), 0x06)
 			}
 			xBytes := make([]byte, 32)
 			yBytes := make([]byte, 32)
 			x.FillBytes(xBytes)
 			y.FillBytes(yBytes)
-			return append(xBytes, yBytes...)
+			return g.transformer.TransformPrecompileInput(append(xBytes, yBytes...), 0x06)
 		},
 	}
 
@@ -738,6 +738,7 @@ func (g *OpcodeGenerator) generateEcrecoverCall() []byte {
 
 	// Generate message hash (32 bytes)
 	hash := g.rng.Bytes(32)
+	hash = g.transformer.TransformPrecompileInput(hash, 0x01)
 	bytecode = append(bytecode, 0x7f) // PUSH32
 	bytecode = append(bytecode, hash...)
 	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (offset)
@@ -800,16 +801,23 @@ func (g *OpcodeGenerator) generateSha256Call() []byte {
 	// Generate variable-length input data (1-1024 bytes)
 	inputLen := g.rng.Intn(1024) + 1
 	inputData := g.rng.Bytes(inputLen)
+	// Apply transformations for edge case testing
+	inputData = g.transformer.TransformPrecompileInput(inputData, 0x02)
+
+	// Update inputLen to reflect the actual transformed data size
+	actualInputLen := len(inputData)
 
 	// Write input data to memory in 32-byte chunks
 	memOffset := 0
-	for i := 0; i < inputLen; i += 32 {
+	for i := 0; i < actualInputLen; i += 32 {
 		chunk := make([]byte, 32)
-		chunkLen := inputLen - i
+		chunkLen := actualInputLen - i
 		if chunkLen > 32 {
 			chunkLen = 32
 		}
-		copy(chunk, inputData[i:i+chunkLen])
+		if i+chunkLen <= len(inputData) {
+			copy(chunk, inputData[i:i+chunkLen])
+		}
 
 		bytecode = append(bytecode, 0x7f) // PUSH32
 		bytecode = append(bytecode, chunk...)
@@ -820,14 +828,14 @@ func (g *OpcodeGenerator) generateSha256Call() []byte {
 
 	// Setup CALL to SHA256 precompile
 	returnOffset := memOffset + 32
-	bytecode = append(bytecode, 0x60, 0x20)                              // PUSH1 32 (return size)
-	bytecode = append(bytecode, 0x60, byte(returnOffset))                // PUSH1 returnOffset
-	bytecode = append(bytecode, 0x61, byte(inputLen>>8), byte(inputLen)) // PUSH2 inputLen
-	bytecode = append(bytecode, 0x60, 0x00)                              // PUSH1 0 (args offset)
-	bytecode = append(bytecode, 0x60, 0x00)                              // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x02)                              // PUSH1 2 (precompile address)
-	bytecode = append(bytecode, 0x5a)                                    // GAS
-	bytecode = append(bytecode, 0xf1)                                    // CALL
+	bytecode = append(bytecode, 0x60, 0x20)                                          // PUSH1 32 (return size)
+	bytecode = append(bytecode, 0x60, byte(returnOffset))                            // PUSH1 returnOffset
+	bytecode = append(bytecode, 0x61, byte(actualInputLen>>8), byte(actualInputLen)) // PUSH2 actualInputLen
+	bytecode = append(bytecode, 0x60, 0x00)                                          // PUSH1 0 (args offset)
+	bytecode = append(bytecode, 0x60, 0x00)                                          // PUSH1 0 (value)
+	bytecode = append(bytecode, 0x60, 0x02)                                          // PUSH1 2 (precompile address)
+	bytecode = append(bytecode, 0x5a)                                                // GAS
+	bytecode = append(bytecode, 0xf1)                                                // CALL
 
 	// Push result to stack
 	bytecode = append(bytecode, 0x60, byte(returnOffset)) // PUSH1 returnOffset
