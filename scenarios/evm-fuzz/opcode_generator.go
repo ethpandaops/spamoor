@@ -119,6 +119,8 @@ type OpcodeGenerator struct {
 	maxGas           uint64      // Maximum gas limit
 	currentGas       uint64      // Current gas usage
 	maxSize          int         // Maximum bytecode size
+	opcodeCount      int         // Current opcode count (PC-based instruction count)
+	maxOpcodeCount   int         // Maximum allowed opcodes (derived from maxSize with 10x limit)
 	opcodeInfos      map[uint16]*OpcodeInfo
 	validOpcodes     []*OpcodeInfo
 	invalidOpcodes   []byte
@@ -293,27 +295,27 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		{"SELFDESTRUCT", 0xff, 1, 0, 5000, simpleOpcode(0xff), 1.1},                                                                 // Interesting
 
 		// Precompile calls (treated as special opcodes)
-		// These consume stack values and use them as inputs to precompiles
+		// Specialized handlers generate proper calldata and push results to stack
 		// Using 0x100+ range to avoid collision with real EVM opcodes
-		{"ECRECOVER", 0x101, 4, 1, 3000, ecrecoverTemplate, 2.5},   // Precompile 1 - consumes 4 stack items (hash, v, r, s)
-		{"SHA256", 0x102, 2, 1, 60, sha256Template, 2.5},           // Precompile 2 - consumes 2 stack items
-		{"RIPEMD160", 0x103, 2, 1, 600, ripemd160Template, 2.0},    // Precompile 3 - consumes 2 stack items
-		{"IDENTITY", 0x104, 1, 1, 15, identityTemplate, 2.0},       // Precompile 4 - consumes 1 stack item
-		{"MODEXP", 0x105, 0, 1, 200, modexpTemplate, 2.8},          // Precompile 5 - special handling, no stack consumption
-		{"ECADD", 0x106, 4, 1, 500, ecAddTemplate, 2.8},            // Precompile 6 - consumes 4 stack items (x1, y1, x2, y2)
-		{"ECMUL", 0x107, 3, 1, 40000, ecMulTemplate, 2.8},          // Precompile 7 - consumes 3 stack items (x, y, scalar)
-		{"ECPAIRING", 0x108, 6, 1, 100000, ecPairingTemplate, 2.8}, // Precompile 8 - consumes 6 stack items (minimum one pair)
-		{"BLAKE2F", 0x109, 7, 1, 1, blake2fTemplate, 2.5},          // Precompile 9 - consumes 7 stack items (rounds, h, m, t, f)
-		{"POINTEVAL", 0x10a, 6, 1, 50000, pointEvalTemplate, 2.5},  // Precompile 10 - consumes 6 stack items
+		{"ECRECOVER", 0x101, 0, 1, 3000, ecrecoverTemplate, 2.5},   // Precompile 1 - returns 32 bytes (address or 0)
+		{"SHA256", 0x102, 0, 1, 60, sha256Template, 2.5},           // Precompile 2 - returns 32 bytes (hash)
+		{"RIPEMD160", 0x103, 0, 1, 600, ripemd160Template, 2.0},    // Precompile 3 - returns 32 bytes (hash, right-padded)
+		{"IDENTITY", 0x104, 0, 1, 15, identityTemplate, 2.0},       // Precompile 4 - returns variable length (input data)
+		{"MODEXP", 0x105, 0, 1, 200, modexpTemplate, 2.8},          // Precompile 5 - returns variable length (modexp result)
+		{"ECADD", 0x106, 0, 2, 500, ecAddTemplate, 2.8},            // Precompile 6 - returns 64 bytes (x, y coordinates)
+		{"ECMUL", 0x107, 0, 2, 40000, ecMulTemplate, 2.8},          // Precompile 7 - returns 64 bytes (x, y coordinates)
+		{"ECPAIRING", 0x108, 0, 1, 100000, ecPairingTemplate, 2.8}, // Precompile 8 - returns 32 bytes (0 or 1)
+		{"BLAKE2F", 0x109, 0, 2, 1, blake2fTemplate, 2.5},          // Precompile 9 - returns 64 bytes (blake2f hash)
+		{"POINTEVAL", 0x10a, 0, 1, 50000, pointEvalTemplate, 2.5},  // Precompile 10 - returns 32 bytes (0 or 1)
 
 		// BLS12-381 precompiles (Prague fork)
-		{"BLS12_G1ADD", 0x10b, 4, 1, 375, bls12G1AddTemplate, 2.5},              // Precompile 0x0b - G1 point addition
-		{"BLS12_G1MSM", 0x10c, 0, 1, 30000, bls12G1MSMTemplate, 2.2},            // Precompile 0x0c - G1 multi-scalar multiplication
-		{"BLS12_G2ADD", 0x10d, 8, 1, 600, bls12G2AddTemplate, 2.5},              // Precompile 0x0d - G2 point addition
-		{"BLS12_G2MSM", 0x10e, 0, 1, 150000, bls12G2MSMTemplate, 2.2},           // Precompile 0x0e - G2 multi-scalar multiplication
-		{"BLS12_PAIRING_CHECK", 0x10f, 12, 1, 37700, bls12PairingTemplate, 2.8}, // Precompile 0x0f - Pairing check
-		{"BLS12_MAP_FP_TO_G1", 0x110, 2, 1, 5500, bls12MapFpToG1Template, 2.2},  // Precompile 0x10 - Map field element to G1
-		{"BLS12_MAP_FP2_TO_G2", 0x111, 4, 1, 23800, bls12MapFp2G2Template, 2.2}, // Precompile 0x11 - Map field extension element to G2
+		{"BLS12_G1ADD", 0x10b, 0, 4, 375, bls12G1AddTemplate, 2.5},              // Precompile 0x0b - returns 128 bytes (G1 point)
+		{"BLS12_G1MSM", 0x10c, 0, 4, 30000, bls12G1MSMTemplate, 2.2},            // Precompile 0x0c - returns 128 bytes (G1 point)
+		{"BLS12_G2ADD", 0x10d, 0, 8, 600, bls12G2AddTemplate, 2.5},              // Precompile 0x0d - returns 256 bytes (G2 point)
+		{"BLS12_G2MSM", 0x10e, 0, 8, 150000, bls12G2MSMTemplate, 2.2},           // Precompile 0x0e - returns 256 bytes (G2 point)
+		{"BLS12_PAIRING_CHECK", 0x10f, 0, 1, 37700, bls12PairingTemplate, 2.8},  // Precompile 0x0f - returns 32 bytes (0 or 1)
+		{"BLS12_MAP_FP_TO_G1", 0x110, 0, 4, 5500, bls12MapFpToG1Template, 2.2},  // Precompile 0x10 - returns 128 bytes (G1 point)
+		{"BLS12_MAP_FP2_TO_G2", 0x111, 0, 8, 23800, bls12MapFp2G2Template, 2.2}, // Precompile 0x11 - returns 256 bytes (G2 point)
 	}
 
 	// Add PUSH1-PUSH32 opcodes
@@ -378,6 +380,8 @@ func NewOpcodeGenerator(txID uint64, baseSeed string, maxSize int, maxGas uint64
 		maxGas:           maxGas,
 		currentGas:       0,
 		maxSize:          maxSize,
+		opcodeCount:      0,
+		maxOpcodeCount:   maxSize * 10, // Allow up to 10x the PC size in actual opcodes
 		opcodeInfos:      make(map[uint16]*OpcodeInfo),
 		txID:             txID,
 		baseSeed:         baseSeed,
@@ -414,8 +418,8 @@ func (g *OpcodeGenerator) buildValidOpcodeList() {
 				g.validOpcodes = append(g.validOpcodes, op)
 			}
 		case "precompiles":
-			// Include precompiles + essential opcodes for stack setup and basic operations
-			if g.isPrecompileOpcode(op.Opcode) || g.isEssentialForPrecompiles(op.Opcode) {
+			// Only include precompiles - they generate their own complete bytecode internally
+			if g.isPrecompileOpcode(op.Opcode) {
 				g.validOpcodes = append(g.validOpcodes, op)
 			}
 		default: // "all" or any other value
@@ -437,35 +441,28 @@ func (g *OpcodeGenerator) isPushOpcode(opcode uint16) bool {
 	return opcode >= 0x5f && opcode <= 0x7f
 }
 
-// isEssentialForPrecompiles checks if an opcode is essential for precompile fuzzing
-func (g *OpcodeGenerator) isEssentialForPrecompiles(opcode uint16) bool {
-	// Essential opcodes needed for precompile testing:
-	// - PUSH opcodes (0x5f-0x7f) for stack setup
-	// - STOP (0x00) for termination
-	// - DUP opcodes (0x80-0x8f) for stack manipulation
-	// - SWAP opcodes (0x90-0x9f) for stack manipulation
-	// - POP (0x50) for stack cleanup
-	// - MSTORE (0x52) for memory operations (used in precompile calls)
-	// - JUMPDEST (0x5b) for valid bytecode structure
+// countOpcodesInBytecode counts the number of opcodes in a bytecode sequence
+// This properly handles PUSH opcodes which consume data bytes
+func (g *OpcodeGenerator) countOpcodesInBytecode(bytecode []byte) int {
+	count := 0
+	pc := 0
 
-	switch {
-	case g.isPushOpcode(opcode):
-		return true
-	case opcode == 0x00: // STOP
-		return true
-	case opcode == 0x50: // POP
-		return true
-	case opcode == 0x52: // MSTORE
-		return true
-	case opcode == 0x5b: // JUMPDEST
-		return true
-	case opcode >= 0x80 && opcode <= 0x8f: // DUP1-DUP16
-		return true
-	case opcode >= 0x90 && opcode <= 0x9f: // SWAP1-SWAP16
-		return true
-	default:
-		return false
+	for pc < len(bytecode) {
+		opcode := bytecode[pc]
+		count++
+
+		// Handle PUSH opcodes which consume additional bytes
+		if opcode >= 0x60 && opcode <= 0x7f { // PUSH1-PUSH32
+			pushSize := int(opcode - 0x5f) // PUSH1=1, PUSH2=2, ..., PUSH32=32
+			pc += pushSize + 1             // Skip opcode + push data
+		} else if opcode == 0x5f { // PUSH0
+			pc++ // Just the opcode, no data
+		} else {
+			pc++ // Regular opcode
+		}
 	}
+
+	return count
 }
 
 // makePushTemplate creates a template function for PUSH opcodes
@@ -570,18 +567,22 @@ func (g *OpcodeGenerator) Generate() []byte {
 	g.jumpTargets = g.jumpTargets[:0]
 	g.jumpPlaceholders = g.jumpPlaceholders[:0]
 	g.currentGas = 0
+	g.opcodeCount = 0
 
 	// Push seed and txID as initial stack values for tracking
 	g.pushSeedAndTxID()
+	// Count the initial PUSH operations (2 PUSH32 opcodes)
+	g.opcodeCount += 2
 
 	// Generate bytecode
-	for len(g.bytecode) < g.maxSize-32 && g.currentGas < g.maxGas-1000 {
+	for len(g.bytecode) < g.maxSize-32 && g.currentGas < g.maxGas-1000 && g.opcodeCount < g.maxOpcodeCount-10 {
 		// Randomly place JUMPDESTs (20% chance when we have few targets)
 		if len(g.jumpTargets) < 10 && g.rng.Float64() < 0.2 {
 			pc := len(g.bytecode)
 			g.bytecode = append(g.bytecode, 0x5b) // JUMPDEST
 			g.jumpTargets = append(g.jumpTargets, pc)
 			g.currentGas += 1
+			g.opcodeCount += 1 // Count the JUMPDEST opcode
 			continue
 		}
 
@@ -591,8 +592,9 @@ func (g *OpcodeGenerator) Generate() []byte {
 	}
 
 	// Ensure we end with a safe terminating instruction
-	if len(g.bytecode) < g.maxSize-1 {
+	if len(g.bytecode) < g.maxSize-1 && g.opcodeCount < g.maxOpcodeCount {
 		g.bytecode = append(g.bytecode, 0x00) // STOP
+		g.opcodeCount += 1                    // Count the STOP opcode
 	}
 
 	// Fix up jump targets
@@ -656,13 +658,15 @@ func (g *OpcodeGenerator) generateNextInstruction() bool {
 	if choice < 0.001 { // 0.1% chance of invalid opcode
 		invalidOp := g.invalidOpcodes[g.rng.Intn(len(g.invalidOpcodes))]
 		g.bytecode = append(g.bytecode, invalidOp)
-		g.currentGas += 3 // Assume some gas cost
+		g.currentGas += 3  // Assume some gas cost
+		g.opcodeCount += 1 // Count the invalid opcode
 		return true
 	}
 
 	if choice < 0.004 { // 0.3% chance of random byte
 		g.bytecode = append(g.bytecode, byte(g.rng.Intn(256)))
 		g.currentGas += 3
+		g.opcodeCount += 1 // Count the random byte as an opcode
 		return true
 	}
 
@@ -691,6 +695,7 @@ func (g *OpcodeGenerator) generateValidInstruction() bool {
 			g.bytecode = append(g.bytecode, 0x60, pushData) // PUSH1
 			g.pushToStack([]byte{pushData}, true)
 			g.currentGas += 3
+			g.opcodeCount += 1 // Count the PUSH1 opcode
 			return true
 		}
 		return false // Can't generate anything
@@ -701,12 +706,16 @@ func (g *OpcodeGenerator) generateValidInstruction() bool {
 
 	// Generate the instruction
 	sequence := op.Template(g)
-	if len(g.bytecode)+len(sequence) > g.maxSize {
+	sequenceOpcodeCount := g.countOpcodesInBytecode(sequence)
+
+	// Check both bytecode size and opcode count limits
+	if len(g.bytecode)+len(sequence) > g.maxSize || g.opcodeCount+sequenceOpcodeCount > g.maxOpcodeCount {
 		return false
 	}
 
 	g.bytecode = append(g.bytecode, sequence...)
 	g.currentGas += op.GasCost
+	g.opcodeCount += sequenceOpcodeCount // Count all opcodes in the generated sequence
 
 	// Update stack state
 	g.updateStackState(op)
