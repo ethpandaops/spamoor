@@ -101,9 +101,9 @@ func (r *DeterministicRNG) Bytes(n int) []byte {
 // OpcodeInfo defines properties of an EVM opcode
 type OpcodeInfo struct {
 	Name        string
-	Opcode      byte
-	StackInput  int // Number of items consumed from stack
-	StackOutput int // Number of items pushed to stack
+	Opcode      uint16 // uint16 to support precompiles (≥0x100) and regular opcodes (≤0xff)
+	StackInput  int    // Number of items consumed from stack
+	StackOutput int    // Number of items pushed to stack
 	GasCost     uint64
 	Template    func(g *OpcodeGenerator) []byte // Function to generate valid sequence
 	Probability float64                         // Relative probability weight for selection (1.0 = normal)
@@ -119,11 +119,12 @@ type OpcodeGenerator struct {
 	maxGas           uint64      // Maximum gas limit
 	currentGas       uint64      // Current gas usage
 	maxSize          int         // Maximum bytecode size
-	opcodeInfos      map[byte]*OpcodeInfo
+	opcodeInfos      map[uint16]*OpcodeInfo
 	validOpcodes     []*OpcodeInfo
 	invalidOpcodes   []byte
 	txID             uint64 // Transaction ID for tracking
 	baseSeed         string // Base seed for reproducibility
+	fuzzMode         string // Fuzzing mode: "all", "opcodes", "precompiles"
 }
 
 // Template functions for opcodes
@@ -293,31 +294,31 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 
 		// Precompile calls (treated as special opcodes)
 		// These consume stack values and use them as inputs to precompiles
-		{"ECRECOVER", 0x01, 4, 1, 3000, ecrecoverTemplate, 2.5},   // Precompile 1 - consumes 4 stack items (hash, v, r, s)
-		{"SHA256", 0x02, 2, 1, 60, sha256Template, 2.5},           // Precompile 2 - consumes 2 stack items
-		{"RIPEMD160", 0x03, 2, 1, 600, ripemd160Template, 2.0},    // Precompile 3 - consumes 2 stack items
-		{"IDENTITY", 0x04, 1, 1, 15, identityTemplate, 2.0},       // Precompile 4 - consumes 1 stack item
-		{"MODEXP", 0x05, 0, 1, 200, modexpTemplate, 2.8},          // Precompile 5 - special handling, no stack consumption
-		{"ECADD", 0x06, 4, 1, 500, ecAddTemplate, 2.8},            // Precompile 6 - consumes 4 stack items (x1, y1, x2, y2)
-		{"ECMUL", 0x07, 3, 1, 40000, ecMulTemplate, 2.8},          // Precompile 7 - consumes 3 stack items (x, y, scalar)
-		{"ECPAIRING", 0x08, 6, 1, 100000, ecPairingTemplate, 2.8}, // Precompile 8 - consumes 6 stack items (minimum one pair)
-		{"BLAKE2F", 0x09, 7, 1, 1, blake2fTemplate, 2.5},          // Precompile 9 - consumes 7 stack items (rounds, h, m, t, f)
-		{"POINTEVAL", 0x0a, 6, 1, 50000, pointEvalTemplate, 2.5},  // Precompile 10 - consumes 6 stack items
+		// Using 0x100+ range to avoid collision with real EVM opcodes
+		{"ECRECOVER", 0x101, 4, 1, 3000, ecrecoverTemplate, 2.5},   // Precompile 1 - consumes 4 stack items (hash, v, r, s)
+		{"SHA256", 0x102, 2, 1, 60, sha256Template, 2.5},           // Precompile 2 - consumes 2 stack items
+		{"RIPEMD160", 0x103, 2, 1, 600, ripemd160Template, 2.0},    // Precompile 3 - consumes 2 stack items
+		{"IDENTITY", 0x104, 1, 1, 15, identityTemplate, 2.0},       // Precompile 4 - consumes 1 stack item
+		{"MODEXP", 0x105, 0, 1, 200, modexpTemplate, 2.8},          // Precompile 5 - special handling, no stack consumption
+		{"ECADD", 0x106, 4, 1, 500, ecAddTemplate, 2.8},            // Precompile 6 - consumes 4 stack items (x1, y1, x2, y2)
+		{"ECMUL", 0x107, 3, 1, 40000, ecMulTemplate, 2.8},          // Precompile 7 - consumes 3 stack items (x, y, scalar)
+		{"ECPAIRING", 0x108, 6, 1, 100000, ecPairingTemplate, 2.8}, // Precompile 8 - consumes 6 stack items (minimum one pair)
+		{"BLAKE2F", 0x109, 7, 1, 1, blake2fTemplate, 2.5},          // Precompile 9 - consumes 7 stack items (rounds, h, m, t, f)
+		{"POINTEVAL", 0x10a, 6, 1, 50000, pointEvalTemplate, 2.5},  // Precompile 10 - consumes 6 stack items
 
 		// BLS12-381 precompiles (Prague fork)
-		{"BLS12_G1ADD", 0x0b, 4, 1, 600, bls12G1AddTemplate, 2.5},               // Precompile 11 - G1 point addition
-		{"BLS12_G1MUL", 0x0c, 3, 1, 12000, bls12G1MulTemplate, 2.5},             // Precompile 12 - G1 scalar multiplication
-		{"BLS12_G1MSM", 0x0d, 0, 1, 30000, bls12G1MSMTemplate, 2.2},             // Precompile 13 - G1 multi-scalar multiplication
-		{"BLS12_G2ADD", 0x0e, 8, 1, 4500, bls12G2AddTemplate, 2.5},              // Precompile 14 - G2 point addition
-		{"BLS12_G2MUL", 0x0f, 5, 1, 55000, bls12G2MulTemplate, 2.5},             // Precompile 15 - G2 scalar multiplication
-		{"BLS12_G2MSM", 0x10, 0, 1, 150000, bls12G2MSMTemplate, 2.2},            // Precompile 16 - G2 multi-scalar multiplication
-		{"BLS12_PAIRING", 0x11, 12, 1, 115000, bls12PairingTemplate, 2.8},       // Precompile 17 - Pairing check
-		{"BLS12_MAP_FP2_TO_G2", 0x12, 4, 1, 110000, bls12MapFp2G2Template, 2.2}, // Precompile 18 - Map field point to G2
+		{"BLS12_G1ADD", 0x10b, 4, 1, 375, bls12G1AddTemplate, 2.5},              // Precompile 0x0b - G1 point addition
+		{"BLS12_G1MSM", 0x10c, 0, 1, 30000, bls12G1MSMTemplate, 2.2},            // Precompile 0x0c - G1 multi-scalar multiplication
+		{"BLS12_G2ADD", 0x10d, 8, 1, 600, bls12G2AddTemplate, 2.5},              // Precompile 0x0d - G2 point addition
+		{"BLS12_G2MSM", 0x10e, 0, 1, 150000, bls12G2MSMTemplate, 2.2},           // Precompile 0x0e - G2 multi-scalar multiplication
+		{"BLS12_PAIRING_CHECK", 0x10f, 12, 1, 37700, bls12PairingTemplate, 2.8}, // Precompile 0x0f - Pairing check
+		{"BLS12_MAP_FP_TO_G1", 0x110, 2, 1, 5500, bls12MapFpToG1Template, 2.2},  // Precompile 0x10 - Map field element to G1
+		{"BLS12_MAP_FP2_TO_G2", 0x111, 4, 1, 23800, bls12MapFp2G2Template, 2.2}, // Precompile 0x11 - Map field extension element to G2
 	}
 
 	// Add PUSH1-PUSH32 opcodes
 	for i := 1; i <= 32; i++ {
-		pushOpcode := byte(0x5f + i)
+		pushOpcode := uint16(0x5f + i)
 		pushSize := i
 		opcodes = append(opcodes, &OpcodeInfo{
 			Name:        fmt.Sprintf("PUSH%d", i),
@@ -332,7 +333,7 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 
 	// Add DUP1-DUP16 opcodes
 	for i := 1; i <= 16; i++ {
-		dupOpcode := byte(0x7f + i)
+		dupOpcode := uint16(0x7f + i)
 		dupDepth := i
 		opcodes = append(opcodes, &OpcodeInfo{
 			Name:        fmt.Sprintf("DUP%d", i),
@@ -340,14 +341,14 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 			StackInput:  dupDepth,
 			StackOutput: dupDepth + 1,
 			GasCost:     3,
-			Template:    simpleOpcode(dupOpcode),
+			Template:    simpleOpcode(byte(dupOpcode)),
 			Probability: 1.0,
 		})
 	}
 
 	// Add SWAP1-SWAP16 opcodes
 	for i := 1; i <= 16; i++ {
-		swapOpcode := byte(0x8f + i)
+		swapOpcode := uint16(0x8f + i)
 		swapDepth := i + 1
 		opcodes = append(opcodes, &OpcodeInfo{
 			Name:        fmt.Sprintf("SWAP%d", i),
@@ -355,7 +356,7 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 			StackInput:  swapDepth,
 			StackOutput: swapDepth,
 			GasCost:     3,
-			Template:    simpleOpcode(swapOpcode),
+			Template:    simpleOpcode(byte(swapOpcode)),
 			Probability: 1.0,
 		})
 	}
@@ -377,9 +378,10 @@ func NewOpcodeGenerator(txID uint64, baseSeed string, maxSize int, maxGas uint64
 		maxGas:           maxGas,
 		currentGas:       0,
 		maxSize:          maxSize,
-		opcodeInfos:      make(map[byte]*OpcodeInfo),
+		opcodeInfos:      make(map[uint16]*OpcodeInfo),
 		txID:             txID,
 		baseSeed:         baseSeed,
+		fuzzMode:         "all", // Default mode
 		invalidOpcodes: []byte{
 			0x0c, 0x0d, 0x0e, 0x0f, // Invalid opcodes
 			0x1e, 0x1f, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
@@ -393,18 +395,84 @@ func NewOpcodeGenerator(txID uint64, baseSeed string, maxSize int, maxGas uint64
 	return g
 }
 
+// SetFuzzMode sets the fuzzing mode for the generator
+func (g *OpcodeGenerator) SetFuzzMode(mode string) {
+	g.fuzzMode = mode
+	g.buildValidOpcodeList() // Rebuild the valid opcodes list based on mode
+}
+
 // buildValidOpcodeList creates a list of valid opcodes for random selection
 func (g *OpcodeGenerator) buildValidOpcodeList() {
+	g.validOpcodes = g.validOpcodes[:0] // Clear existing list
+
 	for _, op := range g.opcodeInfos {
-		g.validOpcodes = append(g.validOpcodes, op)
+		// Filter based on fuzz mode
+		switch g.fuzzMode {
+		case "opcodes":
+			// Only include regular EVM opcodes (exclude precompiles 0x01-0x12)
+			if !g.isPrecompileOpcode(op.Opcode) {
+				g.validOpcodes = append(g.validOpcodes, op)
+			}
+		case "precompiles":
+			// Include precompiles + essential opcodes for stack setup and basic operations
+			if g.isPrecompileOpcode(op.Opcode) || g.isEssentialForPrecompiles(op.Opcode) {
+				g.validOpcodes = append(g.validOpcodes, op)
+			}
+		default: // "all" or any other value
+			// Include all opcodes
+			g.validOpcodes = append(g.validOpcodes, op)
+		}
+	}
+}
+
+// isPrecompileOpcode checks if an opcode represents a precompile call
+func (g *OpcodeGenerator) isPrecompileOpcode(opcode uint16) bool {
+	// Precompile opcodes are ≥0x100 to avoid collision with real EVM opcodes
+	return opcode >= 0x100 && opcode <= 0x111 // 0x100-0x111 for precompiles 1-18
+}
+
+// isPushOpcode checks if an opcode is a PUSH instruction
+func (g *OpcodeGenerator) isPushOpcode(opcode uint16) bool {
+	// PUSH0 is 0x5f, PUSH1-PUSH32 are 0x60-0x7f
+	return opcode >= 0x5f && opcode <= 0x7f
+}
+
+// isEssentialForPrecompiles checks if an opcode is essential for precompile fuzzing
+func (g *OpcodeGenerator) isEssentialForPrecompiles(opcode uint16) bool {
+	// Essential opcodes needed for precompile testing:
+	// - PUSH opcodes (0x5f-0x7f) for stack setup
+	// - STOP (0x00) for termination
+	// - DUP opcodes (0x80-0x8f) for stack manipulation
+	// - SWAP opcodes (0x90-0x9f) for stack manipulation
+	// - POP (0x50) for stack cleanup
+	// - MSTORE (0x52) for memory operations (used in precompile calls)
+	// - JUMPDEST (0x5b) for valid bytecode structure
+
+	switch {
+	case g.isPushOpcode(opcode):
+		return true
+	case opcode == 0x00: // STOP
+		return true
+	case opcode == 0x50: // POP
+		return true
+	case opcode == 0x52: // MSTORE
+		return true
+	case opcode == 0x5b: // JUMPDEST
+		return true
+	case opcode >= 0x80 && opcode <= 0x8f: // DUP1-DUP16
+		return true
+	case opcode >= 0x90 && opcode <= 0x9f: // SWAP1-SWAP16
+		return true
+	default:
+		return false
 	}
 }
 
 // makePushTemplate creates a template function for PUSH opcodes
-func (g *OpcodeGenerator) makePushTemplate(opcode byte, size int) func(g *OpcodeGenerator) []byte {
+func (g *OpcodeGenerator) makePushTemplate(opcode uint16, size int) func(g *OpcodeGenerator) []byte {
 	return func(g *OpcodeGenerator) []byte {
 		result := make([]byte, 1+size)
-		result[0] = opcode
+		result[0] = byte(opcode) // Cast to byte since PUSH opcodes are always ≤ 0xff
 
 		// Generate random data for PUSH
 		data := g.rng.Bytes(size)
@@ -651,7 +719,7 @@ func (g *OpcodeGenerator) selectWeightedOpcode(candidates []*OpcodeInfo) *Opcode
 	// Prefer PUSH operations when stack is low
 	if len(g.stack) < 5 {
 		for _, op := range candidates {
-			if op.Opcode >= 0x60 && op.Opcode <= 0x7f { // PUSH operations
+			if g.isPushOpcode(op.Opcode) { // PUSH operations
 				if g.rng.Float64() < 0.7 {
 					return op
 				}
@@ -720,7 +788,7 @@ func (g *OpcodeGenerator) updateStackState(op *OpcodeInfo) {
 	// Add produced items
 	for i := 0; i < op.StackOutput; i++ {
 		// Most operations produce unknown values
-		known := op.Opcode >= 0x60 && op.Opcode <= 0x7f // PUSH operations produce known values
+		known := g.isPushOpcode(op.Opcode) // PUSH operations produce known values
 		value := make([]byte, 32)
 		if known {
 			// For PUSH operations, we know the value

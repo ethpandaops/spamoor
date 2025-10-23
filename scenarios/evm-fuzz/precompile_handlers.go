@@ -30,25 +30,62 @@ func blake2fTemplate(g *OpcodeGenerator) []byte   { return g.generatePrecompileC
 func pointEvalTemplate(g *OpcodeGenerator) []byte { return g.generatePrecompileCall(10) }
 
 // BLS12-381 precompile templates
-func bls12G1AddTemplate(g *OpcodeGenerator) []byte    { return g.generatePrecompileCall(11) }
-func bls12G1MulTemplate(g *OpcodeGenerator) []byte    { return g.generatePrecompileCall(12) }
-func bls12G1MSMTemplate(g *OpcodeGenerator) []byte    { return g.generatePrecompileCall(13) }
-func bls12G2AddTemplate(g *OpcodeGenerator) []byte    { return g.generatePrecompileCall(14) }
-func bls12G2MulTemplate(g *OpcodeGenerator) []byte    { return g.generatePrecompileCall(15) }
-func bls12G2MSMTemplate(g *OpcodeGenerator) []byte    { return g.generatePrecompileCall(16) }
-func bls12PairingTemplate(g *OpcodeGenerator) []byte  { return g.generatePrecompileCall(17) }
-func bls12MapFp2G2Template(g *OpcodeGenerator) []byte { return g.generatePrecompileCall(18) }
+func bls12G1AddTemplate(g *OpcodeGenerator) []byte     { return g.generatePrecompileCall(11) } // 0x0b
+func bls12G1MSMTemplate(g *OpcodeGenerator) []byte     { return g.generatePrecompileCall(12) } // 0x0c
+func bls12G2AddTemplate(g *OpcodeGenerator) []byte     { return g.generatePrecompileCall(13) } // 0x0d
+func bls12G2MSMTemplate(g *OpcodeGenerator) []byte     { return g.generatePrecompileCall(14) } // 0x0e
+func bls12PairingTemplate(g *OpcodeGenerator) []byte   { return g.generatePrecompileCall(15) } // 0x0f
+func bls12MapFpToG1Template(g *OpcodeGenerator) []byte { return g.generatePrecompileCall(16) } // 0x10
+func bls12MapFp2G2Template(g *OpcodeGenerator) []byte  { return g.generatePrecompileCall(17) } // 0x11
 
-// generateValidBN256Point generates a valid BN256 curve point
+// generateValidBN256Point generates a BN256 curve point - mostly valid, sometimes invalid for testing
 func (g *OpcodeGenerator) generateValidBN256Point() []byte {
 	point := make([]byte, 64) // 32 bytes x + 32 bytes y
+
+	// 4% chance to generate invalid BN256 points for testing edge cases
+	if g.rng.Float64() < 0.04 {
+		invalidType := g.rng.Intn(4)
+		switch invalidType {
+		case 0:
+			// Coordinates >= field modulus
+			copy(point[:32], g.rng.Bytes(32))
+			copy(point[32:], g.rng.Bytes(32))
+			// Ensure coordinates are >= field modulus
+			point[0] |= 0x80  // Make x large
+			point[32] |= 0x80 // Make y large
+		case 1:
+			// All 0xFF bytes (definitely > modulus)
+			for i := range point {
+				point[i] = 0xFF
+			}
+		case 2:
+			// Valid x, invalid y (point not on curve)
+			x := big.NewInt(int64(g.rng.Intn(1000) + 1))
+			xBytes := make([]byte, 32)
+			x.FillBytes(xBytes)
+			copy(point[:32], xBytes)
+			// Generate deliberately wrong y coordinate
+			copy(point[32:], g.rng.Bytes(32))
+			point[32] |= 0x80 // Ensure invalid
+		default:
+			// Coordinates that would cause overflow in calculations
+			// Use values near the field modulus
+			modBytes := bn256FieldModulus.Bytes()
+			copy(point[:32], modBytes)
+			copy(point[32:], modBytes)
+			// Add small random increment to go over modulus
+			point[31] += byte(g.rng.Intn(10) + 1)
+			point[63] += byte(g.rng.Intn(10) + 1)
+		}
+		return point
+	}
 
 	// 10% chance of zero point (point at infinity)
 	if g.rng.Float64() < 0.1 {
 		return point // All zeros = point at infinity
 	}
 
-	// Generate valid curve point by trying random x values
+	// Generate mostly valid curve point by trying random x values
 	// For efficiency, we'll generate a few known good patterns
 	patterns := []func() []byte{
 		// Pattern 1: Use small x values (often valid)
@@ -221,11 +258,11 @@ func (g *OpcodeGenerator) generatePrecompileCall(precompileAddr uint8) []byte {
 		return g.generateBN256PairingCall()
 	case 10: // KZG Point Evaluation
 		return g.generateKZGPointEvalCall()
-	case 13: // BLS12 G1 MSM
+	case 12: // BLS12 G1 MSM
 		return g.generateBLS12G1MSMCall()
-	case 16: // BLS12 G2 MSM
+	case 14: // BLS12 G2 MSM
 		return g.generateBLS12G2MSMCall()
-	case 11, 12, 14, 15, 17, 18: // Other BLS12 operations
+	case 11, 13, 15, 16, 17: // Other BLS12 operations
 		return g.generateBLS12Call(precompileAddr)
 	}
 
@@ -327,6 +364,9 @@ func (g *OpcodeGenerator) generatePrecompileCall(precompileAddr uint8) []byte {
 	// CALL opcode
 	bytecode = append(bytecode, 0xf1) // CALL
 
+	// Add LOG0 to log the result when in precompiles-only mode
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(returnOffset, retSize)...)
+
 	return bytecode
 }
 
@@ -370,6 +410,9 @@ func (g *OpcodeGenerator) generateBN256EcAddCall() []byte {
 	bytecode = append(bytecode, 0x5a)       // GAS
 	bytecode = append(bytecode, 0xf1)       // CALL
 
+	// Add LOG0 to log the result when in precompiles-only mode (return at offset 128, size 64)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(128, 64)...)
+
 	return bytecode
 }
 
@@ -407,6 +450,9 @@ func (g *OpcodeGenerator) generateBN256EcMulCall() []byte {
 	bytecode = append(bytecode, 0x60, 0x07) // PUSH1 7 (precompile address)
 	bytecode = append(bytecode, 0x5a)       // GAS
 	bytecode = append(bytecode, 0xf1)       // CALL
+
+	// Add LOG0 to log the result when in precompiles-only mode (return at offset 96, size 64)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(96, 64)...)
 
 	return bytecode
 }
@@ -477,6 +523,9 @@ func (g *OpcodeGenerator) generateBN256PairingCall() []byte {
 	bytecode = append(bytecode, 0x60, 0x08) // PUSH1 8 (precompile address)
 	bytecode = append(bytecode, 0x5a)       // GAS
 	bytecode = append(bytecode, 0xf1)       // CALL
+
+	// Add LOG0 to log the result when in precompiles-only mode (return at returnOffset, size 32)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(returnOffset, 32)...)
 
 	return bytecode
 }
@@ -579,6 +628,9 @@ func (g *OpcodeGenerator) generateKZGPointEvalCall() []byte {
 	bytecode = append(bytecode, 0x5a)       // GAS
 	bytecode = append(bytecode, 0xf1)       // CALL
 
+	// Add LOG0 to log the result when in precompiles-only mode (return at 0xe0, size 64)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(0xe0, 64)...)
+
 	return bytecode
 }
 
@@ -610,6 +662,64 @@ func (g *OpcodeGenerator) generateValidBLS12ScalarField() []byte {
 	}
 
 	return scalar
+}
+
+// generateValidBLS12BaseField generates a BLS12-381 base field element (64 bytes) - mostly valid, sometimes invalid for testing
+func (g *OpcodeGenerator) generateValidBLS12BaseField() []byte {
+	// BLS12-381 base field modulus (p)
+	// 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab
+	fieldElement := make([]byte, 64)
+
+	// 5% chance to generate invalid field elements for testing edge cases
+	if g.rng.Float64() < 0.05 {
+		invalidType := g.rng.Intn(3)
+		switch invalidType {
+		case 0:
+			// Field element >= modulus (set high bits)
+			copy(fieldElement, g.rng.Bytes(64))
+			fieldElement[0] |= 0xE0 // Set top 3 bits to ensure >= p
+		case 1:
+			// All 0xFF bytes (definitely > modulus)
+			for i := range fieldElement {
+				fieldElement[i] = 0xFF
+			}
+		default:
+			// Modulus + small random value
+			copy(fieldElement, g.rng.Bytes(64))
+			fieldElement[0] = 0x1A // Start with modulus high byte
+			fieldElement[1] = 0x01
+			fieldElement[2] = 0x11
+			fieldElement[3] = 0xEA
+		}
+		return fieldElement
+	}
+
+	// Generate mostly valid patterns
+	patternType := g.rng.Intn(4)
+	switch patternType {
+	case 0:
+		// Small values (often useful for testing)
+		smallVal := g.rng.Intn(1000)
+		binary.BigEndian.PutUint64(fieldElement[56:], uint64(smallVal))
+	case 1:
+		// Powers of 2 (common edge cases)
+		power := g.rng.Intn(63)
+		if power < 56 {
+			binary.BigEndian.PutUint64(fieldElement[56:], 1<<power)
+		} else {
+			binary.BigEndian.PutUint64(fieldElement[48:56], 1<<(power-56))
+		}
+	case 2:
+		// Random but constrained to be less than modulus
+		// Use simple constraint: clear high bits to ensure < p
+		copy(fieldElement, g.rng.Bytes(64))
+		fieldElement[0] &= 0x1F // Clear top 3 bits to ensure < p
+	default:
+		// Medium random values
+		copy(fieldElement[32:], g.rng.Bytes(32)) // Only use lower 32 bytes
+	}
+
+	return fieldElement
 }
 
 // generateValidKZGCommitment generates a valid KZG commitment (compressed G1 point)
@@ -811,6 +921,9 @@ func (g *OpcodeGenerator) generateModexpCall() []byte {
 	// CALL opcode
 	bytecode = append(bytecode, 0xf1) // CALL
 
+	// Add LOG0 to log the result when in precompiles-only mode (return at returnOffset, size modLen)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(returnOffset, modLen)...)
+
 	return bytecode
 }
 
@@ -821,15 +934,13 @@ func (g *OpcodeGenerator) generateBLS12Call(precompileAddr uint8) []byte {
 	switch precompileAddr {
 	case 11: // BLS12_G1ADD
 		return g.generateBLS12G1AddCall()
-	case 12: // BLS12_G1MUL
-		return g.generateBLS12G1MulCall()
-	case 14: // BLS12_G2ADD
+	case 13: // BLS12_G2ADD
 		return g.generateBLS12G2AddCall()
-	case 15: // BLS12_G2MUL
-		return g.generateBLS12G2MulCall()
-	case 17: // BLS12_PAIRING
+	case 15: // BLS12_PAIRING_CHECK
 		return g.generateBLS12PairingCall()
-	case 18: // BLS12_MAP_FP2_TO_G2
+	case 16: // BLS12_MAP_FP_TO_G1
+		return g.generateBLS12MapFpToG1Call()
+	case 17: // BLS12_MAP_FP2_TO_G2
 		return g.generateBLS12MapFp2G2Call()
 	default:
 		// Fallback to simple random data
@@ -845,122 +956,267 @@ func (g *OpcodeGenerator) generateBLS12Call(precompileAddr uint8) []byte {
 		bytecode = append(bytecode, 0x60, precompileAddr) // PUSH1 precompileAddr
 		bytecode = append(bytecode, 0x5a)                 // GAS
 		bytecode = append(bytecode, 0xf1)                 // CALL
+
+		// Add LOG0 to log the result when in precompiles-only mode
+		bytecode = append(bytecode, g.addLogIfPrecompilesOnly(32, 32)...)
 	}
 
 	return bytecode
 }
 
-// generateValidBLS12G1Point generates a valid BLS12-381 G1 point
-func (g *OpcodeGenerator) generateValidBLS12G1Point() []byte {
-	point := make([]byte, 64) // 32 bytes x + 32 bytes y
+// generateValidBLS12G1PointUncompressed generates a BLS12-381 G1 point in uncompressed format (128 bytes) - mostly valid, sometimes invalid for testing
+func (g *OpcodeGenerator) generateValidBLS12G1PointUncompressed() []byte {
+	point := make([]byte, 128) // 128 bytes uncompressed format: 64 bytes x + 64 bytes y
+
+	// 3% chance to generate invalid G1 points for testing edge cases
+	if g.rng.Float64() < 0.03 {
+		invalidType := g.rng.Intn(4)
+		switch invalidType {
+		case 0:
+			// Invalid field elements (> modulus)
+			copy(point[:64], g.rng.Bytes(64))
+			copy(point[64:], g.rng.Bytes(64))
+			point[0] |= 0xE0  // Ensure x >= modulus
+			point[64] |= 0xE0 // Ensure y >= modulus
+		case 1:
+			// All 0xFF bytes
+			for i := range point {
+				point[i] = 0xFF
+			}
+		case 2:
+			// Mixed valid x, invalid y
+			xCoord := g.generateValidBLS12BaseField()
+			copy(point[:64], xCoord)
+			copy(point[64:], g.rng.Bytes(64))
+			point[64] |= 0xE0 // Invalid y
+		default:
+			// Invalid point format (random high bits set in wrong places)
+			xCoord := g.generateValidBLS12BaseField()
+			yCoord := g.generateValidBLS12BaseField()
+			copy(point[:64], xCoord)
+			copy(point[64:], yCoord)
+			// Set compression/infinity flags incorrectly
+			point[0] |= 0x80 // Set compression flag (should be 0 for uncompressed)
+		}
+		return point
+	}
 
 	// 10% chance of zero point (point at infinity)
 	if g.rng.Float64() < 0.1 {
-		return point // All zeros = point at infinity
+		// Zero point: all zeros represents point at infinity in uncompressed format
+		return point
 	}
 
-	// Use known valid BLS12-381 G1 generator point or simple patterns
-	if g.rng.Float64() < 0.3 {
-		// Use G1 generator point (simplified coordinates)
-		binary.BigEndian.PutUint64(point[24:32], 1) // x = 1 (simplified)
-		binary.BigEndian.PutUint64(point[56:64], 2) // y = 2 (simplified)
-	} else {
-		// Generate random field elements (will be reduced by precompile)
-		copy(point, g.rng.Bytes(64))
+	// Generate mostly valid uncompressed G1 point using proper field elements
+	patternType := g.rng.Intn(3)
+	switch patternType {
+	case 0:
+		// Use generator point pattern with valid field elements
+		xCoord := g.generateValidBLS12BaseField()
+		yCoord := g.generateValidBLS12BaseField()
+		copy(point[:64], xCoord)
+		copy(point[64:], yCoord)
+	case 1:
+		// Small coordinate values within field
+		xCoord := make([]byte, 64)
+		yCoord := make([]byte, 64)
+		binary.BigEndian.PutUint64(xCoord[56:64], uint64(g.rng.Intn(1000)+1)) // x coordinate
+		binary.BigEndian.PutUint64(yCoord[56:64], uint64(g.rng.Intn(1000)+1)) // y coordinate
+		copy(point[:64], xCoord)
+		copy(point[64:], yCoord)
+	default:
+		// Valid random field elements
+		xCoord := g.generateValidBLS12BaseField()
+		yCoord := g.generateValidBLS12BaseField()
+		copy(point[:64], xCoord)
+		copy(point[64:], yCoord)
 	}
 
 	return point
 }
 
-// generateValidBLS12G2Point generates a valid BLS12-381 G2 point
-func (g *OpcodeGenerator) generateValidBLS12G2Point() []byte {
-	point := make([]byte, 128) // 4 * 32 bytes (x1, x2, y1, y2)
+// generateValidBLS12G2PointUncompressed generates a BLS12-381 G2 point in uncompressed format (256 bytes) - mostly valid, sometimes invalid for testing
+func (g *OpcodeGenerator) generateValidBLS12G2PointUncompressed() []byte {
+	point := make([]byte, 256) // 256 bytes uncompressed format: 64+64+64+64 bytes for x_c0,x_c1,y_c0,y_c1
 
-	// 10% chance of zero point
-	if g.rng.Float64() < 0.1 {
-		return point // All zeros = point at infinity
+	// 3% chance to generate invalid G2 points for testing edge cases
+	if g.rng.Float64() < 0.03 {
+		invalidType := g.rng.Intn(5)
+		switch invalidType {
+		case 0:
+			// Invalid field elements (> modulus)
+			copy(point, g.rng.Bytes(256))
+			for i := 0; i < 4; i++ {
+				point[i*64] |= 0xE0 // Ensure all field elements >= modulus
+			}
+		case 1:
+			// All 0xFF bytes
+			for i := range point {
+				point[i] = 0xFF
+			}
+		case 2:
+			// Mixed valid and invalid field elements
+			xC0 := g.generateValidBLS12BaseField()
+			xC1 := g.generateValidBLS12BaseField()
+			copy(point[0:64], xC0)
+			copy(point[64:128], xC1)
+			// Invalid y coordinates
+			copy(point[128:192], g.rng.Bytes(64))
+			copy(point[192:256], g.rng.Bytes(64))
+			point[128] |= 0xE0 // Invalid y_c0
+			point[192] |= 0xE0 // Invalid y_c1
+		case 3:
+			// Invalid point format flags
+			xC0 := g.generateValidBLS12BaseField()
+			xC1 := g.generateValidBLS12BaseField()
+			yC0 := g.generateValidBLS12BaseField()
+			yC1 := g.generateValidBLS12BaseField()
+			copy(point[0:64], xC0)
+			copy(point[64:128], xC1)
+			copy(point[128:192], yC0)
+			copy(point[192:256], yC1)
+			// Set compression flag incorrectly
+			point[0] |= 0x80 // Set compression flag (should be 0 for uncompressed)
+		default:
+			// Wrong field element ordering
+			xC0 := g.generateValidBLS12BaseField()
+			xC1 := g.generateValidBLS12BaseField()
+			yC0 := g.generateValidBLS12BaseField()
+			yC1 := g.generateValidBLS12BaseField()
+			// Deliberately swap field elements to test validation
+			copy(point[0:64], yC1)    // Wrong position
+			copy(point[64:128], yC0)  // Wrong position
+			copy(point[128:192], xC1) // Wrong position
+			copy(point[192:256], xC0) // Wrong position
+		}
+		return point
 	}
 
-	// Use simple patterns or random data
-	if g.rng.Float64() < 0.3 {
-		// Use simplified valid coordinates
-		binary.BigEndian.PutUint64(point[24:32], 1)   // x1 = 1
-		binary.BigEndian.PutUint64(point[56:64], 2)   // x2 = 2
-		binary.BigEndian.PutUint64(point[88:96], 1)   // y1 = 1
-		binary.BigEndian.PutUint64(point[120:128], 2) // y2 = 2
-	} else {
-		// Generate random field elements
-		copy(point, g.rng.Bytes(128))
+	// 10% chance of zero point (point at infinity)
+	if g.rng.Float64() < 0.1 {
+		// Zero point: all zeros represents point at infinity in uncompressed format
+		return point
+	}
+
+	// Generate mostly valid uncompressed G2 point using proper field elements
+	patternType := g.rng.Intn(3)
+	switch patternType {
+	case 0:
+		// Use generator point pattern with valid field elements
+		xC0 := g.generateValidBLS12BaseField()
+		xC1 := g.generateValidBLS12BaseField()
+		yC0 := g.generateValidBLS12BaseField()
+		yC1 := g.generateValidBLS12BaseField()
+		copy(point[0:64], xC0)    // x_c0
+		copy(point[64:128], xC1)  // x_c1
+		copy(point[128:192], yC0) // y_c0
+		copy(point[192:256], yC1) // y_c1
+	case 1:
+		// Small coordinate values within field
+		xC0 := make([]byte, 64)
+		xC1 := make([]byte, 64)
+		yC0 := make([]byte, 64)
+		yC1 := make([]byte, 64)
+		binary.BigEndian.PutUint64(xC0[56:64], uint64(g.rng.Intn(1000)+1)) // x_c0
+		binary.BigEndian.PutUint64(xC1[56:64], uint64(g.rng.Intn(1000)+1)) // x_c1
+		binary.BigEndian.PutUint64(yC0[56:64], uint64(g.rng.Intn(1000)+1)) // y_c0
+		binary.BigEndian.PutUint64(yC1[56:64], uint64(g.rng.Intn(1000)+1)) // y_c1
+		copy(point[0:64], xC0)                                             // x_c0
+		copy(point[64:128], xC1)                                           // x_c1
+		copy(point[128:192], yC0)                                          // y_c0
+		copy(point[192:256], yC1)                                          // y_c1
+	default:
+		// Valid random field elements
+		xC0 := g.generateValidBLS12BaseField()
+		xC1 := g.generateValidBLS12BaseField()
+		yC0 := g.generateValidBLS12BaseField()
+		yC1 := g.generateValidBLS12BaseField()
+		copy(point[0:64], xC0)    // x_c0
+		copy(point[64:128], xC1)  // x_c1
+		copy(point[128:192], yC0) // y_c0
+		copy(point[192:256], yC1) // y_c1
 	}
 
 	return point
+}
+
+// generateBLS12MapFpToG1Call creates a BLS12-381 map field point to G1 call
+func (g *OpcodeGenerator) generateBLS12MapFpToG1Call() []byte {
+	var bytecode []byte
+
+	// Generate valid BLS12-381 base field element (64 bytes)
+	fieldElement := g.generateValidBLS12BaseField()
+
+	// Write field element using 2 MSTORE operations (64 bytes = 2 × 32 bytes)
+	bytecode = append(bytecode, 0x7f) // PUSH32
+	bytecode = append(bytecode, fieldElement[:32]...)
+	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0
+	bytecode = append(bytecode, 0x52)       // MSTORE
+
+	bytecode = append(bytecode, 0x7f) // PUSH32
+	bytecode = append(bytecode, fieldElement[32:]...)
+	bytecode = append(bytecode, 0x60, 0x20) // PUSH1 32
+	bytecode = append(bytecode, 0x52)       // MSTORE
+
+	// Setup CALL to BLS12_MAP_FP_TO_G1 precompile
+	bytecode = append(bytecode, 0x60, 0x80) // PUSH1 128 (return size - uncompressed G1 point)
+	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64 (return offset)
+	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64 (args size)
+	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
+	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
+	bytecode = append(bytecode, 0x60, 0x10) // PUSH1 16 (precompile address)
+	bytecode = append(bytecode, 0x5a)       // GAS
+	bytecode = append(bytecode, 0xf1)       // CALL
+
+	// Add LOG0 to log the result when in precompiles-only mode (return at 0x40, size 128)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(0x40, 128)...)
+
+	return bytecode
 }
 
 // generateBLS12G1AddCall creates a BLS12-381 G1 point addition call
 func (g *OpcodeGenerator) generateBLS12G1AddCall() []byte {
 	var bytecode []byte
 
-	// Generate two valid BLS12 G1 points
-	point1 := g.generateValidBLS12G1Point()
-	point2 := g.generateValidBLS12G1Point()
+	// BLS12_G1ADD input: 256 bytes (64+64+64+64 bytes for x1,y1,x2,y2)
+	// Generate two valid BLS12 G1 points (128 bytes each, uncompressed format)
+	point1 := g.generateValidBLS12G1PointUncompressed()
+	point2 := g.generateValidBLS12G1PointUncompressed()
 
-	// Write points to memory
-	for i, point := range [][]byte{point1, point2} {
-		for j := 0; j < 2; j++ { // x, y coordinates
-			bytecode = append(bytecode, 0x7f) // PUSH32
-			bytecode = append(bytecode, point[j*32:(j+1)*32]...)
-			offset := i*64 + j*32
-			bytecode = append(bytecode, 0x60, byte(offset)) // PUSH1 offset
-			bytecode = append(bytecode, 0x52)               // MSTORE
+	// Write points to memory using 8 MSTORE operations (256 bytes = 8 × 32 bytes)
+	for i := 0; i < 8; i++ {
+		var data []byte
+		if i < 4 {
+			// First point (128 bytes = 4 × 32 bytes)
+			data = point1[i*32 : (i+1)*32]
+		} else {
+			// Second point (128 bytes = 4 × 32 bytes)
+			data = point2[(i-4)*32 : (i-3)*32]
 		}
+
+		bytecode = append(bytecode, 0x7f) // PUSH32
+		bytecode = append(bytecode, data...)
+		offset := i * 32
+		if offset < 256 {
+			bytecode = append(bytecode, 0x60, byte(offset)) // PUSH1 offset
+		} else {
+			bytecode = append(bytecode, 0x61, byte(offset>>8), byte(offset)) // PUSH2 offset
+		}
+		bytecode = append(bytecode, 0x52) // MSTORE
 	}
 
 	// Setup CALL to BLS12_G1ADD precompile
-	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64 (return size)
-	bytecode = append(bytecode, 0x60, 0x80) // PUSH1 128 (return offset)
-	bytecode = append(bytecode, 0x60, 0x80) // PUSH1 128 (args size)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x0b) // PUSH1 11 (precompile address)
-	bytecode = append(bytecode, 0x5a)       // GAS
-	bytecode = append(bytecode, 0xf1)       // CALL
+	bytecode = append(bytecode, 0x60, 0x80)       // PUSH1 128 (return size - uncompressed G1 point)
+	bytecode = append(bytecode, 0x61, 0x01, 0x00) // PUSH2 256 (return offset)
+	bytecode = append(bytecode, 0x61, 0x01, 0x00) // PUSH2 256 (args size - two 128-byte points)
+	bytecode = append(bytecode, 0x60, 0x00)       // PUSH1 0 (args offset)
+	bytecode = append(bytecode, 0x60, 0x00)       // PUSH1 0 (value)
+	bytecode = append(bytecode, 0x60, 0x0b)       // PUSH1 11 (precompile address)
+	bytecode = append(bytecode, 0x5a)             // GAS
+	bytecode = append(bytecode, 0xf1)             // CALL
 
-	return bytecode
-}
-
-// generateBLS12G1MulCall creates a BLS12-381 G1 scalar multiplication call
-func (g *OpcodeGenerator) generateBLS12G1MulCall() []byte {
-	var bytecode []byte
-
-	// Generate valid BLS12 G1 point and scalar
-	point := g.generateValidBLS12G1Point()
-	scalar := g.rng.Bytes(32)
-
-	// Write point and scalar to memory
-	bytecode = append(bytecode, 0x7f)          // PUSH32
-	bytecode = append(bytecode, point[:32]...) // x
-	bytecode = append(bytecode, 0x60, 0x00)    // PUSH1 0
-	bytecode = append(bytecode, 0x52)          // MSTORE
-
-	bytecode = append(bytecode, 0x7f)          // PUSH32
-	bytecode = append(bytecode, point[32:]...) // y
-	bytecode = append(bytecode, 0x60, 0x20)    // PUSH1 32
-	bytecode = append(bytecode, 0x52)          // MSTORE
-
-	bytecode = append(bytecode, 0x7f)       // PUSH32
-	bytecode = append(bytecode, scalar...)  // scalar
-	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64
-	bytecode = append(bytecode, 0x52)       // MSTORE
-
-	// Setup CALL to BLS12_G1MUL precompile
-	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64 (return size)
-	bytecode = append(bytecode, 0x60, 0x60) // PUSH1 96 (return offset)
-	bytecode = append(bytecode, 0x60, 0x60) // PUSH1 96 (args size)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x0c) // PUSH1 12 (precompile address)
-	bytecode = append(bytecode, 0x5a)       // GAS
-	bytecode = append(bytecode, 0xf1)       // CALL
+	// Add LOG0 to log the result when in precompiles-only mode (return at 0x100, size 128)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(0x100, 128)...)
 
 	return bytecode
 }
@@ -969,66 +1225,45 @@ func (g *OpcodeGenerator) generateBLS12G1MulCall() []byte {
 func (g *OpcodeGenerator) generateBLS12G2AddCall() []byte {
 	var bytecode []byte
 
-	// Generate two valid BLS12 G2 points
-	point1 := g.generateValidBLS12G2Point()
-	point2 := g.generateValidBLS12G2Point()
+	// BLS12_G2ADD input: 512 bytes (64+64+64+64+64+64+64+64 bytes for x1_c0,x1_c1,y1_c0,y1_c1,x2_c0,x2_c1,y2_c0,y2_c1)
+	// Generate two valid BLS12 G2 points (256 bytes each, uncompressed format)
+	point1 := g.generateValidBLS12G2PointUncompressed()
+	point2 := g.generateValidBLS12G2PointUncompressed()
 
-	// Write points to memory
-	for i, point := range [][]byte{point1, point2} {
-		for j := 0; j < 4; j++ { // x1, x2, y1, y2 coordinates
-			bytecode = append(bytecode, 0x7f) // PUSH32
-			bytecode = append(bytecode, point[j*32:(j+1)*32]...)
-			offset := i*128 + j*32
-			bytecode = append(bytecode, 0x61, byte(offset>>8), byte(offset)) // PUSH2 offset
-			bytecode = append(bytecode, 0x52)                                // MSTORE
+	// Write points to memory using 16 MSTORE operations (512 bytes = 16 × 32 bytes)
+	for i := 0; i < 16; i++ {
+		var data []byte
+		if i < 8 {
+			// First point (256 bytes = 8 × 32 bytes)
+			data = point1[i*32 : (i+1)*32]
+		} else {
+			// Second point (256 bytes = 8 × 32 bytes)
+			data = point2[(i-8)*32 : (i-7)*32]
 		}
+
+		bytecode = append(bytecode, 0x7f) // PUSH32
+		bytecode = append(bytecode, data...)
+		offset := i * 32
+		if offset < 256 {
+			bytecode = append(bytecode, 0x60, byte(offset)) // PUSH1 offset
+		} else {
+			bytecode = append(bytecode, 0x61, byte(offset>>8), byte(offset)) // PUSH2 offset
+		}
+		bytecode = append(bytecode, 0x52) // MSTORE
 	}
 
 	// Setup CALL to BLS12_G2ADD precompile
-	bytecode = append(bytecode, 0x60, 0x80)       // PUSH1 128 (return size)
-	bytecode = append(bytecode, 0x61, 0x01, 0x00) // PUSH2 256 (return offset)
-	bytecode = append(bytecode, 0x61, 0x01, 0x00) // PUSH2 256 (args size)
+	bytecode = append(bytecode, 0x61, 0x01, 0x00) // PUSH2 256 (return size - uncompressed G2 point)
+	bytecode = append(bytecode, 0x61, 0x02, 0x00) // PUSH2 512 (return offset)
+	bytecode = append(bytecode, 0x61, 0x02, 0x00) // PUSH2 512 (args size - two 256-byte points)
 	bytecode = append(bytecode, 0x60, 0x00)       // PUSH1 0 (args offset)
 	bytecode = append(bytecode, 0x60, 0x00)       // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x0e)       // PUSH1 14 (precompile address)
+	bytecode = append(bytecode, 0x60, 0x0d)       // PUSH1 13 (precompile address)
 	bytecode = append(bytecode, 0x5a)             // GAS
 	bytecode = append(bytecode, 0xf1)             // CALL
 
-	return bytecode
-}
-
-// generateBLS12G2MulCall creates a BLS12-381 G2 scalar multiplication call
-func (g *OpcodeGenerator) generateBLS12G2MulCall() []byte {
-	var bytecode []byte
-
-	// Generate valid BLS12 G2 point and scalar
-	point := g.generateValidBLS12G2Point()
-	scalar := g.rng.Bytes(32)
-
-	// Write point coordinates to memory
-	for j := 0; j < 4; j++ { // x1, x2, y1, y2
-		bytecode = append(bytecode, 0x7f) // PUSH32
-		bytecode = append(bytecode, point[j*32:(j+1)*32]...)
-		offset := j * 32
-		bytecode = append(bytecode, 0x60, byte(offset)) // PUSH1 offset
-		bytecode = append(bytecode, 0x52)               // MSTORE
-	}
-
-	// Write scalar
-	bytecode = append(bytecode, 0x7f) // PUSH32
-	bytecode = append(bytecode, scalar...)
-	bytecode = append(bytecode, 0x60, 0x80) // PUSH1 128
-	bytecode = append(bytecode, 0x52)       // MSTORE
-
-	// Setup CALL to BLS12_G2MUL precompile
-	bytecode = append(bytecode, 0x60, 0x80) // PUSH1 128 (return size)
-	bytecode = append(bytecode, 0x60, 0xa0) // PUSH1 160 (return offset)
-	bytecode = append(bytecode, 0x60, 0xa0) // PUSH1 160 (args size)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x0f) // PUSH1 15 (precompile address)
-	bytecode = append(bytecode, 0x5a)       // GAS
-	bytecode = append(bytecode, 0xf1)       // CALL
+	// Add LOG0 to log the result when in precompiles-only mode (return at 0x200, size 256)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(0x200, 256)...)
 
 	return bytecode
 }
@@ -1039,36 +1274,40 @@ func (g *OpcodeGenerator) generateBLS12PairingCall() []byte {
 
 	// Generate 1-2 pairs of G1 and G2 points
 	pairCount := 1 + g.rng.Intn(2) // 1 or 2 pairs
-	totalLen := pairCount * 192    // Each pair: 64 bytes (G1) + 128 bytes (G2)
+	totalLen := pairCount * 384    // Each pair: 128 bytes (G1 uncompressed) + 256 bytes (G2 uncompressed)
 
-	// Write pairs to memory
+	// Write pairs to memory using optimal MSTORE operations
 	for i := 0; i < pairCount; i++ {
-		memOffset := i * 192
+		memOffset := i * 384
 
-		// G1 point (64 bytes)
-		g1Point := g.generateValidBLS12G1Point()
-		for j := 0; j < 2; j++ {
+		// Generate G1 point (128 bytes uncompressed)
+		g1Point := g.generateValidBLS12G1PointUncompressed()
+
+		// Write G1 point using 4 MSTORE operations (128 bytes = 4 × 32 bytes)
+		for j := 0; j < 4; j++ {
 			bytecode = append(bytecode, 0x7f) // PUSH32
 			bytecode = append(bytecode, g1Point[j*32:(j+1)*32]...)
-			offset := memOffset + j*32
-			if offset < 256 {
-				bytecode = append(bytecode, 0x60, byte(offset)) // PUSH1 offset
+			g1Offset := memOffset + j*32
+			if g1Offset < 256 {
+				bytecode = append(bytecode, 0x60, byte(g1Offset)) // PUSH1 offset
 			} else {
-				bytecode = append(bytecode, 0x61, byte(offset>>8), byte(offset)) // PUSH2 offset
+				bytecode = append(bytecode, 0x61, byte(g1Offset>>8), byte(g1Offset)) // PUSH2 offset
 			}
 			bytecode = append(bytecode, 0x52) // MSTORE
 		}
 
-		// G2 point (128 bytes)
-		g2Point := g.generateValidBLS12G2Point()
-		for j := 0; j < 4; j++ {
+		// Generate G2 point (256 bytes uncompressed)
+		g2Point := g.generateValidBLS12G2PointUncompressed()
+
+		// Write G2 point using 8 MSTORE operations (256 bytes = 8 × 32 bytes)
+		for j := 0; j < 8; j++ {
 			bytecode = append(bytecode, 0x7f) // PUSH32
 			bytecode = append(bytecode, g2Point[j*32:(j+1)*32]...)
-			offset := memOffset + 64 + j*32
-			if offset < 256 {
-				bytecode = append(bytecode, 0x60, byte(offset)) // PUSH1 offset
+			g2Offset := memOffset + 128 + j*32
+			if g2Offset < 256 {
+				bytecode = append(bytecode, 0x60, byte(g2Offset)) // PUSH1 offset
 			} else {
-				bytecode = append(bytecode, 0x61, byte(offset>>8), byte(offset)) // PUSH2 offset
+				bytecode = append(bytecode, 0x61, byte(g2Offset>>8), byte(g2Offset)) // PUSH2 offset
 			}
 			bytecode = append(bytecode, 0x52) // MSTORE
 		}
@@ -1089,9 +1328,12 @@ func (g *OpcodeGenerator) generateBLS12PairingCall() []byte {
 	}
 	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
 	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x11) // PUSH1 17 (precompile address)
+	bytecode = append(bytecode, 0x60, 0x0f) // PUSH1 15 (precompile address)
 	bytecode = append(bytecode, 0x5a)       // GAS
 	bytecode = append(bytecode, 0xf1)       // CALL
+
+	// Add LOG0 to log the result when in precompiles-only mode (return at returnOffset, size 32)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(returnOffset, 32)...)
 
 	return bytecode
 }
@@ -1100,29 +1342,35 @@ func (g *OpcodeGenerator) generateBLS12PairingCall() []byte {
 func (g *OpcodeGenerator) generateBLS12MapFp2G2Call() []byte {
 	var bytecode []byte
 
-	// Generate field element (fp2: 2 * 32 bytes)
-	fp2Element := g.rng.Bytes(64)
+	// Generate field element (fp2: 2 * 64 bytes = 128 bytes total)
+	// Each component must be a valid base field element
+	fp2Element := make([]byte, 128)
+	c0 := g.generateValidBLS12BaseField()
+	c1 := g.generateValidBLS12BaseField()
+	copy(fp2Element[:64], c0)
+	copy(fp2Element[64:], c1)
 
-	// Write field element to memory
-	bytecode = append(bytecode, 0x7f)               // PUSH32
-	bytecode = append(bytecode, fp2Element[:32]...) // fp2[0]
-	bytecode = append(bytecode, 0x60, 0x00)         // PUSH1 0
-	bytecode = append(bytecode, 0x52)               // MSTORE
-
-	bytecode = append(bytecode, 0x7f)               // PUSH32
-	bytecode = append(bytecode, fp2Element[32:]...) // fp2[1]
-	bytecode = append(bytecode, 0x60, 0x20)         // PUSH1 32
-	bytecode = append(bytecode, 0x52)               // MSTORE
+	// Write field element to memory using 4 MSTORE operations (128 bytes = 4 × 32 bytes)
+	for i := 0; i < 4; i++ {
+		bytecode = append(bytecode, 0x7f) // PUSH32
+		bytecode = append(bytecode, fp2Element[i*32:(i+1)*32]...)
+		offset := i * 32
+		bytecode = append(bytecode, 0x60, byte(offset)) // PUSH1 offset
+		bytecode = append(bytecode, 0x52)               // MSTORE
+	}
 
 	// Setup CALL to BLS12_MAP_FP2_TO_G2 precompile
-	bytecode = append(bytecode, 0x60, 0x80) // PUSH1 128 (return size - G2 point)
-	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64 (return offset)
-	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64 (args size)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x12) // PUSH1 18 (precompile address)
-	bytecode = append(bytecode, 0x5a)       // GAS
-	bytecode = append(bytecode, 0xf1)       // CALL
+	bytecode = append(bytecode, 0x61, 0x01, 0x00) // PUSH2 256 (return size - uncompressed G2 point)
+	bytecode = append(bytecode, 0x60, 0x80)       // PUSH1 128 (return offset)
+	bytecode = append(bytecode, 0x60, 0x80)       // PUSH1 128 (args size)
+	bytecode = append(bytecode, 0x60, 0x00)       // PUSH1 0 (args offset)
+	bytecode = append(bytecode, 0x60, 0x00)       // PUSH1 0 (value)
+	bytecode = append(bytecode, 0x60, 0x11)       // PUSH1 17 (precompile address)
+	bytecode = append(bytecode, 0x5a)             // GAS
+	bytecode = append(bytecode, 0xf1)             // CALL
+
+	// Add LOG0 to log the result when in precompiles-only mode (return at 0x80, size 256)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(0x80, 256)...)
 
 	return bytecode
 }
@@ -1132,82 +1380,7 @@ func (g *OpcodeGenerator) generateBLS12G1MSMCall() []byte {
 	var bytecode []byte
 
 	// G1 MSM input format: pairs of (G1_point, scalar)
-	// Each G1 point: 64 bytes (x, y coordinates)
-	// Each scalar: 32 bytes
-	// Total per pair: 96 bytes
-
-	// Generate 2-4 pairs
-	pairCount := 2 + g.rng.Intn(3) // 2, 3, or 4 pairs
-	totalLen := pairCount * 96
-
-	// Write pairs to memory
-	for i := 0; i < pairCount; i++ {
-		memOffset := i * 96
-
-		// Generate valid G1 point (64 bytes)
-		pointData := g.generateValidBLS12G1Point()
-		// Write x coordinate
-		bytecode = append(bytecode, 0x7f) // PUSH32
-		bytecode = append(bytecode, pointData[:32]...)
-		if memOffset < 256 {
-			bytecode = append(bytecode, 0x60, byte(memOffset)) // PUSH1 offset
-		} else {
-			bytecode = append(bytecode, 0x61, byte(memOffset>>8), byte(memOffset)) // PUSH2 offset
-		}
-		bytecode = append(bytecode, 0x52) // MSTORE
-
-		// Write y coordinate
-		bytecode = append(bytecode, 0x7f) // PUSH32
-		bytecode = append(bytecode, pointData[32:]...)
-		yOffset := memOffset + 32
-		if yOffset < 256 {
-			bytecode = append(bytecode, 0x60, byte(yOffset)) // PUSH1 offset
-		} else {
-			bytecode = append(bytecode, 0x61, byte(yOffset>>8), byte(yOffset)) // PUSH2 offset
-		}
-		bytecode = append(bytecode, 0x52) // MSTORE
-
-		// Generate scalar (32 bytes)
-		scalarData := g.rng.Bytes(32)
-		bytecode = append(bytecode, 0x7f) // PUSH32
-		bytecode = append(bytecode, scalarData...)
-		scalarOffset := memOffset + 64
-		if scalarOffset < 256 {
-			bytecode = append(bytecode, 0x60, byte(scalarOffset)) // PUSH1 offset
-		} else {
-			bytecode = append(bytecode, 0x61, byte(scalarOffset>>8), byte(scalarOffset)) // PUSH2 offset
-		}
-		bytecode = append(bytecode, 0x52) // MSTORE
-	}
-
-	// Setup CALL to BLS12_G1MSM precompile
-	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64 (return size - G1 point)
-	returnOffset := totalLen + 32
-	if returnOffset < 256 {
-		bytecode = append(bytecode, 0x60, byte(returnOffset)) // PUSH1 retOffset
-	} else {
-		bytecode = append(bytecode, 0x61, byte(returnOffset>>8), byte(returnOffset)) // PUSH2 retOffset
-	}
-	if totalLen < 256 {
-		bytecode = append(bytecode, 0x60, byte(totalLen)) // PUSH1 totalLen
-	} else {
-		bytecode = append(bytecode, 0x61, byte(totalLen>>8), byte(totalLen)) // PUSH2 totalLen
-	}
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x0d) // PUSH1 13 (precompile address)
-	bytecode = append(bytecode, 0x5a)       // GAS
-	bytecode = append(bytecode, 0xf1)       // CALL
-
-	return bytecode
-}
-
-// generateBLS12G2MSMCall creates a BLS12-381 G2 multi-scalar multiplication call
-func (g *OpcodeGenerator) generateBLS12G2MSMCall() []byte {
-	var bytecode []byte
-
-	// G2 MSM input format: pairs of (G2_point, scalar)
-	// Each G2 point: 128 bytes (x1, x2, y1, y2 coordinates)
+	// Each G1 point: 128 bytes (64 bytes x + 64 bytes y, uncompressed format)
 	// Each scalar: 32 bytes
 	// Total per pair: 160 bytes
 
@@ -1219,8 +1392,10 @@ func (g *OpcodeGenerator) generateBLS12G2MSMCall() []byte {
 	for i := 0; i < pairCount; i++ {
 		memOffset := i * 160
 
-		// Generate valid G2 point (128 bytes: x1, x2, y1, y2)
-		pointData := g.generateValidBLS12G2Point()
+		// Generate valid G1 point (128 bytes uncompressed)
+		pointData := g.generateValidBLS12G1PointUncompressed()
+
+		// Write G1 point using 4 MSTORE operations (128 bytes = 4 × 32 bytes)
 		for j := 0; j < 4; j++ {
 			bytecode = append(bytecode, 0x7f) // PUSH32
 			bytecode = append(bytecode, pointData[j*32:(j+1)*32]...)
@@ -1237,7 +1412,7 @@ func (g *OpcodeGenerator) generateBLS12G2MSMCall() []byte {
 		scalarData := g.rng.Bytes(32)
 		bytecode = append(bytecode, 0x7f) // PUSH32
 		bytecode = append(bytecode, scalarData...)
-		scalarOffset := memOffset + 128
+		scalarOffset := memOffset + 128 // Point is 128 bytes, scalar starts after
 		if scalarOffset < 256 {
 			bytecode = append(bytecode, 0x60, byte(scalarOffset)) // PUSH1 offset
 		} else {
@@ -1246,8 +1421,8 @@ func (g *OpcodeGenerator) generateBLS12G2MSMCall() []byte {
 		bytecode = append(bytecode, 0x52) // MSTORE
 	}
 
-	// Setup CALL to BLS12_G2MSM precompile
-	bytecode = append(bytecode, 0x60, 0x80) // PUSH1 128 (return size - G2 point)
+	// Setup CALL to BLS12_G1MSM precompile
+	bytecode = append(bytecode, 0x60, 0x80) // PUSH1 128 (return size - uncompressed G1 point)
 	returnOffset := totalLen + 32
 	if returnOffset < 256 {
 		bytecode = append(bytecode, 0x60, byte(returnOffset)) // PUSH1 retOffset
@@ -1261,9 +1436,112 @@ func (g *OpcodeGenerator) generateBLS12G2MSMCall() []byte {
 	}
 	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
 	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x10) // PUSH1 16 (precompile address)
+	bytecode = append(bytecode, 0x60, 0x0c) // PUSH1 12 (precompile address)
 	bytecode = append(bytecode, 0x5a)       // GAS
 	bytecode = append(bytecode, 0xf1)       // CALL
+
+	// Add LOG0 to log the result when in precompiles-only mode (return at returnOffset, size 128)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(returnOffset, 128)...)
+
+	return bytecode
+}
+
+// generateBLS12G2MSMCall creates a BLS12-381 G2 multi-scalar multiplication call
+func (g *OpcodeGenerator) generateBLS12G2MSMCall() []byte {
+	var bytecode []byte
+
+	// G2 MSM input format: pairs of (G2_point, scalar)
+	// Each G2 point: 256 bytes (64+64+64+64 bytes for x_c0,x_c1,y_c0,y_c1, uncompressed format)
+	// Each scalar: 32 bytes
+	// Total per pair: 288 bytes
+
+	// Generate 2 pairs (fewer due to very large size)
+	pairCount := 2 // 2 pairs
+	totalLen := pairCount * 288
+
+	// Write pairs to memory using optimal MSTORE operations
+	for i := 0; i < pairCount; i++ {
+		memOffset := i * 288
+
+		// Generate valid G2 point (256 bytes uncompressed)
+		pointData := g.generateValidBLS12G2PointUncompressed()
+
+		// Write G2 point using 8 MSTORE operations (256 bytes = 8 × 32 bytes)
+		for j := 0; j < 8; j++ {
+			bytecode = append(bytecode, 0x7f) // PUSH32
+			bytecode = append(bytecode, pointData[j*32:(j+1)*32]...)
+			coordOffset := memOffset + j*32
+			if coordOffset < 256 {
+				bytecode = append(bytecode, 0x60, byte(coordOffset)) // PUSH1 offset
+			} else {
+				bytecode = append(bytecode, 0x61, byte(coordOffset>>8), byte(coordOffset)) // PUSH2 offset
+			}
+			bytecode = append(bytecode, 0x52) // MSTORE
+		}
+
+		// Generate scalar (32 bytes)
+		scalarData := g.rng.Bytes(32)
+		bytecode = append(bytecode, 0x7f) // PUSH32
+		bytecode = append(bytecode, scalarData...)
+		scalarOffset := memOffset + 256
+		if scalarOffset < 256 {
+			bytecode = append(bytecode, 0x60, byte(scalarOffset)) // PUSH1 offset
+		} else {
+			bytecode = append(bytecode, 0x61, byte(scalarOffset>>8), byte(scalarOffset)) // PUSH2 offset
+		}
+		bytecode = append(bytecode, 0x52) // MSTORE
+	}
+
+	// Setup CALL to BLS12_G2MSM precompile
+	bytecode = append(bytecode, 0x61, 0x01, 0x00) // PUSH2 256 (return size - uncompressed G2 point)
+	returnOffset := totalLen + 32
+	if returnOffset < 256 {
+		bytecode = append(bytecode, 0x60, byte(returnOffset)) // PUSH1 retOffset
+	} else {
+		bytecode = append(bytecode, 0x61, byte(returnOffset>>8), byte(returnOffset)) // PUSH2 retOffset
+	}
+	if totalLen < 256 {
+		bytecode = append(bytecode, 0x60, byte(totalLen)) // PUSH1 totalLen
+	} else {
+		bytecode = append(bytecode, 0x61, byte(totalLen>>8), byte(totalLen)) // PUSH2 totalLen
+	}
+	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
+	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
+	bytecode = append(bytecode, 0x60, 0x0e) // PUSH1 14 (precompile address)
+	bytecode = append(bytecode, 0x5a)       // GAS
+	bytecode = append(bytecode, 0xf1)       // CALL
+
+	// Add LOG0 to log the result when in precompiles-only mode (return at returnOffset, size 256)
+	bytecode = append(bytecode, g.addLogIfPrecompilesOnly(returnOffset, 256)...)
+
+	return bytecode
+}
+
+// addLogIfPrecompilesOnly adds LOG0 to log precompile results when in precompiles-only mode
+func (g *OpcodeGenerator) addLogIfPrecompilesOnly(memOffset, size int) []byte {
+	// Only add LOG0 when fuzzing precompiles only
+	if g.fuzzMode != "precompiles" {
+		return []byte{}
+	}
+
+	var bytecode []byte
+
+	// PUSH the size of the data to log
+	if size < 256 {
+		bytecode = append(bytecode, 0x60, byte(size)) // PUSH1 size
+	} else {
+		bytecode = append(bytecode, 0x61, byte(size>>8), byte(size)) // PUSH2 size
+	}
+
+	// PUSH the memory offset where the data is stored
+	if memOffset < 256 {
+		bytecode = append(bytecode, 0x60, byte(memOffset)) // PUSH1 offset
+	} else {
+		bytecode = append(bytecode, 0x61, byte(memOffset>>8), byte(memOffset)) // PUSH2 offset
+	}
+
+	// LOG0 opcode to log the precompile result
+	bytecode = append(bytecode, 0xa0) // LOG0
 
 	return bytecode
 }

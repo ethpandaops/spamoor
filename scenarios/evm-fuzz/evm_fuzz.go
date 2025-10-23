@@ -37,6 +37,7 @@ type ScenarioOptions struct {
 	MinCodeSize uint64 `yaml:"min_code_size"`
 	PayloadSeed string `yaml:"payload_seed"` // Optional seed for reproducible fuzzing
 	TxIdOffset  uint64 `yaml:"tx_id_offset"` // Start fuzzing from a specific txID
+	FuzzMode    string `yaml:"fuzz_mode"`    // Fuzzing mode: "all", "opcodes", "precompiles"
 }
 
 type Scenario struct {
@@ -62,6 +63,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	MinCodeSize: 100,
 	PayloadSeed: "", // Empty means use random seed
 	TxIdOffset:  0,
+	FuzzMode:    "all", // Default to all opcodes and precompiles
 }
 
 var ScenarioDescriptor = scenario.Descriptor{
@@ -96,6 +98,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MinCodeSize, "min-code-size", ScenarioDefaultOptions.MinCodeSize, "Minimum bytecode size")
 	flags.StringVar(&s.options.PayloadSeed, "payload-seed", ScenarioDefaultOptions.PayloadSeed, "Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd, empty means random)")
 	flags.Uint64Var(&s.options.TxIdOffset, "tx-id-offset", ScenarioDefaultOptions.TxIdOffset, "Start fuzzing from a specific transaction ID")
+	flags.StringVar(&s.options.FuzzMode, "fuzz-mode", ScenarioDefaultOptions.FuzzMode, "Fuzzing mode: 'all' (opcodes+precompiles), 'opcodes' (EVM opcodes only), 'precompiles' (precompiles only)")
 
 	return nil
 }
@@ -145,6 +148,11 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		if err := s.validateSeed(s.options.PayloadSeed); err != nil {
 			return fmt.Errorf("invalid payload seed: %v", err)
 		}
+	}
+
+	// Validate fuzz mode
+	if err := s.validateFuzzMode(s.options.FuzzMode); err != nil {
+		return fmt.Errorf("invalid fuzz mode: %v", err)
 	}
 
 	return nil
@@ -310,6 +318,9 @@ func (s *Scenario) generateFuzzedBytecode(txIdx uint64) []byte {
 	// Create deterministic generator for this transaction with seed configuration
 	generator := NewOpcodeGenerator(effectiveTxID, seed, int(s.options.MaxCodeSize), s.options.GasLimit)
 
+	// Set fuzz mode
+	generator.SetFuzzMode(s.options.FuzzMode)
+
 	// Generate sophisticated stack-aware bytecode
 	return generator.Generate()
 }
@@ -329,4 +340,14 @@ func (s *Scenario) validateSeed(seed string) error {
 	}
 
 	return nil
+}
+
+func (s *Scenario) validateFuzzMode(mode string) error {
+	validModes := []string{"all", "opcodes", "precompiles"}
+	for _, validMode := range validModes {
+		if mode == validMode {
+			return nil
+		}
+	}
+	return fmt.Errorf("must be one of: %v, got: %s", validModes, mode)
 }

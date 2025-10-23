@@ -31,6 +31,7 @@ spamoor evm-fuzz [flags]
 - `--min-code-size` - Minimum bytecode size in bytes (default: 100)
 - `--payload-seed` - Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd)
 - `--tx-id-offset` - Start fuzzing from specific transaction ID (default: 0)
+- `--fuzz-mode` - Fuzzing mode: 'all' (default), 'opcodes', 'precompiles'
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
@@ -54,6 +55,7 @@ spamoor evm-fuzz [flags]
 - **Jump pattern fuzzing** - Creates valid and invalid JUMP/JUMPDEST patterns
 - **Memory sanitization** - Applies masks to prevent excessive resource usage
 - **Deterministic seeding** - Reproducible results with custom seeds
+- **Flexible fuzz modes** - Target specific EVM components (opcodes/precompiles)
 
 ## Examples
 
@@ -70,6 +72,16 @@ spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -t 100 --timeout 24h
 Reproducible fuzzing with custom seed:
 ```bash
 spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 500 --payload-seed 0x1234abcd
+```
+
+Fuzz only EVM opcodes (no precompiles):
+```bash
+spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 1000 --fuzz-mode opcodes
+```
+
+Fuzz only precompiles with stack setup:
+```bash
+spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 500 --fuzz-mode precompiles
 ```
 
 Large contract fuzzing:
