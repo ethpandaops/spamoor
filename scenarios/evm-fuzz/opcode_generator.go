@@ -105,8 +105,8 @@ type OpcodeInfo struct {
 	StackInput  int    // Number of items consumed from stack
 	StackOutput int    // Number of items pushed to stack
 	GasCost     uint64
-	Template    func(g *OpcodeGenerator) []byte // Function to generate valid sequence
-	Probability float64                         // Relative probability weight for selection (1.0 = normal)
+	Template    func() []byte // Function to generate valid sequence
+	Probability float64       // Relative probability weight for selection (1.0 = normal)
 }
 
 // OpcodeGenerator generates valid EVM bytecode sequences with stack tracking
@@ -131,19 +131,14 @@ type OpcodeGenerator struct {
 }
 
 // Template functions for opcodes
-func simpleOpcode(opcode byte) func(g *OpcodeGenerator) []byte {
-	return func(g *OpcodeGenerator) []byte { return []byte{opcode} }
+func simpleOpcode(opcode byte) func() []byte {
+	return func() []byte { return []byte{opcode} }
 }
-
-func jumpTemplate(g *OpcodeGenerator) []byte    { return g.generateJump() }
-func jumpiTemplate(g *OpcodeGenerator) []byte   { return g.generateJumpi() }
-func createTemplate(g *OpcodeGenerator) []byte  { return g.generateCreate(false) }
-func create2Template(g *OpcodeGenerator) []byte { return g.generateCreate(true) }
 
 // Generic sanitization wrapper - applies masks to stack positions before executing base template
 // masks[i] = mask for stack position i (0 = no sanitization)
-func sanitizeInput(baseTemplate func(g *OpcodeGenerator) []byte, masks []uint64) func(g *OpcodeGenerator) []byte {
-	return func(g *OpcodeGenerator) []byte {
+func sanitizeInput(baseTemplate func() []byte, masks []uint64) func() []byte {
+	return func() []byte {
 		var bytecode []byte
 
 		// Apply sanitization to each specified stack position
@@ -182,7 +177,7 @@ func sanitizeInput(baseTemplate func(g *OpcodeGenerator) []byte, masks []uint64)
 		}
 
 		// Execute the base template
-		baseBytes := baseTemplate(g)
+		baseBytes := baseTemplate()
 		bytecode = append(bytecode, baseBytes...)
 
 		return bytecode
@@ -216,17 +211,18 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		{"OR", 0x17, 2, 1, 3, simpleOpcode(0x17), 1.0},
 		{"XOR", 0x18, 2, 1, 3, simpleOpcode(0x18), 1.0},
 		{"NOT", 0x19, 1, 1, 3, simpleOpcode(0x19), 1.0},
-		{"BYTE", 0x1a, 2, 1, 3, simpleOpcode(0x1a), 1.0},
+		{"BYTE", 0x1a, 2, 1, 3, sanitizeInput(simpleOpcode(0x1a), []uint64{0x3f}), 1.0},
 		{"SHL", 0x1b, 2, 1, 3, simpleOpcode(0x1b), 1.0},
 		{"SHR", 0x1c, 2, 1, 3, simpleOpcode(0x1c), 1.0},
 		{"SAR", 0x1d, 2, 1, 3, simpleOpcode(0x1d), 1.0},
+		{"CLZ", 0x1e, 1, 1, 3, simpleOpcode(0x1e), 1.5},
 
 		// Crypto operations
 		{"KECCAK256", 0x20, 2, 1, 30, sanitizeInput(simpleOpcode(0x20), []uint64{0x2ffff, 0xffff}), 1.5}, // Sanitize offset and length
 
 		// Environmental information
 		{"ADDRESS", 0x30, 0, 1, 2, simpleOpcode(0x30), 2.0},
-		{"BALANCE", 0x31, 1, 1, 100, simpleOpcode(0x31), 2.2}, // Interesting for fuzzing
+		{"BALANCE", 0x31, 1, 1, 100, simpleOpcode(0x31), 2.2},
 		{"ORIGIN", 0x32, 0, 1, 2, simpleOpcode(0x32), 2.0},
 		{"CALLER", 0x33, 0, 1, 2, simpleOpcode(0x33), 2.0},
 		{"CALLVALUE", 0x34, 0, 1, 2, simpleOpcode(0x34), 2.0},
@@ -249,11 +245,11 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		{"NUMBER", 0x43, 0, 1, 2, simpleOpcode(0x43), 2.0},
 		{"DIFFICULTY", 0x44, 0, 1, 2, simpleOpcode(0x44), 2.0},
 		{"GASLIMIT", 0x45, 0, 1, 2, simpleOpcode(0x45), 2.0},
-		{"CHAINID", 0x46, 0, 1, 2, simpleOpcode(0x46), 2.5},     // New/interesting
-		{"SELFBALANCE", 0x47, 0, 1, 5, simpleOpcode(0x47), 2.5}, // New/interesting
-		{"BASEFEE", 0x48, 0, 1, 2, simpleOpcode(0x48), 2.5},     // New/interesting
-		{"BLOBHASH", 0x49, 1, 1, 3, simpleOpcode(0x49), 2.0},    // Very new/interesting
-		{"BLOBBASEFEE", 0x4a, 0, 1, 2, simpleOpcode(0x4a), 2.0}, // Very new/interesting
+		{"CHAINID", 0x46, 0, 1, 2, simpleOpcode(0x46), 2.5},
+		{"SELFBALANCE", 0x47, 0, 1, 5, simpleOpcode(0x47), 2.5},
+		{"BASEFEE", 0x48, 0, 1, 2, simpleOpcode(0x48), 2.5},
+		{"BLOBHASH", 0x49, 1, 1, 3, simpleOpcode(0x49), 2.0},
+		{"BLOBBASEFEE", 0x4a, 0, 1, 2, simpleOpcode(0x4a), 2.0},
 
 		// Stack operations with memory/storage sanitization
 		{"POP", 0x50, 1, 0, 2, simpleOpcode(0x50), 1.0},
@@ -262,8 +258,8 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		{"MSTORE8", 0x53, 2, 0, 3, sanitizeInput(simpleOpcode(0x53), []uint64{0x2ffff}), 1.0},  // Sanitize offset
 		{"SLOAD", 0x54, 1, 1, 100, sanitizeInput(simpleOpcode(0x54), []uint64{0x2ffff}), 1.2},  // Sanitize storage key
 		{"SSTORE", 0x55, 2, 0, 100, sanitizeInput(simpleOpcode(0x55), []uint64{0x2ffff}), 1.2}, // Sanitize storage key
-		{"JUMP", 0x56, 0, 0, 8, jumpTemplate, 1.0},
-		{"JUMPI", 0x57, 1, 0, 10, jumpiTemplate, 1.0},
+		{"JUMP", 0x56, 0, 0, 8, g.generateJump, 1.0},
+		{"JUMPI", 0x57, 1, 0, 10, g.generateJumpi, 1.0},
 		{"PC", 0x58, 0, 1, 2, simpleOpcode(0x58), 1.0},
 		{"MSIZE", 0x59, 0, 1, 2, simpleOpcode(0x59), 1.0},
 		{"GAS", 0x5a, 0, 1, 2, simpleOpcode(0x5a), 1.0},
@@ -274,6 +270,7 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 
 		// Push operations (PUSH1-PUSH32)
 		{"PUSH0", 0x5f, 0, 1, 2, simpleOpcode(0x5f), 1.0},
+		// PUSH1-PUSH32, SWAP* & DUP* added below
 
 		// Log operations - sanitize memory offset
 		{"LOG0", 0xa0, 2, 0, 375, sanitizeInput(simpleOpcode(0xa0), []uint64{0x2ffff, 0xffff}), 1.0},  // Sanitize offset
@@ -283,12 +280,12 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		{"LOG4", 0xa4, 6, 0, 1875, sanitizeInput(simpleOpcode(0xa4), []uint64{0x2ffff, 0xffff}), 1.0}, // Sanitize offset
 
 		// Contract operations
-		{"CREATE", 0xf0, 3, 1, 32000, createTemplate, 1.8},                                                                              // Enhanced CREATE with deployment + call
+		{"CREATE", 0xf0, 3, 1, 32000, g.createTemplate, 1.8},                                                                            // Enhanced CREATE with deployment + call
 		{"CALL", 0xf1, 6, 1, 100, sanitizeInput(simpleOpcode(0xf1), []uint64{0, 0xffff, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.3},     // Sanitize memory args, custom value=0
 		{"CALLCODE", 0xf2, 6, 1, 100, sanitizeInput(simpleOpcode(0xf2), []uint64{0, 0xffff, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.0}, // Sanitize memory args, custom value=0
 		{"RETURN", 0xf3, 2, 0, 0, sanitizeInput(simpleOpcode(0xf3), []uint64{0x2ffff, 0xffff}), 0.1},                                    // Sanitize offset, length - Lower - ends execution
 		{"DELEGATECALL", 0xf4, 6, 1, 100, sanitizeInput(simpleOpcode(0xf4), []uint64{0, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.3},     // Sanitize argsOffset, argsSize, retOffset, retSize
-		{"CREATE2", 0xf5, 4, 1, 32000, create2Template, 1.8},                                                                            // Enhanced CREATE2 with deployment + call
+		{"CREATE2", 0xf5, 4, 1, 32000, g.create2Template, 1.8},                                                                          // Enhanced CREATE2 with deployment + call
 		{"STATICCALL", 0xfa, 6, 1, 100, sanitizeInput(simpleOpcode(0xfa), []uint64{0, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.3},       // Sanitize argsOffset, argsSize, retOffset, retSize
 		{"REVERT", 0xfd, 2, 0, 0, sanitizeInput(simpleOpcode(0xfd), []uint64{0x2ffff, 0xffff}), 0.1},                                    // Sanitize offset, length - Lower - ends execution
 		{"SELFDESTRUCT", 0xff, 1, 0, 5000, simpleOpcode(0xff), 1.1},                                                                     // Interesting
@@ -296,25 +293,25 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		// Precompile calls (treated as special opcodes)
 		// Specialized handlers generate proper calldata and push results to stack
 		// Using 0x100+ range to avoid collision with real EVM opcodes
-		{"ECRECOVER", 0x101, 0, 1, 3000, ecrecoverTemplate, 2.5},   // Precompile 1 - returns 32 bytes (address or 0)
-		{"SHA256", 0x102, 0, 1, 60, sha256Template, 2.5},           // Precompile 2 - returns 32 bytes (hash)
-		{"RIPEMD160", 0x103, 0, 1, 600, ripemd160Template, 2.0},    // Precompile 3 - returns 32 bytes (hash, right-padded)
-		{"IDENTITY", 0x104, 0, 1, 15, identityTemplate, 2.0},       // Precompile 4 - returns variable length (input data)
-		{"MODEXP", 0x105, 0, 1, 200, modexpTemplate, 2.8},          // Precompile 5 - returns variable length (modexp result)
-		{"ECADD", 0x106, 0, 2, 500, ecAddTemplate, 2.8},            // Precompile 6 - returns 64 bytes (x, y coordinates)
-		{"ECMUL", 0x107, 0, 2, 40000, ecMulTemplate, 2.8},          // Precompile 7 - returns 64 bytes (x, y coordinates)
-		{"ECPAIRING", 0x108, 0, 1, 100000, ecPairingTemplate, 2.8}, // Precompile 8 - returns 32 bytes (0 or 1)
-		{"BLAKE2F", 0x109, 0, 2, 1, blake2fTemplate, 2.5},          // Precompile 9 - returns 64 bytes (blake2f hash)
-		{"POINTEVAL", 0x10a, 0, 1, 50000, pointEvalTemplate, 2.5},  // Precompile 10 - returns 32 bytes (0 or 1)
+		{"ECRECOVER", 0x101, 0, 1, 3000, g.generateEcrecoverCall, 2.5},      // Precompile 1 - returns 32 bytes (address or 0)
+		{"SHA256", 0x102, 0, 1, 60, g.generateSha256Call, 2.5},              // Precompile 2 - returns 32 bytes (hash)
+		{"RIPEMD160", 0x103, 0, 1, 600, g.generateRipemd160Call, 2.0},       // Precompile 3 - returns 32 bytes (hash, right-padded)
+		{"IDENTITY", 0x104, 0, 1, 15, g.generateIdentityCall, 2.0},          // Precompile 4 - returns variable length (input data)
+		{"MODEXP", 0x105, 0, 1, 200, g.generateModexpCall, 2.8},             // Precompile 5 - returns variable length (modexp result)
+		{"ECADD", 0x106, 0, 2, 500, g.generateBN256EcAddCall, 2.8},          // Precompile 6 - returns 64 bytes (x, y coordinates)
+		{"ECMUL", 0x107, 0, 2, 40000, g.generateBN256EcMulCall, 2.8},        // Precompile 7 - returns 64 bytes (x, y coordinates)
+		{"ECPAIRING", 0x108, 0, 1, 100000, g.generateBN256PairingCall, 2.8}, // Precompile 8 - returns 32 bytes (0 or 1)
+		{"BLAKE2F", 0x109, 0, 2, 1, g.generateBlake2fCall, 2.5},             // Precompile 9 - returns 64 bytes (blake2f hash)
+		{"POINTEVAL", 0x10a, 0, 1, 50000, g.generateKZGPointEvalCall, 2.5},  // Precompile 10 - returns 32 bytes (0 or 1)
 
 		// BLS12-381 precompiles (Prague fork)
-		{"BLS12_G1ADD", 0x10b, 0, 4, 375, bls12G1AddTemplate, 2.5},              // Precompile 0x0b - returns 128 bytes (G1 point)
-		{"BLS12_G1MSM", 0x10c, 0, 4, 30000, bls12G1MSMTemplate, 2.2},            // Precompile 0x0c - returns 128 bytes (G1 point)
-		{"BLS12_G2ADD", 0x10d, 0, 8, 600, bls12G2AddTemplate, 2.5},              // Precompile 0x0d - returns 256 bytes (G2 point)
-		{"BLS12_G2MSM", 0x10e, 0, 8, 150000, bls12G2MSMTemplate, 2.2},           // Precompile 0x0e - returns 256 bytes (G2 point)
-		{"BLS12_PAIRING_CHECK", 0x10f, 0, 1, 37700, bls12PairingTemplate, 2.8},  // Precompile 0x0f - returns 32 bytes (0 or 1)
-		{"BLS12_MAP_FP_TO_G1", 0x110, 0, 4, 5500, bls12MapFpToG1Template, 2.2},  // Precompile 0x10 - returns 128 bytes (G1 point)
-		{"BLS12_MAP_FP2_TO_G2", 0x111, 0, 8, 23800, bls12MapFp2G2Template, 2.2}, // Precompile 0x11 - returns 256 bytes (G2 point)
+		{"BLS12_G1ADD", 0x10b, 0, 4, 375, g.generateBLS12G1AddCall, 2.5},              // Precompile 0x0b - returns 128 bytes (G1 point)
+		{"BLS12_G1MSM", 0x10c, 0, 4, 30000, g.generateBLS12G1MSMCall, 2.2},            // Precompile 0x0c - returns 128 bytes (G1 point)
+		{"BLS12_G2ADD", 0x10d, 0, 8, 600, g.generateBLS12G2AddCall, 2.5},              // Precompile 0x0d - returns 256 bytes (G2 point)
+		{"BLS12_G2MSM", 0x10e, 0, 8, 150000, g.generateBLS12G2MSMCall, 2.2},           // Precompile 0x0e - returns 256 bytes (G2 point)
+		{"BLS12_PAIRING_CHECK", 0x10f, 0, 1, 37700, g.generateBLS12PairingCall, 2.8},  // Precompile 0x0f - returns 32 bytes (0 or 1)
+		{"BLS12_MAP_FP_TO_G1", 0x110, 0, 4, 5500, g.generateBLS12MapFpToG1Call, 2.2},  // Precompile 0x10 - returns 128 bytes (G1 point)
+		{"BLS12_MAP_FP2_TO_G2", 0x111, 0, 8, 23800, g.generateBLS12MapFp2G2Call, 2.2}, // Precompile 0x11 - returns 256 bytes (G2 point)
 	}
 
 	// Add PUSH1-PUSH32 opcodes
@@ -387,15 +384,11 @@ func NewOpcodeGenerator(txID uint64, baseSeed string, maxSize int, maxGas uint64
 		txID:             txID,
 		baseSeed:         baseSeed,
 		fuzzMode:         "all", // Default mode
-		invalidOpcodes: []byte{
-			0x0c, 0x0d, 0x0e, 0x0f, // Invalid opcodes
-			0x1e, 0x1f, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
-			0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
-		},
 	}
 
 	g.initializeOpcodes()
 	g.buildValidOpcodeList()
+	g.buildInvalidOpcodeList()
 
 	return g
 }
@@ -403,7 +396,8 @@ func NewOpcodeGenerator(txID uint64, baseSeed string, maxSize int, maxGas uint64
 // SetFuzzMode sets the fuzzing mode for the generator
 func (g *OpcodeGenerator) SetFuzzMode(mode string) {
 	g.fuzzMode = mode
-	g.buildValidOpcodeList() // Rebuild the valid opcodes list based on mode
+	g.buildValidOpcodeList()   // Rebuild the valid opcodes list based on mode
+	g.buildInvalidOpcodeList() // Rebuild the invalid opcodes list
 }
 
 // buildValidOpcodeList creates a list of valid opcodes for random selection
@@ -428,6 +422,35 @@ func (g *OpcodeGenerator) buildValidOpcodeList() {
 			g.validOpcodes = append(g.validOpcodes, op)
 		}
 	}
+}
+
+// buildInvalidOpcodeList creates a list of invalid opcodes by finding gaps in valid opcodes
+func (g *OpcodeGenerator) buildInvalidOpcodeList() {
+	// Create a set of valid opcodes (only regular EVM opcodes, not precompiles)
+	validOpcodeSet := make(map[byte]bool)
+
+	for _, op := range g.opcodeInfos {
+		// Only consider regular EVM opcodes (0x00-0xFF), not precompiles (≥0x100)
+		if op.Opcode <= 0xFF {
+			validOpcodeSet[byte(op.Opcode)] = true
+		}
+	}
+
+	// Find all invalid opcodes in the 0x00-0xFF range
+	g.invalidOpcodes = g.invalidOpcodes[:0] // Clear existing list
+
+	for opcode := 0; opcode <= 0xFF; opcode++ {
+		if !validOpcodeSet[byte(opcode)] {
+			g.invalidOpcodes = append(g.invalidOpcodes, byte(opcode))
+		}
+	}
+}
+
+// GetInvalidOpcodes returns a copy of the invalid opcodes list (for testing/debugging)
+func (g *OpcodeGenerator) GetInvalidOpcodes() []byte {
+	result := make([]byte, len(g.invalidOpcodes))
+	copy(result, g.invalidOpcodes)
+	return result
 }
 
 // isPrecompileOpcode checks if an opcode represents a precompile call
@@ -466,9 +489,12 @@ func (g *OpcodeGenerator) countOpcodesInBytecode(bytecode []byte) int {
 	return count
 }
 
+func (g *OpcodeGenerator) createTemplate() []byte  { return g.generateCreate(false) }
+func (g *OpcodeGenerator) create2Template() []byte { return g.generateCreate(true) }
+
 // makePushTemplate creates a template function for PUSH opcodes
-func (g *OpcodeGenerator) makePushTemplate(opcode uint16, size int) func(g *OpcodeGenerator) []byte {
-	return func(g *OpcodeGenerator) []byte {
+func (g *OpcodeGenerator) makePushTemplate(opcode uint16, size int) func() []byte {
+	return func() []byte {
 		result := make([]byte, 1+size)
 		result[0] = byte(opcode) // Cast to byte since PUSH opcodes are always ≤ 0xff
 
@@ -844,7 +870,7 @@ func (g *OpcodeGenerator) generateValidInstruction() bool {
 	op := g.selectWeightedOpcode(candidates)
 
 	// Generate the instruction
-	sequence := op.Template(g)
+	sequence := op.Template()
 	sequenceOpcodeCount := g.countOpcodesInBytecode(sequence)
 
 	// Check both bytecode size and opcode count limits

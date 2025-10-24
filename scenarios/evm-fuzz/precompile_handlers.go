@@ -2,360 +2,54 @@ package evmfuzz
 
 import (
 	"encoding/binary"
-	"math/big"
 )
 
-// BN256 curve parameters
-var (
-	// BN256 field modulus: 21888242871839275222246405745257275088696311157297823662689037894645226208583
-	bn256FieldModulus = new(big.Int)
-	bn256One          = big.NewInt(1)
-)
+// processPrecompileResult handles precompile results based on fuzzing mode
+// - In precompiles-only mode: adds LOG0 to log results
+// - In normal mode: loads results to stack in 32-byte words for further fuzzing
+func (g *OpcodeGenerator) processPrecompileResult(memOffset, size int) []byte {
+	var bytecode []byte
 
-func init() {
-	// Initialize BN256 field modulus
-	bn256FieldModulus.SetString("21888242871839275222246405745257275088696311157297823662689037894645226208583", 10)
-}
-
-// Precompile call templates - all using specialized handlers directly
-func ecrecoverTemplate(g *OpcodeGenerator) []byte { return g.generateEcrecoverCall() }
-func sha256Template(g *OpcodeGenerator) []byte    { return g.generateSha256Call() }
-func ripemd160Template(g *OpcodeGenerator) []byte { return g.generateRipemd160Call() }
-func identityTemplate(g *OpcodeGenerator) []byte  { return g.generateIdentityCall() }
-func modexpTemplate(g *OpcodeGenerator) []byte    { return g.generateModexpCall() }
-func ecAddTemplate(g *OpcodeGenerator) []byte     { return g.generateBN256EcAddCall() }
-func ecMulTemplate(g *OpcodeGenerator) []byte     { return g.generateBN256EcMulCall() }
-func ecPairingTemplate(g *OpcodeGenerator) []byte { return g.generateBN256PairingCall() }
-func blake2fTemplate(g *OpcodeGenerator) []byte   { return g.generateBlake2fCall() }
-func pointEvalTemplate(g *OpcodeGenerator) []byte { return g.generateKZGPointEvalCall() }
-
-// BLS12-381 precompile templates
-func bls12G1AddTemplate(g *OpcodeGenerator) []byte     { return g.generateBLS12G1AddCall() }     // 0x0b
-func bls12G1MSMTemplate(g *OpcodeGenerator) []byte     { return g.generateBLS12G1MSMCall() }     // 0x0c
-func bls12G2AddTemplate(g *OpcodeGenerator) []byte     { return g.generateBLS12G2AddCall() }     // 0x0d
-func bls12G2MSMTemplate(g *OpcodeGenerator) []byte     { return g.generateBLS12G2MSMCall() }     // 0x0e
-func bls12PairingTemplate(g *OpcodeGenerator) []byte   { return g.generateBLS12PairingCall() }   // 0x0f
-func bls12MapFpToG1Template(g *OpcodeGenerator) []byte { return g.generateBLS12MapFpToG1Call() } // 0x10
-func bls12MapFp2G2Template(g *OpcodeGenerator) []byte  { return g.generateBLS12MapFp2G2Call() }  // 0x11
-
-// generateValidBN256Point generates a BN256 curve point - mostly valid, sometimes invalid for testing
-func (g *OpcodeGenerator) generateValidBN256Point() []byte {
-	point := make([]byte, 64) // 32 bytes x + 32 bytes y
-
-	// 1% chance to generate invalid BN256 points for testing edge cases
-	if g.rng.Float64() < 0.01 {
-		invalidType := g.rng.Intn(4)
-		switch invalidType {
-		case 0:
-			// Coordinates >= field modulus
-			copy(point[:32], g.rng.Bytes(32))
-			copy(point[32:], g.rng.Bytes(32))
-			// Ensure coordinates are >= field modulus
-			point[0] |= 0x80  // Make x large
-			point[32] |= 0x80 // Make y large
-		case 1:
-			// All 0xFF bytes (definitely > modulus)
-			for i := range point {
-				point[i] = 0xFF
-			}
-		case 2:
-			// Valid x, invalid y (point not on curve)
-			x := big.NewInt(int64(g.rng.Intn(1000) + 1))
-			xBytes := make([]byte, 32)
-			x.FillBytes(xBytes)
-			copy(point[:32], xBytes)
-			// Generate deliberately wrong y coordinate
-			copy(point[32:], g.rng.Bytes(32))
-			point[32] |= 0x80 // Ensure invalid
-		default:
-			// Coordinates that would cause overflow in calculations
-			// Use values near the field modulus
-			modBytes := bn256FieldModulus.Bytes()
-			copy(point[:32], modBytes)
-			copy(point[32:], modBytes)
-			// Add small random increment to go over modulus
-			point[31] += byte(g.rng.Intn(10) + 1)
-			point[63] += byte(g.rng.Intn(10) + 1)
+	if g.fuzzMode == "precompiles" {
+		// Precompiles-only mode: LOG the result
+		// PUSH the size of the data to log
+		if size < 256 {
+			bytecode = append(bytecode, 0x60, byte(size)) // PUSH1 size
+		} else {
+			bytecode = append(bytecode, 0x61, byte(size>>8), byte(size)) // PUSH2 size
 		}
-		return g.transformer.TransformPrecompileInput(point, 0x06)
-	}
 
-	// 10% chance of zero point (point at infinity)
-	if g.rng.Float64() < 0.1 {
-		return g.transformer.TransformPrecompileInput(point, 0x06) // All zeros = point at infinity
-	}
-
-	// Generate mostly valid curve point by trying random x values
-	// For efficiency, we'll generate a few known good patterns
-	patterns := []func() []byte{
-		// Pattern 1: Use small x values (often valid)
-		func() []byte {
-			x := big.NewInt(int64(g.rng.Intn(1000) + 1))
-			y := g.calculateBN256Y(x)
-			if y == nil {
-				// Fallback to generator point
-				return g.getBN256Generator()
-			}
-			xBytes := make([]byte, 32)
-			yBytes := make([]byte, 32)
-			x.FillBytes(xBytes)
-			y.FillBytes(yBytes)
-			return g.transformer.TransformPrecompileInput(append(xBytes, yBytes...), 0x06)
-		},
-		// Pattern 2: Use generator point multiples
-		func() []byte {
-			return g.transformer.TransformPrecompileInput(g.getBN256Generator(), 0x06)
-		},
-		// Pattern 3: Use modular reduction of random values
-		func() []byte {
-			randomX := new(big.Int).SetBytes(g.rng.Bytes(32))
-			x := new(big.Int).Mod(randomX, bn256FieldModulus)
-			y := g.calculateBN256Y(x)
-			if y == nil {
-				return g.transformer.TransformPrecompileInput(g.getBN256Generator(), 0x06)
-			}
-			xBytes := make([]byte, 32)
-			yBytes := make([]byte, 32)
-			x.FillBytes(xBytes)
-			y.FillBytes(yBytes)
-			return g.transformer.TransformPrecompileInput(append(xBytes, yBytes...), 0x06)
-		},
-	}
-
-	return patterns[g.rng.Intn(len(patterns))]()
-}
-
-// calculateBN256Y calculates y coordinate for given x on BN256 curve: y² = x³ + 3
-func (g *OpcodeGenerator) calculateBN256Y(x *big.Int) *big.Int {
-	// y² = x³ + 3 (mod p)
-	x3 := new(big.Int).Exp(x, big.NewInt(3), bn256FieldModulus)
-	x3Plus3 := new(big.Int).Add(x3, big.NewInt(3))
-	x3Plus3.Mod(x3Plus3, bn256FieldModulus)
-
-	// Check if x³ + 3 is a quadratic residue
-	y := g.modularSqrt(x3Plus3, bn256FieldModulus)
-	return y
-}
-
-// modularSqrt calculates square root modulo prime using Tonelli-Shanks algorithm (simplified)
-func (g *OpcodeGenerator) modularSqrt(a, p *big.Int) *big.Int {
-	// For BN256 field, p ≡ 3 (mod 4), so we can use simple formula: y = a^((p+1)/4) mod p
-	exp := new(big.Int).Add(p, bn256One)
-	exp.Div(exp, big.NewInt(4))
-	y := new(big.Int).Exp(a, exp, p)
-
-	// Verify: y² ≡ a (mod p)
-	ySquared := new(big.Int).Exp(y, big.NewInt(2), p)
-	if ySquared.Cmp(a) != 0 {
-		return nil // Not a quadratic residue
-	}
-	return y
-}
-
-// getBN256Generator returns the BN256 generator point
-func (g *OpcodeGenerator) getBN256Generator() []byte {
-	// BN256 generator point (1, 2)
-	point := make([]byte, 64)
-	point[31] = 1 // x = 1
-	point[63] = 2 // y = 2
-	return point
-}
-
-// generateValidBN256Scalar generates a valid scalar for BN256 operations
-func (g *OpcodeGenerator) generateValidBN256Scalar() []byte {
-	// Generate random scalar modulo curve order
-	// For simplicity, just use a 32-byte value (will be reduced by precompile)
-	scalar := g.rng.Bytes(32)
-
-	// 5% chance of small scalars (often interesting edge cases)
-	if g.rng.Float64() < 0.05 {
-		small := big.NewInt(int64(g.rng.Intn(100)))
-		smallBytes := make([]byte, 32)
-		small.FillBytes(smallBytes)
-		return smallBytes
-	}
-
-	return scalar
-}
-
-// generateBN256EcAddCall creates a BN256 elliptic curve point addition call
-func (g *OpcodeGenerator) generateBN256EcAddCall() []byte {
-	var bytecode []byte
-
-	// Generate two valid BN256 points
-	point1 := g.generateValidBN256Point()
-	point2 := g.generateValidBN256Point()
-
-	// Write first point (x1, y1) to memory at offset 0
-	bytecode = append(bytecode, 0x7f)           // PUSH32
-	bytecode = append(bytecode, point1[:32]...) // x1
-	bytecode = append(bytecode, 0x60, 0x00)     // PUSH1 0
-	bytecode = append(bytecode, 0x52)           // MSTORE
-
-	bytecode = append(bytecode, 0x7f)           // PUSH32
-	bytecode = append(bytecode, point1[32:]...) // y1
-	bytecode = append(bytecode, 0x60, 0x20)     // PUSH1 32
-	bytecode = append(bytecode, 0x52)           // MSTORE
-
-	// Write second point (x2, y2) to memory at offset 64
-	bytecode = append(bytecode, 0x7f)           // PUSH32
-	bytecode = append(bytecode, point2[:32]...) // x2
-	bytecode = append(bytecode, 0x60, 0x40)     // PUSH1 64
-	bytecode = append(bytecode, 0x52)           // MSTORE
-
-	bytecode = append(bytecode, 0x7f)           // PUSH32
-	bytecode = append(bytecode, point2[32:]...) // y2
-	bytecode = append(bytecode, 0x60, 0x60)     // PUSH1 96
-	bytecode = append(bytecode, 0x52)           // MSTORE
-
-	// Setup CALL to ecAdd precompile
-	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64 (return size)
-	bytecode = append(bytecode, 0x60, 0x80) // PUSH1 128 (return offset)
-	bytecode = append(bytecode, 0x60, 0x80) // PUSH1 128 (args size)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x06) // PUSH1 6 (precompile address)
-	bytecode = append(bytecode, 0x5a)       // GAS
-	bytecode = append(bytecode, 0xf1)       // CALL
-
-	// Add LOG0 to log the result when in precompiles-only mode (return at offset 128, size 64)
-	bytecode = append(bytecode, g.processPrecompileResult(128, 64)...)
-
-	return bytecode
-}
-
-// generateBN256EcMulCall creates a BN256 elliptic curve scalar multiplication call
-func (g *OpcodeGenerator) generateBN256EcMulCall() []byte {
-	var bytecode []byte
-
-	// Generate valid BN256 point and scalar
-	point := g.generateValidBN256Point()
-	scalar := g.generateValidBN256Scalar()
-
-	// Write point (x, y) to memory at offset 0
-	bytecode = append(bytecode, 0x7f)          // PUSH32
-	bytecode = append(bytecode, point[:32]...) // x
-	bytecode = append(bytecode, 0x60, 0x00)    // PUSH1 0
-	bytecode = append(bytecode, 0x52)          // MSTORE
-
-	bytecode = append(bytecode, 0x7f)          // PUSH32
-	bytecode = append(bytecode, point[32:]...) // y
-	bytecode = append(bytecode, 0x60, 0x20)    // PUSH1 32
-	bytecode = append(bytecode, 0x52)          // MSTORE
-
-	// Write scalar to memory at offset 64
-	bytecode = append(bytecode, 0x7f)       // PUSH32
-	bytecode = append(bytecode, scalar...)  // scalar
-	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64
-	bytecode = append(bytecode, 0x52)       // MSTORE
-
-	// Setup CALL to ecMul precompile
-	bytecode = append(bytecode, 0x60, 0x40) // PUSH1 64 (return size)
-	bytecode = append(bytecode, 0x60, 0x60) // PUSH1 96 (return offset)
-	bytecode = append(bytecode, 0x60, 0x60) // PUSH1 96 (args size)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x07) // PUSH1 7 (precompile address)
-	bytecode = append(bytecode, 0x5a)       // GAS
-	bytecode = append(bytecode, 0xf1)       // CALL
-
-	// Add LOG0 to log the result when in precompiles-only mode (return at offset 96, size 64)
-	bytecode = append(bytecode, g.processPrecompileResult(96, 64)...)
-
-	return bytecode
-}
-
-// generateBN256PairingCall creates a BN256 pairing check call
-func (g *OpcodeGenerator) generateBN256PairingCall() []byte {
-	var bytecode []byte
-
-	// Generate 1-3 pairs of G1 and G2 points
-	pairCount := 1 + g.rng.Intn(3) // 1, 2, or 3 pairs
-	totalLen := pairCount * 192    // Each pair: 64 bytes (G1) + 128 bytes (G2)
-
-	// Write pairs to memory
-	for i := 0; i < pairCount; i++ {
-		memOffset := i * 192
-
-		// Generate G1 point (64 bytes)
-		g1Point := g.generateValidBN256Point()
-		bytecode = append(bytecode, 0x7f)            // PUSH32
-		bytecode = append(bytecode, g1Point[:32]...) // G1 x
+		// PUSH the memory offset where the data is stored
 		if memOffset < 256 {
 			bytecode = append(bytecode, 0x60, byte(memOffset)) // PUSH1 offset
 		} else {
 			bytecode = append(bytecode, 0x61, byte(memOffset>>8), byte(memOffset)) // PUSH2 offset
 		}
-		bytecode = append(bytecode, 0x52) // MSTORE
 
-		bytecode = append(bytecode, 0x7f)            // PUSH32
-		bytecode = append(bytecode, g1Point[32:]...) // G1 y
-		g1yOffset := memOffset + 32
-		if g1yOffset < 256 {
-			bytecode = append(bytecode, 0x60, byte(g1yOffset)) // PUSH1 offset
-		} else {
-			bytecode = append(bytecode, 0x61, byte(g1yOffset>>8), byte(g1yOffset)) // PUSH2 offset
-		}
-		bytecode = append(bytecode, 0x52) // MSTORE
+		// LOG0 opcode to log the precompile result
+		bytecode = append(bytecode, 0xa0) // LOG0
+	} else {
+		// Normal fuzzing mode: load result data to stack for further processing
+		// Load result in 32-byte words using MLOAD
+		numWords := (size + 31) / 32 // Round up to get number of 32-byte words
 
-		// Generate G2 point (128 bytes: x1, x2, y1, y2)
-		g2Point := g.generateValidBN256G2Point()
-		for j := 0; j < 4; j++ {
-			bytecode = append(bytecode, 0x7f) // PUSH32
-			bytecode = append(bytecode, g2Point[j*32:(j+1)*32]...)
-			g2Offset := memOffset + 64 + j*32
-			if g2Offset < 256 {
-				bytecode = append(bytecode, 0x60, byte(g2Offset)) // PUSH1 offset
+		// Load each 32-byte word from memory to stack
+		for i := 0; i < numWords; i++ {
+			wordOffset := memOffset + (i * 32)
+
+			// PUSH the memory offset for this word
+			if wordOffset < 256 {
+				bytecode = append(bytecode, 0x60, byte(wordOffset)) // PUSH1 offset
 			} else {
-				bytecode = append(bytecode, 0x61, byte(g2Offset>>8), byte(g2Offset)) // PUSH2 offset
+				bytecode = append(bytecode, 0x61, byte(wordOffset>>8), byte(wordOffset)) // PUSH2 offset
 			}
-			bytecode = append(bytecode, 0x52) // MSTORE
+
+			// MLOAD to load 32 bytes from memory to stack
+			bytecode = append(bytecode, 0x51) // MLOAD
 		}
 	}
-
-	// Setup CALL to ecPairing precompile
-	bytecode = append(bytecode, 0x60, 0x20) // PUSH1 32 (return size)
-	returnOffset := totalLen + 32
-	if returnOffset < 256 {
-		bytecode = append(bytecode, 0x60, byte(returnOffset)) // PUSH1 retOffset
-	} else {
-		bytecode = append(bytecode, 0x61, byte(returnOffset>>8), byte(returnOffset)) // PUSH2 retOffset
-	}
-	if totalLen < 256 {
-		bytecode = append(bytecode, 0x60, byte(totalLen)) // PUSH1 totalLen
-	} else {
-		bytecode = append(bytecode, 0x61, byte(totalLen>>8), byte(totalLen)) // PUSH2 totalLen
-	}
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (args offset)
-	bytecode = append(bytecode, 0x60, 0x00) // PUSH1 0 (value)
-	bytecode = append(bytecode, 0x60, 0x08) // PUSH1 8 (precompile address)
-	bytecode = append(bytecode, 0x5a)       // GAS
-	bytecode = append(bytecode, 0xf1)       // CALL
-
-	// Add LOG0 to log the result when in precompiles-only mode (return at returnOffset, size 32)
-	bytecode = append(bytecode, g.processPrecompileResult(returnOffset, 32)...)
 
 	return bytecode
-}
-
-// generateValidBN256G2Point generates a valid BN256 G2 point
-func (g *OpcodeGenerator) generateValidBN256G2Point() []byte {
-	// For simplicity, use the G2 generator point or zero point
-	if g.rng.Float64() < 0.2 {
-		// Return zero point (point at infinity)
-		return make([]byte, 128)
-	}
-
-	// Return BN256 G2 generator point coordinates
-	// This is a known valid point on the G2 curve
-	point := make([]byte, 128)
-	// Use a simplified valid G2 point (in practice, these would be specific field elements)
-	// For fuzzing, we'll use patterns that are likely to be valid
-	binary.BigEndian.PutUint64(point[24:32], 1)   // x1 = 1
-	binary.BigEndian.PutUint64(point[56:64], 2)   // x2 = 2
-	binary.BigEndian.PutUint64(point[88:96], 1)   // y1 = 1
-	binary.BigEndian.PutUint64(point[120:128], 2) // y2 = 2
-	return point
 }
 
 // generateKZGPointEvalCall creates a KZG point evaluation precompile call
@@ -676,58 +370,6 @@ func (g *OpcodeGenerator) generateModexpCall() []byte {
 
 	return bytecode
 }
-
-// processPrecompileResult handles precompile results based on fuzzing mode
-// - In precompiles-only mode: adds LOG0 to log results
-// - In normal mode: loads results to stack in 32-byte words for further fuzzing
-func (g *OpcodeGenerator) processPrecompileResult(memOffset, size int) []byte {
-	var bytecode []byte
-
-	if g.fuzzMode == "precompiles" {
-		// Precompiles-only mode: LOG the result
-		// PUSH the size of the data to log
-		if size < 256 {
-			bytecode = append(bytecode, 0x60, byte(size)) // PUSH1 size
-		} else {
-			bytecode = append(bytecode, 0x61, byte(size>>8), byte(size)) // PUSH2 size
-		}
-
-		// PUSH the memory offset where the data is stored
-		if memOffset < 256 {
-			bytecode = append(bytecode, 0x60, byte(memOffset)) // PUSH1 offset
-		} else {
-			bytecode = append(bytecode, 0x61, byte(memOffset>>8), byte(memOffset)) // PUSH2 offset
-		}
-
-		// LOG0 opcode to log the precompile result
-		bytecode = append(bytecode, 0xa0) // LOG0
-	} else {
-		// Normal fuzzing mode: load result data to stack for further processing
-		// Load result in 32-byte words using MLOAD
-		numWords := (size + 31) / 32 // Round up to get number of 32-byte words
-
-		// Load each 32-byte word from memory to stack
-		for i := 0; i < numWords; i++ {
-			wordOffset := memOffset + (i * 32)
-
-			// PUSH the memory offset for this word
-			if wordOffset < 256 {
-				bytecode = append(bytecode, 0x60, byte(wordOffset)) // PUSH1 offset
-			} else {
-				bytecode = append(bytecode, 0x61, byte(wordOffset>>8), byte(wordOffset)) // PUSH2 offset
-			}
-
-			// MLOAD to load 32 bytes from memory to stack
-			bytecode = append(bytecode, 0x51) // MLOAD
-		}
-	}
-
-	return bytecode
-}
-
-// =============================================================================
-// Specialized handlers for basic precompiles (0x01-0x0a)
-// =============================================================================
 
 // generateEcrecoverCall creates an ECRECOVER precompile call with specialized input generation
 func (g *OpcodeGenerator) generateEcrecoverCall() []byte {
