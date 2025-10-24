@@ -245,7 +245,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 func (s *Scenario) deployFuzzedContract(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	// Generate fuzzed bytecode for contract deployment
-	fuzzedBytecode := s.generateFuzzedBytecode(txIdx)
+	fuzzedBytecode, value := s.generateFuzzedBytecode(txIdx)
 
 	// Select wallet and client
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
@@ -271,7 +271,7 @@ func (s *Scenario) deployFuzzedContract(ctx context.Context, txIdx uint64) (scen
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       s.options.GasLimit,
 		To:        nil, // Contract creation
-		Value:     uint256.NewInt(0),
+		Value:     value,
 		Data:      fuzzedBytecode,
 	})
 	if err != nil {
@@ -301,7 +301,7 @@ func (s *Scenario) deployFuzzedContract(ctx context.Context, txIdx uint64) (scen
 	return receiptChan, tx, client, wallet, nil
 }
 
-func (s *Scenario) generateFuzzedBytecode(txIdx uint64) []byte {
+func (s *Scenario) generateFuzzedBytecode(txIdx uint64) ([]byte, *uint256.Int) {
 	// Apply txID offset for fast-forwarding to specific transaction
 	effectiveTxID := txIdx + s.options.TxIdOffset
 
@@ -321,8 +321,13 @@ func (s *Scenario) generateFuzzedBytecode(txIdx uint64) []byte {
 	// Set fuzz mode
 	generator.SetFuzzMode(s.options.FuzzMode)
 
+	value := uint256.NewInt(0)
+	if generator.rng.Float64() < 0.75 { // 75% chance for random small value
+		value = uint256.NewInt(uint64(0xa000 + generator.rng.Intn(0x6000)))
+	}
+
 	// Generate sophisticated stack-aware bytecode
-	return generator.Generate()
+	return generator.Generate(), value
 }
 
 func (s *Scenario) validateSeed(seed string) error {

@@ -60,71 +60,10 @@ func (g *OpcodeGenerator) generateValidBLS12G1PointUncompressed() []byte {
 
 	// Always place field elements at the end of 64-byte slots with proper padding
 	// Field elements should be exactly 48 bytes, placed at bytes [16:64] and [80:128]
-	if len(xBytes) == 48 {
-		copy(point[16:64], xBytes[:])
-	} else {
-		// Handle variable length by right-aligning
-		copy(point[64-len(xBytes):64], xBytes[:])
-	}
-
-	if len(yBytes) == 48 {
-		copy(point[80:128], yBytes[:])
-	} else {
-		// Handle variable length by right-aligning
-		copy(point[128-len(yBytes):128], yBytes[:])
-	}
+	copy(point[16:64], xBytes[:])
+	copy(point[80:128], yBytes[:])
 
 	return g.transformer.TransformPrecompileInput(point, 0x0b)
-}
-
-// generateBLS12G1FieldElements generates raw BLS12-381 G1 field elements (48 bytes each)
-func (g *OpcodeGenerator) generateBLS12G1FieldElements() ([]byte, []byte) {
-	choice := g.rng.Intn(100)
-
-	if choice < 5 {
-		// 5% chance to generate invalid field elements for testing
-		invalidX := make([]byte, 48)
-		invalidY := make([]byte, 48)
-		copy(invalidX, g.rng.Bytes(48))
-		copy(invalidY, g.rng.Bytes(48))
-		// Ensure they're > modulus
-		invalidX[0] |= 0xE0
-		invalidY[0] |= 0xE0
-		transformedX := g.transformer.TransformPrecompileInput(invalidX, 0x0b)
-		transformedY := g.transformer.TransformPrecompileInput(invalidY, 0x0b)
-		return transformedX, transformedY
-	}
-
-	if choice < 15 {
-		// 10% chance of zero point (point at infinity)
-		zeroX := make([]byte, 48)
-		zeroY := make([]byte, 48)
-		transformedX := g.transformer.TransformPrecompileInput(zeroX, 0x0b)
-		transformedY := g.transformer.TransformPrecompileInput(zeroY, 0x0b)
-		return transformedX, transformedY
-	}
-
-	// 85% of the time: Generate random valid points using gnark-crypto library
-	var g1Point bls12381.G1Affine
-
-	// Generate a random scalar (this ensures we get a valid point in the subgroup)
-	var scalar fr.Element
-	scalarBytes := g.rng.Bytes(32)
-	scalar.SetBytes(scalarBytes)
-
-	// Get the generator point and multiply by random scalar
-	_, _, g1Gen, _ := bls12381.Generators()
-
-	// Scalar multiplication: scalar * generator (guaranteed to be in correct subgroup)
-	g1Point.ScalarMultiplication(&g1Gen, scalar.BigInt(new(big.Int)))
-
-	// Extract raw field elements (48 bytes each)
-	xBytes := g1Point.X.Bytes()
-	yBytes := g1Point.Y.Bytes()
-
-	transformedX := g.transformer.TransformPrecompileInput(xBytes[:], 0x0b)
-	transformedY := g.transformer.TransformPrecompileInput(yBytes[:], 0x0b)
-	return transformedX, transformedY
 }
 
 // generateValidBLS12G2PointUncompressed generates a BLS12-381 G2 point using gnark-crypto library

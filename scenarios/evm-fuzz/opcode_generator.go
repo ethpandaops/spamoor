@@ -135,10 +135,10 @@ func simpleOpcode(opcode byte) func(g *OpcodeGenerator) []byte {
 	return func(g *OpcodeGenerator) []byte { return []byte{opcode} }
 }
 
-func jumpTemplate(g *OpcodeGenerator) []byte     { return g.generateJump() }
-func jumpiTemplate(g *OpcodeGenerator) []byte    { return g.generateJumpi() }
-func callTemplate(g *OpcodeGenerator) []byte     { return g.generateCallWithZeroValue(0xf1) }
-func callcodeTemplate(g *OpcodeGenerator) []byte { return g.generateCallWithZeroValue(0xf2) }
+func jumpTemplate(g *OpcodeGenerator) []byte    { return g.generateJump() }
+func jumpiTemplate(g *OpcodeGenerator) []byte   { return g.generateJumpi() }
+func createTemplate(g *OpcodeGenerator) []byte  { return g.generateCreate(false) }
+func create2Template(g *OpcodeGenerator) []byte { return g.generateCreate(true) }
 
 // Generic sanitization wrapper - applies masks to stack positions before executing base template
 // masks[i] = mask for stack position i (0 = no sanitization)
@@ -193,7 +193,6 @@ func sanitizeInput(baseTemplate func(g *OpcodeGenerator) []byte, masks []uint64)
 func (g *OpcodeGenerator) initializeOpcodes() {
 	opcodes := []*OpcodeInfo{
 		// Stack operations
-		{"STOP", 0x00, 0, 0, 0, simpleOpcode(0x00), 0.1}, // Lower probability - ends execution
 		{"ADD", 0x01, 2, 1, 3, simpleOpcode(0x01), 1.0},
 		{"MUL", 0x02, 2, 1, 5, simpleOpcode(0x02), 1.0},
 		{"SUB", 0x03, 2, 1, 3, simpleOpcode(0x03), 1.0},
@@ -284,16 +283,15 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		{"LOG4", 0xa4, 6, 0, 1875, sanitizeInput(simpleOpcode(0xa4), []uint64{0x2ffff, 0xffff}), 1.0}, // Sanitize offset
 
 		// Contract operations
-		{"CREATE", 0xf0, 3, 1, 32000, sanitizeInput(simpleOpcode(0xf0), []uint64{0, 0x2ffff, 0xffff}), 1.5},                         // Sanitize offset, length (not value)
-		{"CALL", 0xf1, 6, 1, 100, sanitizeInput(callTemplate, []uint64{0, 0, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.3},            // Sanitize memory args, custom value=0
-		{"CALLCODE", 0xf2, 6, 1, 100, sanitizeInput(callcodeTemplate, []uint64{0, 0, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.0},    // Sanitize memory args, custom value=0
-		{"RETURN", 0xf3, 2, 0, 0, sanitizeInput(simpleOpcode(0xf3), []uint64{0x2ffff, 0xffff}), 0.1},                                // Sanitize offset, length - Lower - ends execution
-		{"DELEGATECALL", 0xf4, 6, 1, 100, sanitizeInput(simpleOpcode(0xf4), []uint64{0, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.3}, // Sanitize argsOffset, argsSize, retOffset, retSize
-		{"CREATE2", 0xf5, 4, 1, 32000, sanitizeInput(simpleOpcode(0xf5), []uint64{0, 0x2ffff, 0xffff, 0}), 1.5},                     // Sanitize offset, length (not value, salt)
-		{"STATICCALL", 0xfa, 6, 1, 100, sanitizeInput(simpleOpcode(0xfa), []uint64{0, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.3},   // Sanitize argsOffset, argsSize, retOffset, retSize
-		{"REVERT", 0xfd, 2, 0, 0, sanitizeInput(simpleOpcode(0xfd), []uint64{0x2ffff, 0xffff}), 0.1},                                // Sanitize offset, length - Lower - ends execution
-		{"INVALID", 0xfe, 0, 0, 0, simpleOpcode(0xfe), 0.05},                                                                        // Very low - breaks execution
-		{"SELFDESTRUCT", 0xff, 1, 0, 5000, simpleOpcode(0xff), 1.1},                                                                 // Interesting
+		{"CREATE", 0xf0, 3, 1, 32000, createTemplate, 1.8},                                                                              // Enhanced CREATE with deployment + call
+		{"CALL", 0xf1, 6, 1, 100, sanitizeInput(simpleOpcode(0xf1), []uint64{0, 0xffff, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.3},     // Sanitize memory args, custom value=0
+		{"CALLCODE", 0xf2, 6, 1, 100, sanitizeInput(simpleOpcode(0xf2), []uint64{0, 0xffff, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.0}, // Sanitize memory args, custom value=0
+		{"RETURN", 0xf3, 2, 0, 0, sanitizeInput(simpleOpcode(0xf3), []uint64{0x2ffff, 0xffff}), 0.1},                                    // Sanitize offset, length - Lower - ends execution
+		{"DELEGATECALL", 0xf4, 6, 1, 100, sanitizeInput(simpleOpcode(0xf4), []uint64{0, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.3},     // Sanitize argsOffset, argsSize, retOffset, retSize
+		{"CREATE2", 0xf5, 4, 1, 32000, create2Template, 1.8},                                                                            // Enhanced CREATE2 with deployment + call
+		{"STATICCALL", 0xfa, 6, 1, 100, sanitizeInput(simpleOpcode(0xfa), []uint64{0, 0, 0x2ffff, 0xffff, 0x2ffff, 0xffff}), 1.3},       // Sanitize argsOffset, argsSize, retOffset, retSize
+		{"REVERT", 0xfd, 2, 0, 0, sanitizeInput(simpleOpcode(0xfd), []uint64{0x2ffff, 0xffff}), 0.1},                                    // Sanitize offset, length - Lower - ends execution
+		{"SELFDESTRUCT", 0xff, 1, 0, 5000, simpleOpcode(0xff), 1.1},                                                                     // Interesting
 
 		// Precompile calls (treated as special opcodes)
 		// Specialized handlers generate proper calldata and push results to stack
@@ -502,18 +500,156 @@ func (g *OpcodeGenerator) generateJumpi() []byte {
 	return []byte{0x61, 0x00, 0x00, 0x57}
 }
 
-// generateCallWithZeroValue creates CALL/CALLCODE with value=0 override
-func (g *OpcodeGenerator) generateCallWithZeroValue(opcode byte) []byte {
-	// Only override the value argument (stack position 2) to be 0
-	// The sanitization wrapper handles all memory argument sanitization
-
-	// Set value to 0 (stack position 2)
-	bytecode := []byte{
-		0x60, 0x00, // PUSH1 0
-		0x82,   // SWAP3 - move 0 to position 2 (value)
-		0x50,   // POP - remove old value
-		opcode, // CALL or CALLCODE
+// generateCreate creates enhanced CREATE/CREATE2 with 50% chance of full deployment + call
+func (g *OpcodeGenerator) generateCreate(isCreate2 bool) []byte {
+	// 60% chance for enhanced deployment with subsequent call
+	if g.rng.Float64() < 0.6 {
+		return g.generateCreateWithCall(isCreate2)
 	}
+
+	// 40% chance for simple CREATE/CREATE2 (existing behavior)
+	if isCreate2 {
+		return []byte{0xf5} // CREATE2
+	}
+	return []byte{0xf0} // CREATE
+}
+
+// generateCreateWithCall implements the full deployment + call pattern
+func (g *OpcodeGenerator) generateCreateWithCall(isCreate2 bool) []byte {
+	var bytecode []byte
+
+	// Step 1: Load current bytecode into memory at offset 0
+	// CODESIZE - get size of current contract code
+	bytecode = append(bytecode, 0x38) // CODESIZE
+
+	// DUP1 - duplicate size for CODECOPY
+	bytecode = append(bytecode, 0x80) // DUP1
+
+	// PUSH0 - source offset in code
+	bytecode = append(bytecode, 0x5f) // PUSH0
+
+	// PUSH0 - destination offset in memory
+	bytecode = append(bytecode, 0x5f) // PUSH0
+
+	// CODECOPY - copy current code to memory[0:]
+	bytecode = append(bytecode, 0x39) // CODECOPY
+
+	// Step 2: Overwrite first 32 bytes with jump bypass pattern
+	// We need to create: PUSH4 0x00000000 JUMP PUSH26 <remaining_bytes>
+	// Calculate the jump target first (it will be at the end of this sequence)
+
+	// Create the bypass pattern (32 bytes total)
+	bypassPattern := make([]byte, 32)
+	bypassPattern[0] = 0x63 // PUSH4
+	// 1-4 are 0x00000000
+	bypassPattern[5] = 0x56 // JUMP
+	bypassPattern[6] = 0x79 // PUSH26
+	// bytes 7-32 are PUSH26 data (can be anything, we'll use random)
+	copy(bypassPattern[7:], g.rng.Bytes(25))
+
+	// Store the bypass pattern in memory starting at offset 0
+	// PUSH32 <byte> - push the byte value
+	bytecode = append(bytecode, 0x7f)
+	jumpAddrPos := len(bytecode) + 1 // position of the jump address
+	bytecode = append(bytecode, bypassPattern...)
+	// PUSH0 - push memory offset
+	bytecode = append(bytecode, 0x5f)
+	// MSTORE - store word in memory
+	bytecode = append(bytecode, 0x52)
+
+	// Step 3: Prepare CREATE/CREATE2 arguments
+	// For CREATE: value, offset, size
+	// For CREATE2: value, offset, size, salt
+
+	// push salt
+	if isCreate2 {
+		// PUSH4 <random_salt> - salt for CREATE2
+		salt := g.rng.Bytes(4)
+		bytecode = append(bytecode, 0x63)
+		bytecode = append(bytecode, salt...)
+
+		// SWAP1 - swap salt with size
+		bytecode = append(bytecode, 0x90)
+	}
+
+	// PUSH0 - offset
+	bytecode = append(bytecode, 0x5f)
+
+	// Push value - 30% chance for random value, 70% chance for 0
+	if g.rng.Float64() < 0.3 {
+		// Random value between 0xa000-0xffff
+		randomValue := 0xa000 + g.rng.Intn(0x6000)                                 // 0xa000 + [0, 0x5fff] = [0xa000, 0xffff]
+		bytecode = append(bytecode, 0x61, byte(randomValue>>8), byte(randomValue)) // PUSH2
+	} else {
+		// PUSH0 - value (0 ETH)
+		bytecode = append(bytecode, 0x5f)
+	}
+
+	if isCreate2 {
+		// CREATE2
+		bytecode = append(bytecode, 0xf5)
+	} else {
+		// CREATE
+		bytecode = append(bytecode, 0xf0)
+	}
+
+	// Step 4: Call into the newly created contract
+	// Determine call type (40% call, 40% delegatecall, 10% staticcall, 10% callcode)
+	callChoice := g.rng.Float64()
+
+	if callChoice < 0.4 { // 40% CALL
+		// Prepare CALL arguments: gas, address, value, argsOffset, argsSize, retOffset, retSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - retSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - retOffset
+		bytecode = append(bytecode, 0x5f) // PUSH0 - argsSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - argsOffset
+		bytecode = append(bytecode, 0x5f) // PUSH0 - value
+		bytecode = append(bytecode, 0x85) // DUP6 - address
+		bytecode = append(bytecode, 0x5a) // GAS - use all available gas
+		bytecode = append(bytecode, 0xf1) // CALL
+	} else if callChoice < 0.8 { // 40% DELEGATECALL
+		// Prepare DELEGATECALL arguments: gas, address, argsOffset, argsSize, retOffset, retSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - retSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - retOffset
+		bytecode = append(bytecode, 0x5f) // PUSH0 - argsSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - argsOffset
+		bytecode = append(bytecode, 0x84) // DUP5 - address
+		bytecode = append(bytecode, 0x5a) // GAS - use all available gas
+		bytecode = append(bytecode, 0xf4) // DELEGATECALL
+	} else if callChoice < 0.9 { // 10% STATICCALL
+		// Prepare STATICCALL arguments: gas, address, argsOffset, argsSize, retOffset, retSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - retSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - retOffset
+		bytecode = append(bytecode, 0x5f) // PUSH0 - argsSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - argsOffset
+		bytecode = append(bytecode, 0x84) // DUP5 - address
+		bytecode = append(bytecode, 0x5a) // GAS - use all available gas
+		bytecode = append(bytecode, 0xfa) // STATICCALL
+	} else { // 10% CALLCODE
+		// Prepare CALLCODE arguments: gas, address, value, argsOffset, argsSize, retOffset, retSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - retSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - retOffset
+		bytecode = append(bytecode, 0x5f) // PUSH0 - argsSize
+		bytecode = append(bytecode, 0x5f) // PUSH0 - argsOffset
+		bytecode = append(bytecode, 0x5f) // PUSH0 - value
+		bytecode = append(bytecode, 0x85) // DUP6 - address
+		bytecode = append(bytecode, 0x5a) // GAS - use all available gas
+		bytecode = append(bytecode, 0xf2) // CALLCODE
+	}
+
+	// Step 5: Add JUMPDEST for the inner call entrypoint
+	// Record the position where we need to place the JUMPDEST
+	jumpdestPos := len(g.bytecode) + len(bytecode)
+	g.jumpTargets = append(g.jumpTargets, jumpdestPos)
+
+	// update jump address
+	bytecode[jumpAddrPos+1] = byte(jumpdestPos >> 16)
+	bytecode[jumpAddrPos+2] = byte(jumpdestPos >> 8)
+	bytecode[jumpAddrPos+3] = byte(jumpdestPos)
+
+	// Add the JUMPDEST
+	bytecode = append(bytecode, 0x5b) // JUMPDEST
+	g.stack = g.stack[:0]             // clear stack to avoid underflow in inner call
 
 	return bytecode
 }
@@ -795,6 +931,8 @@ func (g *OpcodeGenerator) updateStackState(op *OpcodeInfo) {
 	// Remove consumed items
 	if len(g.stack) >= op.StackInput {
 		g.stack = g.stack[:len(g.stack)-op.StackInput]
+	} else {
+		g.stack = g.stack[:0]
 	}
 
 	// Add produced items
