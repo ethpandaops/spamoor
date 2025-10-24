@@ -182,6 +182,34 @@ timeout: ""
 client_group: ""
 deploy_client_group: ""
 log_txs: false
+', 0, 0, '{}'),
+
+-- EVM Fuzz Spammer
+(7, 'evm-fuzz', 'EVM Fuzz Spammer', 'Opcode & Precompile fuzzer, 50tx/block, gas limit 1M, ~20M gas usage', '# wallet settings
+seed: evm-fuzz-7 # seed for the wallet
+refill_amount: 5000000000000000000 # refill 5 ETH when
+refill_balance: 1000000000000000000 # balance drops below 1 ETH
+refill_interval: 600 # check every 10 minutes
+
+# scenario: evm-fuzz
+total_count: 0
+throughput: 50
+max_pending: 100
+max_wallets: 0
+rebroadcast: 30
+base_fee: 20
+tip_fee: 2
+gas_limit: 1000000
+timeout: ""
+client_group: ""
+log_txs: false
+max_code_size: 512
+min_code_size: 100
+payload_seed: ""
+tx_id_offset: 0
+fuzz_mode: all
+
+
 ', 0, 0, '{}');
 
 
