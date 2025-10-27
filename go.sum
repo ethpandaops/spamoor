@@ -59,8 +59,8 @@ github.com/ethereum/c-kzg-4844/v2 v2.0.1 h1:NuErvd0Ha5gLvvZ1m9Id9UZ11kcqMBUUXsbm
 github.com/ethereum/c-kzg-4844/v2 v2.0.1/go.mod h1:urP+cLBtKCW4BS5bnA2IXYs1PRGPpXmdotqpBuU6/5s=
 github.com/ethereum/go-verkle v0.2.2 h1:I2W0WjnrFUIzzVPwm8ykY+7pL2d4VhlsePn4j7cnFk8=
 github.com/ethereum/go-verkle v0.2.2/go.mod h1:M3b90YRnzqKyyzBEWJGqj8Qff4IDeXnzFw0P9bFw3uk=
-github.com/fjl/geas v0.2.2 h1:rR9oIDUz7klhn5A2EbT2+8/IEIc0eJrxOJebNEKsp4M=
-github.com/fjl/geas v0.2.2/go.mod h1:vNa6lxcbPN6BRt6DmT+t4cyZO3n/YeNbn/tyihZEiSM=
+github.com/fjl/geas v0.3.0 h1:ijWKIchZx8teIGD1wJU5SiIELgMOUZyc5TAibzxMpao=
+github.com/fjl/geas v0.3.0/go.mod h1:vNa6lxcbPN6BRt6DmT+t4cyZO3n/YeNbn/tyihZEiSM=
 github.com/fsnotify/fsnotify v1.6.0 h1:n+5WquG0fcWoWp6xPWfHdbskMCQaFnG6PfBrh1Ky4HY=
 github.com/fsnotify/fsnotify v1.6.0/go.mod h1:sl3t1tCWJFWoRz9R8WJCbQihKKwmorjAbSClcnxKAGw=
 github.com/getsentry/sentry-go v0.27.0 h1:Pv98CIbtB3LkMWmXi4Joa5OOcwbmnX88sF5qbK3r3Ps=
