@@ -1,0 +1,22 @@
+# ERC20 Bloater Scenario Configuration
+
+# Target storage size in GB (using 32 bytes per slot calculation)
+# The scenario will write slots until it reaches this target
+target_storage_gb: 1.0
+
+# Target gas usage ratio (default 0.90 = use 90% of block gas limit per transaction)
+# This determines how many addresses are bloated per transaction
+target_gas_ratio: 0.90
+
+# Gas prices in gwei (for EIP-1559 transactions)
+base_fee: 20  # Base fee per gas
+tip_fee: 2    # Priority fee per gas
+
+# Contract deployment
+# Leave empty to deploy new contract, or specify address to use existing
+existing_contract: ""
+
+# Wallet configuration
+# Leave empty to use the first wallet from the wallet pool
+# Or provide a private key to use a specific wallet
+wallet_private_key: ""
