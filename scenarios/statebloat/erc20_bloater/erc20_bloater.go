@@ -33,11 +33,12 @@ const (
 )
 
 type ScenarioOptions struct {
-	TargetStorageGB  float64 `yaml:"target_storage_gb" json:"target_storage_gb"`
-	TargetGasRatio   float64 `yaml:"target_gas_ratio" json:"target_gas_ratio"`
-	BaseFee          uint64  `yaml:"base_fee" json:"base_fee"`
-	TipFee           uint64  `yaml:"tip_fee" json:"tip_fee"`
-	ExistingContract string  `yaml:"existing_contract" json:"existing_contract"`
+	TargetStorageGB   float64 `yaml:"target_storage_gb" json:"target_storage_gb"`
+	TargetGasRatio    float64 `yaml:"target_gas_ratio" json:"target_gas_ratio"`
+	BaseFee           uint64  `yaml:"base_fee" json:"base_fee"`
+	TipFee            uint64  `yaml:"tip_fee" json:"tip_fee"`
+	ExistingContract  string  `yaml:"existing_contract" json:"existing_contract"`
+	CheckpointFile    string  `yaml:"checkpoint_file" json:"checkpoint_file"`
 }
 
 type Checkpoint struct {
@@ -76,6 +77,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:          20,
 	TipFee:           2,
 	ExistingContract: "",
+	CheckpointFile:   CheckpointFileName,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -96,6 +98,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
 	flags.StringVar(&s.options.ExistingContract, "existing-contract", ScenarioDefaultOptions.ExistingContract, "Use existing contract address instead of deploying new one")
+	flags.StringVar(&s.options.CheckpointFile, "checkpoint-file", ScenarioDefaultOptions.CheckpointFile, "Checkpoint file path for resume capability")
 	return nil
 }
 
@@ -181,10 +184,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.contractInstance = contractInstance
 
 	// Query network gas limit
-	blockGasLimit, err := s.getBlockGasLimit(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get block gas limit: %w", err)
-	}
+	blockGasLimit := s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
 
 	// Calculate target gas per transaction (3/4 of block gas limit by default)
 	targetGasPerTx := uint64(float64(blockGasLimit) * s.options.TargetGasRatio)
@@ -390,45 +390,23 @@ func (s *Scenario) sendBloatTx(ctx context.Context, startSlot uint64, numAddress
 		return nil, nil, nil, fmt.Errorf("failed to build bloat tx: %w", err)
 	}
 
-	// Send transaction using TxPool but with manual receipt polling
-	// Note: We bypass SendAndAwaitTransaction because it can miss blocks due to TxPool race conditions
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	// Send transaction and wait for receipt
+	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
-		Rebroadcast: false, // Disable rebroadcast since we're handling confirmation manually
+		Rebroadcast: true,
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to send tx: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to send/confirm tx: %w", err)
 	}
 
-	s.logger.Debugf("sent tx %s, manually polling for receipt...", tx.Hash().Hex())
+	s.logger.Debugf("tx %s confirmed in block #%d (status: %d)",
+		tx.Hash().Hex(), receipt.BlockNumber.Uint64(), receipt.Status)
 
-	// Manually poll for receipt (more reliable than relying on TxPool block processing)
-	ethClient := client.GetEthClient()
-	var receipt *types.Receipt
-	maxAttempts := 60 // 60 attempts * 2s = 2 minute timeout
-	for i := 0; i < maxAttempts; i++ {
-		receipt, err = ethClient.TransactionReceipt(ctx, tx.Hash())
-		if err == nil && receipt != nil {
-			s.logger.Debugf("retrieved receipt for tx %s in block #%d (status: %d)",
-				tx.Hash().Hex(), receipt.BlockNumber.Uint64(), receipt.Status)
-			return tx, wallet, receipt, nil
-		}
-
-		// Check if context was cancelled
-		select {
-		case <-ctx.Done():
-			return nil, nil, nil, ctx.Err()
-		default:
-		}
-
-		time.Sleep(2 * time.Second)
-	}
-
-	return nil, nil, nil, fmt.Errorf("timeout waiting for tx confirmation after %d seconds: %s", maxAttempts*2, tx.Hash().Hex())
+	return tx, wallet, receipt, nil
 }
 
 func (s *Scenario) loadCheckpoint() (*Checkpoint, error) {
-	data, err := os.ReadFile(CheckpointFileName)
+	data, err := os.ReadFile(s.options.CheckpointFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -459,12 +437,12 @@ func (s *Scenario) saveCheckpoint() error {
 		return err
 	}
 
-	tempPath := CheckpointFileName + ".tmp"
+	tempPath := s.options.CheckpointFile + ".tmp"
 	if err := os.WriteFile(tempPath, data, 0644); err != nil {
 		return err
 	}
 
-	return os.Rename(tempPath, CheckpointFileName)
+	return os.Rename(tempPath, s.options.CheckpointFile)
 }
 
 func (s *Scenario) saveConfig() error {
@@ -499,13 +477,4 @@ func (s *Scenario) getChainID(ctx context.Context) (*big.Int, error) {
 		s.chainID, s.chainIDError = client.GetChainId(ctx)
 	})
 	return s.chainID, s.chainIDError
-}
-
-func (s *Scenario) getBlockGasLimit(ctx context.Context) (uint64, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
-	block, err := client.GetEthClient().BlockByNumber(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get latest block: %w", err)
-	}
-	return block.GasLimit(), nil
 }
