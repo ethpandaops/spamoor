@@ -16,20 +16,12 @@ contract ERC20Bloater {
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
-    address public owner;
-
     event StorageBloated(uint256 startSlot, uint256 endSlot, uint256 slotsWritten);
 
     constructor(uint256 initialSupply) {
-        owner = msg.sender;
         totalSupply = initialSupply;
         balanceOf[msg.sender] = initialSupply;
         nextStorageSlot = 1; // Start from address 0x0000...0001
-    }
-
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Not owner");
-        _;
     }
 
     /**
@@ -71,7 +63,7 @@ contract ERC20Bloater {
      * @param startSlot The address index to start from (allows resuming after errors)
      * @param numAddresses Number of addresses to bloat (each creates 2 storage slots)
      */
-    function bloatStorage(uint256 startSlot, uint256 numAddresses) external onlyOwner {
+    function bloatStorage(uint256 startSlot, uint256 numAddresses) external {
         uint256 endSlot = startSlot + numAddresses;
 
         unchecked {
@@ -102,7 +94,7 @@ contract ERC20Bloater {
     /**
      * @dev Emergency mint function to refill supply if needed
      */
-    function mint(address to, uint256 amount) external onlyOwner {
+    function mint(address to, uint256 amount) external {
         unchecked {
             totalSupply += amount;
             balanceOf[to] += amount;
