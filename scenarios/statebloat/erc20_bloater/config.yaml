@@ -4,9 +4,10 @@
 # The scenario will write slots until it reaches this target
 target_storage_gb: 1.0
 
-# Target gas usage ratio (default 0.90 = use 90% of block gas limit per transaction)
+# Target gas usage ratio (default 0.50 = use 50% of block gas limit per transaction)
 # This determines how many addresses are bloated per transaction
-target_gas_ratio: 0.90
+# Lower values help prevent base fee increases
+target_gas_ratio: 0.50
 
 # Gas prices in gwei (for EIP-1559 transactions)
 base_fee: 20  # Base fee per gas

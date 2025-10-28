@@ -72,7 +72,7 @@ type Scenario struct {
 var ScenarioName = "erc20_bloater"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TargetStorageGB:  1.0,
-	TargetGasRatio:   0.90,
+	TargetGasRatio:   0.50,
 	BaseFee:          20,
 	TipFee:           2,
 	ExistingContract: "",
@@ -92,7 +92,7 @@ func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Float64Var(&s.options.TargetStorageGB, "target-gb", ScenarioDefaultOptions.TargetStorageGB, "Target storage size in GB")
-	flags.Float64Var(&s.options.TargetGasRatio, "target-gas-ratio", ScenarioDefaultOptions.TargetGasRatio, "Target gas usage as ratio of block gas limit (default 0.90 = 90%)")
+	flags.Float64Var(&s.options.TargetGasRatio, "target-gas-ratio", ScenarioDefaultOptions.TargetGasRatio, "Target gas usage as ratio of block gas limit (default 0.50 = 50%)")
 	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
 	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
 	flags.StringVar(&s.options.ExistingContract, "existing-contract", ScenarioDefaultOptions.ExistingContract, "Use existing contract address instead of deploying new one")
