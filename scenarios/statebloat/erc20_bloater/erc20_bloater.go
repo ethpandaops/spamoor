@@ -25,33 +25,33 @@ import (
 )
 
 const (
-	CheckpointFileName  = ".erc20_bloater_checkpoint.json"
-	ConfigFileName      = "config.yaml"
-	BytesPerSlot        = 32
-	SlotsPerBloatCycle  = 2 // Each iteration: 1 balance + 1 allowance
+	CheckpointFileName   = ".erc20_bloater_checkpoint.json"
+	ConfigFileName       = "config.yaml"
+	BytesPerSlot         = 32
+	SlotsPerBloatCycle   = 2                                                                                // Each iteration: 1 balance + 1 allowance
 	DefaultInitialSupply = "115792089237316195423570985008687907853269984665640564039457584007913129639935" // max uint256
 )
 
 type ScenarioOptions struct {
-	TargetStorageGB   float64 `yaml:"target_storage_gb" json:"target_storage_gb"`
-	TargetGasRatio    float64 `yaml:"target_gas_ratio" json:"target_gas_ratio"`
-	BaseFee           uint64  `yaml:"base_fee" json:"base_fee"`
-	TipFee            uint64  `yaml:"tip_fee" json:"tip_fee"`
-	ExistingContract  string  `yaml:"existing_contract" json:"existing_contract"`
-	CheckpointFile    string  `yaml:"checkpoint_file" json:"checkpoint_file"`
+	TargetStorageGB  float64 `yaml:"target_storage_gb" json:"target_storage_gb"`
+	TargetGasRatio   float64 `yaml:"target_gas_ratio" json:"target_gas_ratio"`
+	BaseFee          float64 `yaml:"base_fee" json:"base_fee"`
+	TipFee           float64 `yaml:"tip_fee" json:"tip_fee"`
+	ExistingContract string  `yaml:"existing_contract" json:"existing_contract"`
+	CheckpointFile   string  `yaml:"checkpoint_file" json:"checkpoint_file"`
 }
 
 type Checkpoint struct {
-	ContractAddress      common.Address `json:"contract_address"`
-	LastSuccessfulSlot   uint64         `json:"last_successful_slot"`
-	NextSlotToWrite      uint64         `json:"next_slot_to_write"`
-	TotalSlotsCreated    uint64         `json:"total_slots_created"`
-	EstimatedStorageGB   float64        `json:"estimated_storage_gb"`
-	LastBlockNumber      uint64         `json:"last_block_number"`
-	LastTxHash           string         `json:"last_transaction_hash"`
-	LastUpdateTimestamp  time.Time      `json:"last_update_timestamp"`
-	ErrorCount           int            `json:"error_count"`
-	LastError            *string        `json:"last_error"`
+	ContractAddress     common.Address `json:"contract_address"`
+	LastSuccessfulSlot  uint64         `json:"last_successful_slot"`
+	NextSlotToWrite     uint64         `json:"next_slot_to_write"`
+	TotalSlotsCreated   uint64         `json:"total_slots_created"`
+	EstimatedStorageGB  float64        `json:"estimated_storage_gb"`
+	LastBlockNumber     uint64         `json:"last_block_number"`
+	LastTxHash          string         `json:"last_transaction_hash"`
+	LastUpdateTimestamp time.Time      `json:"last_update_timestamp"`
+	ErrorCount          int            `json:"error_count"`
+	LastError           *string        `json:"last_error"`
 }
 
 type Scenario struct {
@@ -64,10 +64,6 @@ type Scenario struct {
 
 	checkpoint      *Checkpoint
 	checkpointMutex sync.Mutex
-
-	chainID      *big.Int
-	chainIDOnce  sync.Once
-	chainIDError error
 }
 
 var ScenarioName = "erc20_bloater"
@@ -95,8 +91,8 @@ func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Float64Var(&s.options.TargetStorageGB, "target-gb", ScenarioDefaultOptions.TargetStorageGB, "Target storage size in GB")
 	flags.Float64Var(&s.options.TargetGasRatio, "target-gas-ratio", ScenarioDefaultOptions.TargetGasRatio, "Target gas usage as ratio of block gas limit (default 0.50 = 50%)")
-	flags.Uint64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
-	flags.Uint64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
 	flags.StringVar(&s.options.ExistingContract, "existing-contract", ScenarioDefaultOptions.ExistingContract, "Use existing contract address instead of deploying new one")
 	flags.StringVar(&s.options.CheckpointFile, "checkpoint-file", ScenarioDefaultOptions.CheckpointFile, "Checkpoint file path for resume capability")
 	return nil
@@ -176,7 +172,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	}
 
 	// Bind to contract
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
+	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
 	contractInstance, err := contract.NewERC20Bloater(s.contractAddr, client.GetEthClient())
 	if err != nil {
 		return fmt.Errorf("failed to bind contract: %w", err)
@@ -184,7 +180,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.contractInstance = contractInstance
 
 	// Query network gas limit
-	blockGasLimit := s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
+	blockGasLimit, err := s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
+	if err != nil {
+		return fmt.Errorf("failed to get current gas limit: %w", err)
+	}
 
 	// Calculate target gas per transaction (3/4 of block gas limit by default)
 	targetGasPerTx := uint64(float64(blockGasLimit) * s.options.TargetGasRatio)
@@ -279,8 +278,15 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.Transaction, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
+	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
+	if client == nil {
+		return nil, nil, fmt.Errorf("no client available")
+	}
+
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
+	if wallet == nil {
+		return nil, nil, fmt.Errorf("no wallet available")
+	}
 
 	initialSupply, ok := new(big.Int).SetString(DefaultInitialSupply, 10)
 	if !ok {
@@ -330,7 +336,7 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 }
 
 func (s *Scenario) sendBloatTx(ctx context.Context, startSlot uint64, numAddresses uint64) (*types.Transaction, *spamoor.Wallet, *types.Receipt, error) {
-	client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
+	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
 	if client == nil {
@@ -469,12 +475,4 @@ func (s *Scenario) handleError(err error) {
 	}
 
 	s.logger.Errorf("bloating error: %v", err)
-}
-
-func (s *Scenario) getChainID(ctx context.Context) (*big.Int, error) {
-	s.chainIDOnce.Do(func() {
-		client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, "")
-		s.chainID, s.chainIDError = client.GetChainId(ctx)
-	})
-	return s.chainID, s.chainIDError
 }
