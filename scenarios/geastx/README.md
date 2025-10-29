@@ -39,6 +39,7 @@ spamoor geastx [flags]
 
 ### Client selection
 - `--client-group` Only use RPC clients that belong to this group label
+- `--deploy-client-group` - Client group to use for deployment transactions (same as --client-group if empty)
 
 ### Debug options
 - `-v, --verbose` Verbose log output

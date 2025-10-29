@@ -26,32 +26,33 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount       uint64  `yaml:"total_count"`
-	Throughput       uint64  `yaml:"throughput"`
-	MaxPending       uint64  `yaml:"max_pending"`
-	MaxWallets       uint64  `yaml:"max_wallets"`
-	Rebroadcast      uint64  `yaml:"rebroadcast"`
-	BaseFee          float64 `yaml:"base_fee"`
-	TipFee           float64 `yaml:"tip_fee"`
-	DeployGasLimit   uint64  `yaml:"deploy_gas_limit"`
-	GasLimit         uint64  `yaml:"gas_limit"`
-	Amount           uint64  `yaml:"amount"`
-	RandomAmount     bool    `yaml:"random_amount"`
-	RandomTarget     bool    `yaml:"random_target"`
-	ContractCode     string  `yaml:"contract_code"`
-	ContractFile     string  `yaml:"contract_file"`
-	ContractAddress  string  `yaml:"contract_address"`
-	ContractArgs     string  `yaml:"contract_args"`
-	ContractAddrPath string  `yaml:"contract_addr_path"`
-	CallData         string  `yaml:"call_data"`
-	CallABI          string  `yaml:"call_abi"`
-	CallABIFile      string  `yaml:"call_abi_file"`
-	CallFnName       string  `yaml:"call_fn_name"`
-	CallFnSig        string  `yaml:"call_fn_sig"`
-	CallArgs         string  `yaml:"call_args"`
-	Timeout          string  `yaml:"timeout"`
-	ClientGroup      string  `yaml:"client_group"`
-	LogTxs           bool    `yaml:"log_txs"`
+	TotalCount        uint64  `yaml:"total_count"`
+	Throughput        uint64  `yaml:"throughput"`
+	MaxPending        uint64  `yaml:"max_pending"`
+	MaxWallets        uint64  `yaml:"max_wallets"`
+	Rebroadcast       uint64  `yaml:"rebroadcast"`
+	BaseFee           float64 `yaml:"base_fee"`
+	TipFee            float64 `yaml:"tip_fee"`
+	DeployGasLimit    uint64  `yaml:"deploy_gas_limit"`
+	GasLimit          uint64  `yaml:"gas_limit"`
+	Amount            uint64  `yaml:"amount"`
+	RandomAmount      bool    `yaml:"random_amount"`
+	RandomTarget      bool    `yaml:"random_target"`
+	ContractCode      string  `yaml:"contract_code"`
+	ContractFile      string  `yaml:"contract_file"`
+	ContractAddress   string  `yaml:"contract_address"`
+	ContractArgs      string  `yaml:"contract_args"`
+	ContractAddrPath  string  `yaml:"contract_addr_path"`
+	CallData          string  `yaml:"call_data"`
+	CallABI           string  `yaml:"call_abi"`
+	CallABIFile       string  `yaml:"call_abi_file"`
+	CallFnName        string  `yaml:"call_fn_name"`
+	CallFnSig         string  `yaml:"call_fn_sig"`
+	CallArgs          string  `yaml:"call_args"`
+	Timeout           string  `yaml:"timeout"`
+	ClientGroup       string  `yaml:"client_group"`
+	DeployClientGroup string  `yaml:"deploy_client_group"`
+	LogTxs            bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -65,32 +66,33 @@ type Scenario struct {
 
 var ScenarioName = "calltx"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:       0,
-	Throughput:       100,
-	MaxPending:       0,
-	MaxWallets:       0,
-	Rebroadcast:      1,
-	BaseFee:          20,
-	TipFee:           2,
-	DeployGasLimit:   2000000,
-	GasLimit:         1000000,
-	Amount:           0,
-	RandomAmount:     false,
-	RandomTarget:     false,
-	ContractCode:     "",
-	ContractFile:     "",
-	ContractAddress:  "",
-	ContractArgs:     "",
-	ContractAddrPath: "",
-	CallData:         "",
-	CallABI:          "",
-	CallABIFile:      "",
-	CallFnName:       "",
-	CallFnSig:        "",
-	CallArgs:         "",
-	Timeout:          "",
-	ClientGroup:      "",
-	LogTxs:           false,
+	TotalCount:        0,
+	Throughput:        100,
+	MaxPending:        0,
+	MaxWallets:        0,
+	Rebroadcast:       1,
+	BaseFee:           20,
+	TipFee:            2,
+	DeployGasLimit:    2000000,
+	GasLimit:          1000000,
+	Amount:            0,
+	RandomAmount:      false,
+	RandomTarget:      false,
+	ContractCode:      "",
+	ContractFile:      "",
+	ContractAddress:   "",
+	ContractArgs:      "",
+	ContractAddrPath:  "",
+	CallData:          "",
+	CallABI:           "",
+	CallABIFile:       "",
+	CallFnName:        "",
+	CallFnSig:         "",
+	CallArgs:          "",
+	Timeout:           "",
+	ClientGroup:       "",
+	DeployClientGroup: "",
+	LogTxs:            false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -131,6 +133,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.CallFnSig, "call-fn-sig", ScenarioDefaultOptions.CallFnSig, "Function signature to call (alternative to --call-abi)")
 	flags.StringVar(&s.options.CallArgs, "call-args", ScenarioDefaultOptions.CallArgs, "JSON array of arguments to pass to the function")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.StringVar(&s.options.DeployClientGroup, "deploy-client-group", ScenarioDefaultOptions.DeployClientGroup, "Client group to use for deployments")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
@@ -367,9 +370,14 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) sendDeploymentTx(ctx context.Context, contractCode []byte) (*types.Receipt, *spamoor.Client, error) {
+	deployClientGroup := s.options.DeployClientGroup
+	if deployClientGroup == "" {
+		deployClientGroup = s.options.ClientGroup
+	}
+
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
-		spamoor.WithClientGroup(s.options.ClientGroup),
+		spamoor.WithClientGroup(deployClientGroup),
 	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
@@ -413,7 +421,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, contractCode []byte) (*
 
 	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
-		ClientGroup: s.options.ClientGroup,
+		ClientGroup: deployClientGroup,
 		Rebroadcast: true,
 	})
 	if err != nil {

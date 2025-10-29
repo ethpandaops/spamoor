@@ -42,6 +42,10 @@ func (d *Daemon) ImportSpammersOnStartup(source string, logger logrus.FieldLogge
 		for _, importedInfo := range result.Imported {
 			spammer := d.GetSpammer(importedInfo.ID)
 			if spammer != nil {
+				if importedInfo.Start != nil && !*importedInfo.Start {
+					logger.Infof("  - Skipped ID %d: %s (%s)", importedInfo.ID, importedInfo.Name, importedInfo.Scenario)
+					continue
+				}
 				err := spammer.Start()
 				if err != nil {
 					logger.Errorf("failed to start imported spammer %s: %v", importedInfo.Name, err)

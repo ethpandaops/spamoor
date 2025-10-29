@@ -25,6 +25,7 @@ spamoor blobs [flags]
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--blobfee` - Max blob fee in gwei (default: 20)
 - `--rebroadcast` - Seconds to wait before rebroadcasting (default: 30)
+- `--submit-count` - Number of clients to submit transaction to (default: 3)
 
 ### Blob Configuration
 - `-b, --sidecars` - Maximum number of blob sidecars per transaction (default: 3)

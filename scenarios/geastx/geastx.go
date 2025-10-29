@@ -25,21 +25,22 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount     uint64  `yaml:"total_count"`
-	Throughput     uint64  `yaml:"throughput"`
-	MaxPending     uint64  `yaml:"max_pending"`
-	MaxWallets     uint64  `yaml:"max_wallets"`
-	Rebroadcast    uint64  `yaml:"rebroadcast"`
-	Amount         uint64  `yaml:"amount"`
-	BaseFee        float64 `yaml:"base_fee"`
-	TipFee         float64 `yaml:"tip_fee"`
-	GasLimit       uint64  `yaml:"gas_limit"`
-	DeployGasLimit uint64  `yaml:"deploy_gas_limit"`
-	GeasFile       string  `yaml:"geas_file"`
-	GeasCode       string  `yaml:"geas_code"`
-	ClientGroup    string  `yaml:"client_group"`
-	Timeout        string  `yaml:"timeout"`
-	LogTxs         bool    `yaml:"log_txs"`
+	TotalCount        uint64  `yaml:"total_count"`
+	Throughput        uint64  `yaml:"throughput"`
+	MaxPending        uint64  `yaml:"max_pending"`
+	MaxWallets        uint64  `yaml:"max_wallets"`
+	Rebroadcast       uint64  `yaml:"rebroadcast"`
+	Amount            uint64  `yaml:"amount"`
+	BaseFee           float64 `yaml:"base_fee"`
+	TipFee            float64 `yaml:"tip_fee"`
+	GasLimit          uint64  `yaml:"gas_limit"`
+	DeployGasLimit    uint64  `yaml:"deploy_gas_limit"`
+	GeasFile          string  `yaml:"geas_file"`
+	GeasCode          string  `yaml:"geas_code"`
+	ClientGroup       string  `yaml:"client_group"`
+	DeployClientGroup string  `yaml:"deploy_client_group"`
+	Timeout           string  `yaml:"timeout"`
+	LogTxs            bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -52,21 +53,22 @@ type Scenario struct {
 
 var ScenarioName = "geastx"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:     0,
-	Throughput:     100,
-	MaxPending:     0,
-	MaxWallets:     0,
-	Rebroadcast:    1,
-	Amount:         0,
-	BaseFee:        20,
-	TipFee:         2,
-	GasLimit:       1000000,
-	DeployGasLimit: 1000000,
-	GeasFile:       "",
-	GeasCode:       "",
-	ClientGroup:    "",
-	Timeout:        "",
-	LogTxs:         false,
+	TotalCount:        0,
+	Throughput:        100,
+	MaxPending:        0,
+	MaxWallets:        0,
+	Rebroadcast:       1,
+	Amount:            0,
+	BaseFee:           20,
+	TipFee:            2,
+	GasLimit:          1000000,
+	DeployGasLimit:    1000000,
+	GeasFile:          "",
+	GeasCode:          "",
+	ClientGroup:       "",
+	DeployClientGroup: "",
+	Timeout:           "",
+	LogTxs:            false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -96,6 +98,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.GeasFile, "geasfile", "", "Path to the geas file to use for execution")
 	flags.StringVar(&s.options.GeasCode, "geascode", "", "Geas code to use for execution")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.StringVar(&s.options.DeployClientGroup, "deploy-client-group", ScenarioDefaultOptions.DeployClientGroup, "Client group to use for deployments")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
@@ -264,9 +267,14 @@ func (s *Scenario) trimGeasOpcodes(opcodesGeas string) string {
 }
 
 func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*types.Receipt, *spamoor.Client, error) {
+	deployClientGroup := s.options.DeployClientGroup
+	if deployClientGroup == "" {
+		deployClientGroup = s.options.ClientGroup
+	}
+
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
-		spamoor.WithClientGroup(s.options.ClientGroup),
+		spamoor.WithClientGroup(deployClientGroup),
 	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
@@ -344,7 +352,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 
 	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
-		ClientGroup: s.options.ClientGroup,
+		ClientGroup: deployClientGroup,
 		Rebroadcast: true,
 	})
 	if err != nil {

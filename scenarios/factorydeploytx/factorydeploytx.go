@@ -22,21 +22,22 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount       uint64  `yaml:"total_count"`
-	Throughput       uint64  `yaml:"throughput"`
-	MaxPending       uint64  `yaml:"max_pending"`
-	MaxWallets       uint64  `yaml:"max_wallets"`
-	Rebroadcast      uint64  `yaml:"rebroadcast"`
-	BaseFee          float64 `yaml:"base_fee"`
-	TipFee           float64 `yaml:"tip_fee"`
-	GasLimit         uint64  `yaml:"gas_limit"`
-	FactoryAddress   string  `yaml:"factory_address"`
-	InitCode         string  `yaml:"init_code"`
-	StartSalt        uint64  `yaml:"start_salt"`
-	WellKnownFactory bool    `yaml:"well_known_factory"`
-	Timeout          string  `yaml:"timeout"`
-	ClientGroup      string  `yaml:"client_group"`
-	LogTxs           bool    `yaml:"log_txs"`
+	TotalCount        uint64  `yaml:"total_count"`
+	Throughput        uint64  `yaml:"throughput"`
+	MaxPending        uint64  `yaml:"max_pending"`
+	MaxWallets        uint64  `yaml:"max_wallets"`
+	Rebroadcast       uint64  `yaml:"rebroadcast"`
+	BaseFee           float64 `yaml:"base_fee"`
+	TipFee            float64 `yaml:"tip_fee"`
+	GasLimit          uint64  `yaml:"gas_limit"`
+	FactoryAddress    string  `yaml:"factory_address"`
+	InitCode          string  `yaml:"init_code"`
+	StartSalt         uint64  `yaml:"start_salt"`
+	WellKnownFactory  bool    `yaml:"well_known_factory"`
+	Timeout           string  `yaml:"timeout"`
+	ClientGroup       string  `yaml:"client_group"`
+	DeployClientGroup string  `yaml:"deploy_client_group"`
+	LogTxs            bool    `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -50,21 +51,22 @@ type Scenario struct {
 
 var ScenarioName = "factorydeploytx"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:       0,
-	Throughput:       50,
-	MaxPending:       0,
-	MaxWallets:       0,
-	Rebroadcast:      1,
-	BaseFee:          20,
-	TipFee:           2,
-	GasLimit:         2000000,
-	FactoryAddress:   "",
-	InitCode:         "",
-	StartSalt:        0,
-	WellKnownFactory: true,
-	Timeout:          "",
-	ClientGroup:      "",
-	LogTxs:           false,
+	TotalCount:        0,
+	Throughput:        50,
+	MaxPending:        0,
+	MaxWallets:        0,
+	Rebroadcast:       1,
+	BaseFee:           20,
+	TipFee:            2,
+	GasLimit:          2000000,
+	FactoryAddress:    "",
+	InitCode:          "",
+	StartSalt:         0,
+	WellKnownFactory:  true,
+	Timeout:           "",
+	ClientGroup:       "",
+	DeployClientGroup: "",
+	LogTxs:            false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -95,6 +97,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.BoolVar(&s.options.WellKnownFactory, "well-known-factory", ScenarioDefaultOptions.WellKnownFactory, "Use well-known factory deployer wallet")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
+	flags.StringVar(&s.options.DeployClientGroup, "deploy-client-group", ScenarioDefaultOptions.DeployClientGroup, "Client group to use for deployments")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
 }
@@ -255,9 +258,14 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		return common.Address{}, fmt.Errorf("factory deployer wallet not available")
 	}
 
+	deployClientGroup := s.options.DeployClientGroup
+	if deployClientGroup == "" {
+		deployClientGroup = s.options.ClientGroup
+	}
+
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
-		spamoor.WithClientGroup(s.options.ClientGroup),
+		spamoor.WithClientGroup(deployClientGroup),
 	)
 	if client == nil {
 		return common.Address{}, scenario.ErrNoClients
@@ -300,7 +308,7 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 
 	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, factoryWallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
-		ClientGroup: s.options.ClientGroup,
+		ClientGroup: deployClientGroup,
 		Rebroadcast: true,
 	})
 	if err != nil {

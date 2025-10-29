@@ -53,6 +53,7 @@ type WellKnownWalletConfig struct {
 	RefillAmount  *uint256.Int
 	RefillBalance *uint256.Int
 	VeryWellKnown bool
+	PrivateKey    string
 }
 
 // WalletPool manages a pool of child wallets derived from a root wallet with automatic funding
@@ -67,12 +68,13 @@ type WalletPool struct {
 	txpool      *TxPool
 	runFundings bool
 
-	childWallets     []*Wallet
-	wellKnownNames   []*WellKnownWalletConfig
-	wellKnownWallets map[string]*Wallet
-	selectionMutex   sync.Mutex
-	rrWalletIdx      int
-	reclaimedFunds   bool
+	childWallets         []*Wallet
+	wellKnownNames       []*WellKnownWalletConfig
+	wellKnownWallets     map[string]*Wallet
+	customWalletPrivkeys []string
+	selectionMutex       sync.Mutex
+	rrWalletIdx          int
+	reclaimedFunds       bool
 
 	// Optional callback to track transaction results for metrics
 	transactionTracker func(err error)
@@ -168,6 +170,14 @@ func (pool *WalletPool) MarshalConfig() (string, error) {
 // SetWalletCount sets the number of child wallets to create.
 func (pool *WalletPool) SetWalletCount(count uint64) {
 	pool.config.WalletCount = count
+}
+
+// SetWalletPrivkeys sets custom wallet private keys used for child wallets.
+// The privkey parameter accepts hex strings with or without "0x" prefix.
+// You should supply as many privkeys as you want to create wallets for (SetWalletCount),
+// otherwise the remaining wallets will be generated deterministically based on the root wallet & seed.
+func (pool *WalletPool) SetWalletPrivkeys(privkeys []string) {
+	pool.customWalletPrivkeys = privkeys
 }
 
 // SetRunFundings enables or disables automatic wallet funding.
@@ -469,30 +479,41 @@ func (pool *WalletPool) PrepareWallets() error {
 // It generates a private key by hashing the root wallet's private key with the child index and seed.
 // Returns the wallet, funding request (if needed), and any error.
 func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *Client, seed string) (*Wallet, *FundingRequest, error) {
-	idxBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(idxBytes, childIdx)
-	if seed != "" {
-		seedBytes := []byte(seed)
-		idxBytes = append(idxBytes, seedBytes...)
+	walletPrivkey := ""
+	if childIdx < uint64(len(pool.customWalletPrivkeys)) {
+		walletPrivkey = pool.customWalletPrivkeys[childIdx]
+	} else {
+		idxBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(idxBytes, childIdx)
+		if seed != "" {
+			seedBytes := []byte(seed)
+			idxBytes = append(idxBytes, seedBytes...)
+		}
+		parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
+		childKey := sha256.Sum256(append(parentKey, idxBytes...))
+		walletPrivkey = fmt.Sprintf("%x", childKey)
 	}
-	parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
-	childKey := sha256.Sum256(append(parentKey, idxBytes...))
 
-	return pool.prepareWallet(fmt.Sprintf("%x", childKey), client, pool.config.RefillAmount, pool.config.RefillBalance)
+	return pool.prepareWallet(walletPrivkey, client, pool.config.RefillAmount, pool.config.RefillBalance)
 }
 
 // prepareWellKnownWallet creates a named wallet derived from the root wallet using deterministic key generation.
 // It generates a private key by hashing the root wallet's private key with the wallet name and seed.
+// If a private key is provided in the config, it uses that instead of generating a new one.
 // Uses custom refill amounts from the config if specified, otherwise falls back to pool defaults.
 func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, client *Client, seed string) (*Wallet, *FundingRequest, error) {
-	idxBytes := make([]byte, len(config.Name))
-	copy(idxBytes, config.Name)
-	if seed != "" && !config.VeryWellKnown {
-		seedBytes := []byte(seed)
-		idxBytes = append(idxBytes, seedBytes...)
+	walletPrivkey := config.PrivateKey
+	if walletPrivkey == "" {
+		idxBytes := make([]byte, len(config.Name))
+		copy(idxBytes, config.Name)
+		if seed != "" && !config.VeryWellKnown {
+			seedBytes := []byte(seed)
+			idxBytes = append(idxBytes, seedBytes...)
+		}
+		parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
+		childKey := sha256.Sum256(append(parentKey, idxBytes...))
+		walletPrivkey = fmt.Sprintf("%x", childKey)
 	}
-	parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
-	childKey := sha256.Sum256(append(parentKey, idxBytes...))
 
 	refillAmount := pool.config.RefillAmount
 	refillBalance := pool.config.RefillBalance
@@ -504,13 +525,15 @@ func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, cl
 		refillBalance = config.RefillBalance
 	}
 
-	return pool.prepareWallet(fmt.Sprintf("%x", childKey), client, refillAmount, refillBalance)
+	return pool.prepareWallet(walletPrivkey, client, refillAmount, refillBalance)
 }
 
 // prepareWallet creates a wallet from a private key and checks if it needs funding.
 // Updates the wallet's state from the blockchain and creates a funding request if
 // the wallet's balance is below the specified refill threshold.
 func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmount *uint256.Int, refillBalance *uint256.Int) (*Wallet, *FundingRequest, error) {
+	//TODO: deduplicate wallet creation to avoid issues when using the same privkey for multiple scenarios/wallets
+
 	childWallet, err := NewWallet(privkey)
 	if err != nil {
 		return nil, nil, err

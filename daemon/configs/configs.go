@@ -23,6 +23,7 @@ type SpammerConfig struct {
 	Name        string                 `yaml:"name"`
 	Description string                 `yaml:"description"`
 	Config      map[string]interface{} `yaml:"config"`
+	Start       *bool                  `yaml:"start,omitempty"`
 }
 
 // ConfigImportItem represents either a spammer config or an include directive
@@ -32,6 +33,7 @@ type ConfigImportItem struct {
 	Name        string                 `yaml:"name,omitempty"`
 	Description string                 `yaml:"description,omitempty"`
 	Config      map[string]interface{} `yaml:"config,omitempty"`
+	Start       *bool                  `yaml:"start,omitempty"`
 
 	// Include directive
 	Include string `yaml:"include,omitempty"`
@@ -97,6 +99,7 @@ func ResolveConfigImports(input string, baseURL string, visited map[string]bool)
 				Name:        item.Name,
 				Description: item.Description,
 				Config:      item.Config,
+				Start:       item.Start,
 			}
 			allConfigs = append(allConfigs, config)
 		}
