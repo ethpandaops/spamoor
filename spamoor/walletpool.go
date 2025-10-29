@@ -650,8 +650,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 	wg := &sync.WaitGroup{}
 	wl := make(chan bool, 50)
 
-	wellKnownCount := uint64(len(pool.wellKnownWallets))
-	fundingReqs := make([]*FundingRequest, 0, pool.config.WalletCount+wellKnownCount)
+	fundingReqs := make([]*FundingRequest, 0, len(pool.childWallets)+len(pool.wellKnownWallets))
 	reqsMutex := &sync.Mutex{}
 
 	for idx, config := range pool.wellKnownNames {
@@ -698,10 +697,10 @@ func (pool *WalletPool) resupplyChildWallets() error {
 		}(idx, wellKnownWallet, config)
 	}
 
-	for childIdx := uint64(0); childIdx < pool.config.WalletCount; childIdx++ {
+	for childIdx := 0; childIdx < len(pool.childWallets); childIdx++ {
 		wg.Add(1)
 		wl <- true
-		go func(childIdx uint64) {
+		go func(childIdx int) {
 			defer func() {
 				<-wl
 				wg.Done()
