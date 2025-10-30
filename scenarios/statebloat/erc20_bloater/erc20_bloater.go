@@ -2,17 +2,15 @@ package erc20bloater
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -25,8 +23,6 @@ import (
 )
 
 const (
-	CheckpointFileName   = ".erc20_bloater_checkpoint.json"
-	ConfigFileName       = "config.yaml"
 	BytesPerSlot         = 32
 	SlotsPerBloatCycle   = 2                                                                                // Each iteration: 1 balance + 1 allowance
 	DefaultInitialSupply = "115792089237316195423570985008687907853269984665640564039457584007913129639935" // max uint256
@@ -37,21 +33,7 @@ type ScenarioOptions struct {
 	TargetGasRatio   float64 `yaml:"target_gas_ratio" json:"target_gas_ratio"`
 	BaseFee          float64 `yaml:"base_fee" json:"base_fee"`
 	TipFee           float64 `yaml:"tip_fee" json:"tip_fee"`
-	ExistingContract string  `yaml:"existing_contract" json:"existing_contract"`
-	CheckpointFile   string  `yaml:"checkpoint_file" json:"checkpoint_file"`
-}
-
-type Checkpoint struct {
-	ContractAddress     common.Address `json:"contract_address"`
-	LastSuccessfulSlot  uint64         `json:"last_successful_slot"`
-	NextSlotToWrite     uint64         `json:"next_slot_to_write"`
-	TotalSlotsCreated   uint64         `json:"total_slots_created"`
-	EstimatedStorageGB  float64        `json:"estimated_storage_gb"`
-	LastBlockNumber     uint64         `json:"last_block_number"`
-	LastTxHash          string         `json:"last_transaction_hash"`
-	LastUpdateTimestamp time.Time      `json:"last_update_timestamp"`
-	ErrorCount          int            `json:"error_count"`
-	LastError           *string        `json:"last_error"`
+	ExistingContract string  `yaml:"existing_contract" json:"existing_contract"` // Optional override for edge cases
 }
 
 type Scenario struct {
@@ -61,9 +43,6 @@ type Scenario struct {
 
 	contractAddr     common.Address
 	contractInstance *contract.ERC20Bloater
-
-	checkpoint      *Checkpoint
-	checkpointMutex sync.Mutex
 }
 
 var ScenarioName = "erc20_bloater"
@@ -73,7 +52,6 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:          20,
 	TipFee:           2,
 	ExistingContract: "",
-	CheckpointFile:   CheckpointFileName,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
@@ -93,8 +71,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Float64Var(&s.options.TargetGasRatio, "target-gas-ratio", ScenarioDefaultOptions.TargetGasRatio, "Target gas usage as ratio of block gas limit (default 0.50 = 50%)")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
-	flags.StringVar(&s.options.ExistingContract, "existing-contract", ScenarioDefaultOptions.ExistingContract, "Use existing contract address instead of deploying new one")
-	flags.StringVar(&s.options.CheckpointFile, "checkpoint-file", ScenarioDefaultOptions.CheckpointFile, "Checkpoint file path for resume capability")
+	flags.StringVar(&s.options.ExistingContract, "existing-contract", ScenarioDefaultOptions.ExistingContract, "(Optional) Override contract address for edge cases")
 	return nil
 }
 
@@ -123,61 +100,68 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished", ScenarioName)
 
-	// Try to load checkpoint (always enabled)
-	var startSlot uint64
-	checkpoint, err := s.loadCheckpoint()
-	if err != nil {
-		s.logger.Warnf("failed to load checkpoint: %v, starting fresh", err)
-	} else if checkpoint != nil {
-		s.checkpoint = checkpoint
-		s.contractAddr = checkpoint.ContractAddress
-		startSlot = checkpoint.NextSlotToWrite
-		s.logger.Infof("resuming from checkpoint: contract=%s, next_slot=%d, total_slots=%d",
-			checkpoint.ContractAddress.Hex(), checkpoint.NextSlotToWrite, checkpoint.TotalSlotsCreated)
-	}
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+	)
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
-	// Deploy or use existing contract
-	if s.contractAddr == (common.Address{}) {
-		if s.options.ExistingContract != "" {
-			s.contractAddr = common.HexToAddress(s.options.ExistingContract)
-			s.logger.Infof("using existing contract: %s", s.contractAddr.Hex())
-		} else {
+	var startSlot uint64 = 1 // Default: start from address 0x01
+
+	// Determine contract address using nonce-based approach
+	if s.options.ExistingContract != "" {
+		// Manual override for edge cases
+		s.contractAddr = common.HexToAddress(s.options.ExistingContract)
+		s.logger.Infof("using manually specified contract: %s", s.contractAddr.Hex())
+	} else {
+		// Nonce-based automatic detection
+		nonce := wallet.GetNonce()
+
+		if nonce == 0 {
+			// Fresh wallet - deploy new contract
+			s.logger.Infof("wallet nonce is 0, deploying new contract...")
 			receipt, _, err := s.deployContract(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to deploy contract: %w", err)
 			}
 			s.contractAddr = receipt.ContractAddress
 			s.logger.Infof("deployed contract: %s (block #%d)", s.contractAddr.Hex(), receipt.BlockNumber.Uint64())
-
-			// Save config with deployed contract address for future runs
-			s.options.ExistingContract = s.contractAddr.Hex()
-			if err := s.saveConfig(); err != nil {
-				s.logger.Warnf("failed to save config file: %v", err)
-			} else {
-				s.logger.Infof("saved config to %s for future runs", ConfigFileName)
-			}
-		}
-
-		// Initialize checkpoint if not resuming
-		if s.checkpoint == nil {
-			s.checkpoint = &Checkpoint{
-				ContractAddress:     s.contractAddr,
-				LastSuccessfulSlot:  0,
-				NextSlotToWrite:     1, // Start from address 0x0000...0001
-				TotalSlotsCreated:   0,
-				EstimatedStorageGB:  0,
-				LastUpdateTimestamp: time.Now(),
-			}
+			s.logger.Infof("to resume later, use same wallet (--seed) - contract will be auto-detected")
+			startSlot = 1
+		} else {
+			// Wallet has history - contract should exist at nonce 0 address
+			s.contractAddr = crypto.CreateAddress(wallet.GetAddress(), 0)
+			s.logger.Infof("wallet nonce is %d, calculated contract address: %s", nonce, s.contractAddr.Hex())
 		}
 	}
 
 	// Bind to contract
-	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
 	contractInstance, err := contract.NewERC20Bloater(s.contractAddr, client.GetEthClient())
 	if err != nil {
-		return fmt.Errorf("failed to bind contract: %w", err)
+		return fmt.Errorf("failed to bind to contract: %w", err)
 	}
 	s.contractInstance = contractInstance
+
+	// Query on-chain progress from contract (if resuming)
+	if wallet.GetNonce() > 0 || s.options.ExistingContract != "" {
+		nextSlot, err := contractInstance.NextStorageSlot(nil)
+		if err != nil {
+			return fmt.Errorf("failed to query nextStorageSlot from contract: %w", err)
+		}
+
+		startSlot = nextSlot.Uint64()
+		if startSlot == 0 {
+			startSlot = 1 // Contract not yet bloated, start from slot 1
+		}
+
+		// Calculate and log current progress
+		targetBytes := uint64(s.options.TargetStorageGB * 1024 * 1024 * 1024)
+		targetSlots := targetBytes / BytesPerSlot
+		currentGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
+		progress := float64(startSlot) / float64(targetSlots) * 100
+
+		s.logger.Infof("resuming from on-chain state: slot %d (%.2f%% complete, %.3f GB / %.3f GB)",
+			startSlot, progress, currentGB, s.options.TargetStorageGB)
+	}
 
 	// Query network gas limit
 	blockGasLimit, err := s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
@@ -204,11 +188,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	// Start bloating
 	txCount := uint64(0)
+	errorCount := 0
 	for startSlot < targetSlots {
 		select {
 		case <-ctx.Done():
-			s.logger.Info("context cancelled, saving final checkpoint")
-			s.saveCheckpoint()
+			s.logger.Info("context cancelled, exiting")
 			return ctx.Err()
 		default:
 		}
@@ -220,59 +204,47 @@ func (s *Scenario) Run(ctx context.Context) error {
 		numAddresses := (endSlot - startSlot) / SlotsPerBloatCycle
 
 		// Submit bloating transaction
-		tx, wallet, receipt, err := s.sendBloatTx(ctx, startSlot/SlotsPerBloatCycle, numAddresses)
+		tx, w, receipt, err := s.sendBloatTx(ctx, startSlot/SlotsPerBloatCycle, numAddresses)
 		if err != nil {
-			s.handleError(err)
-			time.Sleep(time.Second * time.Duration(s.checkpoint.ErrorCount))
+			s.logger.Errorf("bloating error: %v", err)
+			errorCount++
+			time.Sleep(time.Second * time.Duration(errorCount))
 			continue
 		}
 
 		s.logger.WithFields(logrus.Fields{
 			"tx":        tx.Hash().Hex(),
 			"nonce":     tx.Nonce(),
-			"wallet":    s.walletPool.GetWalletName(wallet.GetAddress()),
+			"wallet":    s.walletPool.GetWalletName(w.GetAddress()),
 			"addresses": numAddresses,
 			"from_slot": startSlot / SlotsPerBloatCycle,
 		}).Infof("sent bloat tx #%d", txCount+1)
 
 		if receipt.Status != types.ReceiptStatusSuccessful {
-			s.handleError(fmt.Errorf("tx failed: %s (gas used: %d, gas limit: %d)",
-				tx.Hash().Hex(), receipt.GasUsed, tx.Gas()))
-			time.Sleep(time.Second * time.Duration(s.checkpoint.ErrorCount))
+			s.logger.Errorf("tx failed: %s (gas used: %d, gas limit: %d)",
+				tx.Hash().Hex(), receipt.GasUsed, tx.Gas())
+			errorCount++
+			time.Sleep(time.Second * time.Duration(errorCount))
 			continue
 		}
 
-		// Update checkpoint on success
-		s.checkpointMutex.Lock()
-		s.checkpoint.LastSuccessfulSlot = endSlot - 1
-		s.checkpoint.NextSlotToWrite = endSlot
-		s.checkpoint.TotalSlotsCreated = endSlot
-		s.checkpoint.EstimatedStorageGB = float64(endSlot*BytesPerSlot) / (1024 * 1024 * 1024)
-		s.checkpoint.LastBlockNumber = receipt.BlockNumber.Uint64()
-		s.checkpoint.LastTxHash = tx.Hash().Hex()
-		s.checkpoint.ErrorCount = 0
-		s.checkpoint.LastError = nil
-		s.checkpointMutex.Unlock()
-
-		// Save checkpoint after each confirmed transaction
-		if err := s.saveCheckpoint(); err != nil {
-			s.logger.Warnf("failed to save checkpoint: %v", err)
-		}
-
+		// Reset error count on success
+		errorCount = 0
 		txCount++
 
 		// Log progress
+		currentGB := float64(endSlot*BytesPerSlot) / (1024 * 1024 * 1024)
 		progress := float64(endSlot) / float64(targetSlots) * 100
 		s.logger.Infof("progress: %.2f%% | slots: %d / %d | storage: %.3f GB / %.3f GB",
-			progress, endSlot, targetSlots, s.checkpoint.EstimatedStorageGB, s.options.TargetStorageGB)
+			progress, endSlot, targetSlots, currentGB, s.options.TargetStorageGB)
 
 		startSlot = endSlot
 	}
 
-	// Save final checkpoint
-	s.saveCheckpoint()
+	// Log completion
+	finalGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
 	s.logger.Infof("bloating complete! total slots: %d, estimated storage: %.3f GB",
-		s.checkpoint.TotalSlotsCreated, s.checkpoint.EstimatedStorageGB)
+		startSlot, finalGB)
 
 	return nil
 }
@@ -409,70 +381,4 @@ func (s *Scenario) sendBloatTx(ctx context.Context, startSlot uint64, numAddress
 		tx.Hash().Hex(), receipt.BlockNumber.Uint64(), receipt.Status)
 
 	return tx, wallet, receipt, nil
-}
-
-func (s *Scenario) loadCheckpoint() (*Checkpoint, error) {
-	data, err := os.ReadFile(s.options.CheckpointFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var checkpoint Checkpoint
-	if err := json.Unmarshal(data, &checkpoint); err != nil {
-		return nil, err
-	}
-
-	return &checkpoint, nil
-}
-
-func (s *Scenario) saveCheckpoint() error {
-	s.checkpointMutex.Lock()
-	defer s.checkpointMutex.Unlock()
-
-	if s.checkpoint == nil {
-		return nil
-	}
-
-	s.checkpoint.LastUpdateTimestamp = time.Now()
-
-	data, err := json.MarshalIndent(s.checkpoint, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	tempPath := s.options.CheckpointFile + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0644); err != nil {
-		return err
-	}
-
-	return os.Rename(tempPath, s.options.CheckpointFile)
-}
-
-func (s *Scenario) saveConfig() error {
-	data, err := yaml.Marshal(&s.options)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(ConfigFileName, data, 0644)
-}
-
-func (s *Scenario) handleError(err error) {
-	s.checkpointMutex.Lock()
-	defer s.checkpointMutex.Unlock()
-
-	if s.checkpoint != nil {
-		s.checkpoint.ErrorCount++
-		errStr := err.Error()
-		s.checkpoint.LastError = &errStr
-
-		if saveErr := s.saveCheckpoint(); saveErr != nil {
-			s.logger.Errorf("failed to save checkpoint after error: %v", saveErr)
-		}
-	}
-
-	s.logger.Errorf("bloating error: %v", err)
 }
