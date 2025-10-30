@@ -92,7 +92,22 @@ func (s *Scenario) Init(options *scenario.Options) error {
 }
 
 func (s *Scenario) Config() string {
-	yamlBytes, _ := yaml.Marshal(&s.options)
+	// Include runtime state in config output for web UI visibility
+	type ConfigWithState struct {
+		ScenarioOptions
+		ContractAddress string `yaml:"contract_address,omitempty" json:"contract_address,omitempty"`
+	}
+
+	cfg := ConfigWithState{
+		ScenarioOptions: s.options,
+	}
+
+	// Add contract address if known
+	if s.contractAddr != (common.Address{}) {
+		cfg.ContractAddress = s.contractAddr.Hex()
+	}
+
+	yamlBytes, _ := yaml.Marshal(&cfg)
 	return string(yamlBytes)
 }
 
