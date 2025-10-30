@@ -31,7 +31,7 @@ type ScenarioOptions struct {
 	Rebroadcast                 uint64                   `yaml:"rebroadcast"`
 	BaseFee                     float64                  `yaml:"base_fee"`
 	TipFee                      float64                  `yaml:"base_fee"`
-	BlobFee                     uint64                   `yaml:"blob_fee"`
+	BlobFee                     float64                  `yaml:"blob_fee"`
 	BlobV1Percent               uint64                   `yaml:"blob_v1_percent"`
 	FuluActivation              utils.FlexibleJsonUInt64 `yaml:"fulu_activation"`
 	ThroughputIncrementInterval uint64                   `yaml:"throughput_increment_interval"`
@@ -91,7 +91,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in blob transactions (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in blob transactions (in gwei)")
-	flags.Uint64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
+	flags.Float64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
 	flags.Uint64Var((*uint64)(&s.options.FuluActivation), "fulu-activation", uint64(ScenarioDefaultOptions.FuluActivation), "Unix timestamp of the Fulu activation")
 	flags.Uint64Var(&s.options.ThroughputIncrementInterval, "throughput-increment-interval", ScenarioDefaultOptions.ThroughputIncrementInterval, "Increment the throughput every interval (in sec).")
@@ -257,7 +257,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 
 	var blobFee *big.Int
 	if s.options.BlobFee > 0 {
-		blobFee = new(big.Int).Mul(big.NewInt(int64(s.options.BlobFee)), big.NewInt(1000000000))
+		blobFee = big.NewInt(int64(s.options.BlobFee * 1e9))
 	} else {
 		blobFee = new(big.Int).Mul(feeCap, big.NewInt(1000000000))
 	}

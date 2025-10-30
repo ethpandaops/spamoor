@@ -1228,7 +1228,6 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 			// add tx as pending tx
 			txOptions := &SendTransactionOptions{
 				Client:      client,
-				ClientGroup: tx.Options.ClientGroup,
 				Rebroadcast: true,
 				OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 					if err == nil {
@@ -1239,6 +1238,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 
 			if tx.Options != nil {
 				txOptions.LogFn = tx.Options.LogFn
+				txOptions.ClientGroup = tx.Options.ClientGroup
 			}
 
 			err := pool.submitTransaction(ctx, tx.FromWallet, tx.Tx, txOptions, false)
