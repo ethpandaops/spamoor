@@ -489,4 +489,3 @@ func (s *Scenario) sendBloatTxWithGasLimit(ctx context.Context, startSlot uint64
 
 	return tx, wallet, receipt, nil
 }
-
