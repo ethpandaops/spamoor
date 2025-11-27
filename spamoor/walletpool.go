@@ -867,11 +867,15 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client
 	if err != nil {
 		return nil, err
 	}
-	if feeCap.Cmp(big.NewInt(400000000000)) < 0 {
-		feeCap = big.NewInt(400000000000)
+	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
+		feeCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		feeCap = feeCap.Add(feeCap, big.NewInt(2000000000)) // +2 gwei
 	}
-	if tipCap.Cmp(big.NewInt(200000000000)) < 0 {
-		tipCap = big.NewInt(200000000000)
+	if tipCap.Cmp(big.NewInt(100000000000)) > 0 {
+		tipCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
 	}
 
 	toAddr := childWallet.GetAddress()
@@ -906,11 +910,15 @@ func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, cl
 	if err != nil {
 		return nil, err
 	}
-	if feeCap.Cmp(big.NewInt(200000000000)) < 0 {
-		feeCap = big.NewInt(200000000000)
+	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
+		feeCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		feeCap = feeCap.Add(feeCap, big.NewInt(2000000000)) // +2 gwei
 	}
-	if tipCap.Cmp(big.NewInt(100000000000)) < 0 {
-		tipCap = big.NewInt(100000000000)
+	if tipCap.Cmp(big.NewInt(100000000000)) > 0 {
+		tipCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
 	}
 
 	totalAmount := uint256.NewInt(0)
@@ -962,10 +970,13 @@ func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *W
 	if err != nil {
 		return nil, err
 	}
-	if feeCap.Cmp(big.NewInt(200000000000)) < 0 {
-		feeCap = big.NewInt(200000000000)
+	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
+		feeCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		feeCap = feeCap.Add(feeCap, big.NewInt(1000000000)) // +1 gwei
 	}
 	if tipCap.Cmp(feeCap) < 0 {
+		// set tip to the same as fee, this ensures the wallet balance is cleared completely
 		tipCap = feeCap
 	}
 
