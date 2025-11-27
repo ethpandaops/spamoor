@@ -462,7 +462,6 @@ func (s *Scenario) calculateTransactionSplits(totalTargetGas uint64) []uint64 {
 	return splits
 }
 
-
 // distributeTokensToWallets distributes tokens from wallet 0 to other wallets for parallel execution
 func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int) error {
 	if numWallets <= 1 {
