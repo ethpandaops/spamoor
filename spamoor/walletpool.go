@@ -368,6 +368,7 @@ func (pool *WalletPool) PrepareWallets() error {
 	} else {
 		var client *Client
 		var fundingReqs []*FundingRequest
+		var childWallets []*Wallet
 
 		for i := 0; i < 3; i++ {
 			client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientRandom), WithoutBuilder()) // send all preparation transactions via this client to avoid rejections due to nonces
@@ -375,7 +376,7 @@ func (pool *WalletPool) PrepareWallets() error {
 				return fmt.Errorf("no client available")
 			}
 
-			pool.childWallets = make([]*Wallet, pool.config.WalletCount)
+			childWallets = make([]*Wallet, pool.config.WalletCount)
 			fundingReqs = make([]*FundingRequest, 0, pool.config.WalletCount)
 
 			var walletErr error
@@ -435,7 +436,7 @@ func (pool *WalletPool) PrepareWallets() error {
 					}
 
 					walletsMutex.Lock()
-					pool.childWallets[childIdx] = childWallet
+					childWallets[childIdx] = childWallet
 					if fundingReq != nil {
 						fundingReqs = append(fundingReqs, fundingReq)
 					}
@@ -448,10 +449,12 @@ func (pool *WalletPool) PrepareWallets() error {
 				return fmt.Errorf("child wallet preparation failed: %w", walletErr)
 			}
 
-			if len(pool.childWallets) > 0 {
+			if len(childWallets) > 0 {
 				break
 			}
 		}
+
+		pool.childWallets = childWallets
 
 		if pool.runFundings && len(fundingReqs) > 0 {
 			err := pool.processFundingRequests(fundingReqs)
