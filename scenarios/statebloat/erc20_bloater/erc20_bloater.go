@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -27,6 +26,31 @@ const (
 	BytesPerSlot         = 32
 	SlotsPerBloatCycle   = 2                                                                                // Each iteration: 1 balance + 1 allowance
 	DefaultInitialSupply = "115792089237316195423570985008687907853269984665640564039457584007913129639935" // max uint256
+
+	// EIP-7825 transaction gas limits
+	MaxGasLimitPerTx   = 16777216 // EIP-7825 maximum: exactly 2^24
+	FixedGasLimitPerTx = 16700000 // Set slightly below max to ensure transaction success
+
+	// MaxBloatedAddressesPerTx is the maximum number of addresses we can bloat in a single transaction
+	// while staying under the EIP-7825 gas limit.
+	//
+	// Gas cost breakdown per address iteration in bloatStorage():
+	//   - SSTORE to balanceOf[targetAddr]:
+	//     * Cold address (first time): 22,100 gas (2,900 cold account + 20,000 SSTORE new slot)
+	//     * Warm address (subsequent): 2,900 gas (100 warm account + 2,900 SSTORE existing slot)
+	//   - SSTORE to allowance[sender][targetAddr]:
+	//     * Cold mapping: 22,100 gas (similar to above)
+	//     * Warm mapping: 2,900 gas
+	//   - SSTORE to balanceOf[sender] (once per tx): 2,900 gas (warm storage)
+	//   - Loop overhead (arithmetic, memory): ~200 gas per iteration
+	//
+	// Total per address (cold): ~44,400 gas
+	// Total per address (warm): ~6,000 gas
+	//
+	// For maximum efficiency with cold addresses:
+	// 16,700,000 / 44,400 ≈ 376 addresses
+	// We use 370 to leave a safety margin.
+	MaxBloatedAddressesPerTx = 370
 )
 
 type ScenarioOptions struct {
@@ -206,8 +230,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 		currentGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
 		progress := float64(startSlot) / float64(targetSlots) * 100
 
-		s.logger.Infof("resuming from on-chain state: slot %d (%.2f%% complete, %.3f GB / %.3f GB)",
-			startSlot, progress, currentGB, s.options.TargetStorageGB)
+		s.logger.Infof("resuming from on-chain state: contract %s | slot %d (%.2f%% complete, %.3f GB / %.3f GB)",
+			s.contractAddr.Hex(), startSlot, progress, currentGB, s.options.TargetStorageGB)
 	}
 
 	// Query network gas limit (reuse existing if already fetched)
@@ -242,8 +266,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 		// Log splitting strategy if needed
 		if len(txSplits) > 1 {
-			s.logger.Infof("EIP-7825: splitting target gas (%.1fM) across %d transactions (%.1fM gas each)",
-				float64(totalTargetGas)/1000000, len(txSplits), float64(txSplits[0])/1000000)
+			s.logger.Infof("splitting target gas (%.1fM) across %d transactions (fixed %.1fM gas each)",
+				float64(totalTargetGas)/1000000, len(txSplits), float64(FixedGasLimitPerTx)/1000000)
 		} else {
 			s.logger.Infof("block gas limit: %d, target gas: %d (%.0f%%) - single tx",
 				blockGasLimit, totalTargetGas, s.options.TargetGasRatio*100)
@@ -265,7 +289,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 		var txBatches []txBatch
 
 		// Build all transactions first
-		for i, targetGasLimit := range txSplits {
+		for i := range txSplits {
 			// Use a different wallet for each split transaction to enable parallel submission
 			// Wallet 0 is the deployer, so we use wallets 1, 2, 3, ... for bloating
 			walletIndex := i + 1
@@ -279,23 +303,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 			wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, walletIndex)
 
-			// Estimate gas for a sample transaction to get accurate gas per address
-			// Start with a reasonable number of addresses and adjust based on actual gas usage
-			testAddresses := uint64(100) // Test with 100 addresses
-			gasEstimate, err := s.estimateGasForAddresses(ctx, wallet, startSlot/SlotsPerBloatCycle, testAddresses)
-			if err != nil {
-				s.logger.Errorf("gas estimation failed: %v", err)
-				roundSuccess = false
-				break
-			}
-
-			// Calculate actual gas per address from the estimate
-			gasPerAddress := gasEstimate / testAddresses
-
-			// Calculate how many addresses we can fit in the target gas limit
-			// Leave some buffer (95% of limit) to ensure we don't exceed it
-			safeGasLimit := uint64(float64(targetGasLimit) * 0.95)
-			numAddresses := safeGasLimit / gasPerAddress
+			// Use the maximum number of addresses that fit within EIP-7825 limit
+			numAddresses := uint64(MaxBloatedAddressesPerTx)
 
 			// Check if we would exceed our target slots
 			endSlot := startSlot + numAddresses*SlotsPerBloatCycle
@@ -308,11 +317,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 				break // No more addresses to process
 			}
 
-			s.logger.Debugf("batch %d/%d: estimated %d gas per address, fitting %d addresses in %d gas limit",
-				i+1, len(txSplits), gasPerAddress, numAddresses, targetGasLimit)
+			s.logger.Debugf("batch %d/%d: processing %d addresses (max per tx) with %dM gas limit",
+				i+1, len(txSplits), numAddresses, FixedGasLimitPerTx/1000000)
 
 			// Build bloating transaction with calculated number of addresses
-			tx, err := s.buildBloatTx(ctx, wallet, startSlot/SlotsPerBloatCycle, numAddresses, targetGasLimit)
+			tx, err := s.buildBloatTx(ctx, wallet, startSlot/SlotsPerBloatCycle, numAddresses)
 			if err != nil {
 				s.logger.Errorf("failed to build batch tx %d/%d: %v", i+1, len(txSplits), err)
 				roundSuccess = false
@@ -323,7 +332,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 				tx:           tx,
 				wallet:       wallet,
 				numAddresses: numAddresses,
-				gasLimit:     targetGasLimit,
+				gasLimit:     FixedGasLimitPerTx,
 				endSlot:      endSlot,
 			})
 
@@ -331,7 +340,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 				"batch":     fmt.Sprintf("%d/%d", i+1, len(txSplits)),
 				"wallet":    s.walletPool.GetWalletName(wallet.GetAddress()),
 				"addresses": numAddresses,
-				"gas_limit": targetGasLimit,
+				"gas_limit": FixedGasLimitPerTx,
 			}).Debugf("built bloat tx")
 
 			startSlot = endSlot
@@ -426,91 +435,33 @@ func (s *Scenario) Run(ctx context.Context) error {
 		// Log progress after successful round
 		currentGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
 		progress := float64(startSlot) / float64(targetSlots) * 100
-		s.logger.Infof("progress: %.2f%% | slots: %d / %d | storage: %.3f GB / %.3f GB | round txs: %d",
-			progress, startSlot, targetSlots, currentGB, s.options.TargetStorageGB, batchTxCount)
+		s.logger.Infof("progress: %.2f%% | contract: %s | slots: %d / %d | storage: %.3f GB / %.3f GB | round txs: %d",
+			progress, s.contractAddr.Hex(), startSlot, targetSlots, currentGB, s.options.TargetStorageGB, batchTxCount)
 	}
 
 	// Log completion
 	finalGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
-	s.logger.Infof("bloating complete! total slots: %d, estimated storage: %.3f GB, total txs: %d",
-		startSlot, finalGB, totalTxCount)
+	s.logger.Infof("bloating complete! contract: %s | total slots: %d | estimated storage: %.3f GB | total txs: %d",
+		s.contractAddr.Hex(), startSlot, finalGB, totalTxCount)
 
 	return nil
 }
 
-// calculateTransactionSplits determines how to split the total target gas across multiple transactions
-// to comply with EIP-7825's maximum gas limit per transaction
+// calculateTransactionSplits determines how many transactions are needed for the target gas
+// Each transaction uses the fixed gas limit for simplicity and predictability
 func (s *Scenario) calculateTransactionSplits(totalTargetGas uint64) []uint64 {
-	// Check if we need to split at all
-	if totalTargetGas <= utils.MaxGasLimitPerTx {
-		return []uint64{totalTargetGas}
-	}
+	// Simple calculation: divide total by fixed limit
+	numTxs := (totalTargetGas + FixedGasLimitPerTx - 1) / FixedGasLimitPerTx // ceiling division
 
-	// Calculate number of transactions needed
-	numTxs := (totalTargetGas + utils.MaxGasLimitPerTx - 1) / utils.MaxGasLimitPerTx // ceiling division
-	gasPerTx := totalTargetGas / numTxs
-
-	// Ensure each transaction doesn't exceed the limit
-	if gasPerTx > utils.MaxGasLimitPerTx {
-		gasPerTx = utils.MaxGasLimitPerTx
-	}
-
-	// Build the splits array
+	// All transactions use the same fixed gas limit
 	splits := make([]uint64, numTxs)
-	remainingGas := totalTargetGas
-
-	for i := 0; i < int(numTxs); i++ {
-		if remainingGas >= gasPerTx {
-			splits[i] = gasPerTx
-			remainingGas -= gasPerTx
-		} else if remainingGas > 0 {
-			splits[i] = remainingGas
-			remainingGas = 0
-		}
-	}
-
-	// Adjust last transaction to account for any rounding
-	if remainingGas > 0 && len(splits) > 0 {
-		lastIdx := len(splits) - 1
-		if splits[lastIdx]+remainingGas <= utils.MaxGasLimitPerTx {
-			splits[lastIdx] += remainingGas
-		}
+	for i := range splits {
+		splits[i] = FixedGasLimitPerTx
 	}
 
 	return splits
 }
 
-// estimateGasForAddresses estimates gas for bloating a specific number of addresses
-func (s *Scenario) estimateGasForAddresses(ctx context.Context, wallet *spamoor.Wallet, startSlot uint64, numAddresses uint64) (uint64, error) {
-	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
-	if client == nil {
-		return 0, fmt.Errorf("no client available")
-	}
-
-	// Pack the contract call data for gas estimation
-	abi, err := contract.ERC20BloaterMetaData.GetAbi()
-	if err != nil {
-		return 0, fmt.Errorf("failed to get contract ABI: %w", err)
-	}
-
-	callData, err := abi.Pack("bloatStorage", new(big.Int).SetUint64(startSlot), new(big.Int).SetUint64(numAddresses))
-	if err != nil {
-		return 0, fmt.Errorf("failed to pack call data: %w", err)
-	}
-
-	callMsg := ethereum.CallMsg{
-		From: wallet.GetAddress(),
-		To:   &s.contractAddr,
-		Data: callData,
-	}
-
-	gasEstimate, err := client.GetEthClient().EstimateGas(ctx, callMsg)
-	if err != nil {
-		return 0, fmt.Errorf("estimateGas failed: %w", err)
-	}
-
-	return gasEstimate, nil
-}
 
 // distributeTokensToWallets distributes tokens from wallet 0 to other wallets for parallel execution
 func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int) error {
@@ -640,7 +591,7 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 }
 
 // buildBloatTx builds a bloating transaction without sending it
-func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, startSlot uint64, numAddresses uint64, targetGasLimit uint64) (*types.Transaction, error) {
+func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, startSlot uint64, numAddresses uint64) (*types.Transaction, error) {
 	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
 	if client == nil {
 		return nil, fmt.Errorf("no client available")
@@ -651,33 +602,8 @@ func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, sta
 		return nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
 
-	var gasLimit uint64
-
-	// If target gas limit is provided, use it (it's already been calculated properly)
-	if targetGasLimit > 0 {
-		gasLimit = targetGasLimit
-		// Ensure we don't exceed EIP-7825 limit
-		if gasLimit > utils.MaxGasLimitPerTx {
-			s.logger.Warnf("requested gas limit %d exceeds EIP-7825 max of %d, capping", gasLimit, utils.MaxGasLimitPerTx)
-			gasLimit = utils.MaxGasLimitPerTx
-		}
-	} else {
-		// This shouldn't happen anymore, but keep as fallback
-		// Estimate gas for the actual transaction
-		gasEstimate, err := s.estimateGasForAddresses(ctx, wallet, startSlot, numAddresses)
-		if err != nil {
-			return nil, fmt.Errorf("gas estimation failed: %w", err)
-		}
-
-		// Add 5% buffer
-		gasLimit = uint64(float64(gasEstimate) * 1.05)
-
-		// Apply EIP-7825 cap
-		if gasLimit > utils.MaxGasLimitPerTx {
-			s.logger.Warnf("estimated gas %d exceeds EIP-7825 limit, capping to %d", gasLimit, utils.MaxGasLimitPerTx)
-			gasLimit = utils.MaxGasLimitPerTx
-		}
-	}
+	// Use fixed gas limit for simplicity and predictability
+	gasLimit := uint64(FixedGasLimitPerTx)
 
 	// Build transaction using BuildBoundTx
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
