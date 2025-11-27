@@ -375,7 +375,7 @@ func (pool *WalletPool) PrepareWallets() error {
 				return fmt.Errorf("no client available")
 			}
 
-			pool.childWallets = make([]*Wallet, 0, pool.config.WalletCount)
+			pool.childWallets = make([]*Wallet, pool.config.WalletCount)
 			fundingReqs = make([]*FundingRequest, 0, pool.config.WalletCount)
 
 			var walletErr error
@@ -392,7 +392,6 @@ func (pool *WalletPool) PrepareWallets() error {
 						wg.Done()
 					}()
 					if walletErr != nil {
-						fmt.Printf("Error: %v\n", walletErr)
 						return
 					}
 
@@ -412,6 +411,10 @@ func (pool *WalletPool) PrepareWallets() error {
 				}(config)
 			}
 
+			if walletErr != nil {
+				return fmt.Errorf("well known wallet preparation failed: %w", walletErr)
+			}
+
 			for childIdx := uint64(0); childIdx < pool.config.WalletCount; childIdx++ {
 				wg.Add(1)
 				wl <- true
@@ -421,7 +424,6 @@ func (pool *WalletPool) PrepareWallets() error {
 						wg.Done()
 					}()
 					if walletErr != nil {
-						fmt.Printf("Error: %v\n", walletErr)
 						return
 					}
 
@@ -433,7 +435,7 @@ func (pool *WalletPool) PrepareWallets() error {
 					}
 
 					walletsMutex.Lock()
-					pool.childWallets = append(pool.childWallets, childWallet)
+					pool.childWallets[childIdx] = childWallet
 					if fundingReq != nil {
 						fundingReqs = append(fundingReqs, fundingReq)
 					}
@@ -441,6 +443,10 @@ func (pool *WalletPool) PrepareWallets() error {
 				}(childIdx)
 			}
 			wg.Wait()
+
+			if walletErr != nil {
+				return fmt.Errorf("child wallet preparation failed: %w", walletErr)
+			}
 
 			if len(pool.childWallets) > 0 {
 				break
