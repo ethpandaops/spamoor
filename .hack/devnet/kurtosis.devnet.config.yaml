@@ -9,6 +9,7 @@ network_params:
   preset: mainnet
   gas_limit: 100000000
   genesis_gaslimit: 100000000
+snooper_enabled: true
 additional_services:
   - spamoor # required for config extraction
   - dora

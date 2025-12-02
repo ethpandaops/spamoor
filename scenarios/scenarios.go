@@ -3,6 +3,7 @@ package scenarios
 import (
 	"github.com/ethpandaops/spamoor/scenario"
 
+	"github.com/ethpandaops/spamoor/scenarios/aitx"
 	blobcombined "github.com/ethpandaops/spamoor/scenarios/blob-combined"
 	blobconflicting "github.com/ethpandaops/spamoor/scenarios/blob-conflicting"
 	blobreplacements "github.com/ethpandaops/spamoor/scenarios/blob-replacements"
@@ -29,6 +30,7 @@ import (
 // This registry includes scenarios for testing various Ethereum transaction types and patterns.
 // Each descriptor defines the configuration, constructor, and metadata for a specific test scenario.
 var ScenarioDescriptors = []*scenario.Descriptor{
+	&aitx.ScenarioDescriptor,
 	&blobcombined.ScenarioDescriptor,
 	&blobconflicting.ScenarioDescriptor,
 	&blobs.ScenarioDescriptor,
