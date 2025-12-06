@@ -28,18 +28,19 @@ import (
 
 // ScenarioOptions holds all configurable parameters
 type ScenarioOptions struct {
-	TotalCount  uint64  `yaml:"total_count"`
-	Throughput  uint64  `yaml:"throughput"`
-	MaxPending  uint64  `yaml:"max_pending"`
-	MaxWallets  uint64  `yaml:"max_wallets"`
-	Rebroadcast uint64  `yaml:"rebroadcast"`
-	BaseFee     float64 `yaml:"base_fee"`
-	TipFee      float64 `yaml:"tip_fee"`
-	Timeout     string  `yaml:"timeout"`
-	ClientGroup string  `yaml:"client_group"`
-	PayloadFile string  `yaml:"payload_file"`
-	StartOffset uint64  `yaml:"start_offset"`
-	LogTxs      bool    `yaml:"log_txs"`
+	TotalCount     uint64  `yaml:"total_count"`
+	Throughput     uint64  `yaml:"throughput"`
+	MaxPending     uint64  `yaml:"max_pending"`
+	MaxWallets     uint64  `yaml:"max_wallets"`
+	Rebroadcast    uint64  `yaml:"rebroadcast"`
+	BaseFee        float64 `yaml:"base_fee"`
+	TipFee         float64 `yaml:"tip_fee"`
+	Timeout        string  `yaml:"timeout"`
+	ClientGroup    string  `yaml:"client_group"`
+	PayloadFile    string  `yaml:"payload_file"`
+	StartOffset    uint64  `yaml:"start_offset"`
+	SkipPostChecks bool    `yaml:"skip_postchecks"`
+	LogTxs         bool    `yaml:"log_txs"`
 }
 
 // Scenario implements the replay-eest scenario
@@ -67,18 +68,19 @@ type Scenario struct {
 
 var ScenarioName = "replay-eest"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:  0,
-	Throughput:  1,
-	MaxPending:  10,
-	MaxWallets:  100,
-	Rebroadcast: 1,
-	BaseFee:     20,
-	TipFee:      2,
-	Timeout:     "",
-	ClientGroup: "",
-	PayloadFile: "",
-	StartOffset: 0,
-	LogTxs:      false,
+	TotalCount:     0,
+	Throughput:     1,
+	MaxPending:     10,
+	MaxWallets:     100,
+	Rebroadcast:    1,
+	BaseFee:        20,
+	TipFee:         2,
+	Timeout:        "",
+	ClientGroup:    "",
+	PayloadFile:    "",
+	StartOffset:    0,
+	SkipPostChecks: false,
+	LogTxs:         false,
 }
 
 var ScenarioDescriptor = scenario.Descriptor{
@@ -120,6 +122,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 		"Path or URL to the YAML payload file")
 	flags.Uint64Var(&s.options.StartOffset, "start-offset", ScenarioDefaultOptions.StartOffset,
 		"Start offset for the scenario")
+	flags.BoolVar(&s.options.SkipPostChecks, "skip-postchecks", ScenarioDefaultOptions.SkipPostChecks,
+		"Skip post-check validation")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs,
 		"Log individual transactions")
 	return nil
@@ -271,7 +275,7 @@ func (s *Scenario) processTestCase(ctx context.Context, params *scenario.Process
 		} else {
 			s.failInvalidCount++
 		}
-	} else if len(result.postCheckFailures) > 0 {
+	} else if !s.options.SkipPostChecks && len(result.postCheckFailures) > 0 {
 		s.failPostcheckCount++
 	} else {
 		s.successCount++
@@ -417,7 +421,9 @@ func (s *Scenario) executeTestCase(
 	}
 
 	// Perform post-checks
-	result.postCheckFailures = s.performPostChecks(ctx, logger, client, senderWallets, payload, addressMap, initialBalances, gasCosts)
+	if !s.options.SkipPostChecks {
+		result.postCheckFailures = s.performPostChecks(ctx, logger, client, senderWallets, payload, addressMap, initialBalances, gasCosts)
+	}
 
 	return result
 }
@@ -1034,7 +1040,7 @@ func (s *Scenario) tryAcquireWallets(count int) []*spamoor.Wallet {
 	walletCount := s.walletPool.GetConfiguredWalletCount()
 
 	for i := uint64(0); i < walletCount && len(candidates) < count; i++ {
-		wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(i))
+		wallet := s.walletPool.GetWallet(spamoor.SelectWalletRoundRobin, int(i))
 		if wallet == nil {
 			continue
 		}

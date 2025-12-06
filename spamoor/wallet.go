@@ -58,6 +58,7 @@ type PendingTx struct {
 	Submitted        time.Time
 	LastRebroadcast  time.Time
 	RebroadcastCount uint64
+	Options          *SendTransactionOptions
 }
 
 // NewWallet creates a new wallet from a private key string.
@@ -428,7 +429,7 @@ func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
 // It manages a map of nonce channels used to wait for specific transaction confirmations.
 // Returns the nonce status and a boolean indicating if this is the first pending transaction.
 // If the target nonce is already confirmed, returns nil and false.
-func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool) {
+func (wallet *Wallet) getTxNonceChan(tx *types.Transaction, options *SendTransactionOptions) (*nonceStatus, bool) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
@@ -442,6 +443,9 @@ func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool)
 	if nonceChan != nil {
 		for _, existingTx := range nonceChan.txs {
 			if existingTx.Tx.Hash() == tx.Hash() {
+				if existingTx.Options == nil && options != nil {
+					existingTx.Options = options
+				}
 				return nonceChan, false
 			}
 		}
@@ -449,6 +453,7 @@ func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool)
 		nonceChan.txs = append(nonceChan.txs, &PendingTx{
 			Tx:        tx,
 			Submitted: time.Now(),
+			Options:   options,
 		})
 		return nonceChan, false
 	}
@@ -458,6 +463,7 @@ func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool)
 			{
 				Tx:        tx,
 				Submitted: time.Now(),
+				Options:   options,
 			},
 		},
 		channel: make(chan bool),
@@ -522,4 +528,79 @@ func (wallet *Wallet) GetPendingTxs() []*PendingTx {
 	}
 
 	return pendingTxs
+}
+
+// GetLowestPendingNonce returns the lowest pending nonce for this wallet.
+// Returns 0, false if there are no pending transactions.
+func (wallet *Wallet) GetLowestPendingNonce() (uint64, bool) {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	if len(wallet.txNonceChans) == 0 {
+		return 0, false
+	}
+
+	lowestNonce := uint64(0)
+	first := true
+	for nonce := range wallet.txNonceChans {
+		if first || nonce < lowestNonce {
+			lowestNonce = nonce
+			first = false
+		}
+	}
+
+	return lowestNonce, true
+}
+
+// GetNonceGaps returns missing nonces between confirmedTxCount and the lowest pending nonce.
+// This helps detect nonce gaps that need to be filled with dummy transactions.
+func (wallet *Wallet) GetNonceGaps() []uint64 {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	if len(wallet.txNonceChans) == 0 {
+		return nil
+	}
+
+	// Find the lowest pending nonce
+	lowestPendingNonce := uint64(0)
+	first := true
+	for nonce := range wallet.txNonceChans {
+		if first || nonce < lowestPendingNonce {
+			lowestPendingNonce = nonce
+			first = false
+		}
+	}
+
+	// No gap if lowest pending nonce equals confirmed count
+	if lowestPendingNonce <= wallet.confirmedTxCount {
+		return nil
+	}
+
+	// Build list of missing nonces
+	gaps := make([]uint64, 0, lowestPendingNonce-wallet.confirmedTxCount)
+	for nonce := wallet.confirmedTxCount; nonce < lowestPendingNonce; nonce++ {
+		// Check if this nonce already has a pending tx
+		if _, exists := wallet.txNonceChans[nonce]; !exists {
+			gaps = append(gaps, nonce)
+		}
+	}
+
+	return gaps
+}
+
+// BuildFillerTx creates a simple self-transfer transaction to fill a nonce gap.
+// The transaction sends 0 value to the wallet's own address with minimal gas.
+func (wallet *Wallet) BuildFillerTx(nonce uint64, gasTipCap, gasFeeCap *big.Int) (*types.Transaction, error) {
+	txData := &types.DynamicFeeTx{
+		ChainID:   wallet.chainid,
+		Nonce:     nonce,
+		GasTipCap: gasTipCap,
+		GasFeeCap: gasFeeCap,
+		Gas:       21000, // Minimum gas for simple transfer
+		To:        &wallet.address,
+		Value:     big.NewInt(0),
+		Data:      nil,
+	}
+	return wallet.signTx(txData)
 }
