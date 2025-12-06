@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -72,25 +74,126 @@ func NewConverter(logger logrus.FieldLogger, options ConvertOptions) (*Converter
 	return c, nil
 }
 
+// conversionProgress tracks conversion progress for async reporting
+type conversionProgress struct {
+	mu             sync.Mutex
+	totalFiles     int
+	processedFiles int
+	failedFiles    int
+	totalCases     int
+	processedCases int
+	currentFile    string
+	startTime      time.Time
+	done           chan struct{}
+	logger         logrus.FieldLogger
+}
+
+func newConversionProgress(totalFiles int, logger logrus.FieldLogger) *conversionProgress {
+	return &conversionProgress{
+		totalFiles: totalFiles,
+		startTime:  time.Now(),
+		done:       make(chan struct{}),
+		logger:     logger,
+	}
+}
+
+func (p *conversionProgress) setCurrentFile(file string, testCases int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.currentFile = file
+	p.totalCases += testCases
+}
+
+func (p *conversionProgress) fileCompleted(payloadCount int, failed bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.processedFiles++
+	p.processedCases += payloadCount
+	if failed {
+		p.failedFiles++
+	}
+	p.currentFile = ""
+}
+
+func (p *conversionProgress) startReporter() {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-p.done:
+				return
+			case <-ticker.C:
+				p.report()
+			}
+		}
+	}()
+}
+
+func (p *conversionProgress) stopReporter() {
+	close(p.done)
+}
+
+func (p *conversionProgress) report() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	elapsed := time.Since(p.startTime)
+	filePercent := float64(0)
+	if p.totalFiles > 0 {
+		filePercent = float64(p.processedFiles) / float64(p.totalFiles) * 100
+	}
+
+	if p.currentFile != "" {
+		p.logger.Infof("conversion progress: %d/%d files (%.1f%%), %d/%d test cases, current: %s - elapsed: %s",
+			p.processedFiles, p.totalFiles, filePercent,
+			p.processedCases, p.totalCases, p.currentFile,
+			elapsed.Round(time.Second))
+	} else {
+		p.logger.Infof("conversion progress: %d/%d files (%.1f%%), %d test cases - elapsed: %s",
+			p.processedFiles, p.totalFiles, filePercent,
+			p.processedCases, elapsed.Round(time.Second))
+	}
+}
+
+func (p *conversionProgress) getStats() (processedFiles, totalFiles, failedFiles, processedCases int, elapsed time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.processedFiles, p.totalFiles, p.failedFiles, p.processedCases, time.Since(p.startTime)
+}
+
 // ConvertDirectory converts all EEST fixtures in a directory
 func (c *Converter) ConvertDirectory(inputPath string) (*ConvertedOutput, error) {
 	c.logger.WithField("path", inputPath).Info("scanning for EEST fixtures")
 
-	var allPayloads []ConvertedPayload
-	jsonFileCount := 0
-	failedFileCount := 0
-
+	// First pass: collect all JSON files
+	var jsonFiles []string
 	err := filepath.Walk(inputPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-
-		if info.IsDir() || !strings.HasSuffix(path, ".json") {
-			return nil
+		if !info.IsDir() && strings.HasSuffix(path, ".json") {
+			jsonFiles = append(jsonFiles, path)
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to walk path: %w", err)
+	}
 
-		jsonFileCount++
+	totalFiles := len(jsonFiles)
+	c.logger.WithField("files", totalFiles).Info("found JSON fixture files")
 
+	// Start async progress reporter
+	progress := newConversionProgress(totalFiles, c.logger)
+	progress.startReporter()
+	defer progress.stopReporter()
+
+	// Process files
+	var allPayloads []ConvertedPayload
+
+	for _, path := range jsonFiles {
 		relPath, err := filepath.Rel(inputPath, path)
 		if err != nil {
 			relPath = path
@@ -98,29 +201,49 @@ func (c *Converter) ConvertDirectory(inputPath string) (*ConvertedOutput, error)
 
 		c.logger.WithField("file", relPath).Debug("processing fixture file")
 
+		// Count test cases in file before processing
+		testCaseCount := c.countTestCases(path)
+		progress.setCurrentFile(relPath, testCaseCount)
+
 		payloads, err := c.convertFixtureFile(path, relPath)
 		if err != nil {
 			c.logger.WithError(err).WithField("file", relPath).Warn("failed to convert fixture")
-			failedFileCount++
-			return nil
+			progress.fileCompleted(0, true)
+		} else {
+			allPayloads = append(allPayloads, payloads...)
+			progress.fileCompleted(len(payloads), false)
 		}
-
-		allPayloads = append(allPayloads, payloads...)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to walk path: %w", err)
 	}
 
 	// Print summary
+	processedFiles, totalFilesCount, failedFiles, processedCases, elapsed := progress.getStats()
 	c.logger.Info("--- Conversion Summary ---")
-	c.logger.WithField("count", jsonFileCount).Info("JSON files processed")
-	if failedFileCount > 0 {
-		c.logger.WithField("count", failedFileCount).Warn("JSON files failed")
+	c.logger.WithFields(logrus.Fields{
+		"processed": processedFiles,
+		"total":     totalFilesCount,
+		"elapsed":   elapsed.Round(time.Second),
+	}).Info("JSON files processed")
+	if failedFiles > 0 {
+		c.logger.WithField("count", failedFiles).Warn("JSON files failed")
 	}
-	c.logger.WithField("count", len(allPayloads)).Info("test payloads converted")
+	c.logger.WithField("count", processedCases).Info("test payloads converted")
 
 	return &ConvertedOutput{Payloads: allPayloads}, nil
+}
+
+// countTestCases quickly counts the number of test cases in a fixture file
+func (c *Converter) countTestCases(filePath string) int {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return 0
+	}
+
+	var fixture EESTFixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		return 0
+	}
+
+	return len(fixture)
 }
 
 func (c *Converter) convertFixtureFile(filePath, relPath string) ([]ConvertedPayload, error) {
@@ -234,6 +357,11 @@ func (c *Converter) convertTestCase(testCase EESTTestCase, name string) (Convert
 		}
 	}
 
+	// Skip test cases with more than 100 contracts
+	if len(contracts) > 100 {
+		return ConvertedPayload{}, fmt.Errorf("skipping test case: too many contracts (%d > 100)", len(contracts))
+	}
+
 	// Register contracts first (they get $contract[1], $contract[2], etc.)
 	for _, contract := range contracts {
 		mapper.RegisterContract(contract.addr)
@@ -279,6 +407,11 @@ func (c *Converter) convertTestCase(testCase EESTTestCase, name string) (Convert
 				break
 			}
 		}
+	}
+
+	// Skip test cases with more than 100 unique sender wallets
+	if len(usedSenderAddrs) > 100 {
+		return ConvertedPayload{}, fmt.Errorf("skipping test case: too many unique senders (%d > 100)", len(usedSenderAddrs))
 	}
 
 	// Register only the actually used senders (sorted for deterministic order)
