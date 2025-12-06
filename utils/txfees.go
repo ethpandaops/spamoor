@@ -17,6 +17,10 @@ type TxFees struct {
 
 func GetTransactionFees(tx *types.Transaction, receipt *types.Receipt) *TxFees {
 	effectiveGasPrice := receipt.EffectiveGasPrice
+	if tx.Type() == types.LegacyTxType {
+		effectiveGasPrice = tx.GasPrice()
+	}
+
 	if effectiveGasPrice == nil {
 		effectiveGasPrice = big.NewInt(0)
 	}

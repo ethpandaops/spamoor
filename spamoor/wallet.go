@@ -283,6 +283,21 @@ func (wallet *Wallet) BuildDynamicFeeTx(txData *types.DynamicFeeTx) (*types.Tran
 	return wallet.signTx(txData)
 }
 
+// BuildLegacyTx builds and signs a legacy transaction.
+// It automatically assigns the next available nonce and signs the transaction.
+func (wallet *Wallet) BuildLegacyTx(txData *types.LegacyTx) (*types.Transaction, error) {
+	txData.Nonce = wallet.GetNextNonce()
+	return wallet.signTx(txData)
+}
+
+// BuildAccessListTx builds and signs an access list transaction.
+// It automatically assigns the next available nonce and signs the transaction.
+func (wallet *Wallet) BuildAccessListTx(txData *types.AccessListTx) (*types.Transaction, error) {
+	txData.ChainID = wallet.chainid
+	txData.Nonce = wallet.GetNextNonce()
+	return wallet.signTx(txData)
+}
+
 // BuildBlobTx builds and signs a blob transaction (EIP-4844).
 // It automatically assigns the next available nonce and signs the transaction.
 func (wallet *Wallet) BuildBlobTx(txData *types.BlobTx) (*types.Transaction, error) {
@@ -331,6 +346,21 @@ func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMeta
 // ReplaceDynamicFeeTx builds a replacement dynamic fee transaction with a specific nonce.
 // This is useful for replacing stuck transactions with higher gas prices.
 func (wallet *Wallet) ReplaceDynamicFeeTx(txData *types.DynamicFeeTx, nonce uint64) (*types.Transaction, error) {
+	txData.ChainID = wallet.chainid
+	txData.Nonce = nonce
+	return wallet.signTx(txData)
+}
+
+// ReplaceLegacyTx builds a replacement legacy transaction with a specific nonce.
+// This is useful for replacing stuck transactions with higher gas prices.
+func (wallet *Wallet) ReplaceLegacyTx(txData *types.LegacyTx, nonce uint64) (*types.Transaction, error) {
+	txData.Nonce = nonce
+	return wallet.signTx(txData)
+}
+
+// ReplaceAccessListTx builds a replacement access list transaction with a specific nonce.
+// This is useful for replacing stuck transactions with higher gas prices.
+func (wallet *Wallet) ReplaceAccessListTx(txData *types.AccessListTx, nonce uint64) (*types.Transaction, error) {
 	txData.ChainID = wallet.chainid
 	txData.Nonce = nonce
 	return wallet.signTx(txData)
