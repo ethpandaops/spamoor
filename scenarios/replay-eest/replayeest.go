@@ -1,6 +1,8 @@
 package replayeest
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -8,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -21,6 +24,7 @@ import (
 	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 
+	"github.com/ethpandaops/spamoor/eestconv"
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
@@ -28,19 +32,22 @@ import (
 
 // ScenarioOptions holds all configurable parameters
 type ScenarioOptions struct {
-	TotalCount     uint64  `yaml:"total_count"`
-	Throughput     uint64  `yaml:"throughput"`
-	MaxPending     uint64  `yaml:"max_pending"`
-	MaxWallets     uint64  `yaml:"max_wallets"`
-	Rebroadcast    uint64  `yaml:"rebroadcast"`
-	BaseFee        float64 `yaml:"base_fee"`
-	TipFee         float64 `yaml:"tip_fee"`
-	Timeout        string  `yaml:"timeout"`
-	ClientGroup    string  `yaml:"client_group"`
-	PayloadFile    string  `yaml:"payload_file"`
-	StartOffset    uint64  `yaml:"start_offset"`
-	SkipPostChecks bool    `yaml:"skip_postchecks"`
-	LogTxs         bool    `yaml:"log_txs"`
+	TotalCount      uint64  `yaml:"total_count"`
+	Throughput      uint64  `yaml:"throughput"`
+	MaxPending      uint64  `yaml:"max_pending"`
+	MaxWallets      uint64  `yaml:"max_wallets"`
+	Rebroadcast     uint64  `yaml:"rebroadcast"`
+	BaseFee         float64 `yaml:"base_fee"`
+	TipFee          float64 `yaml:"tip_fee"`
+	Timeout         string  `yaml:"timeout"`
+	ClientGroup     string  `yaml:"client_group"`
+	PayloadFile     string  `yaml:"payload_file"`
+	FixturesRelease string  `yaml:"fixtures_release"` // URL to .tar.gz file containing EEST fixtures
+	FixturesPattern string  `yaml:"fixtures_pattern"` // Regex pattern to include fixtures by path/name
+	FixturesExclude string  `yaml:"fixtures_exclude"` // Regex pattern to exclude fixtures by path/name
+	StartOffset     uint64  `yaml:"start_offset"`
+	SkipPostChecks  bool    `yaml:"skip_postchecks"`
+	LogTxs          bool    `yaml:"log_txs"`
 }
 
 // Scenario implements the replay-eest scenario
@@ -68,19 +75,22 @@ type Scenario struct {
 
 var ScenarioName = "replay-eest"
 var ScenarioDefaultOptions = ScenarioOptions{
-	TotalCount:     0,
-	Throughput:     1,
-	MaxPending:     10,
-	MaxWallets:     100,
-	Rebroadcast:    1,
-	BaseFee:        20,
-	TipFee:         2,
-	Timeout:        "",
-	ClientGroup:    "",
-	PayloadFile:    "",
-	StartOffset:    0,
-	SkipPostChecks: false,
-	LogTxs:         false,
+	TotalCount:      0,
+	Throughput:      1,
+	MaxPending:      10,
+	MaxWallets:      100,
+	Rebroadcast:     1,
+	BaseFee:         20,
+	TipFee:          2,
+	Timeout:         "",
+	ClientGroup:     "",
+	PayloadFile:     "",
+	FixturesRelease: "",
+	FixturesPattern: "",
+	FixturesExclude: "",
+	StartOffset:     0,
+	SkipPostChecks:  false,
+	LogTxs:          false,
 }
 
 var ScenarioDescriptor = scenario.Descriptor{
@@ -120,6 +130,12 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 		"Client group to use for transactions")
 	flags.StringVarP(&s.options.PayloadFile, "payload", "f", ScenarioDefaultOptions.PayloadFile,
 		"Path or URL to the YAML payload file")
+	flags.StringVar(&s.options.FixturesRelease, "fixtures-release", ScenarioDefaultOptions.FixturesRelease,
+		"URL or path to a .tar.gz file containing EEST fixtures (alternative to --payload)")
+	flags.StringVar(&s.options.FixturesPattern, "fixtures-pattern", ScenarioDefaultOptions.FixturesPattern,
+		"Regex pattern to include fixtures by path/name (used with --fixtures-release)")
+	flags.StringVar(&s.options.FixturesExclude, "fixtures-exclude", ScenarioDefaultOptions.FixturesExclude,
+		"Regex pattern to exclude fixtures by path/name (used with --fixtures-release)")
 	flags.Uint64Var(&s.options.StartOffset, "start-offset", ScenarioDefaultOptions.StartOffset,
 		"Start offset for the scenario")
 	flags.BoolVar(&s.options.SkipPostChecks, "skip-postchecks", ScenarioDefaultOptions.SkipPostChecks,
@@ -140,31 +156,17 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		}
 	}
 
-	if s.options.PayloadFile == "" {
-		return fmt.Errorf("payload file is required (use --payload or -f)")
+	// Validate options: need either PayloadFile or FixturesRelease
+	if s.options.PayloadFile == "" && s.options.FixturesRelease == "" {
+		return fmt.Errorf("either payload file or fixtures release is required (use --payload or --fixtures-release)")
 	}
 
-	// Load payloads
-	payloads, err := s.loadPayloads(s.options.PayloadFile)
-	if err != nil {
-		return fmt.Errorf("failed to load payloads: %w", err)
-	}
-	s.payloads = payloads
-	s.logger.Infof("loaded %d test payloads", len(s.payloads))
-
-	// Calculate max senders needed across all payloads
-	maxSenders := 0
-	for _, p := range s.payloads {
-		senderCount := p.GetSenderCount()
-		if senderCount > maxSenders {
-			maxSenders = senderCount
-		}
+	if s.options.PayloadFile != "" && s.options.FixturesRelease != "" {
+		return fmt.Errorf("cannot specify both payload file and fixtures release")
 	}
 
 	// Configure wallet count: we need enough wallets for parallel test cases
-	// Each test case needs: 1 deployer + N senders
-	walletsPerTestCase := maxSenders + 1
-	minWallets := uint64(walletsPerTestCase) * s.options.MaxPending
+	minWallets := 5 * s.options.MaxPending
 	if s.options.MaxWallets > 0 && s.options.MaxWallets < minWallets {
 		s.logger.Warnf("max-wallets (%d) is less than recommended (%d), may cause contention",
 			s.options.MaxWallets, minWallets)
@@ -179,8 +181,43 @@ func (s *Scenario) Init(options *scenario.Options) error {
 }
 
 func (s *Scenario) Run(ctx context.Context) error {
-	s.logger.Infof("starting scenario: %s with %d payloads", ScenarioName, len(s.payloads))
+	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished", ScenarioName)
+
+	// Load payloads from appropriate source
+	var payloads []Payload
+	var err error
+
+	if s.options.FixturesRelease != "" {
+		// Load from fixtures release (.tar.gz)
+		payloads, err = s.loadFromFixturesRelease(ctx, s.options.FixturesRelease, s.options.FixturesPattern, s.options.FixturesExclude)
+		if err != nil {
+			return fmt.Errorf("failed to load from fixtures release: %w", err)
+		}
+	} else {
+		// Load from payload file
+		payloads, err = s.loadPayloads(s.options.PayloadFile)
+		if err != nil {
+			return fmt.Errorf("failed to load payloads: %w", err)
+		}
+	}
+
+	s.payloads = payloads
+	s.logger.Infof("loaded %d test payloads", len(s.payloads))
+
+	// Check context after loading
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// Calculate max senders needed across all payloads
+	maxSenders := 0
+	for _, p := range s.payloads {
+		senderCount := p.GetSenderCount()
+		if senderCount > maxSenders {
+			maxSenders = senderCount
+		}
+	}
 
 	// Start wallet unlock processor
 	go s.processWalletUnlocks(ctx)
@@ -207,7 +244,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
-	err := scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
+	err = scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
 		TotalCount: totalCount,
 		Throughput: s.options.Throughput,
 		MaxPending: maxPending,
@@ -1148,6 +1185,323 @@ func (s *Scenario) loadPayloads(pathOrURL string) ([]Payload, error) {
 	}
 
 	return output.Payloads, nil
+}
+
+// loadFromFixturesRelease loads fixtures from a .tar.gz file (URL or local path),
+// extracts it to a temp directory, converts the fixtures using eestconv,
+// and returns the payloads.
+func (s *Scenario) loadFromFixturesRelease(ctx context.Context, pathOrURL string, testPattern string, excludePattern string) ([]Payload, error) {
+	s.logger.WithField("source", pathOrURL).Info("loading fixtures release")
+
+	// Create temp directory for extraction
+	tempDir, err := os.MkdirTemp("", "eest-fixtures-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer func() {
+		s.logger.WithField("path", tempDir).Debug("cleaning up temp directory")
+		os.RemoveAll(tempDir)
+	}()
+
+	// Check context before starting
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Get tar.gz reader (from URL or file)
+	var tarReader io.Reader
+	var contentLength int64
+	var cleanup func()
+
+	if strings.HasPrefix(pathOrURL, "http://") || strings.HasPrefix(pathOrURL, "https://") {
+		s.logger.Info("downloading fixtures from URL")
+
+		// Create request with context
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, pathOrURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch URL: %w", err)
+		}
+		cleanup = func() { resp.Body.Close() }
+
+		if resp.StatusCode != http.StatusOK {
+			cleanup()
+			return nil, fmt.Errorf("HTTP error: %s", resp.Status)
+		}
+		contentLength = resp.ContentLength
+		tarReader = resp.Body
+
+		// Log total size if known
+		if contentLength > 0 {
+			sizeMB := float64(contentLength) / (1024 * 1024)
+			s.logger.Infof("downloading %.1f MB", sizeMB)
+		}
+	} else {
+		s.logger.Info("loading fixtures from file")
+		file, err := os.Open(pathOrURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open file: %w", err)
+		}
+		cleanup = func() { file.Close() }
+
+		// Get file size
+		fileInfo, err := file.Stat()
+		if err == nil {
+			contentLength = fileInfo.Size()
+			sizeMB := float64(contentLength) / (1024 * 1024)
+			s.logger.Infof("reading %.1f MB", sizeMB)
+		}
+		tarReader = file
+	}
+	defer cleanup()
+
+	// Wrap reader with progress tracking and context awareness
+	progressReader := newProgressReader(ctx, tarReader, contentLength, s.logger, "downloading/reading")
+
+	// Extract tar.gz with progress reporting
+	s.logger.Info("extracting fixtures archive")
+	fileCount, err := extractTarGzWithProgress(ctx, progressReader, tempDir, s.logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract tar.gz: %w", err)
+	}
+	s.logger.WithField("files", fileCount).Info("extraction complete")
+
+	// Find the blockchain_tests directory
+	blockchainTestsDir := filepath.Join(tempDir, "fixtures", "blockchain_tests")
+	if _, err := os.Stat(blockchainTestsDir); os.IsNotExist(err) {
+		// Try without "fixtures" subdirectory
+		blockchainTestsDir = filepath.Join(tempDir, "blockchain_tests")
+		if _, err := os.Stat(blockchainTestsDir); os.IsNotExist(err) {
+			return nil, fmt.Errorf("could not find blockchain_tests directory in archive")
+		}
+	}
+
+	s.logger.WithField("path", blockchainTestsDir).Info("found blockchain_tests directory")
+
+	// Convert fixtures using eestconv
+	converter, err := eestconv.NewConverter(s.logger, eestconv.ConvertOptions{
+		TestPattern:    testPattern,
+		ExcludePattern: excludePattern,
+		Verbose:        false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create converter: %w", err)
+	}
+
+	output, err := converter.ConvertDirectory(blockchainTestsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert fixtures: %w", err)
+	}
+
+	// Convert eestconv payloads to scenario Payloads
+	payloads := make([]Payload, len(output.Payloads))
+	for i, p := range output.Payloads {
+		payloads[i] = convertEestconvPayload(p)
+	}
+
+	return payloads, nil
+}
+
+// progressReader wraps an io.Reader and reports progress periodically
+type progressReader struct {
+	ctx          context.Context
+	reader       io.Reader
+	totalSize    int64
+	bytesRead    int64
+	logger       *logrus.Entry
+	operation    string
+	lastReport   time.Time
+	reportPeriod time.Duration
+	startTime    time.Time
+}
+
+func newProgressReader(ctx context.Context, reader io.Reader, totalSize int64, logger *logrus.Entry, operation string) *progressReader {
+	return &progressReader{
+		ctx:          ctx,
+		reader:       reader,
+		totalSize:    totalSize,
+		logger:       logger,
+		operation:    operation,
+		lastReport:   time.Now(),
+		reportPeriod: 30 * time.Second,
+		startTime:    time.Now(),
+	}
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	// Check context before reading
+	if err := pr.ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	n, err := pr.reader.Read(p)
+	pr.bytesRead += int64(n)
+
+	// Report progress every 30 seconds
+	if time.Since(pr.lastReport) >= pr.reportPeriod {
+		pr.reportProgress()
+		pr.lastReport = time.Now()
+	}
+
+	return n, err
+}
+
+func (pr *progressReader) reportProgress() {
+	elapsed := time.Since(pr.startTime)
+	bytesReadMB := float64(pr.bytesRead) / (1024 * 1024)
+
+	if pr.totalSize > 0 {
+		percent := float64(pr.bytesRead) / float64(pr.totalSize) * 100
+		totalMB := float64(pr.totalSize) / (1024 * 1024)
+		pr.logger.Infof("%s progress: %.1f MB / %.1f MB (%.1f%%) - elapsed: %s",
+			pr.operation, bytesReadMB, totalMB, percent, elapsed.Round(time.Second))
+	} else {
+		pr.logger.Infof("%s progress: %.1f MB - elapsed: %s",
+			pr.operation, bytesReadMB, elapsed.Round(time.Second))
+	}
+}
+
+// extractTarGzWithProgress extracts a tar.gz archive to a destination directory,
+// only extracting files under fixtures/blockchain_tests/ or blockchain_tests/,
+// and reports progress periodically. It respects context cancellation.
+func extractTarGzWithProgress(ctx context.Context, reader io.Reader, destDir string, logger *logrus.Entry) (int, error) {
+	gzReader, err := gzip.NewReader(reader)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+
+	fileCount := 0
+	lastReport := time.Now()
+	startTime := time.Now()
+	reportPeriod := 30 * time.Second
+
+	for {
+		// Check context before processing each file
+		if err := ctx.Err(); err != nil {
+			return fileCount, err
+		}
+
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fileCount, fmt.Errorf("failed to read tar header: %w", err)
+		}
+
+		// Only extract files under blockchain_tests directories
+		name := header.Name
+		if !strings.Contains(name, "blockchain_tests/") &&
+			!strings.HasSuffix(name, "blockchain_tests") {
+			continue
+		}
+
+		// Security: prevent path traversal
+		targetPath := filepath.Join(destDir, header.Name)
+		if !strings.HasPrefix(targetPath, filepath.Clean(destDir)+string(os.PathSeparator)) {
+			return fileCount, fmt.Errorf("invalid file path in archive: %s", header.Name)
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(targetPath, 0755); err != nil {
+				return fileCount, fmt.Errorf("failed to create directory: %w", err)
+			}
+		case tar.TypeReg:
+			// Create parent directory if needed
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+				return fileCount, fmt.Errorf("failed to create parent directory: %w", err)
+			}
+
+			outFile, err := os.Create(targetPath)
+			if err != nil {
+				return fileCount, fmt.Errorf("failed to create file: %w", err)
+			}
+
+			// Limit copy size for security (4GB max per file)
+			if _, err := io.CopyN(outFile, tarReader, 4*1024*1024*1024); err != nil && err != io.EOF {
+				outFile.Close()
+				return fileCount, fmt.Errorf("failed to write file: %w", err)
+			}
+			outFile.Close()
+			fileCount++
+
+			// Report extraction progress every 30 seconds
+			if time.Since(lastReport) >= reportPeriod {
+				elapsed := time.Since(startTime)
+				logger.Infof("extraction progress: %d files extracted - elapsed: %s",
+					fileCount, elapsed.Round(time.Second))
+				lastReport = time.Now()
+			}
+		}
+	}
+
+	return fileCount, nil
+}
+
+// convertEestconvPayload converts an eestconv.ConvertedPayload to the scenario's Payload type
+func convertEestconvPayload(p eestconv.ConvertedPayload) Payload {
+	txs := make([]Tx, len(p.Txs))
+	for i, t := range p.Txs {
+		accessList := make([]AccessListItem, len(t.AccessList))
+		for j, al := range t.AccessList {
+			accessList[j] = AccessListItem{
+				Address:     al.Address,
+				StorageKeys: al.StorageKeys,
+			}
+		}
+
+		authList := make([]AuthorizationItem, len(t.AuthorizationList))
+		for j, auth := range t.AuthorizationList {
+			authList[j] = AuthorizationItem{
+				ChainID: auth.ChainID,
+				Address: auth.Address,
+				Nonce:   auth.Nonce,
+				Signer:  auth.Signer,
+				V:       auth.V,
+				R:       auth.R,
+				S:       auth.S,
+			}
+		}
+
+		txs[i] = Tx{
+			From:                 t.From,
+			Type:                 t.Type,
+			To:                   t.To,
+			Data:                 t.Data,
+			Gas:                  t.Gas,
+			GasPrice:             t.GasPrice,
+			MaxFeePerGas:         t.MaxFeePerGas,
+			MaxPriorityFeePerGas: t.MaxPriorityFeePerGas,
+			Value:                t.Value,
+			AccessList:           accessList,
+			BlobCount:            t.BlobCount,
+			AuthorizationList:    authList,
+			FixtureBaseFee:       t.FixtureBaseFee,
+		}
+	}
+
+	postCheck := make(map[string]PostCheckEntry, len(p.PostCheck))
+	for k, v := range p.PostCheck {
+		postCheck[k] = PostCheckEntry{
+			Balance: v.Balance,
+			Storage: v.Storage,
+		}
+	}
+
+	return Payload{
+		Name:          p.Name,
+		Prerequisites: p.Prerequisites,
+		Txs:           txs,
+		PostCheck:     postCheck,
+	}
 }
 
 // Helper functions
