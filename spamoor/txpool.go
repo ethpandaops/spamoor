@@ -85,16 +85,6 @@ type BulkBlockSubscription struct {
 	Callback BulkBlockStatsCallback
 }
 
-// RebroadcastRequest represents a transaction that needs to be rebroadcast
-type RebroadcastRequest struct {
-	confirmCtx  context.Context
-	fromWallet  *Wallet
-	tx          *types.Transaction
-	options     *SendTransactionOptions
-	retryCount  uint64
-	nextAttempt time.Time
-}
-
 // TxPool manages transaction submission, confirmation tracking, and chain reorganization handling.
 // It monitors blockchain blocks, tracks transaction confirmations, handles reorgs by re-submitting
 // affected transactions, and provides transaction awaiting functionality with automatic rebroadcasting.
@@ -122,11 +112,6 @@ type TxPool struct {
 	subscriptions      map[uint64]*BlockSubscription
 	bulkSubscriptions  map[uint64]*BulkBlockSubscription
 	nextSubscriptionID atomic.Uint64
-
-	// Rebroadcast management
-	rebroadcastRequests     []*RebroadcastRequest
-	rebroadcastRequestsChan chan *RebroadcastRequest
-	rebroadcastMutex        sync.RWMutex
 }
 
 // TxPoolOptions contains configuration options for the transaction pool.
@@ -161,13 +146,8 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 		pool.reorgDepth = options.ReorgDepth
 	}
 
-	// Initialize rebroadcast system
-	pool.rebroadcastRequests = []*RebroadcastRequest{}
-	pool.rebroadcastRequestsChan = make(chan *RebroadcastRequest, 100)
-
 	go pool.runTxPoolLoop()
 	go pool.processStaleTransactionsLoop()
-	go pool.runRebroadcastLoop()
 
 	return pool
 }
@@ -879,7 +859,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 			}
 		}()
 
-		receipt, err = pool.awaitTransaction(confirmCtx, wallet, tx, wg)
+		receipt, err = pool.awaitTransaction(confirmCtx, wallet, tx, options, wg)
 		if confirmCtx.Err() != nil {
 			err = nil
 		}
@@ -967,11 +947,6 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 		return submitErr
 	}
 
-	// Start reliable rebroadcast if enabled
-	if options.Rebroadcast {
-		pool.scheduleRebroadcast(confirmCtx, wallet, tx, options)
-	}
-
 	return nil
 }
 
@@ -979,9 +954,9 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 // It uses the wallet's nonce channel system to wait for confirmation and
 // handles cases where the transaction might be replaced or reorged.
 // The wg parameter is signaled when confirmation tracking is set up.
-func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, wg *sync.WaitGroup) (*types.Receipt, error) {
+func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, wg *sync.WaitGroup) (*types.Receipt, error) {
 	txHash := tx.Hash()
-	nonceChan, isFirstPendingTx := wallet.getTxNonceChan(tx)
+	nonceChan, isFirstPendingTx := wallet.getTxNonceChan(tx, options)
 
 	if isFirstPendingTx && pool.lastBlockNumber > wallet.lastConfirmation+1 {
 		wallet.lastConfirmation = pool.lastBlockNumber - 1
@@ -1045,50 +1020,124 @@ func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wall
 
 }
 
-// processStaleConfirmations recovers stale transactions that may have been missed.
+// processStaleConfirmations recovers stale transactions that may have been missed
+// and handles rebroadcasting of pending transactions.
 // It checks if a wallet has pending transactions that are older than 10 blocks,
-// queries the current nonce from the blockchain, and recovers any confirmed
-// transactions that weren't properly tracked.
+// queries the current nonce from the blockchain, recovers any confirmed transactions
+// that weren't properly tracked, and rebroadcasts pending transactions if enabled.
 func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet) {
-	if len(wallet.txNonceChans) > 0 && blockNumber > wallet.lastConfirmation+10 {
-		wallet.lastConfirmation = blockNumber
+	if len(wallet.txNonceChans) == 0 || blockNumber <= wallet.lastConfirmation+10 {
+		return
+	}
 
-		var lastNonce uint64
-		var err error
-		for retry := 0; retry < 3; retry++ {
-			client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
-			if client == nil {
-				continue
-			}
+	wallet.lastConfirmation = blockNumber
 
-			lastNonce, err = client.GetNonceAt(pool.options.Context, wallet.address, big.NewInt(int64(blockNumber)))
-			if err == nil {
-				break
-			}
+	// Query on-chain nonce
+	var onChainNonce uint64
+	var err error
+	for retry := 0; retry < 3; retry++ {
+		client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
+		if client == nil {
+			continue
 		}
 
-		if lastNonce == wallet.confirmedTxCount {
-			return
-		}
-
-		pendingNonce := 0
-		for n := range wallet.txNonceChans {
-			pendingNonce = int(n)
+		onChainNonce, err = client.GetNonceAt(pool.options.Context, wallet.address, big.NewInt(int64(blockNumber)))
+		if err == nil {
 			break
 		}
+	}
 
-		logrus.Debugf("recovering stale transactions for %v (tx count: %v, current nonce %v, cache nonce %v, first pending nonce: %v)", wallet.address.String(), len(wallet.txNonceChans), lastNonce, wallet.confirmedTxCount, pendingNonce)
+	if err != nil {
+		logrus.WithError(err).Warnf("failed to get on-chain nonce for %v", wallet.address.String())
+		return
+	}
 
-		wallet.txNonceMutex.Lock()
-		defer wallet.txNonceMutex.Unlock()
+	wallet.txNonceMutex.Lock()
 
-		for n := range wallet.txNonceChans {
-			if n < lastNonce {
-				logrus.WithError(err).Warnf("recovering stale confirmed transactions for %v (nonce %v)", wallet.address.String(), n)
-				close(wallet.txNonceChans[n].channel)
-				delete(wallet.txNonceChans, n)
+	// Collect pending nonces sorted
+	pendingNonces := make([]uint64, 0, len(wallet.txNonceChans))
+	for n, nc := range wallet.txNonceChans {
+		if len(nc.txs) > 0 {
+			pendingNonces = append(pendingNonces, n)
+		}
+	}
+	slices.Sort(pendingNonces)
+
+	// Find lowest pending nonce
+	lowestPendingNonce := uint64(0)
+	if len(pendingNonces) > 0 {
+		lowestPendingNonce = pendingNonces[0]
+	}
+
+	name := wallet.GetAddress().String()
+	logrus.Debugf("processing stale confirmations for %v (on-chain nonce: %v, confirmed: %v, pending count: %v, lowest pending: %v)",
+		name, onChainNonce, wallet.confirmedTxCount, len(wallet.txNonceChans), lowestPendingNonce)
+
+	// Close channels for confirmed transactions and collect txs to rebroadcast
+	var txsToRebroadcast []*PendingTx
+	var nonceGaps []uint64
+
+	// Only consider rebroadcasting the 2 lowest pending nonces
+	const maxRebroadcastNonces = 2
+	pendingNoncesChecked := 0
+
+	for _, nonce := range pendingNonces {
+		nonceChan := wallet.txNonceChans[nonce]
+		if nonce < onChainNonce {
+			// Transaction confirmed - close channel and clean up
+			logrus.Debugf("recovering stale confirmed transaction for %v (nonce %v)", wallet.address.String(), nonce)
+			close(nonceChan.channel)
+			delete(wallet.txNonceChans, nonce)
+		} else if nonce <= onChainNonce+(maxRebroadcastNonces-1) {
+			pendingNoncesChecked++
+			// Get the most recent pending tx for this nonce (last in the list)
+			if len(nonceChan.txs) > 0 {
+				mostRecentTx := nonceChan.txs[len(nonceChan.txs)-1]
+				if mostRecentTx.Options != nil && mostRecentTx.Options.Rebroadcast {
+					// Check if enough time has passed since last rebroadcast
+					backoffDelay := pool.calculateBackoffDelay(mostRecentTx.RebroadcastCount)
+					if time.Since(mostRecentTx.LastRebroadcast) >= backoffDelay {
+						txsToRebroadcast = append(txsToRebroadcast, mostRecentTx)
+					}
+				}
 			}
 		}
+	}
+
+	// Update confirmed nonce
+	if onChainNonce > wallet.confirmedTxCount {
+		wallet.confirmedTxCount = onChainNonce
+	}
+
+	// Check for nonce gaps between on-chain nonce and lowest pending nonce
+	if lowestPendingNonce > onChainNonce {
+		for nonce := onChainNonce; nonce < lowestPendingNonce; nonce++ {
+			nonceGaps = append(nonceGaps, nonce)
+		}
+	}
+
+	wallet.txNonceMutex.Unlock()
+
+	// Fill nonce gaps if any
+	if len(nonceGaps) > 0 {
+		logrus.WithFields(logrus.Fields{
+			"wallet": wallet.GetAddress().Hex(),
+			"gaps":   nonceGaps,
+		}).Warnf("detected nonce gaps, filling with dummy transactions")
+		go pool.fillNonceGaps(pool.options.Context, wallet, nonceGaps, nil)
+	}
+
+	// Rebroadcast pending transactions
+	for _, pendingTx := range txsToRebroadcast {
+		logrus.WithFields(logrus.Fields{
+			"wallet": wallet.GetAddress().Hex(),
+			"nonce":  pendingTx.Tx.Nonce(),
+			"txhash": pendingTx.Tx.Hash().Hex(),
+		}).Debugf("rebroadcasting stale transaction")
+
+		pendingTx.LastRebroadcast = time.Now()
+		pendingTx.RebroadcastCount++
+		go pool.rebroadcastTransaction(pool.options.Context, pendingTx.Tx, pendingTx.Options, pendingTx.RebroadcastCount)
 	}
 }
 
@@ -1371,16 +1420,6 @@ func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
 	return delay
 }
 
-// isTransactionBlocking checks if a transaction is blocking wallet progress.
-// Returns true if the transaction nonce is the next required nonce for the wallet.
-func (pool *TxPool) isTransactionBlocking(wallet *Wallet, txNonce uint64) bool {
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	// This transaction is the next one that needs to be included
-	return txNonce <= wallet.confirmedTxCount
-}
-
 // rebroadcastTransaction performs the actual rebroadcast of a transaction.
 // This method encapsulates the existing rebroadcast logic for reuse.
 func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transaction, options *SendTransactionOptions, retryCount uint64) {
@@ -1431,106 +1470,68 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 	}
 }
 
-// runRebroadcastLoop runs the main rebroadcast processing loop
-func (pool *TxPool) runRebroadcastLoop() {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-pool.options.Context.Done():
-			return
-		case newRequest := <-pool.rebroadcastRequestsChan:
-			pool.addRebroadcastRequest(newRequest)
-		case <-ticker.C:
-			nextAttempt := pool.processRebroadcastRequests()
-			if !nextAttempt.IsZero() {
-				duration := time.Until(nextAttempt)
-				if duration > 0 {
-					ticker.Reset(duration)
-				} else {
-					ticker.Reset(50 * time.Millisecond)
-				}
-			} else {
-				ticker.Reset(10 * time.Second)
-			}
-		}
+// fillNonceGaps creates and submits dummy transactions to fill nonce gaps.
+func (pool *TxPool) fillNonceGaps(ctx context.Context, wallet *Wallet, gaps []uint64, baseOptions *SendTransactionOptions) {
+	// Get current gas prices from the pool
+	baseFee := pool.GetCurrentBaseFee()
+	if baseFee == nil {
+		baseFee = big.NewInt(1e9) // fallback to 1 gwei
 	}
-}
 
-// addRebroadcastRequest adds a new rebroadcast request to the queue
-func (pool *TxPool) addRebroadcastRequest(req *RebroadcastRequest) {
-	pool.rebroadcastMutex.Lock()
-	defer pool.rebroadcastMutex.Unlock()
+	// Use 2x base fee for fee cap and reasonable tip
+	gasFeeCap := new(big.Int).Mul(baseFee, big.NewInt(2))
+	gasTipCap := big.NewInt(1e9) // 1 gwei tip
+	if gasFeeCap.Cmp(gasTipCap) < 0 {
+		gasTipCap = gasFeeCap
+	}
 
-	// Set initial next attempt time
-	backoffDelay := pool.calculateBackoffDelay(req.retryCount)
-	req.nextAttempt = time.Now().Add(backoffDelay)
-
-	pool.rebroadcastRequests = append(pool.rebroadcastRequests, req)
-}
-
-// processRebroadcastRequests processes all pending rebroadcast requests
-func (pool *TxPool) processRebroadcastRequests() time.Time {
-	pool.rebroadcastMutex.Lock()
-	defer pool.rebroadcastMutex.Unlock()
-
-	now := time.Now()
-	activeRequests := make([]*RebroadcastRequest, 0, len(pool.rebroadcastRequests))
-	lowestNextAttempt := time.Time{}
-
-	for _, req := range pool.rebroadcastRequests {
+	for _, nonce := range gaps {
 		select {
-		case <-req.confirmCtx.Done():
-			// Transaction confirmed, remove from queue
-			continue
+		case <-ctx.Done():
+			return
 		default:
 		}
 
-		// Check if it's time to rebroadcast
-		if now.After(req.nextAttempt) {
-			// Check if this transaction is blocking wallet progress
-			if pool.isTransactionBlocking(req.fromWallet, req.tx.Nonce()) {
-				// Perform rebroadcast
-				go pool.rebroadcastTransaction(req.confirmCtx, req.tx, req.options, req.retryCount)
-				req.retryCount++
-
-				pendingTx := req.fromWallet.GetPendingTx(req.tx)
-				if pendingTx != nil {
-					pendingTx.LastRebroadcast = now
-					pendingTx.RebroadcastCount++
-				}
-
-				// Calculate next attempt time
-				backoffDelay := pool.calculateBackoffDelay(req.retryCount)
-				req.nextAttempt = now.Add(backoffDelay)
-			}
-
-			if lowestNextAttempt.IsZero() || req.nextAttempt.Before(lowestNextAttempt) {
-				lowestNextAttempt = req.nextAttempt
-			}
+		// Build and sign the filler transaction
+		fillerTx, err := wallet.BuildFillerTx(nonce, gasTipCap, gasFeeCap)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"wallet": wallet.GetAddress().Hex(),
+				"nonce":  nonce,
+			}).WithError(err).Warnf("failed to build filler transaction")
+			continue
 		}
 
-		// Keep request in queue for next iteration
-		activeRequests = append(activeRequests, req)
-	}
+		// Create options for the filler transaction
+		fillerOptions := &SendTransactionOptions{
+			Rebroadcast: true,
+			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				if err != nil {
+					logrus.WithFields(logrus.Fields{
+						"wallet": wallet.GetAddress().Hex(),
+						"nonce":  tx.Nonce(),
+					}).WithError(err).Warnf("filler transaction failed")
+				} else {
+					logrus.WithFields(logrus.Fields{
+						"wallet": wallet.GetAddress().Hex(),
+						"nonce":  tx.Nonce(),
+						"txhash": tx.Hash().Hex(),
+					}).Infof("filler transaction confirmed")
+				}
+			},
+		}
 
-	pool.rebroadcastRequests = activeRequests
-	return lowestNextAttempt
-}
+		if baseOptions != nil {
+			fillerOptions.ClientGroup = baseOptions.ClientGroup
+		}
 
-// scheduleRebroadcast schedules a transaction for rebroadcasting
-func (pool *TxPool) scheduleRebroadcast(confirmCtx context.Context, fromWallet *Wallet, tx *types.Transaction, options *SendTransactionOptions) {
-	req := &RebroadcastRequest{
-		confirmCtx: confirmCtx,
-		fromWallet: fromWallet,
-		tx:         tx,
-		options:    options,
-		retryCount: 0,
-	}
-
-	select {
-	case pool.rebroadcastRequestsChan <- req:
-	case <-pool.options.Context.Done():
+		// Submit the filler transaction
+		err = pool.submitTransaction(ctx, wallet, fillerTx, fillerOptions, true)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"wallet": wallet.GetAddress().Hex(),
+				"nonce":  nonce,
+			}).WithError(err).Warnf("failed to submit filler transaction")
+		}
 	}
 }
