@@ -40,6 +40,7 @@ type ScenarioOptions struct {
 	BaseFee         float64 `yaml:"base_fee"`
 	TipFee          float64 `yaml:"tip_fee"`
 	Timeout         string  `yaml:"timeout"`
+	PayloadTimeout  string  `yaml:"payload_timeout"` // Timeout for each payload (default: 30m)
 	ClientGroup     string  `yaml:"client_group"`
 	PayloadFile     string  `yaml:"payload_file"`
 	FixturesRelease string  `yaml:"fixtures_release"` // URL to .tar.gz file containing EEST fixtures
@@ -52,9 +53,10 @@ type ScenarioOptions struct {
 
 // Scenario implements the replay-eest scenario
 type Scenario struct {
-	options    ScenarioOptions
-	logger     *logrus.Entry
-	walletPool *spamoor.WalletPool
+	options        ScenarioOptions
+	logger         *logrus.Entry
+	walletPool     *spamoor.WalletPool
+	payloadTimeout time.Duration
 
 	// Loaded payloads
 	payloads []Payload
@@ -71,6 +73,7 @@ type Scenario struct {
 	failInvalidCount   uint64 // Failed due to invalid tx (wallet acquisition, build errors)
 	failRevertedCount  uint64 // Failed due to tx revert
 	failPostcheckCount uint64 // Failed due to postcheck failures
+	failTimeoutCount   uint64 // Failed due to payload timeout
 }
 
 var ScenarioName = "replay-eest"
@@ -83,6 +86,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:         20,
 	TipFee:          2,
 	Timeout:         "",
+	PayloadTimeout:  "30m",
 	ClientGroup:     "",
 	PayloadFile:     "",
 	FixturesRelease: "",
@@ -126,6 +130,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 		"Tip fee in gwei (0 = use suggested)")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout,
 		"Timeout for the scenario (e.g., '1h', '30m')")
+	flags.StringVar(&s.options.PayloadTimeout, "payload-timeout", ScenarioDefaultOptions.PayloadTimeout,
+		"Timeout for each payload before cancellation (e.g., '30m', '1h')")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup,
 		"Client group to use for transactions")
 	flags.StringVarP(&s.options.PayloadFile, "payload", "f", ScenarioDefaultOptions.PayloadFile,
@@ -163,6 +169,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 
 	if s.options.PayloadFile != "" && s.options.FixturesRelease != "" {
 		return fmt.Errorf("cannot specify both payload file and fixtures release")
+	}
+
+	if s.options.PayloadTimeout != "" {
+		var err error
+		s.payloadTimeout, err = time.ParseDuration(s.options.PayloadTimeout)
+		if err != nil {
+			return fmt.Errorf("invalid payload timeout: %w", err)
+		}
 	}
 
 	// Configure wallet count: we need enough wallets for parallel test cases
@@ -258,10 +272,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	// Print final summary
 	s.statsLock.Lock()
-	totalFailed := s.failInvalidCount + s.failRevertedCount + s.failPostcheckCount
-	s.logger.Infof("final summary: current=%d, success=%d, failed=%d (invalid=%d, reverted=%d, postcheck=%d), total=%d",
+	totalFailed := s.failInvalidCount + s.failRevertedCount + s.failPostcheckCount + s.failTimeoutCount
+	s.logger.Infof("final summary: current=%d, success=%d, failed=%d (invalid=%d, reverted=%d, postcheck=%d, timeout=%d), total=%d",
 		s.currentPayloadIdx, s.successCount, totalFailed,
-		s.failInvalidCount, s.failRevertedCount, s.failPostcheckCount, len(s.payloads))
+		s.failInvalidCount, s.failRevertedCount, s.failPostcheckCount, s.failTimeoutCount, len(s.payloads))
 	s.statsLock.Unlock()
 
 	return err
@@ -306,7 +320,9 @@ func (s *Scenario) processTestCase(ctx context.Context, params *scenario.Process
 
 	// Update stats
 	s.statsLock.Lock()
-	if result.err != nil {
+	if result.timedOut {
+		s.failTimeoutCount++
+	} else if result.err != nil {
 		if result.reverted {
 			s.failRevertedCount++
 		} else {
@@ -321,12 +337,14 @@ func (s *Scenario) processTestCase(ctx context.Context, params *scenario.Process
 
 	// Log result
 	params.OrderedLogCb(func() {
-		if result.err != nil {
-			logger.Warnf("test case failed: %v", result.err)
+		if result.timedOut {
+			logger.WithField("test", payload.Name).Warnf("test case timed out after payload timeout exceeded")
+		} else if result.err != nil {
+			logger.WithField("test", payload.Name).Warnf("test case failed: %w", result.err)
 		} else if len(result.postCheckFailures) > 0 {
 			errMsg := make([]string, 0, len(result.postCheckFailures))
 			errMsg = append(errMsg, result.postCheckFailures...)
-			logger.Warnf("test case completed with %d post-check failures: %s", len(result.postCheckFailures), strings.Join(errMsg, ", "))
+			logger.WithField("test", payload.Name).Warnf("test case completed with %d post-check failures: %s", len(result.postCheckFailures), strings.Join(errMsg, ", "))
 		} else {
 			if s.options.LogTxs {
 				logger.Infof("test case #%d completed successfully", params.TxIdx+1)
@@ -342,6 +360,7 @@ func (s *Scenario) processTestCase(ctx context.Context, params *scenario.Process
 type testCaseResult struct {
 	err               error
 	reverted          bool // True if the error was due to tx revert
+	timedOut          bool // True if the payload timed out
 	postCheckFailures []string
 }
 
@@ -421,10 +440,11 @@ func (s *Scenario) executeTestCase(
 
 	// Execute deployer transactions first
 	if len(deployerTxs) > 0 {
-		reverted, err := s.executeDeployerTxs(ctx, logger, deployer, client, deployerTxs, addressMap, senderWallets, feeCap, tipCap)
+		reverted, timedOut, err := s.executeDeployerTxs(ctx, logger, deployer, client, deployerTxs, addressMap, senderWallets, feeCap, tipCap)
 		if err != nil {
 			result.err = fmt.Errorf("deployer transactions failed: %w", err)
 			result.reverted = reverted
+			result.timedOut = timedOut
 			return result
 		}
 	}
@@ -438,10 +458,11 @@ func (s *Scenario) executeTestCase(
 		}
 		senderWallet := senderWallets[senderIdx-1]
 
-		fixtureGas, actualGas, reverted, err := s.executeSenderTxs(ctx, logger, senderWallet, client, group.txs, addressMap, senderWallets, feeCap, tipCap)
+		fixtureGas, actualGas, reverted, timedOut, err := s.executeSenderTxs(ctx, logger, senderWallet, client, group.txs, addressMap, senderWallets, feeCap, tipCap)
 		if err != nil {
 			result.err = fmt.Errorf("sender[%d] transactions failed: %w", senderIdx, err)
 			result.reverted = reverted
+			result.timedOut = timedOut
 			return result
 		}
 
@@ -473,27 +494,38 @@ func (s *Scenario) executeDeployerTxs(
 	addressMap map[string]common.Address,
 	senderWallets []*spamoor.Wallet,
 	feeCap, tipCap *big.Int,
-) (bool, error) {
+) (bool, bool, error) {
 	// Reset nonces if needed
 	if err := deployer.ResetNoncesIfNeeded(ctx, client); err != nil {
-		return false, fmt.Errorf("failed to reset deployer nonces: %w", err)
+		return false, false, fmt.Errorf("failed to reset deployer nonces: %w", err)
 	}
 
 	// Build, submit, and wait for each transaction one by one
-	// Use WaitGroup and collect receipts via OnComplete callback
-	var wg sync.WaitGroup
 	receipts := make([]*types.Receipt, len(txs))
 	errors := make([]error, len(txs))
+	pendingTxs := 0
+	pendingChan := make(chan struct{}, 1)
+	txObjects := make([]*types.Transaction, len(txs))
+
+	var timer *time.Timer
+	if s.payloadTimeout > 0 {
+		timer = time.NewTimer(s.payloadTimeout)
+	} else {
+		timer = time.NewTimer(time.Hour * 2)
+	}
+	defer timer.Stop()
 
 	for i, tx := range txs {
 		// Build transaction
 		signedTx, err := s.buildTransaction(ctx, deployer, client, tx, addressMap, senderWallets, feeCap, tipCap)
 		if err != nil {
-			return false, fmt.Errorf("failed to build deployer tx %d: %w", i, err)
+			return false, false, fmt.Errorf("failed to build deployer tx %d: %w", i, err)
 		}
 
+		txObjects[i] = signedTx
+
 		// Submit transaction with OnComplete callback
-		wg.Add(1)
+		pendingTxs++
 		txIdx := i
 		err = s.walletPool.GetTxPool().SendTransaction(ctx, deployer, signedTx, &spamoor.SendTransactionOptions{
 			Client:      client,
@@ -502,21 +534,33 @@ func (s *Scenario) executeDeployerTxs(
 			OnComplete: func(_ *types.Transaction, receipt *types.Receipt, err error) {
 				receipts[txIdx] = receipt
 				errors[txIdx] = err
-				wg.Done()
+				pendingChan <- struct{}{}
 			},
 		})
 		if err != nil {
-			return false, fmt.Errorf("failed to submit deployer tx %d: %w", i, err)
+			return false, false, fmt.Errorf("failed to submit deployer tx %d: %w", i, err)
 		}
 	}
 
-	// Wait for all transactions to complete
-	wg.Wait()
+	// Wait for all transactions to complete or timeout
+waitloop:
+	select {
+	case <-pendingChan:
+		pendingTxs--
+		if pendingTxs == 0 {
+			break waitloop
+		}
+	case <-timer.C:
+		err := s.replaceWithDummyTxs(ctx, txObjects, deployer, client, feeCap, tipCap)
+		return false, true, fmt.Errorf("deployer transactions timed out (replaced: %w)", err)
+	case <-ctx.Done():
+		return false, false, ctx.Err()
+	}
 
 	// Check for any errors
 	for i, err := range errors {
 		if err != nil {
-			return false, fmt.Errorf("deployer tx %d failed: %w", i, err)
+			return false, false, fmt.Errorf("deployer tx %d failed: %w", i, err)
 		}
 	}
 
@@ -531,7 +575,7 @@ func (s *Scenario) executeDeployerTxs(
 		logger.Debugf("deployer transactions confirmed: %d txs", len(txs))
 	}
 
-	return reverted, nil
+	return reverted, false, nil
 }
 
 func (s *Scenario) executeSenderTxs(
@@ -543,30 +587,41 @@ func (s *Scenario) executeSenderTxs(
 	addressMap map[string]common.Address,
 	senderWallets []*spamoor.Wallet,
 	feeCap, tipCap *big.Int,
-) (fixtureGasCost, actualGasCost *big.Int, reverted bool, err error) {
+) (fixtureGasCost, actualGasCost *big.Int, reverted bool, timedOut bool, err error) {
 	fixtureGasCost = big.NewInt(0)
 	actualGasCost = big.NewInt(0)
 
 	// Reset nonces if needed
 	if err := sender.ResetNoncesIfNeeded(ctx, client); err != nil {
-		return nil, nil, false, fmt.Errorf("failed to reset sender nonces: %w", err)
+		return nil, nil, false, false, fmt.Errorf("failed to reset sender nonces: %w", err)
 	}
 
 	// Build, submit, and wait for each transaction one by one
-	// Use WaitGroup and collect receipts via OnComplete callback
-	var wg sync.WaitGroup
 	receipts := make([]*types.Receipt, len(txs))
 	errors := make([]error, len(txs))
+	pendingTxs := 0
+	pendingChan := make(chan struct{}, 1)
+	txObjects := make([]*types.Transaction, len(txs))
+
+	var timer *time.Timer
+	if s.payloadTimeout > 0 {
+		timer = time.NewTimer(s.payloadTimeout)
+	} else {
+		timer = time.NewTimer(time.Hour * 2)
+	}
+	defer timer.Stop()
 
 	for i, tx := range txs {
 		// Build transaction
 		signedTx, err := s.buildTransaction(ctx, sender, client, tx, addressMap, senderWallets, feeCap, tipCap)
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("failed to build sender tx %d: %w", i, err)
+			return nil, nil, false, false, fmt.Errorf("failed to build sender tx %d: %w", i, err)
 		}
 
+		txObjects[i] = signedTx
+
 		// Submit transaction with OnComplete callback
-		wg.Add(1)
+		pendingTxs++
 		txIdx := i
 		err = s.walletPool.GetTxPool().SendTransaction(ctx, sender, signedTx, &spamoor.SendTransactionOptions{
 			Client:      client,
@@ -575,21 +630,33 @@ func (s *Scenario) executeSenderTxs(
 			OnComplete: func(_ *types.Transaction, receipt *types.Receipt, err error) {
 				receipts[txIdx] = receipt
 				errors[txIdx] = err
-				wg.Done()
+				pendingChan <- struct{}{}
 			},
 		})
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("failed to submit sender tx %d: %w", i, err)
+			return nil, nil, false, false, fmt.Errorf("failed to submit sender tx %d: %w", i, err)
 		}
 	}
 
 	// Wait for all transactions to complete
-	wg.Wait()
+waitloop:
+	select {
+	case <-pendingChan:
+		pendingTxs--
+		if pendingTxs == 0 {
+			break waitloop
+		}
+	case <-timer.C:
+		err := s.replaceWithDummyTxs(ctx, txObjects, sender, client, feeCap, tipCap)
+		return nil, nil, false, true, fmt.Errorf("sender transactions timed out (replaced: %w)", err)
+	case <-ctx.Done():
+		return nil, nil, false, false, ctx.Err()
+	}
 
 	// Check for errors and calculate gas costs from receipts
 	for i, receipt := range receipts {
 		if errors[i] != nil {
-			return nil, nil, false, fmt.Errorf("sender tx %d failed: %w", i, errors[i])
+			return nil, nil, false, false, fmt.Errorf("sender tx %d failed: %w", i, errors[i])
 		}
 		if receipt == nil || receipt.Status == 0 {
 			reverted = true
@@ -609,7 +676,7 @@ func (s *Scenario) executeSenderTxs(
 		logger.Debugf("sender transactions confirmed: %d txs", len(txs))
 	}
 
-	return fixtureGasCost, actualGasCost, reverted, nil
+	return fixtureGasCost, actualGasCost, reverted, false, nil
 }
 
 func (s *Scenario) buildTransaction(
@@ -836,6 +903,43 @@ func (s *Scenario) buildTransaction(
 	}
 
 	return signedTx, nil
+}
+
+// replaceWithDummyTxs
+func (s *Scenario) replaceWithDummyTxs(ctx context.Context, txs []*types.Transaction, wallet *spamoor.Wallet, client *spamoor.Client, feeCap, tipCap *big.Int) error {
+	doubleFeeCap := new(big.Int).Mul(feeCap, big.NewInt(2))
+	doubleTipCap := new(big.Int).Mul(tipCap, big.NewInt(2))
+	walletAddr := wallet.GetAddress()
+
+	replaceTxs := make([]*types.Transaction, len(txs))
+	for i, tx := range txs {
+		txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
+			GasFeeCap: uint256.MustFromBig(doubleFeeCap),
+			GasTipCap: uint256.MustFromBig(doubleTipCap),
+			Gas:       25000,
+			To:        &walletAddr,
+			Value:     uint256.NewInt(0),
+			Data:      []byte{},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to build dynamic fee tx: %w", err)
+		}
+		signedTx, err := wallet.ReplaceDynamicFeeTx(txData, tx.Nonce())
+		if err != nil {
+			return fmt.Errorf("failed to build dynamic fee tx: %w", err)
+		}
+
+		replaceTxs[i] = signedTx
+	}
+
+	_, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, wallet, replaceTxs, &spamoor.BatchOptions{
+		PendingLimit: 100,
+		ClientPool:   s.walletPool.GetClientPool(),
+		ClientGroup:  s.options.ClientGroup,
+		MaxRetries:   3,
+	})
+
+	return err
 }
 
 func (s *Scenario) buildAddressMap(
@@ -1139,10 +1243,10 @@ func (s *Scenario) printStatsSummary(ctx context.Context) {
 			return
 		case <-ticker.C:
 			s.statsLock.Lock()
-			totalFailed := s.failInvalidCount + s.failRevertedCount + s.failPostcheckCount
-			s.logger.Infof("progress: current=%d/%d, success=%d, failed=%d (invalid=%d, reverted=%d, postcheck=%d)",
+			totalFailed := s.failInvalidCount + s.failRevertedCount + s.failPostcheckCount + s.failTimeoutCount
+			s.logger.Infof("progress: current=%d/%d, success=%d, failed=%d (invalid=%d, reverted=%d, postcheck=%d, timeout=%d)",
 				s.currentPayloadIdx, len(s.payloads), s.successCount, totalFailed,
-				s.failInvalidCount, s.failRevertedCount, s.failPostcheckCount)
+				s.failInvalidCount, s.failRevertedCount, s.failPostcheckCount, s.failTimeoutCount)
 			s.statsLock.Unlock()
 		}
 	}
