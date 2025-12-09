@@ -324,10 +324,9 @@ func (s *Scenario) processTestCase(ctx context.Context, params *scenario.Process
 		if result.err != nil {
 			logger.Warnf("test case failed: %v", result.err)
 		} else if len(result.postCheckFailures) > 0 {
-			logger.Warnf("test case completed with %d post-check failures", len(result.postCheckFailures))
-			for _, failure := range result.postCheckFailures {
-				logger.Warnf("  - %s", failure)
-			}
+			errMsg := make([]string, 0, len(result.postCheckFailures))
+			errMsg = append(errMsg, result.postCheckFailures...)
+			logger.Warnf("test case completed with %d post-check failures: %s", len(result.postCheckFailures), strings.Join(errMsg, ", "))
 		} else {
 			if s.options.LogTxs {
 				logger.Infof("test case #%d completed successfully", params.TxIdx+1)

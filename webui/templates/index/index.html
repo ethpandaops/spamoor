@@ -662,7 +662,7 @@ function appendLogs(logs, logsDiv) {
       const otherFields = fields.filter(([key]) => key !== 'rpc');
       
       const visibleFields = otherFields.slice(0, 2)
-        .map(([key, value]) => `<span class="badge">${key}=${value}</span>`)
+        .map(([key, value]) => `<span class="badge" title="${key}=${value}">${key}=${value}</span>`)
         .join('');
         
       const hiddenFields = [
@@ -1519,6 +1519,12 @@ updateCountdown();
   background-color: var(--bs-secondary) !important;
   color: var(--bs-body-color);
   border: 1px solid var(--bs-border-color);
+}
+
+.log-fields .badge:not(.more-fields) {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Dark theme badge styling */
