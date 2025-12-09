@@ -340,7 +340,7 @@ func (s *Scenario) processTestCase(ctx context.Context, params *scenario.Process
 		if result.timedOut {
 			logger.WithField("test", payload.Name).Warnf("test case timed out after payload timeout exceeded")
 		} else if result.err != nil {
-			logger.WithField("test", payload.Name).Warnf("test case failed: %w", result.err)
+			logger.WithField("test", payload.Name).Warnf("test case failed: %v", result.err.Error())
 		} else if len(result.postCheckFailures) > 0 {
 			errMsg := make([]string, 0, len(result.postCheckFailures))
 			errMsg = append(errMsg, result.postCheckFailures...)
