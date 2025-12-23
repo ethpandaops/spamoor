@@ -87,6 +87,75 @@ uv run execute remote \
   deep_branch_testing.py::test_worst_depth_stateroot_recomp
 ```
 
+## Spamoor Scenario Usage
+
+### Command Line Usage
+
+```bash
+./bin/spamoor storage-trie-brancher \
+  --count 1000 \
+  --storage-depth 10 \
+  --account-depth 5 \
+  --data-file ./scenarios/statebloat/storage_trie_brancher/s10_acc5.json \
+  --contract-file ./scenarios/statebloat/storage_trie_brancher/depth_10.sol \
+  --rpchost http://localhost:8545 \
+  --privkey 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+  --seed "test-seed" \
+  --basefee 20 \
+  --tipfee 2 \
+  --max-wallets 50
+```
+
+### YAML Configuration Example
+
+Create a file `storage_trie_brancher_config.yaml`:
+
+```yaml
+scenarios:
+  - name: storage-trie-brancher
+    config:
+      # Number of contracts to deploy
+      total_contracts: 1000
+
+      # Storage trie depth (9 or 10)
+      storage_depth: 10
+
+      # Account trie depth (3, 4, or 5)
+      account_depth: 5
+
+      # Maximum number of wallets for parallel execution
+      max_wallets: 50
+
+      # Skip contract deployment (only fund EOAs)
+      skip_contracts: false
+
+      # Skip EOA funding (only deploy contracts)
+      skip_funding: false
+
+      # Path or URL to CREATE2 data JSON file
+      # Can be a local file path or HTTP/HTTPS URL
+      data_file: "./scenarios/statebloat/storage_trie_brancher/s10_acc5.json"
+      # Or from URL:
+      # data_file: "https://raw.githubusercontent.com/example/repo/main/s10_acc5.json"
+
+      # Path or URL to Solidity contract file
+      # Can be a local file path or HTTP/HTTPS URL
+      contract_file: "./scenarios/statebloat/storage_trie_brancher/depth_10.sol"
+      # Or from URL:
+      # contract_file: "https://raw.githubusercontent.com/example/repo/main/depth_10.sol"
+
+      # Gas settings (in gwei)
+      base_fee: 20
+      tip_fee: 2
+
+      # Client group for transaction routing (optional)
+      client_group: ""
+
+      # Log all submitted transactions
+      log_txs: true
+```
+
+
 ## Configuration
 
 Adjust `NUM_CONTRACTS` in `deep_branch_testing.py` to match your deployment:

@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -130,8 +132,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of wallets to use for parallel execution")
 	flags.BoolVar(&s.options.SkipContracts, "skip-contracts", ScenarioDefaultOptions.SkipContracts, "Skip contract deployment (only fund EOAs)")
 	flags.BoolVar(&s.options.SkipFunding, "skip-funding", ScenarioDefaultOptions.SkipFunding, "Skip EOA funding (only deploy contracts)")
-	flags.StringVar(&s.options.DataFile, "data-file", ScenarioDefaultOptions.DataFile, "Path to CREATE2 data JSON file (auto-detected if empty)")
-	flags.StringVar(&s.options.ContractFile, "contract-file", ScenarioDefaultOptions.ContractFile, "Path to Solidity contract file (auto-detected if empty)")
+	flags.StringVar(&s.options.DataFile, "data-file", ScenarioDefaultOptions.DataFile, "Path or URL to CREATE2 data JSON file (auto-detected if empty)")
+	flags.StringVar(&s.options.ContractFile, "contract-file", ScenarioDefaultOptions.ContractFile, "Path or URL to Solidity contract file (auto-detected if empty)")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas (in gwei)")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
@@ -200,10 +202,37 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	return nil
 }
 
+// loadDataFromPathOrURL loads data from a file path or URL
+func (s *Scenario) loadDataFromPathOrURL(pathOrURL string) ([]byte, error) {
+	if strings.HasPrefix(pathOrURL, "http://") || strings.HasPrefix(pathOrURL, "https://") {
+		// Load from URL
+		s.logger.WithField("url", pathOrURL).Debug("Loading data from URL")
+		resp, err := http.Get(pathOrURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch URL: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("HTTP error: %s", resp.Status)
+		}
+
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response: %w", err)
+		}
+		return data, nil
+	}
+
+	// Load from file
+	s.logger.WithField("file", pathOrURL).Debug("Loading data from file")
+	return os.ReadFile(pathOrURL)
+}
+
 func (s *Scenario) loadDeploymentData() error {
-	data, err := os.ReadFile(s.options.DataFile)
+	data, err := s.loadDataFromPathOrURL(s.options.DataFile)
 	if err != nil {
-		return fmt.Errorf("failed to read data file: %w", err)
+		return fmt.Errorf("failed to load data file: %w", err)
 	}
 
 	s.deployData = &DeploymentData{}
@@ -229,13 +258,41 @@ func (s *Scenario) compileContract() error {
 		return fmt.Errorf("solc not found in PATH: %w", err)
 	}
 
+	contractPath := s.options.ContractFile
+	var tempFile string
+
+	// If it's a URL, download to a temp file
+	if strings.HasPrefix(contractPath, "http://") || strings.HasPrefix(contractPath, "https://") {
+		s.logger.WithField("url", contractPath).Debug("Downloading contract from URL")
+		data, err := s.loadDataFromPathOrURL(contractPath)
+		if err != nil {
+			return fmt.Errorf("failed to download contract file: %w", err)
+		}
+
+		// Create temp file
+		tmpFile, err := os.CreateTemp("", "contract-*.sol")
+		if err != nil {
+			return fmt.Errorf("failed to create temp file: %w", err)
+		}
+		tempFile = tmpFile.Name()
+		defer os.Remove(tempFile) // Clean up temp file
+
+		if _, err := tmpFile.Write(data); err != nil {
+			tmpFile.Close()
+			return fmt.Errorf("failed to write contract to temp file: %w", err)
+		}
+		tmpFile.Close()
+
+		contractPath = tempFile
+	}
+
 	// Compile with the same flags as the Python script to get matching bytecode
 	cmd := exec.Command("solc",
 		"--bin",
 		"--optimize",
 		"--optimize-runs", "200",
 		"--metadata-hash", "none", // Critical for reproducible bytecode
-		s.options.ContractFile,
+		contractPath,
 	)
 
 	output, err := cmd.Output()
