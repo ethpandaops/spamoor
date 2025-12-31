@@ -96,8 +96,8 @@ uv run execute remote \
   --count 1000 \
   --storage-depth 10 \
   --account-depth 5 \
-  --data-file ./scenarios/statebloat/storage_trie_brancher/s10_acc5.json \
-  --contract-file ./scenarios/statebloat/storage_trie_brancher/depth_10.sol \
+  --data-file "https://example.com/s10_acc5.json" \
+  --bytecode "https://example.com/depth_10.bin" \
   --rpchost http://localhost:8545 \
   --privkey 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
   --seed "test-seed" \
@@ -105,6 +105,11 @@ uv run execute remote \
   --tipfee 2 \
   --max-wallets 50
 ```
+
+Note: Both `--data-file` and `--bytecode` are required parameters and can be:
+- Local file paths
+- HTTP/HTTPS URLs
+- For bytecode: direct hex string (e.g., "0x608060...")
 
 ### YAML Configuration Example
 
@@ -132,17 +137,16 @@ scenarios:
       # Skip EOA funding (only deploy contracts)
       skip_funding: false
 
-      # Path or URL to CREATE2 data JSON file
+      # Path or URL to CREATE2 data JSON file (required)
       # Can be a local file path or HTTP/HTTPS URL
-      data_file: "./scenarios/statebloat/storage_trie_brancher/s10_acc5.json"
-      # Or from URL:
-      # data_file: "https://raw.githubusercontent.com/example/repo/main/s10_acc5.json"
+      data_file: "https://raw.githubusercontent.com/example/repo/main/s10_acc5.json"
 
-      # Path or URL to Solidity contract file
-      # Can be a local file path or HTTP/HTTPS URL
-      contract_file: "./scenarios/statebloat/storage_trie_brancher/depth_10.sol"
-      # Or from URL:
-      # contract_file: "https://raw.githubusercontent.com/example/repo/main/depth_10.sol"
+      # Contract bytecode (required)
+      # Can be:
+      # - Direct hex string: "0x608060405260..."
+      # - Local file path: "./bytecode.bin"
+      # - URL: "https://raw.githubusercontent.com/example/repo/main/depth_10.bin"
+      bytecode: "https://raw.githubusercontent.com/example/repo/main/depth_10.bin"
 
       # Gas settings (in gwei)
       base_fee: 20
@@ -155,6 +159,44 @@ scenarios:
       log_txs: true
 ```
 
+Run with the YAML config:
+
+```bash
+# Using spamoor directly with config file
+./bin/spamoor storage-trie-brancher \
+  --config storage_trie_brancher_config.yaml \
+  --rpchost http://localhost:8545 \
+  --privkey 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+  --seed "test-seed"
+
+# Or using spamoor-daemon for web interface
+./bin/spamoor-daemon \
+  --rpchost http://localhost:8545 \
+  --privkey 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+  --scenario-file storage_trie_brancher_config.yaml
+```
+
+### Using External URLs
+
+The scenario supports loading files from external sources:
+
+```yaml
+scenarios:
+  - name: storage-trie-brancher
+    config:
+      total_contracts: 5000
+      storage_depth: 10
+      account_depth: 5
+      max_wallets: 100
+
+      # Load from GitHub raw URLs or any HTTP server
+      data_file: "https://raw.githubusercontent.com/CPerezz/worst-case-artifacts/main/s10_acc5.json"
+      bytecode: "https://raw.githubusercontent.com/CPerezz/worst-case-artifacts/main/depth_10.bin"
+
+      base_fee: 20
+      tip_fee: 2
+      log_txs: true
+```
 
 ## Configuration
 

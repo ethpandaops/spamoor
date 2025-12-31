@@ -9,8 +9,6 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -47,7 +45,7 @@ type ScenarioOptions struct {
 	SkipContracts  bool    `yaml:"skip_contracts"`
 	SkipFunding    bool    `yaml:"skip_funding"`
 	DataFile       string  `yaml:"data_file"`
-	ContractFile   string  `yaml:"contract_file"`
+	Bytecode       string  `yaml:"bytecode"` // Bytecode hex string (or path/URL to bytecode file)
 	BaseFee        float64 `yaml:"base_fee"`
 	TipFee         float64 `yaml:"tip_fee"`
 	ClientGroup    string  `yaml:"client_group"`
@@ -102,7 +100,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	SkipContracts:  false,
 	SkipFunding:    false,
 	DataFile:       "",
-	ContractFile:   "",
+	Bytecode:       "",
 	BaseFee:        20,
 	TipFee:         2,
 	ClientGroup:    "",
@@ -132,8 +130,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of wallets to use for parallel execution")
 	flags.BoolVar(&s.options.SkipContracts, "skip-contracts", ScenarioDefaultOptions.SkipContracts, "Skip contract deployment (only fund EOAs)")
 	flags.BoolVar(&s.options.SkipFunding, "skip-funding", ScenarioDefaultOptions.SkipFunding, "Skip EOA funding (only deploy contracts)")
-	flags.StringVar(&s.options.DataFile, "data-file", ScenarioDefaultOptions.DataFile, "Path or URL to CREATE2 data JSON file (auto-detected if empty)")
-	flags.StringVar(&s.options.ContractFile, "contract-file", ScenarioDefaultOptions.ContractFile, "Path or URL to Solidity contract file (auto-detected if empty)")
+	flags.StringVar(&s.options.DataFile, "data-file", ScenarioDefaultOptions.DataFile, "Path or URL to CREATE2 data JSON file (required)")
+	flags.StringVar(&s.options.Bytecode, "bytecode", ScenarioDefaultOptions.Bytecode, "Contract bytecode hex string or path/URL to bytecode file (required)")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas (in gwei)")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
@@ -169,16 +167,13 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		s.walletPool.SetWalletCount(50) // Default fallback
 	}
 
-	// Auto-detect data file if not specified
+	// Validate required parameters
 	if s.options.DataFile == "" {
-		s.options.DataFile = filepath.Join("scenarios", "statebloat", "storage_trie_brancher",
-			fmt.Sprintf("s%d_acc%d.json", s.options.StorageDepth, s.options.AccountDepth))
+		return fmt.Errorf("data-file is required")
 	}
 
-	// Auto-detect contract file if not specified
-	if s.options.ContractFile == "" {
-		s.options.ContractFile = filepath.Join("scenarios", "statebloat", "storage_trie_brancher",
-			fmt.Sprintf("depth_%d.sol", s.options.StorageDepth))
+	if s.options.Bytecode == "" {
+		return fmt.Errorf("bytecode is required")
 	}
 
 	// Load deployment data
@@ -186,17 +181,17 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("failed to load deployment data: %w", err)
 	}
 
-	// Compile contract to get init code
-	if err := s.compileContract(); err != nil {
-		return fmt.Errorf("failed to compile contract: %w", err)
+	// Load bytecode
+	if err := s.loadBytecode(); err != nil {
+		return fmt.Errorf("failed to load bytecode: %w", err)
 	}
 
 	s.logger.WithFields(logrus.Fields{
-		"contracts":     s.options.TotalContracts,
-		"storage_depth": s.options.StorageDepth,
-		"account_depth": s.options.AccountDepth,
-		"data_file":     s.options.DataFile,
-		"contract_file": s.options.ContractFile,
+		"contracts":       s.options.TotalContracts,
+		"storage_depth":   s.options.StorageDepth,
+		"account_depth":   s.options.AccountDepth,
+		"data_file":       s.options.DataFile,
+		"bytecode_length": len(s.initCode),
 	}).Info("initialized storage trie brancher scenario")
 
 	return nil
@@ -252,78 +247,37 @@ func (s *Scenario) loadDeploymentData() error {
 	return nil
 }
 
-func (s *Scenario) compileContract() error {
-	// Check if solc is available
-	if _, err := exec.LookPath("solc"); err != nil {
-		return fmt.Errorf("solc not found in PATH: %w", err)
+func (s *Scenario) loadBytecode() error {
+	bytecodeInput := s.options.Bytecode
+
+	// Check if it's a file path or URL
+	if strings.HasPrefix(bytecodeInput, "http://") || strings.HasPrefix(bytecodeInput, "https://") ||
+		strings.Contains(bytecodeInput, "/") || strings.HasSuffix(bytecodeInput, ".bin") {
+		// It's a path or URL, load from file/URL
+		s.logger.WithField("source", bytecodeInput).Debug("Loading bytecode from file/URL")
+		data, err := s.loadDataFromPathOrURL(bytecodeInput)
+		if err != nil {
+			return fmt.Errorf("failed to load bytecode file: %w", err)
+		}
+		bytecodeInput = string(data)
 	}
 
-	contractPath := s.options.ContractFile
-	var tempFile string
+	// Clean up the bytecode hex string
+	bytecodeHex := strings.TrimSpace(bytecodeInput)
+	bytecodeHex = strings.TrimPrefix(bytecodeHex, "0x")
 
-	// If it's a URL, download to a temp file
-	if strings.HasPrefix(contractPath, "http://") || strings.HasPrefix(contractPath, "https://") {
-		s.logger.WithField("url", contractPath).Debug("Downloading contract from URL")
-		data, err := s.loadDataFromPathOrURL(contractPath)
-		if err != nil {
-			return fmt.Errorf("failed to download contract file: %w", err)
-		}
-
-		// Create temp file
-		tmpFile, err := os.CreateTemp("", "contract-*.sol")
-		if err != nil {
-			return fmt.Errorf("failed to create temp file: %w", err)
-		}
-		tempFile = tmpFile.Name()
-		defer os.Remove(tempFile) // Clean up temp file
-
-		if _, err := tmpFile.Write(data); err != nil {
-			tmpFile.Close()
-			return fmt.Errorf("failed to write contract to temp file: %w", err)
-		}
-		tmpFile.Close()
-
-		contractPath = tempFile
-	}
-
-	// Compile with the same flags as the Python script to get matching bytecode
-	cmd := exec.Command("solc",
-		"--bin",
-		"--optimize",
-		"--optimize-runs", "200",
-		"--metadata-hash", "none", // Critical for reproducible bytecode
-		contractPath,
-	)
-
-	output, err := cmd.Output()
+	// Decode hex string to bytes
+	var err error
+	s.initCode, err = hex.DecodeString(bytecodeHex)
 	if err != nil {
-		return fmt.Errorf("failed to compile contract: %w", err)
-	}
-
-	// Parse the output to extract bytecode
-	lines := strings.Split(string(output), "\n")
-	inBinarySection := false
-	for _, line := range lines {
-		if strings.Contains(line, "Binary:") {
-			inBinarySection = true
-			continue
-		}
-		if inBinarySection && strings.TrimSpace(line) != "" && !strings.HasPrefix(line, "=") {
-			bytecodeHex := strings.TrimSpace(line)
-			bytecodeHex = strings.TrimPrefix(bytecodeHex, "0x")
-			s.initCode, err = hex.DecodeString(bytecodeHex)
-			if err != nil {
-				return fmt.Errorf("failed to decode bytecode: %w", err)
-			}
-			break
-		}
+		return fmt.Errorf("failed to decode bytecode hex: %w", err)
 	}
 
 	if len(s.initCode) == 0 {
-		return fmt.Errorf("failed to extract bytecode from solc output")
+		return fmt.Errorf("bytecode is empty")
 	}
 
-	s.logger.Infof("Compiled contract, init code size: %d bytes", len(s.initCode))
+	s.logger.Infof("Loaded bytecode, init code size: %d bytes", len(s.initCode))
 	return nil
 }
 
@@ -546,10 +500,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 		s.logger.Infof("Deployed %d contracts", len(s.deployedContracts))
 	}
 
-	// Save deployment info
-	if err := s.saveDeploymentInfo(); err != nil {
-		s.logger.Warnf("Failed to save deployment info: %v", err)
-	}
+	// Log deployment info
+	s.logDeploymentInfo()
 
 	s.logger.WithFields(logrus.Fields{
 		"contracts_deployed": len(s.deployedContracts),
@@ -799,7 +751,7 @@ func (s *Scenario) calculateCreate2Address(salt []byte) common.Address {
 	initCodeHash := crypto.Keccak256(s.initCode)
 
 	data := []byte{0xff}
-	data = append(data, common.HexToAddress(NickFactoryAddress).Bytes()...)
+	data = append(data, s.factoryAddress.Bytes()...)
 	data = append(data, salt...)
 	data = append(data, initCodeHash...)
 
@@ -807,45 +759,42 @@ func (s *Scenario) calculateCreate2Address(salt []byte) common.Address {
 	return common.BytesToAddress(hash[12:])
 }
 
-func (s *Scenario) saveDeploymentInfo() error {
-	// Save deployment info to JSON file
-	deploymentInfo := map[string]interface{}{
+func (s *Scenario) logDeploymentInfo() {
+	// Log deployment summary
+	s.logger.WithFields(logrus.Fields{
 		"storage_depth":      s.options.StorageDepth,
 		"account_depth":      s.options.AccountDepth,
-		"deployer":           NickFactoryAddress,
+		"deployer":           s.factoryAddress.Hex(),
 		"contracts_deployed": len(s.deployedContracts),
 		"accounts_funded":    len(s.fundedAccounts),
-		"contracts":          s.deployments,
+	}).Info("Deployment completed - summary")
+
+	// Log deployed contract addresses for reference
+	if len(s.deployments) > 0 {
+		addresses := make([]string, 0, len(s.deployments))
+		for _, deploy := range s.deployments {
+			addresses = append(addresses, deploy.Address)
+		}
+
+		// Log first 10 addresses as example
+		logCount := 10
+		if len(addresses) < logCount {
+			logCount = len(addresses)
+		}
+
+		s.logger.WithField("sample_addresses", addresses[:logCount]).Info("Sample deployed contract addresses")
+
+		// Log all deployment details as structured JSON for programmatic access
+		if s.options.LogTxs {
+			deploymentData, _ := json.Marshal(map[string]interface{}{
+				"storage_depth":      s.options.StorageDepth,
+				"account_depth":      s.options.AccountDepth,
+				"deployer":           s.factoryAddress.Hex(),
+				"contracts_deployed": len(s.deployedContracts),
+				"accounts_funded":    len(s.fundedAccounts),
+				"contracts":          s.deployments,
+			})
+			s.logger.WithField("deployment_data", string(deploymentData)).Debug("Full deployment data (JSON)")
+		}
 	}
-
-	outputPath := filepath.Join("scenarios", "statebloat", "storage_trie_brancher", "deployed_contracts.json")
-	data, err := json.MarshalIndent(deploymentInfo, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(outputPath, data, 0644); err != nil {
-		return err
-	}
-
-	// Also save just the contract addresses to stubs.json
-	addresses := make([]string, 0, len(s.deployments))
-	for _, deploy := range s.deployments {
-		addresses = append(addresses, deploy.Address)
-	}
-
-	stubsPath := filepath.Join("scenarios", "statebloat", "storage_trie_brancher", "stubs.json")
-	stubsData, err := json.MarshalIndent(addresses, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(stubsPath, stubsData, 0644); err != nil {
-		return err
-	}
-
-	s.logger.Infof("Deployment info saved to %s", outputPath)
-	s.logger.Infof("Contract addresses saved to %s", stubsPath)
-
-	return nil
 }
