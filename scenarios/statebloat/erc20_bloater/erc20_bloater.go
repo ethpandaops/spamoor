@@ -552,18 +552,16 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 		return nil, nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
 
-	var deployedAddr common.Address
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       2000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		addr, deployTx, _, err := contract.DeployERC20Bloater(transactOpts, client.GetEthClient(), initialSupply)
+		_, deployTx, _, err := contract.DeployERC20Bloater(transactOpts, client.GetEthClient(), initialSupply)
 		if err != nil {
 			return nil, err
 		}
-		deployedAddr = addr
 		return deployTx, nil
 	})
 	if err != nil {
@@ -583,8 +581,6 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 	if receipt.Status != types.ReceiptStatusSuccessful {
 		return nil, nil, fmt.Errorf("deployment tx failed")
 	}
-
-	s.contractAddr = deployedAddr
 
 	return receipt, tx, nil
 }
