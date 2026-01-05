@@ -368,6 +368,7 @@ func (pool *WalletPool) PrepareWallets() error {
 	} else {
 		var client *Client
 		var fundingReqs []*FundingRequest
+		var childWallets []*Wallet
 
 		for i := 0; i < 3; i++ {
 			client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientRandom), WithoutBuilder()) // send all preparation transactions via this client to avoid rejections due to nonces
@@ -375,7 +376,7 @@ func (pool *WalletPool) PrepareWallets() error {
 				return fmt.Errorf("no client available")
 			}
 
-			pool.childWallets = make([]*Wallet, 0, pool.config.WalletCount)
+			childWallets = make([]*Wallet, pool.config.WalletCount)
 			fundingReqs = make([]*FundingRequest, 0, pool.config.WalletCount)
 
 			var walletErr error
@@ -392,7 +393,6 @@ func (pool *WalletPool) PrepareWallets() error {
 						wg.Done()
 					}()
 					if walletErr != nil {
-						fmt.Printf("Error: %v\n", walletErr)
 						return
 					}
 
@@ -412,6 +412,10 @@ func (pool *WalletPool) PrepareWallets() error {
 				}(config)
 			}
 
+			if walletErr != nil {
+				return fmt.Errorf("well known wallet preparation failed: %w", walletErr)
+			}
+
 			for childIdx := uint64(0); childIdx < pool.config.WalletCount; childIdx++ {
 				wg.Add(1)
 				wl <- true
@@ -421,7 +425,6 @@ func (pool *WalletPool) PrepareWallets() error {
 						wg.Done()
 					}()
 					if walletErr != nil {
-						fmt.Printf("Error: %v\n", walletErr)
 						return
 					}
 
@@ -433,7 +436,7 @@ func (pool *WalletPool) PrepareWallets() error {
 					}
 
 					walletsMutex.Lock()
-					pool.childWallets = append(pool.childWallets, childWallet)
+					childWallets[childIdx] = childWallet
 					if fundingReq != nil {
 						fundingReqs = append(fundingReqs, fundingReq)
 					}
@@ -442,10 +445,16 @@ func (pool *WalletPool) PrepareWallets() error {
 			}
 			wg.Wait()
 
-			if len(pool.childWallets) > 0 {
+			if walletErr != nil {
+				return fmt.Errorf("child wallet preparation failed: %w", walletErr)
+			}
+
+			if len(childWallets) > 0 {
 				break
 			}
 		}
+
+		pool.childWallets = childWallets
 
 		if pool.runFundings && len(fundingReqs) > 0 {
 			err := pool.processFundingRequests(fundingReqs)
@@ -858,11 +867,15 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client
 	if err != nil {
 		return nil, err
 	}
-	if feeCap.Cmp(big.NewInt(400000000000)) < 0 {
-		feeCap = big.NewInt(400000000000)
+	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
+		feeCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		feeCap = feeCap.Add(feeCap, big.NewInt(2000000000)) // +2 gwei
 	}
-	if tipCap.Cmp(big.NewInt(200000000000)) < 0 {
-		tipCap = big.NewInt(200000000000)
+	if tipCap.Cmp(big.NewInt(100000000000)) > 0 {
+		tipCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
 	}
 
 	toAddr := childWallet.GetAddress()
@@ -897,11 +910,15 @@ func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, cl
 	if err != nil {
 		return nil, err
 	}
-	if feeCap.Cmp(big.NewInt(200000000000)) < 0 {
-		feeCap = big.NewInt(200000000000)
+	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
+		feeCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		feeCap = feeCap.Add(feeCap, big.NewInt(2000000000)) // +2 gwei
 	}
-	if tipCap.Cmp(big.NewInt(100000000000)) < 0 {
-		tipCap = big.NewInt(100000000000)
+	if tipCap.Cmp(big.NewInt(100000000000)) > 0 {
+		tipCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
 	}
 
 	totalAmount := uint256.NewInt(0)
@@ -953,10 +970,13 @@ func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *W
 	if err != nil {
 		return nil, err
 	}
-	if feeCap.Cmp(big.NewInt(200000000000)) < 0 {
-		feeCap = big.NewInt(200000000000)
+	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
+		feeCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		feeCap = feeCap.Add(feeCap, big.NewInt(1000000000)) // +1 gwei
 	}
 	if tipCap.Cmp(feeCap) < 0 {
+		// set tip to the same as fee, this ensures the wallet balance is cleared completely
 		tipCap = feeCap
 	}
 

@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/github/license/ethpandaops/spamoor)](LICENSE)
 [![Docker](https://img.shields.io/docker/pulls/ethpandaops/spamoor)](https://hub.docker.com/r/ethpandaops/spamoor)
 
-Spamoor is a robust transaction spamming tool designed for stress testing, network validation, and continuous transaction testing on Ethereum testnets. With 13+ different transaction scenarios and a powerful web-based daemon mode, it's the ultimate tool for Ethereum network testing.
+Spamoor is a robust transaction spamming tool designed for stress testing, network validation, and continuous transaction testing on Ethereum testnets. With 14+ different transaction scenarios and a powerful web-based daemon mode, it's the ultimate tool for Ethereum network testing.
 
 ## 🚀 Quick Start
 
@@ -74,6 +74,7 @@ Spamoor provides a comprehensive suite of transaction scenarios for different te
 | [`setcodetx`](./scenarios/setcodetx/README.md) | **Set Code Transactions** - EIP-7702 setcode transactions |
 | [`uniswap-swaps`](./scenarios/uniswap-swaps/README.md) | **Uniswap Swaps** - Deploy and test Uniswap V2 token swaps |
 | [`blobs`](./scenarios/blobs/README.md) | **Blob Transactions** - Send blob transactions with random data |
+| [`blob-average`](./scenarios/blob-average/README.md) | **Blob Average** - Maintain network-wide average blob count per block |
 | [`blob-replacements`](./scenarios/blob-replacements/README.md) | **Blob Replacements** - Test blob transaction replacement |
 | [`blob-conflicting`](./scenarios/blob-conflicting/README.md) | **Conflicting Blobs** - Test conflicting blob/normal transactions |
 | [`blob-combined`](./scenarios/blob-combined/README.md) | **Combined Blob Testing** - Randomized blob scenario combinations |
@@ -320,7 +321,7 @@ Comprehensive guide for implementing custom transaction scenarios. Covers:
 
 ## ✨ Key Features
 
-- **🎯 13+ Transaction Scenarios**: From basic EOA transfers to complex DeFi interactions
+- **🎯 14+ Transaction Scenarios**: From basic EOA transfers to complex DeFi interactions
 - **🖥️ Web-Based Daemon Mode**: Manage multiple spammers through an intuitive UI
 - **🔌 REST API**: Full programmatic control for automation
 - **📊 Prometheus Metrics**: Built-in monitoring and observability

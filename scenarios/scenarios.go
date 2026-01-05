@@ -3,6 +3,7 @@ package scenarios
 import (
 	"github.com/ethpandaops/spamoor/scenario"
 
+	blobaverage "github.com/ethpandaops/spamoor/scenarios/blob-average"
 	blobcombined "github.com/ethpandaops/spamoor/scenarios/blob-combined"
 	blobconflicting "github.com/ethpandaops/spamoor/scenarios/blob-conflicting"
 	blobreplacements "github.com/ethpandaops/spamoor/scenarios/blob-replacements"
@@ -19,6 +20,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	erc20bloater "github.com/ethpandaops/spamoor/scenarios/statebloat/erc20_bloater"
 	extcodesizesetup "github.com/ethpandaops/spamoor/scenarios/statebloat/extcodesize_setup"
+	storagetriebrancher "github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
 	"github.com/ethpandaops/spamoor/scenarios/taskrunner"
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
@@ -30,6 +32,7 @@ import (
 // This registry includes scenarios for testing various Ethereum transaction types and patterns.
 // Each descriptor defines the configuration, constructor, and metadata for a specific test scenario.
 var ScenarioDescriptors = []*scenario.Descriptor{
+	&blobaverage.ScenarioDescriptor,
 	&blobcombined.ScenarioDescriptor,
 	&blobconflicting.ScenarioDescriptor,
 	&blobs.ScenarioDescriptor,
@@ -46,6 +49,7 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&gasburnertx.ScenarioDescriptor,
 	&geastx.ScenarioDescriptor,
 	&setcodetx.ScenarioDescriptor,
+	&storagetriebrancher.ScenarioDescriptor,
 	&storagespam.ScenarioDescriptor,
 	&taskrunner.ScenarioDescriptor,
 	&uniswapswaps.ScenarioDescriptor,
