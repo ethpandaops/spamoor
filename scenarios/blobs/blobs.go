@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -289,32 +288,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 		return nil, nil, client, wallet, 0, err
 	}
 
-	var blobCellProofs []kzg4844.Proof
-
-	if s.options.BlobV1Percent > 0 {
-		// generate cell proofs here to avoid heavy recomputation on each submission
-		blobCellProofs, err = txbuilder.GenerateCellProofs(tx.BlobTxSidecar())
-		if err != nil {
-			s.logger.Warnf("failed to generate cell proofs: %v", err)
-		}
-	}
-
-	getTxBytes := func() ([]byte, uint8) {
-		var txBytes []byte
-		txVersion := uint8(0)
-		sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
-		if sendAsV1 {
-			txBytes, err = txbuilder.MarshalBlobV1Tx(tx, blobCellProofs)
-			if err != nil || (txBytes != nil && len(txBytes) == 0) {
-				s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
-			} else {
-				txVersion = 1
-			}
-		}
-		return txBytes, txVersion
-	}
-
-	_, txVersion := getTxBytes()
+	isBlobV1 := false
 	receiptChan := make(scenario.ReceiptChan, 1)
 
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
@@ -356,9 +330,16 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 			}
 		},
 		OnEncode: func(tx *types.Transaction) ([]byte, error) {
-			// we might need to switch to v1 after fulu activation
-			txBytes, _ := getTxBytes()
-			return txBytes, nil
+			sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
+			if sendAsV1 && !isBlobV1 {
+				err := tx.BlobTxSidecar().ToV1()
+				if err != nil {
+					return nil, err
+				}
+
+				isBlobV1 = true
+			}
+			return nil, nil
 		},
 	})
 	if err != nil {
@@ -368,5 +349,5 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 		return nil, nil, client, wallet, 0, err
 	}
 
-	return receiptChan, tx, client, wallet, txVersion, nil
+	return receiptChan, tx, client, wallet, tx.BlobTxSidecar().Version, nil
 }

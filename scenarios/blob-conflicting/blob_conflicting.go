@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -305,36 +304,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 		return nil, nil, client, wallet, 0, err
 	}
 
-	var blobCellProofs []kzg4844.Proof
-
-	if s.options.BlobV1Percent > 0 {
-		// generate cell proofs here to avoid heavy recomputation on each submission
-		blobCellProofs, err = txbuilder.GenerateCellProofs(tx1.BlobTxSidecar())
-		if err != nil {
-			s.logger.Warnf("failed to generate cell proofs: %v", err)
-		}
-	}
-
-	getTxBytes := func() ([]byte, uint8) {
-		var txBytes []byte
-		txVersion := uint8(0)
-		sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
-		if sendAsV1 {
-			txBytes, err = txbuilder.MarshalBlobV1Tx(tx1, blobCellProofs)
-			if err != nil || (txBytes != nil && len(txBytes) == 0) {
-				s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
-			} else {
-				txVersion = 1
-			}
-		}
-		return txBytes, txVersion
-	}
-
-	_, txVersion := getTxBytes()
-
 	// send both tx at exactly the same time
 	wg := sync.WaitGroup{}
 	wg.Add(2)
+	isBlobV1 := false
 	receiptChan := make(scenario.ReceiptChan, 1)
 
 	var err1, err2 error
@@ -352,8 +325,16 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 			},
 			LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.0", txIdx+1), tx1),
 			OnEncode: func(tx *types.Transaction) ([]byte, error) {
-				txBytes, _ := getTxBytes()
-				return txBytes, nil
+				sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
+				if sendAsV1 && !isBlobV1 {
+					err := tx.BlobTxSidecar().ToV1()
+					if err != nil {
+						return nil, err
+					}
+
+					isBlobV1 = true
+				}
+				return nil, nil
 			},
 		})
 		if err1 != nil {
@@ -396,7 +377,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 		return nil, nil, client, wallet, 0, err1
 	}
 
-	return receiptChan, tx1, client, wallet, txVersion, nil
+	return receiptChan, tx1, client, wallet, tx1.BlobTxSidecar().Version, nil
 }
 
 func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *spamoor.Client, txLabel string) {
