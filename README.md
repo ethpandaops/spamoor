@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/github/license/ethpandaops/spamoor)](LICENSE)
 [![Docker](https://img.shields.io/docker/pulls/ethpandaops/spamoor)](https://hub.docker.com/r/ethpandaops/spamoor)
 
-Spamoor is a robust transaction spamming tool designed for stress testing, network validation, and continuous transaction testing on Ethereum testnets. With 14+ different transaction scenarios and a powerful web-based daemon mode, it's the ultimate tool for Ethereum network testing.
+Spamoor is a robust transaction spamming tool designed for stress testing, network validation, and continuous transaction testing on Ethereum testnets. With 14+ different transaction scenarios and a powerful web-based daemon mode, it's the ultimate tool for Ethereum network testing
 
 ## 🚀 Quick Start
 
@@ -37,10 +37,10 @@ spamoor run <yaml-file> [flags]
 ```
 
 ### 🔑 Required Parameters
-| Parameter | Description |
-|-----------|-------------|
+| Parameter   | Description                                           |
+| ----------- | ----------------------------------------------------- |
 | `--privkey` | Private key for the root wallet (funds child wallets) |
-| `--rpchost` | RPC endpoint(s) to send transactions to |
+| `--rpchost` | RPC endpoint(s) to send transactions to               |
 
 ### 🔧 Advanced Configuration
 
@@ -64,25 +64,25 @@ spamoor eoatx --privkey="0x..." \
 
 Spamoor provides a comprehensive suite of transaction scenarios for different testing needs:
 
-| Scenario | Description |
-|----------|-------------|
-| [`eoatx`](./scenarios/eoatx/README.md) | **EOA Transactions** - Send standard ETH transfers with configurable amounts |
-| [`erctx`](./scenarios/erctx/README.md) | **ERC20 Transactions** - Deploy ERC20 tokens and perform transfers |
-| [`calltx`](./scenarios/calltx/README.md) | **Contract Calls** - Deploy contracts and repeatedly call functions |
-| [`deploytx`](./scenarios/deploytx/README.md) | **Contract Deployments** - Deploy contracts with custom bytecode |
-| [`deploy-destruct`](./scenarios/deploy-destruct/README.md) | **Self-Destruct Deployments** - Deploy self-destructing contracts |
-| [`setcodetx`](./scenarios/setcodetx/README.md) | **Set Code Transactions** - EIP-7702 setcode transactions |
-| [`uniswap-swaps`](./scenarios/uniswap-swaps/README.md) | **Uniswap Swaps** - Deploy and test Uniswap V2 token swaps |
-| [`blobs`](./scenarios/blobs/README.md) | **Blob Transactions** - Send blob transactions with random data |
-| [`blob-average`](./scenarios/blob-average/README.md) | **Blob Average** - Maintain network-wide average blob count per block |
-| [`blob-replacements`](./scenarios/blob-replacements/README.md) | **Blob Replacements** - Test blob transaction replacement |
-| [`blob-conflicting`](./scenarios/blob-conflicting/README.md) | **Conflicting Blobs** - Test conflicting blob/normal transactions |
-| [`blob-combined`](./scenarios/blob-combined/README.md) | **Combined Blob Testing** - Randomized blob scenario combinations |
-| [`gasburnertx`](./scenarios/gasburnertx/README.md) | **Gas Burner** - Burn specific amounts of gas |
-| [`storagespam`](./scenarios/storagespam/README.md) | **Storage Spam** - Stress test EVM storage |
-| [`geastx`](./scenarios/geastx/README.md) | **Geas Transactions** - Execute custom geas bytecode |
-| [`xentoken`](./scenarios/xentoken/README.md) | **XEN Sybil Attack** - Simulate XEN token sybil attacks |
-| [`taskrunner`](./scenarios/taskrunner/README.md) | **Task Runner** - Execute configurable task sequences with init and execution phases |
+| Scenario                                                       | Description                                                                          |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [`eoatx`](./scenarios/eoatx/README.md)                         | **EOA Transactions** - Send standard ETH transfers with configurable amounts         |
+| [`erctx`](./scenarios/erctx/README.md)                         | **ERC20 Transactions** - Deploy ERC20 tokens and perform transfers                   |
+| [`calltx`](./scenarios/calltx/README.md)                       | **Contract Calls** - Deploy contracts and repeatedly call functions                  |
+| [`deploytx`](./scenarios/deploytx/README.md)                   | **Contract Deployments** - Deploy contracts with custom bytecode                     |
+| [`deploy-destruct`](./scenarios/deploy-destruct/README.md)     | **Self-Destruct Deployments** - Deploy self-destructing contracts                    |
+| [`setcodetx`](./scenarios/setcodetx/README.md)                 | **Set Code Transactions** - EIP-7702 setcode transactions                            |
+| [`uniswap-swaps`](./scenarios/uniswap-swaps/README.md)         | **Uniswap Swaps** - Deploy and test Uniswap V2 token swaps                           |
+| [`blobs`](./scenarios/blobs/README.md)                         | **Blob Transactions** - Send blob transactions with random data                      |
+| [`blob-average`](./scenarios/blob-average/README.md)           | **Blob Average** - Maintain network-wide average blob count per block                |
+| [`blob-replacements`](./scenarios/blob-replacements/README.md) | **Blob Replacements** - Test blob transaction replacement                            |
+| [`blob-conflicting`](./scenarios/blob-conflicting/README.md)   | **Conflicting Blobs** - Test conflicting blob/normal transactions                    |
+| [`blob-combined`](./scenarios/blob-combined/README.md)         | **Combined Blob Testing** - Randomized blob scenario combinations                    |
+| [`gasburnertx`](./scenarios/gasburnertx/README.md)             | **Gas Burner** - Burn specific amounts of gas                                        |
+| [`storagespam`](./scenarios/storagespam/README.md)             | **Storage Spam** - Stress test EVM storage                                           |
+| [`geastx`](./scenarios/geastx/README.md)                       | **Geas Transactions** - Execute custom geas bytecode                                 |
+| [`xentoken`](./scenarios/xentoken/README.md)                   | **XEN Sybil Attack** - Simulate XEN token sybil attacks                              |
+| [`taskrunner`](./scenarios/taskrunner/README.md)               | **Task Runner** - Execute configurable task sequences with init and execution phases |
 
 ## 🚄 Run Command - Execute Multiple Scenarios
 
@@ -94,14 +94,14 @@ spamoor run <yaml-file> [flags]
 ```
 
 ### Flags
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--spammers` | `-s` | Indexes of spammers to run (e.g., `-s 0,2`). If not specified, runs all |
-| `--privkey` | `-p` | Private key for the root wallet |
-| `--rpchost` | `-h` | RPC endpoints (multiple allowed) |
-| `--rpchost-file` | - | File containing RPC endpoints |
-| `--verbose` | `-v` | Enable verbose logging |
-| `--trace` | - | Enable trace logging |
+| Flag             | Short | Description                                                             |
+| ---------------- | ----- | ----------------------------------------------------------------------- |
+| `--spammers`     | `-s`  | Indexes of spammers to run (e.g., `-s 0,2`). If not specified, runs all |
+| `--privkey`      | `-p`  | Private key for the root wallet                                         |
+| `--rpchost`      | `-h`  | RPC endpoints (multiple allowed)                                        |
+| `--rpchost-file` | -     | File containing RPC endpoints                                           |
+| `--verbose`      | `-v`  | Enable verbose logging                                                  |
+| `--trace`        | -     | Enable trace logging                                                    |
 
 ### Example Configuration
 ```yaml
@@ -168,21 +168,21 @@ spamoor-daemon [flags]
 
 ### ⚙️ Configuration Flags
 
-| Flag | Short | Description | Default |
-|------|-------|-------------|---------|
-| `--db` | `-d` | Database file location | `spamoor.db` |
-| `--rpchost` | `-h` | RPC endpoints (multiple allowed) | - |
-| `--rpchost-file` | - | File containing RPC endpoints | - |
-| `--privkey` | `-p` | Root wallet private key | - |
-| `--port` | `-P` | Web UI port | `8080` |
-| `--startup-spammer` | - | YAML file or URL with startup spammers | - |
-| `--startup-delay` | - | Delay in seconds before starting spammers on startup | `30` |
-| `--fulu-activation` | - | Unix timestamp of Fulu activation | `0` |
-| `--without-batcher` | - | Disable transaction batching | `false` |
-| `--disable-tx-metrics` | - | Disable transaction metrics collection | `false` |
-| `--verbose` | `-v` | Enable verbose logging | `false` |
-| `--debug` | - | Enable debug mode | `false` |
-| `--trace` | - | Enable trace logging | `false` |
+| Flag                   | Short | Description                                          | Default      |
+| ---------------------- | ----- | ---------------------------------------------------- | ------------ |
+| `--db`                 | `-d`  | Database file location                               | `spamoor.db` |
+| `--rpchost`            | `-h`  | RPC endpoints (multiple allowed)                     | -            |
+| `--rpchost-file`       | -     | File containing RPC endpoints                        | -            |
+| `--privkey`            | `-p`  | Root wallet private key                              | -            |
+| `--port`               | `-P`  | Web UI port                                          | `8080`       |
+| `--startup-spammer`    | -     | YAML file or URL with startup spammers               | -            |
+| `--startup-delay`      | -     | Delay in seconds before starting spammers on startup | `30`         |
+| `--fulu-activation`    | -     | Unix timestamp of Fulu activation                    | `0`          |
+| `--without-batcher`    | -     | Disable transaction batching                         | `false`      |
+| `--disable-tx-metrics` | -     | Disable transaction metrics collection               | `false`      |
+| `--verbose`            | `-v`  | Enable verbose logging                               | `false`      |
+| `--debug`              | -     | Enable debug mode                                    | `false`      |
+| `--trace`              | -     | Enable trace logging                                 | `false`      |
 
 ### 🌐 Web Interface Features
 
