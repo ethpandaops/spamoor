@@ -193,32 +193,3 @@ func randomBlobData(size int) ([]byte, error) {
 	}
 	return data, nil
 }
-
-// GenerateCellProofs generates cell proofs for blob v1 transactions (experimental feature).
-// This function requires blob-v1 support to be initialized, otherwise returns an error.
-// Used for advanced blob transaction types that require cell-level proofs.
-func GenerateCellProofs(sidecar *types.BlobTxSidecar) ([]kzg4844.Proof, error) {
-	if blobV1GenerateCellProof == nil {
-		return nil, fmt.Errorf("blob-v1 not supported when using spamoor as library")
-	}
-	return blobV1GenerateCellProof(sidecar)
-}
-
-// MarshalBlobV1Tx marshals a blob v1 transaction with cell proofs into bytes.
-// This function requires blob-v1 support to be initialized, otherwise returns an error.
-// Used for encoding experimental blob v1 transaction format with cell proofs.
-func MarshalBlobV1Tx(tx *types.Transaction, cellProofs []kzg4844.Proof) ([]byte, error) {
-	if blobV1Marshaller == nil {
-		return nil, fmt.Errorf("blob-v1 not supported when using spamoor as library")
-	}
-
-	return blobV1Marshaller(tx, cellProofs)
-}
-
-// blobV1GenerateCellProof is a function pointer for generating cell proofs in blob v1 transactions.
-// This is set externally when blob-v1 support is available and remains nil when used as a library.
-var blobV1GenerateCellProof func(tx *types.BlobTxSidecar) ([]kzg4844.Proof, error)
-
-// blobV1Marshaller is a function pointer for marshaling blob v1 transactions with cell proofs.
-// This is set externally when blob-v1 support is available and remains nil when used as a library.
-var blobV1Marshaller func(tx *types.Transaction, cellProofs []kzg4844.Proof) ([]byte, error)
