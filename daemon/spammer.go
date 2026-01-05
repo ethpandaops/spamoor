@@ -231,7 +231,7 @@ func (s *Spammer) runScenario() {
 		} else if s.scenarioCtx.Err() != nil {
 			s.dbEntity.Status = int(SpammerStatusPaused)
 		} else if scenarioErr != nil {
-			s.logger.Errorf("failed to run scenario: %w", scenarioErr)
+			s.logger.Errorf("failed to run scenario: %v", scenarioErr)
 			s.dbEntity.Status = int(SpammerStatusFailed)
 		} else {
 			s.logger.Info("scenario finished successfully")
@@ -245,7 +245,7 @@ func (s *Spammer) runScenario() {
 			return s.daemon.db.UpdateSpammer(tx, s.dbEntity)
 		})
 		if err != nil {
-			s.logger.Errorf("failed to update spammer: %w", err)
+			s.logger.Errorf("failed to update spammer: %v", err)
 		}
 
 		s.running = false
