@@ -11,6 +11,7 @@ import (
 // Descriptor describes a scenario.
 type Descriptor struct {
 	Name           string
+	Aliases        []string
 	Description    string
 	DefaultOptions any
 	NewScenario    func(logger logrus.FieldLogger) Scenario

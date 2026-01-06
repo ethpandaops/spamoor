@@ -1,4 +1,4 @@
-package erctx
+package erc1155tx
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/scenario"
-	"github.com/ethpandaops/spamoor/scenarios/erctx/contract"
+	"github.com/ethpandaops/spamoor/scenarios/erc1155tx/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
@@ -30,8 +30,12 @@ type ScenarioOptions struct {
 	BaseFee           float64 `yaml:"base_fee"`
 	TipFee            float64 `yaml:"tip_fee"`
 	Amount            uint64  `yaml:"amount"`
+	MaxIndex          uint64  `yaml:"max_index"`
+	BatchSize         uint64  `yaml:"batch_size"`
 	RandomAmount      bool    `yaml:"random_amount"`
 	RandomTarget      bool    `yaml:"random_target"`
+	RandomIndex       bool    `yaml:"random_index"`
+	RandomBatchSize   bool    `yaml:"random_batch_size"`
 	Timeout           string  `yaml:"timeout"`
 	ClientGroup       string  `yaml:"client_group"`
 	DeployClientGroup string  `yaml:"deploy_client_group"`
@@ -46,7 +50,7 @@ type Scenario struct {
 	contractAddr common.Address
 }
 
-var ScenarioName = "erctx"
+var ScenarioName = "erc1155tx"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TotalCount:        0,
 	Throughput:        200,
@@ -56,8 +60,12 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BaseFee:           20,
 	TipFee:            2,
 	Amount:            20,
+	MaxIndex:          0,
+	BatchSize:         1,
 	RandomAmount:      false,
 	RandomTarget:      false,
+	RandomIndex:       false,
+	RandomBatchSize:   false,
 	Timeout:           "",
 	ClientGroup:       "",
 	DeployClientGroup: "",
@@ -65,7 +73,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
-	Description:    "Send ERC20 transactions with different configurations",
+	Description:    "Send ERC1155 NFT transactions with different configurations",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
@@ -85,9 +93,13 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transfer transactions (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transfer transactions (in gwei)")
-	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (in gwei)")
+	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (for ERC1155)")
+	flags.Uint64Var(&s.options.MaxIndex, "max-index", ScenarioDefaultOptions.MaxIndex, "Maximum token index to mint (for ERC1155)")
+	flags.Uint64Var(&s.options.BatchSize, "batch-size", ScenarioDefaultOptions.BatchSize, "Batch size for transactions (for ERC1155)")
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
+	flags.BoolVar(&s.options.RandomIndex, "random-index", ScenarioDefaultOptions.RandomIndex, "Use random token indexes for transactions")
+	flags.BoolVar(&s.options.RandomBatchSize, "random-batch-size", ScenarioDefaultOptions.RandomBatchSize, "Use random batch sizes for transactions")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.StringVar(&s.options.DeployClientGroup, "deploy-client-group", ScenarioDefaultOptions.DeployClientGroup, "Client group to use for deployments")
@@ -257,7 +269,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 		Gas:       2000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		_, deployTx, _, err := contract.DeployTestToken(transactOpts, client.GetEthClient())
+		_, deployTx, _, err := contract.DeployTestToken1155(transactOpts, client.GetEthClient())
 		return deployTx, err
 	})
 
@@ -301,13 +313,50 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
-	amount := uint256.NewInt(s.options.Amount)
-	amount = amount.Mul(amount, uint256.NewInt(1000000000))
-	if s.options.RandomAmount {
-		n, err := rand.Int(rand.Reader, amount.ToBig())
+	indexes := make([]*big.Int, 0)
+	amounts := make([]*big.Int, 0)
+
+	batchSize := s.options.BatchSize
+	if s.options.RandomBatchSize && s.options.BatchSize > 0 {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(s.options.BatchSize)))
 		if err == nil {
-			amount = uint256.MustFromBig(n)
+			batchSize = n.Uint64()
 		}
+	}
+
+	for i := uint64(0); i < batchSize; i++ {
+		var index *big.Int
+
+		batchTxIdx := (txIdx * batchSize) + i
+
+		if s.options.RandomIndex {
+			var max *big.Int
+			if s.options.MaxIndex > 0 {
+				max = big.NewInt(int64(s.options.MaxIndex))
+			} else {
+				max = new(big.Int).Lsh(big.NewInt(1), 256) // 2^256
+			}
+			n, err := rand.Int(rand.Reader, max)
+			if err == nil {
+				index = n
+			}
+		} else if s.options.MaxIndex > 0 {
+			index = big.NewInt(int64(batchTxIdx % s.options.MaxIndex))
+		} else {
+			index = big.NewInt(int64(batchTxIdx))
+		}
+
+		amount := big.NewInt(int64(s.options.Amount))
+		amount = amount.Mul(amount, big.NewInt(1000000000))
+		if s.options.RandomAmount {
+			n, err := rand.Int(rand.Reader, amount)
+			if err == nil {
+				amount = n
+			}
+		}
+
+		indexes = append(indexes, index)
+		amounts = append(amounts, amount)
 	}
 
 	toAddr := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
@@ -317,7 +366,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		toAddr = common.Address(addrBytes)
 	}
 
-	testToken, err := contract.NewTestToken(s.contractAddr, client.GetEthClient())
+	testToken, err := contract.NewTestToken1155(s.contractAddr, client.GetEthClient())
 	if err != nil {
 		return nil, nil, client, wallet, err
 	}
@@ -328,7 +377,11 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		Gas:       100000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		return testToken.TransferMint(transactOpts, toAddr, amount.ToBig())
+		if len(indexes) == 1 {
+			return testToken.TransferMint(transactOpts, toAddr, indexes[0], amounts[0])
+		} else {
+			return testToken.MintBatch(transactOpts, toAddr, indexes, amounts)
+		}
 	})
 	if err != nil {
 		return nil, nil, client, wallet, err
