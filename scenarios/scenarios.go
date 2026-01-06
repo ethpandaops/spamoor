@@ -1,6 +1,8 @@
 package scenarios
 
 import (
+	"slices"
+
 	"github.com/ethpandaops/spamoor/scenario"
 
 	blobaverage "github.com/ethpandaops/spamoor/scenarios/blob-average"
@@ -12,7 +14,9 @@ import (
 	deploydestruct "github.com/ethpandaops/spamoor/scenarios/deploy-destruct"
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
-	"github.com/ethpandaops/spamoor/scenarios/erctx"
+	"github.com/ethpandaops/spamoor/scenarios/erc1155tx"
+	"github.com/ethpandaops/spamoor/scenarios/erc20tx"
+	"github.com/ethpandaops/spamoor/scenarios/erc721tx"
 	evmfuzz "github.com/ethpandaops/spamoor/scenarios/evm-fuzz"
 	"github.com/ethpandaops/spamoor/scenarios/factorydeploytx"
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
@@ -40,7 +44,9 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&deploytx.ScenarioDescriptor,
 	&eoatx.ScenarioDescriptor,
 	&erc20bloater.ScenarioDescriptor,
-	&erctx.ScenarioDescriptor,
+	&erc20tx.ScenarioDescriptor,
+	&erc721tx.ScenarioDescriptor,
+	&erc1155tx.ScenarioDescriptor,
 	&evmfuzz.ScenarioDescriptor,
 	&factorydeploytx.ScenarioDescriptor,
 	&gasburnertx.ScenarioDescriptor,
@@ -59,6 +65,9 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 func GetScenario(name string) *scenario.Descriptor {
 	for _, scenario := range ScenarioDescriptors {
 		if scenario.Name == name {
+			return scenario
+		}
+		if len(scenario.Aliases) > 0 && slices.Contains(scenario.Aliases, name) {
 			return scenario
 		}
 	}

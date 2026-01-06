@@ -1,4 +1,4 @@
-package erctx
+package erc721tx
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/scenario"
-	"github.com/ethpandaops/spamoor/scenarios/erctx/contract"
+	"github.com/ethpandaops/spamoor/scenarios/erc721tx/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
@@ -29,8 +29,8 @@ type ScenarioOptions struct {
 	Rebroadcast       uint64  `yaml:"rebroadcast"`
 	BaseFee           float64 `yaml:"base_fee"`
 	TipFee            float64 `yaml:"tip_fee"`
-	Amount            uint64  `yaml:"amount"`
-	RandomAmount      bool    `yaml:"random_amount"`
+	MaxIndex          uint64  `yaml:"max_index"`
+	RandomIndex       bool    `yaml:"random_index"`
 	RandomTarget      bool    `yaml:"random_target"`
 	Timeout           string  `yaml:"timeout"`
 	ClientGroup       string  `yaml:"client_group"`
@@ -46,7 +46,7 @@ type Scenario struct {
 	contractAddr common.Address
 }
 
-var ScenarioName = "erctx"
+var ScenarioName = "erc721tx"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TotalCount:        0,
 	Throughput:        200,
@@ -55,8 +55,8 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Rebroadcast:       1,
 	BaseFee:           20,
 	TipFee:            2,
-	Amount:            20,
-	RandomAmount:      false,
+	MaxIndex:          0,
+	RandomIndex:       false,
 	RandomTarget:      false,
 	Timeout:           "",
 	ClientGroup:       "",
@@ -65,7 +65,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
-	Description:    "Send ERC20 transactions with different configurations",
+	Description:    "Send NFT transactions (ERC721/ERC1155) with different configurations",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
@@ -85,8 +85,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transfer transactions (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transfer transactions (in gwei)")
-	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (in gwei)")
-	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
+	flags.Uint64Var(&s.options.MaxIndex, "max-index", ScenarioDefaultOptions.MaxIndex, "Maximum token index to mint")
+	flags.BoolVar(&s.options.RandomIndex, "random-index", ScenarioDefaultOptions.RandomIndex, "Use random token index to mint")
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
@@ -145,14 +145,14 @@ func (s *Scenario) Run(ctx context.Context) error {
 	// deploy erc20 contract
 	contractReceipt, _, err := s.sendDeploymentTx(ctx)
 	if err != nil {
-		s.logger.Errorf("could not deploy token contract: %v", err)
+		s.logger.Errorf("could not deploy nft contract: %v", err)
 		return err
 	}
 	if contractReceipt == nil {
-		return fmt.Errorf("could not deploy token contract: %w", err)
+		return fmt.Errorf("could not deploy nft contract: %w", err)
 	}
 	s.contractAddr = contractReceipt.ContractAddress
-	s.logger.Infof("deployed token contract: %v (confirmed in block #%v)", s.contractAddr.String(), contractReceipt.BlockNumber.String())
+	s.logger.Infof("deployed nft contract: %v (confirmed in block #%v)", s.contractAddr.String(), contractReceipt.BlockNumber.String())
 
 	// send transactions
 	maxPending := s.options.MaxPending
@@ -257,7 +257,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 		Gas:       2000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		_, deployTx, _, err := contract.DeployTestToken(transactOpts, client.GetEthClient())
+		_, deployTx, _, err := contract.DeployTestToken721(transactOpts, client.GetEthClient())
 		return deployTx, err
 	})
 
@@ -301,13 +301,23 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
-	amount := uint256.NewInt(s.options.Amount)
-	amount = amount.Mul(amount, uint256.NewInt(1000000000))
-	if s.options.RandomAmount {
-		n, err := rand.Int(rand.Reader, amount.ToBig())
-		if err == nil {
-			amount = uint256.MustFromBig(n)
+	var index *uint256.Int
+
+	if s.options.RandomIndex {
+		var max *big.Int
+		if s.options.MaxIndex > 0 {
+			max = big.NewInt(int64(s.options.MaxIndex))
+		} else {
+			max = new(big.Int).Lsh(big.NewInt(1), 256) // 2^256
 		}
+		n, err := rand.Int(rand.Reader, max)
+		if err == nil {
+			index = uint256.MustFromBig(n)
+		}
+	} else if s.options.MaxIndex > 0 {
+		index = uint256.NewInt(txIdx % s.options.MaxIndex)
+	} else {
+		index = uint256.NewInt(txIdx)
 	}
 
 	toAddr := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
@@ -317,7 +327,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		toAddr = common.Address(addrBytes)
 	}
 
-	testToken, err := contract.NewTestToken(s.contractAddr, client.GetEthClient())
+	testToken, err := contract.NewTestToken721(s.contractAddr, client.GetEthClient())
 	if err != nil {
 		return nil, nil, client, wallet, err
 	}
@@ -328,7 +338,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		Gas:       100000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		return testToken.TransferMint(transactOpts, toAddr, amount.ToBig())
+		return testToken.TransferMint(transactOpts, toAddr, index.ToBig())
 	})
 	if err != nil {
 		return nil, nil, client, wallet, err
