@@ -65,7 +65,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
-	Description:    "Send NFT transactions (ERC721/ERC1155) with different configurations",
+	Description:    "Send ERC721 NFT transactions with different configurations",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
