@@ -1,6 +1,7 @@
 package scenarios
 
 import (
+	"fmt"
 	"slices"
 
 	"github.com/ethpandaops/spamoor/scenario"
@@ -30,40 +31,88 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/xentoken"
 )
 
-// ScenarioDescriptors contains all available scenario descriptors for the spamoor tool.
-// This registry includes scenarios for testing various Ethereum transaction types and patterns.
-// Each descriptor defines the configuration, constructor, and metadata for a specific test scenario.
-var ScenarioDescriptors = []*scenario.Descriptor{
-	&blobaverage.ScenarioDescriptor,
-	&blobcombined.ScenarioDescriptor,
-	&blobconflicting.ScenarioDescriptor,
-	&blobs.ScenarioDescriptor,
-	&blobreplacements.ScenarioDescriptor,
-	&calltx.ScenarioDescriptor,
-	&deploydestruct.ScenarioDescriptor,
-	&deploytx.ScenarioDescriptor,
-	&eoatx.ScenarioDescriptor,
-	&erc20bloater.ScenarioDescriptor,
-	&erc20tx.ScenarioDescriptor,
-	&erc721tx.ScenarioDescriptor,
-	&erc1155tx.ScenarioDescriptor,
-	&evmfuzz.ScenarioDescriptor,
-	&factorydeploytx.ScenarioDescriptor,
-	&gasburnertx.ScenarioDescriptor,
-	&geastx.ScenarioDescriptor,
-	&setcodetx.ScenarioDescriptor,
-	&storagespam.ScenarioDescriptor,
-	&taskrunner.ScenarioDescriptor,
-	&uniswapswaps.ScenarioDescriptor,
-	&wallets.ScenarioDescriptor,
-	&xentoken.ScenarioDescriptor,
+// scenarioDescriptorTree contains the tree of scenario categories and descriptors.
+// The order of the categories and descriptors is important for the CLI help text,
+// validation, and displaying available options to users.
+var scenarioDescriptorTree = []*scenario.Category{
+	{
+		Name:        "Simple",
+		Description: "Simple scenarios",
+		Descriptors: []*scenario.Descriptor{
+			&blobaverage.ScenarioDescriptor,
+			&blobcombined.ScenarioDescriptor,
+			&blobconflicting.ScenarioDescriptor,
+			&blobs.ScenarioDescriptor,
+			&blobreplacements.ScenarioDescriptor,
+			&deploydestruct.ScenarioDescriptor,
+			&eoatx.ScenarioDescriptor,
+			&erc20tx.ScenarioDescriptor,
+			&erc721tx.ScenarioDescriptor,
+			&erc1155tx.ScenarioDescriptor,
+			&evmfuzz.ScenarioDescriptor,
+			&gasburnertx.ScenarioDescriptor,
+			&setcodetx.ScenarioDescriptor,
+			&uniswapswaps.ScenarioDescriptor,
+			&xentoken.ScenarioDescriptor,
+		},
+	},
+	{
+		Name:        "Complex",
+		Description: "Complex scenarios (require additional configuration)",
+		Descriptors: []*scenario.Descriptor{
+			&calltx.ScenarioDescriptor,
+			&deploytx.ScenarioDescriptor,
+			&factorydeploytx.ScenarioDescriptor,
+			&geastx.ScenarioDescriptor,
+			&storagespam.ScenarioDescriptor,
+			&taskrunner.ScenarioDescriptor,
+		},
+	},
+	{
+		Name:        "Bloatnet",
+		Description: "Scenarios specifically designed for state bloating",
+		Descriptors: []*scenario.Descriptor{
+			&erc20bloater.ScenarioDescriptor,
+		},
+	},
+	{
+		Name:        "Utility",
+		Description: "Utility scenarios",
+		Descriptors: []*scenario.Descriptor{
+			&wallets.ScenarioDescriptor,
+		},
+	},
+}
+
+// scenarioDescriptors contains all available scenario descriptors for the spamoor tool.
+var scenarioDescriptors []*scenario.Descriptor
+
+func init() {
+	nameMap := make(map[string]*scenario.Descriptor)
+
+	var addCategory func(category *scenario.Category)
+	addCategory = func(category *scenario.Category) {
+		for _, descriptor := range category.Descriptors {
+			if _, ok := nameMap[descriptor.Name]; ok {
+				panic(fmt.Sprintf("scenario descriptor %s already registered", descriptor.Name))
+			}
+			nameMap[descriptor.Name] = descriptor
+		}
+		scenarioDescriptors = append(scenarioDescriptors, category.Descriptors...)
+		for _, child := range category.Children {
+			addCategory(child)
+		}
+	}
+	for _, category := range scenarioDescriptorTree {
+		addCategory(category)
+	}
 }
 
 // GetScenario finds and returns a scenario descriptor by name.
 // It performs a linear search through all registered scenarios and returns
 // the matching descriptor, or nil if no scenario with the given name exists.
 func GetScenario(name string) *scenario.Descriptor {
-	for _, scenario := range ScenarioDescriptors {
+	for _, scenario := range scenarioDescriptors {
 		if scenario.Name == name {
 			return scenario
 		}
@@ -79,9 +128,16 @@ func GetScenario(name string) *scenario.Descriptor {
 // This is useful for CLI help text, validation, and displaying available options
 // to users. The order matches the order in ScenarioDescriptors.
 func GetScenarioNames() []string {
-	names := make([]string, len(ScenarioDescriptors))
-	for i, scenario := range ScenarioDescriptors {
+	names := make([]string, len(scenarioDescriptors))
+	for i, scenario := range scenarioDescriptors {
 		names[i] = scenario.Name
 	}
 	return names
+}
+
+// GetScenarioCategories returns a slice containing the categories of all registered scenarios.
+// This is useful for CLI help text, validation, and displaying available options
+// to users. The order matches the order in scenarioDescriptorTree.
+func GetScenarioCategories() []*scenario.Category {
+	return scenarioDescriptorTree
 }

@@ -177,18 +177,36 @@
                 
                 <div class="mb-3">
                   <label class="form-label">Scenario</label>
-                  <select class="form-select" name="scenario" required>
-                    <option value="">Select a scenario...</option>
-                  </select>
+                  <input type="hidden" name="scenario" required>
+                  <div id="scenarioSelectorContainer" class="scenario-selector border rounded p-0" style="max-height: 400px; overflow-y: auto;">
+                    <div id="scenarioCategories" class="list-group list-group-flush">
+                      <!-- Categories will be populated here -->
+                    </div>
+                  </div>
+                  <div id="selectedScenarioDisplay" class="d-none border rounded p-3">
+                    <div class="d-flex justify-content-between align-items-start">
+                      <div>
+                        <small class="text-muted" id="selectedScenarioPath"></small>
+                        <div class="mt-1">
+                          <i class="fas fa-cube text-primary me-2"></i>
+                          <strong id="selectedScenarioName"></strong>
+                        </div>
+                        <small class="text-muted" id="selectedScenarioDesc"></small>
+                      </div>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearScenarioSelection()">
+                        <i class="fas fa-exchange-alt"></i> Change
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                
-                <div class="mb-3">
+
+                <div class="mb-3 d-none" id="configContainer">
                   <label class="form-label">Configuration</label>
-                  <textarea class="form-control font-monospace" name="config" rows="16" 
+                  <textarea class="form-control font-monospace" name="config" rows="12"
                     style="tab-size: 2;" required></textarea>
                 </div>
 
-                <div class="mb-3 form-check">
+                <div class="mb-3 form-check d-none" id="startImmediatelyContainer">
                   <input type="checkbox" class="form-check-input" id="startImmediately" name="startImmediately" checked>
                   <label class="form-check-label" for="startImmediately">
                     Start spammer after creation
@@ -458,19 +476,184 @@ let filteredConfigs = [];
 let currentVersion = null;
 let hasImportedSpammers = false;
 
+let scenarioCategories = null;
+
 document.getElementById('newSpammerModal').addEventListener('show.bs.modal', async () => {
   hasImportedSpammers = false;
-  const select = document.querySelector('[name="scenario"]');
-  select.querySelectorAll('option:not(:first-child)').forEach(opt => opt.remove());
-  
-  const scenarios = await fetch('/api/scenarios').then(r => r.json());
-  scenarios.forEach(scenario => {
-    const option = document.createElement('option');
-    option.value = scenario.name;
-    option.textContent = scenario.name + (scenario.description ? ' - ' + scenario.description : '');
-    select.appendChild(option);
-  });
+
+  /* Clear previous selection */
+  document.querySelector('#newSpammerForm [name="scenario"]').value = '';
+  document.getElementById('selectedScenarioDisplay').classList.add('d-none');
+  document.getElementById('scenarioSelectorContainer').classList.remove('d-none');
+  document.querySelector('#newSpammerForm [name="config"]').value = '';
+  document.getElementById('configContainer').classList.add('d-none');
+  document.getElementById('startImmediatelyContainer').classList.add('d-none');
+
+  /* Disable create button until scenario is selected */
+  const createBtn = document.getElementById('primaryAction');
+  if (createBtn.textContent === 'Create') {
+    createBtn.disabled = true;
+  }
+
+  /* Load and render scenario categories */
+  if (!scenarioCategories) {
+    scenarioCategories = await fetch('/api/scenarios').then(r => r.json());
+  }
+  renderScenarioCategories(scenarioCategories);
 });
+
+function renderScenarioCategories(categories, container = null, depth = 0) {
+  const targetContainer = container || document.getElementById('scenarioCategories');
+  if (!container) {
+    targetContainer.innerHTML = '';
+  }
+
+  categories.forEach((category, idx) => {
+    const categoryId = `category-${depth}-${idx}`;
+    const hasScenarios = category.scenarios && category.scenarios.length > 0;
+    const hasChildren = category.children && category.children.length > 0;
+
+    /* Category header */
+    const categoryHeader = document.createElement('div');
+    categoryHeader.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center category-header';
+    categoryHeader.style.paddingLeft = `${(depth * 16) + 12}px`;
+    categoryHeader.setAttribute('data-bs-toggle', 'collapse');
+    categoryHeader.setAttribute('data-bs-target', `#${categoryId}`);
+    categoryHeader.setAttribute('aria-expanded', 'false');
+    categoryHeader.setAttribute('role', 'button');
+    categoryHeader.innerHTML = `
+      <div>
+        <i class="fas fa-chevron-right category-chevron me-2"></i>
+        <strong>${category.name}</strong>
+        <small class="text-muted ms-2">${category.description}</small>
+      </div>
+      <span class="badge bg-secondary">${countScenarios(category)}</span>
+    `;
+    targetContainer.appendChild(categoryHeader);
+
+    /* Collapsible content */
+    const collapseDiv = document.createElement('div');
+    collapseDiv.className = 'collapse';
+    collapseDiv.id = categoryId;
+    targetContainer.appendChild(collapseDiv);
+
+    /* Add event listener for chevron rotation */
+    collapseDiv.addEventListener('show.bs.collapse', () => {
+      categoryHeader.querySelector('.category-chevron').classList.replace('fa-chevron-right', 'fa-chevron-down');
+    });
+    collapseDiv.addEventListener('hide.bs.collapse', () => {
+      categoryHeader.querySelector('.category-chevron').classList.replace('fa-chevron-down', 'fa-chevron-right');
+    });
+
+    /* Add scenarios */
+    if (hasScenarios) {
+      category.scenarios.forEach(scenario => {
+        const scenarioItem = document.createElement('div');
+        scenarioItem.className = 'list-group-item list-group-item-action scenario-item';
+        scenarioItem.style.paddingLeft = `${((depth + 1) * 16) + 12}px`;
+        scenarioItem.setAttribute('data-scenario', scenario.name);
+        scenarioItem.innerHTML = `
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <i class="fas fa-cube text-primary me-2"></i>
+              <span class="scenario-name">${scenario.name}</span>
+            </div>
+          </div>
+          ${scenario.description ? `<small class="text-muted ms-4 d-block">${scenario.description}</small>` : ''}
+        `;
+        scenarioItem.addEventListener('click', () => selectScenario(scenario.name));
+        collapseDiv.appendChild(scenarioItem);
+      });
+    }
+
+    /* Add nested children */
+    if (hasChildren) {
+      renderScenarioCategories(category.children, collapseDiv, depth + 1);
+    }
+  });
+}
+
+function countScenarios(category) {
+  let count = category.scenarios ? category.scenarios.length : 0;
+  if (category.children) {
+    category.children.forEach(child => {
+      count += countScenarios(child);
+    });
+  }
+  return count;
+}
+
+function findScenarioInfo(categories, scenarioName, path = []) {
+  for (const category of categories) {
+    const currentPath = [...path, category.name];
+
+    /* Check scenarios in this category */
+    if (category.scenarios) {
+      for (const scenario of category.scenarios) {
+        if (scenario.name === scenarioName) {
+          return { scenario, path: currentPath };
+        }
+      }
+    }
+
+    /* Check nested children */
+    if (category.children) {
+      const result = findScenarioInfo(category.children, scenarioName, currentPath);
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+async function selectScenario(scenarioName) {
+  /* Update hidden input */
+  document.querySelector('#newSpammerForm [name="scenario"]').value = scenarioName;
+
+  /* Find scenario info and category path */
+  const info = findScenarioInfo(scenarioCategories, scenarioName);
+
+  /* Update selection display */
+  document.getElementById('selectedScenarioPath').textContent = info ? info.path.join(' > ') : '';
+  document.getElementById('selectedScenarioName').textContent = scenarioName;
+  document.getElementById('selectedScenarioDesc').textContent = info ? info.scenario.description : '';
+
+  /* Hide selector, show selected display */
+  document.getElementById('scenarioSelectorContainer').classList.add('d-none');
+  document.getElementById('selectedScenarioDisplay').classList.remove('d-none');
+
+  /* Show config and start immediately checkbox */
+  document.getElementById('configContainer').classList.remove('d-none');
+  document.getElementById('startImmediatelyContainer').classList.remove('d-none');
+
+  /* Enable create button */
+  const createBtn = document.getElementById('primaryAction');
+  if (createBtn.textContent === 'Create') {
+    createBtn.disabled = false;
+  }
+
+  /* Load configuration */
+  const config = await fetch(`/api/scenarios/${scenarioName}/config`).then(r => r.text());
+  document.querySelector('#newSpammerForm [name="config"]').value = config;
+}
+
+function clearScenarioSelection() {
+  document.querySelector('#newSpammerForm [name="scenario"]').value = '';
+  document.querySelector('#newSpammerForm [name="config"]').value = '';
+
+  /* Hide selected display, show selector */
+  document.getElementById('selectedScenarioDisplay').classList.add('d-none');
+  document.getElementById('scenarioSelectorContainer').classList.remove('d-none');
+
+  /* Hide config and start immediately checkbox */
+  document.getElementById('configContainer').classList.add('d-none');
+  document.getElementById('startImmediatelyContainer').classList.add('d-none');
+
+  /* Disable create button */
+  const createBtn = document.getElementById('primaryAction');
+  if (createBtn.textContent === 'Create') {
+    createBtn.disabled = true;
+  }
+}
 
 document.getElementById('newSpammerModal').addEventListener('hidden.bs.modal', () => {
   if (hasImportedSpammers) {
@@ -512,13 +695,6 @@ document.querySelectorAll('#spammerTabs button[data-bs-toggle="tab"]').forEach(t
   });
 });
 
-document.querySelector('[name="scenario"]').addEventListener('change', async (e) => {
-  const scenario = e.target.value;
-  if (!scenario) return;
-  
-  const config = await fetch(`/api/scenarios/${scenario}/config`).then(r => r.text());
-  document.querySelector('[name="config"]').value = config;
-});
 
 document.querySelector('#newSpammerForm [name="config"]').addEventListener('keydown', function(e) {
   if (e.key === 'Tab') {
@@ -1697,6 +1873,73 @@ updateCountdown();
 
 #spammerTabs {
   margin: 0 -16px;
+}
+
+/* Scenario Selector Styles */
+.scenario-selector {
+  background-color: var(--bs-body-bg);
+}
+
+.scenario-selector .list-group-item {
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+.scenario-selector .list-group-item:first-child {
+  border-top: none;
+}
+
+.scenario-selector .category-header {
+  background-color: var(--bs-tertiary-bg);
+  font-size: 0.95em;
+}
+
+.scenario-selector .category-header:hover {
+  background-color: var(--bs-secondary-bg);
+}
+
+.scenario-selector .scenario-item {
+  cursor: pointer;
+  transition: background-color 0.15s ease-in-out;
+}
+
+.scenario-selector .scenario-item:hover {
+  background-color: var(--bs-secondary-bg);
+}
+
+.scenario-selector .scenario-item.active {
+  background-color: var(--bs-primary);
+  color: var(--bs-white);
+}
+
+.scenario-selector .scenario-item.active .text-muted {
+  color: rgba(255, 255, 255, 0.75) !important;
+}
+
+.scenario-selector .scenario-item.active .text-primary {
+  color: var(--bs-white) !important;
+}
+
+.category-chevron {
+  transition: transform 0.2s ease-in-out;
+  width: 12px;
+  text-align: center;
+}
+
+/* Dark theme adjustments */
+[data-bs-theme="dark"] .scenario-selector .category-header {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+[data-bs-theme="dark"] .scenario-selector .category-header:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-bs-theme="dark"] .scenario-selector .scenario-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 /* Library content responsive height */
