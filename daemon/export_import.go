@@ -66,7 +66,7 @@ func (d *Daemon) ExportSpammers(spammerIDs ...int64) (string, error) {
 }
 
 // ImportSpammers imports spammers from YAML data, file path, or URL.
-// Handles deduplication by checking name combinations and validates before importing.
+// Validates scenario types before importing.
 // Returns validation results and the number of spammers imported.
 func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, error) {
 	// Resolve all includes and get the final spammer configs
@@ -99,12 +99,6 @@ func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, 
 		scenarioDescriptor := scenarios.GetScenario(importConfig.Scenario)
 		if scenarioDescriptor == nil {
 			importErrors = append(importErrors, fmt.Sprintf("Scenario '%s' not found", importConfig.Scenario))
-			continue
-		}
-
-		// Check if spammer with same scenario + name already exists - skip if it does
-		if d.spammerExistsByScenarioAndName(importConfig.Scenario, importConfig.Name) {
-			importWarnings = append(importWarnings, fmt.Sprintf("Skipped spammer '%s' (%s) - already exists", importConfig.Name, importConfig.Scenario))
 			continue
 		}
 
@@ -175,12 +169,6 @@ func (d *Daemon) validateImportConfigs(importConfigs []ExportSpammerConfig) (*Im
 		Spammers:         []SpammerValidationInfo{},
 	}
 
-	existingSpammers := d.GetAllSpammers()
-	existingNames := make(map[string]bool)
-	for _, existing := range existingSpammers {
-		existingNames[existing.GetName()] = true
-	}
-
 	for _, importConfig := range importConfigs {
 		info := SpammerValidationInfo{
 			Name:        importConfig.Name,
@@ -198,12 +186,6 @@ func (d *Daemon) validateImportConfigs(importConfigs []ExportSpammerConfig) (*Im
 			result.InvalidScenarios = append(result.InvalidScenarios, importConfig.Scenario)
 		}
 
-		// Check name duplicates
-		if existingNames[importConfig.Name] {
-			info.Issues = append(info.Issues, "Name already exists, will be renamed")
-			result.Duplicates = append(result.Duplicates, importConfig.Name)
-		}
-
 		if info.Valid {
 			result.ValidSpammers++
 		}
@@ -212,17 +194,6 @@ func (d *Daemon) validateImportConfigs(importConfigs []ExportSpammerConfig) (*Im
 	}
 
 	return result, nil
-}
-
-// spammerExistsByScenarioAndName checks if a spammer with the given scenario and name already exists
-func (d *Daemon) spammerExistsByScenarioAndName(scenario, name string) bool {
-	existingSpammers := d.GetAllSpammers()
-	for _, existing := range existingSpammers {
-		if existing.GetScenario() == scenario && existing.GetName() == name {
-			return true
-		}
-	}
-	return false
 }
 
 // ImportResult contains the results of an import operation
