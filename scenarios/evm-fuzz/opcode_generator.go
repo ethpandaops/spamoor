@@ -98,18 +98,6 @@ func (r *DeterministicRNG) Bytes(n int) []byte {
 	return result
 }
 
-// decodeSingle decodes a single immediate byte for DUPN/SWAPN opcodes
-// Returns the decoded n value (17-235) and whether the byte is valid
-func decodeSingle(x int) (int, bool) {
-	if x >= 91 && x <= 127 {
-		return 0, false // Invalid range
-	}
-	if x <= 90 {
-		return x + 17, true
-	}
-	return x - 20, true // x >= 128
-}
-
 // encodeSingle encodes an n value (17-235) for DUPN/SWAPN opcodes
 func encodeSingle(n int) int {
 	if n < 17 || n > 235 {
@@ -119,24 +107,6 @@ func encodeSingle(n int) int {
 		return n - 17
 	}
 	return n + 20
-}
-
-// decodePair decodes an immediate byte for EXCHANGE opcode
-// Returns (n, m) where 1 <= n < m <= 29 and n+m <= 30
-func decodePair(x int) (int, int, bool) {
-	if x >= 80 && x <= 127 {
-		return 0, 0, false // Invalid range
-	}
-	k := x
-	if x > 79 {
-		k = x - 48
-	}
-	q := k / 16
-	r := k % 16
-	if q < r {
-		return q + 1, r + 1, true
-	}
-	return r + 1, 29 - q, true
 }
 
 // encodePair encodes (n, m) values for EXCHANGE opcode
