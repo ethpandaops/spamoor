@@ -1,0 +1,23 @@
+# Storage Trie Brancher Test - Depth 3 nibbles
+# Testing with 10 branches at depth 3
+
+target_branches: 10        # Create 10 branches
+target_depth: 3            # Each exactly 3 nibbles deep
+seed: "test-depth-3"       # Deterministic seed
+
+# Mining configuration
+mining_workers: 4          # 4 parallel mining threads
+batch_size: 1              # 1 address per tx
+mining_iterations: 10000   # Try 10k addresses per round (depth 3 is easier to find)
+
+# Checkpointing
+checkpoint_every: 5        # Save every 5 transactions
+
+# Gas settings
+basefee: 1
+tipfee: 1
+gas_limit: 5000000         # 5M gas per transaction
+
+# Tracking
+min_recordable: 3          # Track branches >= 3 nibbles
+max_tracked: 100           # Keep top 100 branches

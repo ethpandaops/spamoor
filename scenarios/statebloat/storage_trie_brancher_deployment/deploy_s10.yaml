@@ -1,0 +1,62 @@
+# Name: Storage Trie Brancher - Storage Depth 10
+# Description: Deploy worst-case storage trie contracts with depth 10 across 5 account depths (3-7)
+
+- scenario: storage-trie-brancher
+  name: '[Storage Trie] s10 acc_depth=3'
+  config:
+    total_contracts: 18000
+    storage_depth: 10
+    account_depth: 3
+    max_wallets: 50
+    base_fee: 20
+    tip_fee: 2
+    data_file: "https://raw.githubusercontent.com/CPerezz/worst_case_miner/main/mined_assets/s10/acc_depth3.json"
+    bytecode: "https://raw.githubusercontent.com/CPerezz/worst_case_miner/main/mined_assets/s10/bytecode.bin"
+
+- scenario: storage-trie-brancher
+  name: '[Storage Trie] s10 acc_depth=4'
+  config:
+    total_contracts: 18000
+    storage_depth: 10
+    account_depth: 4
+    max_wallets: 50
+    base_fee: 20
+    tip_fee: 2
+    data_file: "https://raw.githubusercontent.com/CPerezz/worst_case_miner/main/mined_assets/s10/acc_depth4.json"
+    bytecode: "https://raw.githubusercontent.com/CPerezz/worst_case_miner/main/mined_assets/s10/bytecode.bin"
+
+- scenario: storage-trie-brancher
+  name: '[Storage Trie] s10 acc_depth=5'
+  config:
+    total_contracts: 18000
+    storage_depth: 10
+    account_depth: 5
+    max_wallets: 50
+    base_fee: 20
+    tip_fee: 2
+    data_file: "https://raw.githubusercontent.com/CPerezz/worst_case_miner/main/mined_assets/s10/acc_depth5.json"
+    bytecode: "https://raw.githubusercontent.com/CPerezz/worst_case_miner/main/mined_assets/s10/bytecode.bin"
+
+- scenario: storage-trie-brancher
+  name: '[Storage Trie] s10 acc_depth=6'
+  config:
+    total_contracts: 18000
+    storage_depth: 10
+    account_depth: 6
+    max_wallets: 50
+    base_fee: 20
+    tip_fee: 2
+    data_file: "https://raw.githubusercontent.com/CPerezz/worst_case_miner/main/mined_assets/s10/acc_depth6.json"
+    bytecode: "https://raw.githubusercontent.com/CPerezz/worst_case_miner/main/mined_assets/s10/bytecode.bin"
+
+- scenario: storage-trie-brancher
+  name: '[Storage Trie] s10 acc_depth=7'
+  config:
+    total_contracts: 18000
+    storage_depth: 10
+    account_depth: 7
+    max_wallets: 50
+    base_fee: 20
+    tip_fee: 2
+    data_file: "https://raw.githubusercontent.com/CPerezz/worst_case_miner/main/mined_assets/s10/acc_depth7.json"
+    bytecode: "https://raw.githubusercontent.com/CPerezz/worst_case_miner/main/mined_assets/s10/bytecode.bin"

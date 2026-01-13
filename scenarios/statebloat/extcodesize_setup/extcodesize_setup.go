@@ -23,11 +23,16 @@ import (
 	"github.com/ethpandaops/spamoor/utils"
 )
 
-// Contract sizes in KB
-var ContractSizesKB = []float64{0.5, 1, 2, 5, 10, 24}
+// Contract sizes in KB - default set for backwards compatibility
+var DefaultContractSizesKB = []float64{0.5, 1, 2, 5, 10, 24}
 
-// MaxContractSize is the maximum contract size in bytes (24 KB)
-const MaxContractSize = 24576
+// AllContractSizesKB includes all supported sizes (including post-EIP-7907 sizes)
+var AllContractSizesKB = []float64{0.5, 1, 2, 5, 10, 24, 32, 64}
+
+// MaxContractSize is the maximum contract size in bytes
+// Pre-Prague: 24KB (EIP-170)
+// Post-Prague: 48KB (EIP-7907), but testnets may allow larger
+const MaxContractSize = 65536 // 64KB for testnet support
 
 // InitcodeInfo stores information about a deployed initcode contract
 type InitcodeInfo struct {
@@ -54,7 +59,9 @@ type PredeployedAddresses struct {
 
 type ScenarioOptions struct {
 	ContractsPerSize     uint64               `yaml:"contracts_per_size" json:"contracts_per_size"`
+	ContractSizes        []float64            `yaml:"contract_sizes" json:"contract_sizes"` // Sizes in KB to deploy (e.g., [0.5, 1, 2, 5, 10, 24, 32, 64])
 	MaxWallets           uint64               `yaml:"max_wallets" json:"max_wallets"`
+	MaxPending           uint64               `yaml:"max_pending" json:"max_pending"` // Maximum pending transactions (0 = auto-calculate based on wallet count)
 	BaseFee              float64              `yaml:"base_fee" json:"base_fee"`
 	TipFee               float64              `yaml:"tip_fee" json:"tip_fee"`
 	Throughput           uint64               `yaml:"throughput" json:"throughput"`
@@ -74,7 +81,9 @@ type Scenario struct {
 var ScenarioName = "extcodesize_setup"
 var ScenarioDefaultOptions = ScenarioOptions{
 	ContractsPerSize: 1000,
+	ContractSizes:    AllContractSizesKB, // [0.5, 1, 2, 5, 10, 24, 32, 64]
 	MaxWallets:       50,
+	MaxPending:       0, // 0 = auto-calculate based on wallet count
 	BaseFee:          20,
 	TipFee:           2,
 	Throughput:       0, // 0 = auto-calculate based on block gas limit
@@ -126,6 +135,11 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		s.options.PredeployedAddresses.Factories = make(map[string]common.Address)
 	}
 
+	// Use default contract sizes if not specified
+	if len(s.options.ContractSizes) == 0 {
+		s.options.ContractSizes = AllContractSizesKB
+	}
+
 	// Set up wallets for parallel execution
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
@@ -159,7 +173,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	// Phase 1: Deploy initcode contracts for all sizes
 	s.logger.Info("=== Phase 1: Deploying initcode contracts ===")
-	for _, sizeKB := range ContractSizesKB {
+	for _, sizeKB := range s.options.ContractSizes {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -190,7 +204,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	// Phase 2: Deploy factory contracts for all sizes
 	s.logger.Info("=== Phase 2: Deploying factory contracts ===")
-	for _, sizeKB := range ContractSizesKB {
+	for _, sizeKB := range s.options.ContractSizes {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -223,7 +237,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	// Phase 3: Deploy contracts via factories
 	s.logger.Info("=== Phase 3: Deploying contracts via factories ===")
-	for _, sizeKB := range ContractSizesKB {
+	for _, sizeKB := range s.options.ContractSizes {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -243,12 +257,12 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Info("=== Deployment Summary ===")
 	s.logger.Info("Factory addresses (stubs.json format):")
 	s.logger.Info("{")
-	for i, sizeKB := range ContractSizesKB {
+	for i, sizeKB := range s.options.ContractSizes {
 		sizeKey := sizeKeyFromKB(sizeKB)
 		factoryInfo := s.factoryContracts[sizeKey]
 		stubKey := fmt.Sprintf("bloatnet_factory_%s", sizeKey)
 		comma := ","
-		if i == len(ContractSizesKB)-1 {
+		if i == len(s.options.ContractSizes)-1 {
 			comma = ""
 		}
 		s.logger.Infof("  \"%s\": \"%s\"%s", stubKey, factoryInfo.Address.Hex(), comma)
@@ -258,7 +272,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	// Also log in a more readable format
 	s.logger.Info("")
 	s.logger.Info("=== Factory Addresses ===")
-	for _, sizeKB := range ContractSizesKB {
+	for _, sizeKB := range s.options.ContractSizes {
 		sizeKey := sizeKeyFromKB(sizeKB)
 		factoryInfo := s.factoryContracts[sizeKey]
 		stubKey := fmt.Sprintf("bloatnet_factory_%s", sizeKey)
@@ -481,10 +495,13 @@ func (s *Scenario) deployContractsViaFactory(ctx context.Context, sizeKB float64
 	s.logger.Infof("deploying %d contracts for %s: block_gas=%dM, tx_gas=%d, txs_per_block=%d",
 		remaining, sizeKey, blockGasLimit/1_000_000, gasPerDeployment, txsPerBlock)
 
-	// Calculate maxPending based on wallet count
-	maxPending := s.walletPool.GetConfiguredWalletCount() * 10
-	if maxPending < 100 {
-		maxPending = 100
+	// Calculate maxPending - use config value if set, otherwise auto-calculate
+	maxPending := s.options.MaxPending
+	if maxPending == 0 {
+		maxPending = s.walletPool.GetConfiguredWalletCount() * 10
+		if maxPending < 100 {
+			maxPending = 100
+		}
 	}
 
 	err = scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
@@ -580,6 +597,11 @@ func (s *Scenario) sendFactoryDeployTx(ctx context.Context, params *scenario.Pro
 
 	if receipt != nil && receipt.Status != 1 {
 		logger.Warnf("tx %d failed with status %d", params.TxIdx+1, receipt.Status)
+	}
+
+	// Mark wallet for nonce resync if transaction failed to send
+	if err != nil {
+		wallet.MarkNeedResync()
 	}
 
 	return err

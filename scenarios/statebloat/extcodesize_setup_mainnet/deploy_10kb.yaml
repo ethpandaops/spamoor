@@ -1,0 +1,18 @@
+- scenario: extcodesize_setup
+  name: '[EXTCODESIZE] Deploy 10KB contracts'
+  config:
+    seed: extcodesize-10kb
+    refill_amount: "100000000000000000000000"
+    refill_balance: "10000000000000000000000"
+    refill_interval: 20
+    contracts_per_size: 18100
+    contract_sizes: [10]
+    max_wallets: 2
+    max_pending: 20
+    base_fee: 20
+    tip_fee: 2
+    predeployed:
+      initcode:
+        "10kb": "0x07f335C5B675ee692C2D57AC805EdA02A708078a"
+      factories:
+        "10kb": "0x401ef5eBd3F749B839e13363aDD39bb85Bb8B204"

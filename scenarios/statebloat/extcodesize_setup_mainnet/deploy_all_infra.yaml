@@ -1,0 +1,12 @@
+# Name: EXTCODESIZE Infrastructure Deployment (Mainnet)
+# Description: Deploy all initcode and factory contracts for all sizes (0.5kb to 64kb)
+
+- scenario: extcodesize_setup
+  name: '[EXTCODESIZE] Deploy all infrastructure'
+  seed: extcodesize-infra-all
+  config:
+    contracts_per_size: 0
+    contract_sizes: [0.5, 1, 2, 5, 10, 24, 32, 64]
+    max_wallets: 1
+    base_fee: 20
+    tip_fee: 2
