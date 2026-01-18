@@ -145,7 +145,7 @@ func NewClient(rpchost string) (*Client, error) {
 	}
 
 	ctx := context.Background()
-	rpcClient, err := rpc.DialContext(ctx, rpchost)
+	rpcClient, err := rpc.DialOptions(ctx, rpchost, rpc.WithWebsocketMessageSizeLimit(0))
 	if err != nil {
 		return nil, err
 	}
