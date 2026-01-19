@@ -98,6 +98,38 @@ func (r *DeterministicRNG) Bytes(n int) []byte {
 	return result
 }
 
+// encodeSingle encodes an n value (17-235) for DUPN/SWAPN opcodes
+func encodeSingle(n int) int {
+	if n < 17 || n > 235 {
+		return -1 // Invalid
+	}
+	if n <= 107 {
+		return n - 17
+	}
+	return n + 20
+}
+
+// encodePair encodes (n, m) values for EXCHANGE opcode
+// Requires 1 <= n <= 13, n < m <= 29, and n+m <= 30
+func encodePair(n, m int) int {
+	if n < 1 || n > 13 || m <= n || m > 29 || n+m > 30 {
+		return -1 // Invalid
+	}
+	var q, r int
+	if m <= 16 {
+		q = n - 1
+		r = m - 1
+	} else {
+		q = 29 - m
+		r = n - 1
+	}
+	k := 16*q + r
+	if k <= 79 {
+		return k
+	}
+	return k + 48
+}
+
 // OpcodeInfo defines properties of an EVM opcode
 type OpcodeInfo struct {
 	Name        string
@@ -252,6 +284,7 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		{"BASEFEE", 0x48, 0, 1, 2, simpleOpcode(0x48), 2.5},
 		{"BLOBHASH", 0x49, 1, 1, 3, simpleOpcode(0x49), 2.0},
 		{"BLOBBASEFEE", 0x4a, 0, 1, 2, simpleOpcode(0x4a), 2.0},
+		{"SLOTNUM", 0x4b, 0, 1, 2, simpleOpcode(0x4b), 2.0},
 
 		// Stack operations with memory/storage sanitization
 		{"POP", 0x50, 1, 0, 2, simpleOpcode(0x50), 1.0},
@@ -360,6 +393,39 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 			Probability: 1.0,
 		})
 	}
+
+	// Add DUPN, SWAPN, EXCHANGE opcodes (EOF/Fusaka opcodes)
+	// These have 1-byte immediates and handle stack management in their templates
+	// StackInput/StackOutput are set to 0 because the templates manage stack directly
+	opcodes = append(opcodes, &OpcodeInfo{
+		Name:        "DUPN",
+		Opcode:      0xe6,
+		StackInput:  17, // Minimum required (n ranges 17-235)
+		StackOutput: 18, // n+1 output after duplicating
+		GasCost:     3,
+		Template:    g.generateDUPN,
+		Probability: 1.5,
+	})
+
+	opcodes = append(opcodes, &OpcodeInfo{
+		Name:        "SWAPN",
+		Opcode:      0xe7,
+		StackInput:  18, // Minimum required (n+1 where n ranges 17-235)
+		StackOutput: 18, // Stack size unchanged
+		GasCost:     3,
+		Template:    g.generateSWAPN,
+		Probability: 1.5,
+	})
+
+	opcodes = append(opcodes, &OpcodeInfo{
+		Name:        "EXCHANGE",
+		Opcode:      0xe8,
+		StackInput:  3, // Minimum required (m+1 where smallest valid m is 2)
+		StackOutput: 3, // Stack size unchanged
+		GasCost:     3,
+		Template:    g.generateEXCHANGE,
+		Probability: 1.5,
+	})
 
 	// Store in map for quick lookup
 	for _, op := range opcodes {
@@ -493,6 +559,174 @@ func (g *OpcodeGenerator) countOpcodesInBytecode(bytecode []byte) int {
 
 func (g *OpcodeGenerator) createTemplate() []byte  { return g.generateCreate(false) }
 func (g *OpcodeGenerator) create2Template() []byte { return g.generateCreate(true) }
+
+// generateDUPN generates DUPN opcode with immediate byte
+// DUPN duplicates the n'th stack item (n from 17-235)
+// Has 10% chance to generate invalid immediate for testing stack underflow
+// Note: Stack changes are handled by updateStackState, not here
+func (g *OpcodeGenerator) generateDUPN() []byte {
+	// 10% chance to generate invalid immediate (stack underflow test)
+	if g.rng.Float64() < 0.1 {
+		return g.generateInvalidDUPN()
+	}
+
+	// Valid case: choose n based on current stack size
+	maxN := g.stackSize
+	if maxN < 17 {
+		// Not enough stack items, generate with minimum valid n but will cause underflow
+		return g.generateInvalidDUPN()
+	}
+	maxN = min(maxN, 235)
+
+	// Pick n between 17 and min(stackSize, 235)
+	n := 17 + g.rng.Intn(maxN-17+1)
+	imm := encodeSingle(n)
+	imm = max(imm, 0) // Fallback to valid immediate if negative
+
+	return []byte{0xe6, byte(imm)}
+}
+
+// generateInvalidDUPN generates DUPN with invalid immediate for testing
+func (g *OpcodeGenerator) generateInvalidDUPN() []byte {
+	choice := g.rng.Float64()
+	var imm int
+
+	if choice < 0.4 {
+		// Invalid immediate in forbidden range (91-127)
+		imm = 91 + g.rng.Intn(37) // 91-127
+	} else if choice < 0.7 {
+		// Valid immediate but n > stack size (underflow)
+		n := g.stackSize + 1 + g.rng.Intn(50)
+		n = max(n, 17)
+		n = min(n, 235)
+		imm = encodeSingle(n)
+		imm = max(imm, 0)
+	} else {
+		// Random immediate in valid encoding range
+		imm = g.rng.Intn(256)
+	}
+
+	return []byte{0xe6, byte(imm)}
+}
+
+// generateSWAPN generates SWAPN opcode with immediate byte
+// SWAPN swaps the n+1'th stack item with the top (n from 17-235)
+// Has 10% chance to generate invalid immediate for testing stack underflow
+// Note: Stack changes are handled by updateStackState, not here
+func (g *OpcodeGenerator) generateSWAPN() []byte {
+	// 10% chance to generate invalid immediate (stack underflow test)
+	if g.rng.Float64() < 0.1 {
+		return g.generateInvalidSWAPN()
+	}
+
+	// Valid case: need n+1 items on stack
+	maxN := g.stackSize - 1
+	if maxN < 17 {
+		// Not enough stack items, generate invalid case
+		return g.generateInvalidSWAPN()
+	}
+	maxN = min(maxN, 235)
+
+	// Pick n between 17 and min(stackSize-1, 235)
+	n := 17 + g.rng.Intn(maxN-17+1)
+	imm := encodeSingle(n)
+	imm = max(imm, 0) // Fallback
+
+	// SWAPN doesn't change stack size (just swaps)
+	return []byte{0xe7, byte(imm)}
+}
+
+// generateInvalidSWAPN generates SWAPN with invalid immediate for testing
+func (g *OpcodeGenerator) generateInvalidSWAPN() []byte {
+	choice := g.rng.Float64()
+	var imm int
+
+	if choice < 0.4 {
+		// Invalid immediate in forbidden range (91-127)
+		imm = 91 + g.rng.Intn(37) // 91-127
+	} else if choice < 0.7 {
+		// Valid immediate but n+1 > stack size (underflow)
+		n := g.stackSize + g.rng.Intn(50)
+		n = max(n, 17)
+		n = min(n, 235)
+		imm = encodeSingle(n)
+		imm = max(imm, 0)
+	} else {
+		// Random immediate
+		imm = g.rng.Intn(256)
+	}
+
+	return []byte{0xe7, byte(imm)}
+}
+
+// generateEXCHANGE generates EXCHANGE opcode with immediate byte
+// EXCHANGE swaps stack[top-n] with stack[top-m] where 1 <= n < m <= 29
+// Has 10% chance to generate invalid immediate for testing stack underflow
+// Note: Stack changes are handled by updateStackState, not here
+func (g *OpcodeGenerator) generateEXCHANGE() []byte {
+	// 10% chance to generate invalid immediate (stack underflow test)
+	if g.rng.Float64() < 0.1 {
+		return g.generateInvalidEXCHANGE()
+	}
+
+	// Valid case: need m+1 items on stack where m is the larger index
+	// Valid pairs: 1 <= n < m <= 29, n+m <= 30
+	// m+1 is the minimum required stack depth
+
+	// Find valid (n, m) pairs that fit current stack
+	type pair struct{ n, m int }
+	var validPairs []pair
+
+	for n := 1; n <= 13; n++ {
+		for m := n + 1; m <= 29 && n+m <= 30; m++ {
+			if m+1 <= g.stackSize {
+				validPairs = append(validPairs, pair{n, m})
+			}
+		}
+	}
+
+	if len(validPairs) == 0 {
+		// Not enough stack items for any valid EXCHANGE
+		return g.generateInvalidEXCHANGE()
+	}
+
+	// Pick a random valid pair
+	p := validPairs[g.rng.Intn(len(validPairs))]
+	imm := encodePair(p.n, p.m)
+	imm = max(imm, 0) // Fallback
+
+	// EXCHANGE doesn't change stack size (just swaps)
+	return []byte{0xe8, byte(imm)}
+}
+
+// generateInvalidEXCHANGE generates EXCHANGE with invalid immediate for testing
+func (g *OpcodeGenerator) generateInvalidEXCHANGE() []byte {
+	choice := g.rng.Float64()
+	var imm int
+
+	if choice < 0.4 {
+		// Invalid immediate in forbidden range (80-127)
+		imm = 80 + g.rng.Intn(48) // 80-127
+	} else if choice < 0.7 {
+		// Valid immediate but m+1 > stack size (underflow)
+		// Generate a pair that exceeds current stack
+		n := 1 + g.rng.Intn(13) // 1-13
+		m := n + 1 + g.rng.Intn(max(29-n-1, 1))
+		m = min(m, 30-n) // Ensure n+m <= 30
+		m = max(m, n+1)  // Ensure m > n
+		m = min(m, 29)   // Ensure m <= 29
+		imm = encodePair(n, m)
+		if imm < 0 {
+			// Fallback to random valid-looking immediate
+			imm = g.rng.Intn(80) // Valid range 0-79
+		}
+	} else {
+		// Random immediate
+		imm = g.rng.Intn(256)
+	}
+
+	return []byte{0xe8, byte(imm)}
+}
 
 // makePushTemplate creates a template function for PUSH opcodes
 func (g *OpcodeGenerator) makePushTemplate(opcode uint16, size int) func() []byte {
