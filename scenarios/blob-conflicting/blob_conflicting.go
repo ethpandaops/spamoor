@@ -6,11 +6,11 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -35,6 +35,7 @@ type ScenarioOptions struct {
 	FuluActivation              utils.FlexibleJsonUInt64 `yaml:"fulu_activation"`
 	ThroughputIncrementInterval uint64                   `yaml:"throughput_increment_interval"`
 	Timeout                     string                   `yaml:"timeout"`
+	BlobData                    string                   `yaml:"blob_data"`
 	ClientGroup                 string                   `yaml:"client_group"`
 	LogTxs                      bool                     `yaml:"log_txs"`
 }
@@ -60,6 +61,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	FuluActivation:              math.MaxInt64,
 	ThroughputIncrementInterval: 0,
 	Timeout:                     "",
+	BlobData:                    "",
 	ClientGroup:                 "",
 	LogTxs:                      false,
 }
@@ -91,6 +93,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var((*uint64)(&s.options.FuluActivation), "fulu-activation", uint64(ScenarioDefaultOptions.FuluActivation), "Unix timestamp of the Fulu activation")
 	flags.Uint64Var(&s.options.ThroughputIncrementInterval, "throughput-increment-interval", ScenarioDefaultOptions.ThroughputIncrementInterval, "Increment the throughput every interval (in sec).")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
+	flags.StringVar(&s.options.BlobData, "blob-data", ScenarioDefaultOptions.BlobData, "Blob data to use in blob transactions")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
@@ -255,21 +258,31 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 	for i := 0; i < int(blobCount); i++ {
 		blobLabel := fmt.Sprintf("0x1611AA0000%08dFF%02dFF%04dFEED", txIdx, i, 0)
 
-		specialBlob := rand.Intn(50)
-		switch specialBlob {
-		case 0: // special blob commitment - all 0x0
-			blobRefs[i] = []string{"0x0"}
-		case 1, 2: // reuse well known blob
-			blobRefs[i] = []string{"repeat:0x42:1337"}
-		case 3, 4: // duplicate commitment
-			if i == 0 {
-				blobRefs[i] = []string{blobLabel, "random"}
-			} else {
-				blobRefs[i] = []string{"copy:0"}
+		if s.options.BlobData != "" {
+			blobRefs[i] = []string{}
+			for _, blob := range strings.Split(s.options.BlobData, ",") {
+				if blob == "label" {
+					blob = blobLabel
+				}
+				blobRefs[i] = append(blobRefs[i], blob)
 			}
 
-		default: // random blob data
-			blobRefs[i] = []string{blobLabel, "random"}
+		} else {
+			specialBlob := rand.Intn(50)
+			switch specialBlob {
+			case 0: // special blob commitment - all 0x0
+				blobRefs[i] = []string{"0x0"}
+			case 1, 2: // reuse well known blob
+				blobRefs[i] = []string{"repeat:0x42:1337"}
+			case 3, 4: // duplicate commitment
+				if i == 0 {
+					blobRefs[i] = []string{blobLabel, "random"}
+				} else {
+					blobRefs[i] = []string{"copy:0"}
+				}
+			default: // random blob data
+				blobRefs[i] = []string{blobLabel, "random:full"}
+			}
 		}
 	}
 
@@ -305,36 +318,10 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 		return nil, nil, client, wallet, 0, err
 	}
 
-	var blobCellProofs []kzg4844.Proof
-
-	if s.options.BlobV1Percent > 0 {
-		// generate cell proofs here to avoid heavy recomputation on each submission
-		blobCellProofs, err = txbuilder.GenerateCellProofs(tx1.BlobTxSidecar())
-		if err != nil {
-			s.logger.Warnf("failed to generate cell proofs: %v", err)
-		}
-	}
-
-	getTxBytes := func() ([]byte, uint8) {
-		var txBytes []byte
-		txVersion := uint8(0)
-		sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
-		if sendAsV1 {
-			txBytes, err = txbuilder.MarshalBlobV1Tx(tx1, blobCellProofs)
-			if err != nil || (txBytes != nil && len(txBytes) == 0) {
-				s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
-			} else {
-				txVersion = 1
-			}
-		}
-		return txBytes, txVersion
-	}
-
-	_, txVersion := getTxBytes()
-
 	// send both tx at exactly the same time
 	wg := sync.WaitGroup{}
 	wg.Add(2)
+	isBlobV1 := false
 	receiptChan := make(scenario.ReceiptChan, 1)
 
 	var err1, err2 error
@@ -352,8 +339,16 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 			},
 			LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.0", txIdx+1), tx1),
 			OnEncode: func(tx *types.Transaction) ([]byte, error) {
-				txBytes, _ := getTxBytes()
-				return txBytes, nil
+				sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
+				if sendAsV1 && !isBlobV1 {
+					err := tx.BlobTxSidecar().ToV1()
+					if err != nil {
+						return nil, err
+					}
+
+					isBlobV1 = true
+				}
+				return nil, nil
 			},
 		})
 		if err1 != nil {
@@ -396,7 +391,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 		return nil, nil, client, wallet, 0, err1
 	}
 
-	return receiptChan, tx1, client, wallet, txVersion, nil
+	return receiptChan, tx1, client, wallet, tx1.BlobTxSidecar().Version, nil
 }
 
 func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *spamoor.Client, txLabel string) {

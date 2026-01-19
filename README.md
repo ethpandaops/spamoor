@@ -67,7 +67,9 @@ Spamoor provides a comprehensive suite of transaction scenarios for different te
 | Scenario | Description |
 |----------|-------------|
 | [`eoatx`](./scenarios/eoatx/README.md) | **EOA Transactions** - Send standard ETH transfers with configurable amounts |
-| [`erctx`](./scenarios/erctx/README.md) | **ERC20 Transactions** - Deploy ERC20 tokens and perform transfers |
+| [`erc20tx`](./scenarios/erc20tx/README.md) | **ERC20 Transactions** - Deploy ERC20 tokens and perform transfers |
+| [`erc721tx`](./scenarios/erc721tx/README.md) | **ERC721 Transactions** - Deploy ERC721 NFTs and perform transfers |
+| [`erc1155tx`](./scenarios/erc1155tx/README.md) | **ERC1155 Transactions** - Deploy ERC1155 NFTs and perform transfers |
 | [`calltx`](./scenarios/calltx/README.md) | **Contract Calls** - Deploy contracts and repeatedly call functions |
 | [`deploytx`](./scenarios/deploytx/README.md) | **Contract Deployments** - Deploy contracts with custom bytecode |
 | [`deploy-destruct`](./scenarios/deploy-destruct/README.md) | **Self-Destruct Deployments** - Deploy self-destructing contracts |

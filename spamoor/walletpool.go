@@ -877,6 +877,10 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client
 	} else {
 		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
 	}
+	// Ensure tipCap never exceeds feeCap (EIP-1559 requirement)
+	if tipCap.Cmp(feeCap) > 0 {
+		tipCap = new(big.Int).Set(feeCap)
+	}
 
 	toAddr := childWallet.GetAddress()
 	refillTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
@@ -919,6 +923,10 @@ func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, cl
 		tipCap = big.NewInt(100000000000) // 100 gwei
 	} else {
 		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
+	}
+	// Ensure tipCap never exceeds feeCap (EIP-1559 requirement)
+	if tipCap.Cmp(feeCap) > 0 {
+		tipCap = new(big.Int).Set(feeCap)
 	}
 
 	totalAmount := uint256.NewInt(0)

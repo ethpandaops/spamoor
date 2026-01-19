@@ -6,12 +6,12 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -34,6 +34,7 @@ type ScenarioOptions struct {
 	BlobFee         float64                  `yaml:"blob_fee"`
 	BlobV1Percent   uint64                   `yaml:"blob_v1_percent"`
 	FuluActivation  utils.FlexibleJsonUInt64 `yaml:"fulu_activation"`
+	BlobData        string                   `yaml:"blob_data"`
 	ClientGroup     string                   `yaml:"client_group"`
 	SubmitCount     uint64                   `yaml:"submit_count"`
 	LogTxs          bool                     `yaml:"log_txs"`
@@ -64,6 +65,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	BlobFee:         20,
 	BlobV1Percent:   100,
 	FuluActivation:  math.MaxInt64,
+	BlobData:        "",
 	ClientGroup:     "",
 	SubmitCount:     3,
 	LogTxs:          false,
@@ -94,6 +96,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Float64Var(&s.options.BlobFee, "blobfee", ScenarioDefaultOptions.BlobFee, "Max blob fee to use in blob transactions (in gwei)")
 	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to be submitted with the v1 wrapper format")
 	flags.Uint64Var((*uint64)(&s.options.FuluActivation), "fulu-activation", uint64(ScenarioDefaultOptions.FuluActivation), "Unix timestamp of the Fulu activation")
+	flags.StringVar(&s.options.BlobData, "blob-data", ScenarioDefaultOptions.BlobData, "Blob data to use in blob transactions")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.Uint64Var(&s.options.SubmitCount, "submit-count", ScenarioDefaultOptions.SubmitCount, "Number of times to submit each transaction (to increase chance of inclusion)")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
@@ -377,20 +380,31 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 	for i := 0; i < int(blobCount); i++ {
 		blobLabel := fmt.Sprintf("0x1611AA0000%08dFF%02dFF%04dFEED", txIdx, i, 0)
 
-		specialBlob := rand.Intn(50)
-		switch specialBlob {
-		case 0: // special blob commitment - all 0x0
-			blobRefs[i] = []string{"0x0"}
-		case 1, 2: // reuse well known blob
-			blobRefs[i] = []string{"repeat:0x42:1337"}
-		case 3, 4: // duplicate commitment
-			if i == 0 {
-				blobRefs[i] = []string{blobLabel, "random"}
-			} else {
-				blobRefs[i] = []string{"copy:0"}
+		if s.options.BlobData != "" {
+			blobRefs[i] = []string{}
+			for _, blob := range strings.Split(s.options.BlobData, ",") {
+				if blob == "label" {
+					blob = blobLabel
+				}
+				blobRefs[i] = append(blobRefs[i], blob)
 			}
-		default: // random blob data
-			blobRefs[i] = []string{blobLabel, "random"}
+
+		} else {
+			specialBlob := rand.Intn(50)
+			switch specialBlob {
+			case 0: // special blob commitment - all 0x0
+				blobRefs[i] = []string{"0x0"}
+			case 1, 2: // reuse well known blob
+				blobRefs[i] = []string{"repeat:0x42:1337"}
+			case 3, 4: // duplicate commitment
+				if i == 0 {
+					blobRefs[i] = []string{blobLabel, "random"}
+				} else {
+					blobRefs[i] = []string{"copy:0"}
+				}
+			default: // random blob data
+				blobRefs[i] = []string{blobLabel, "random:full"}
+			}
 		}
 	}
 
@@ -412,31 +426,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 		return nil, nil, client, wallet, 0, err
 	}
 
-	var blobCellProofs []kzg4844.Proof
-
-	if s.options.BlobV1Percent > 0 {
-		blobCellProofs, err = txbuilder.GenerateCellProofs(tx.BlobTxSidecar())
-		if err != nil {
-			s.logger.Warnf("failed to generate cell proofs: %v", err)
-		}
-	}
-
-	getTxBytes := func() ([]byte, uint8) {
-		var txBytes []byte
-		txVersion := uint8(0)
-		sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
-		if sendAsV1 {
-			txBytes, err = txbuilder.MarshalBlobV1Tx(tx, blobCellProofs)
-			if err != nil || (txBytes != nil && len(txBytes) == 0) {
-				s.logger.Warnf("failed to marshal blob tx as v1: %v", err)
-			} else {
-				txVersion = 1
-			}
-		}
-		return txBytes, txVersion
-	}
-
-	_, txVersion := getTxBytes()
+	isBlobV1 := false
 	receiptChan := make(scenario.ReceiptChan, 1)
 
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
@@ -478,8 +468,16 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 			}
 		},
 		OnEncode: func(tx *types.Transaction) ([]byte, error) {
-			txBytes, _ := getTxBytes()
-			return txBytes, nil
+			sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
+			if sendAsV1 && !isBlobV1 {
+				err := tx.BlobTxSidecar().ToV1()
+				if err != nil {
+					return nil, err
+				}
+
+				isBlobV1 = true
+			}
+			return nil, nil
 		},
 	})
 	if err != nil {
@@ -487,5 +485,5 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 		return nil, nil, client, wallet, 0, err
 	}
 
-	return receiptChan, tx, client, wallet, txVersion, nil
+	return receiptChan, tx, client, wallet, tx.BlobTxSidecar().Version, nil
 }
