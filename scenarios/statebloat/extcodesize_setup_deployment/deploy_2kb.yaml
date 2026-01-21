@@ -1,0 +1,14 @@
+- scenario: extcodesize_setup
+  name: '[EXTCODESIZE] Deploy 2KB contracts'
+  seed: extcodesize-2kb
+  config:
+    contracts_per_size: 18100
+    contract_sizes: [2]
+    max_wallets: 100
+    base_fee: 20
+    tip_fee: 2
+    predeployed:
+      initcode:
+        "2kb": "0x590e5c913fa1e5b6a4ce428f0a6ce0ab8f07ba36"
+      factories:
+        "2kb": "0x1B7be25943B9977DDD73316D90C893222D1D9AeE"

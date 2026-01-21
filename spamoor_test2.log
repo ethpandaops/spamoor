@@ -1,0 +1,189 @@
+time="2025-12-22T11:21:44+01:00" level=info msg="starting spamoor" buildtime= version=git-
+time="2025-12-22T11:21:44+01:00" level=info msg="initialized client pool with 1 clients (chain id: 1337)" module=clientpool
+time="2025-12-22T11:21:44+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T11:21:44+01:00" level=info msg="initialized root wallet (addr: 0xFABB0ac9d68B0B445fB7357272Ff202C5651694a balance: 49 ETH, nonce: 10)"
+time="2025-12-22T11:21:44+01:00" level=info msg="processed block 931:  0 total tx, 0 tx confirmed from 0 wallets (424.791µs, 14.541µs)"
+time="2025-12-22T11:21:45+01:00" level=info msg="Compiled contract, init code size: 1870 bytes" scenario=storage-trie-brancher
+time="2025-12-22T11:21:45+01:00" level=info msg="initialized storage trie brancher scenario" account_depth=3 contract_file=scenarios/statebloat/storage_trie_brancher/depth_9.sol contracts=10 data_file=scenarios/statebloat/storage_trie_brancher/s9_acc3.json scenario=storage-trie-brancher storage_depth=9
+time="2025-12-22T11:21:45+01:00" level=info msg="root wallet is locked, insufficient root wallet balance. awaiting addtional funds. needed: 51 ETH" module=walletpool
+time="2025-12-22T11:21:50+01:00" level=info msg="processed block 932:  0 total tx, 0 tx confirmed from 0 wallets (438.625µs, 2.125µs)"
+time="2025-12-22T11:21:57+01:00" level=info msg="processed block 933:  0 total tx, 0 tx confirmed from 0 wallets (618.458µs, 6.167µs)"
+time="2025-12-22T11:21:57+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:22:03+01:00" level=info msg="processed block 934:  0 total tx, 0 tx confirmed from 0 wallets (309.708µs, 1.958µs)"
+time="2025-12-22T11:22:09+01:00" level=info msg="processed block 935:  0 total tx, 0 tx confirmed from 0 wallets (397.833µs, 3.542µs)"
+time="2025-12-22T11:22:09+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:22:15+01:00" level=info msg="processed block 936:  0 total tx, 0 tx confirmed from 0 wallets (1.156334ms, 4.875µs)"
+time="2025-12-22T11:22:21+01:00" level=info msg="processed block 937:  0 total tx, 0 tx confirmed from 0 wallets (629.625µs, 4.333µs)"
+time="2025-12-22T11:22:21+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:22:27+01:00" level=info msg="processed block 938:  0 total tx, 0 tx confirmed from 0 wallets (712.917µs, 5.125µs)"
+time="2025-12-22T11:22:33+01:00" level=info msg="processed block 939:  0 total tx, 0 tx confirmed from 0 wallets (792.375µs, 4.916µs)"
+time="2025-12-22T11:22:33+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:22:39+01:00" level=info msg="processed block 940:  0 total tx, 0 tx confirmed from 0 wallets (664µs, 5.625µs)"
+time="2025-12-22T11:22:45+01:00" level=info msg="processed block 941:  0 total tx, 0 tx confirmed from 0 wallets (939.709µs, 5.333µs)"
+time="2025-12-22T11:22:45+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:22:51+01:00" level=info msg="processed block 942:  0 total tx, 0 tx confirmed from 0 wallets (909.625µs, 6.792µs)"
+time="2025-12-22T11:22:57+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:22:57+01:00" level=info msg="processed block 943:  0 total tx, 0 tx confirmed from 0 wallets (628.334µs, 3.625µs)"
+time="2025-12-22T11:23:03+01:00" level=info msg="processed block 944:  0 total tx, 0 tx confirmed from 0 wallets (523.167µs, 2.125µs)"
+time="2025-12-22T11:23:09+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:23:09+01:00" level=info msg="processed block 945:  0 total tx, 0 tx confirmed from 0 wallets (455.709µs, 3.041µs)"
+time="2025-12-22T11:23:15+01:00" level=info msg="processed block 946:  0 total tx, 0 tx confirmed from 0 wallets (354.542µs, 3.916µs)"
+time="2025-12-22T11:23:21+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:23:21+01:00" level=info msg="processed block 947:  0 total tx, 0 tx confirmed from 0 wallets (635.625µs, 6.292µs)"
+time="2025-12-22T11:23:27+01:00" level=info msg="processed block 948:  0 total tx, 0 tx confirmed from 0 wallets (407.792µs, 5.208µs)"
+time="2025-12-22T11:23:33+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:23:33+01:00" level=info msg="processed block 949:  0 total tx, 0 tx confirmed from 0 wallets (323.166µs, 3.042µs)"
+time="2025-12-22T11:23:39+01:00" level=info msg="processed block 950:  0 total tx, 0 tx confirmed from 0 wallets (559.916µs, 5.792µs)"
+time="2025-12-22T11:23:44+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T11:23:45+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:23:45+01:00" level=info msg="processed block 951:  0 total tx, 0 tx confirmed from 0 wallets (1.116875ms, 7.208µs)"
+time="2025-12-22T11:23:51+01:00" level=info msg="processed block 952:  0 total tx, 0 tx confirmed from 0 wallets (557.791µs, 6.417µs)"
+time="2025-12-22T11:23:57+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:23:57+01:00" level=info msg="processed block 953:  0 total tx, 0 tx confirmed from 0 wallets (634.583µs, 5.875µs)"
+time="2025-12-22T11:24:03+01:00" level=info msg="processed block 954:  0 total tx, 0 tx confirmed from 0 wallets (1.096833ms, 5.375µs)"
+time="2025-12-22T11:24:09+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:24:09+01:00" level=info msg="processed block 955:  0 total tx, 0 tx confirmed from 0 wallets (672.5µs, 2.916µs)"
+time="2025-12-22T11:24:15+01:00" level=info msg="processed block 956:  0 total tx, 0 tx confirmed from 0 wallets (1.348167ms, 6µs)"
+time="2025-12-22T11:24:21+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:24:21+01:00" level=info msg="processed block 957:  0 total tx, 0 tx confirmed from 0 wallets (767.25µs, 5.583µs)"
+time="2025-12-22T11:24:27+01:00" level=info msg="processed block 958:  0 total tx, 0 tx confirmed from 0 wallets (689.5µs, 5.833µs)"
+time="2025-12-22T11:24:33+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:24:33+01:00" level=info msg="processed block 959:  0 total tx, 0 tx confirmed from 0 wallets (1.126209ms, 7.292µs)"
+time="2025-12-22T11:24:39+01:00" level=info msg="processed block 960:  0 total tx, 0 tx confirmed from 0 wallets (1.454292ms, 3.625µs)"
+time="2025-12-22T11:24:45+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:24:45+01:00" level=info msg="processed block 961:  0 total tx, 0 tx confirmed from 0 wallets (1.030334ms, 5.333µs)"
+time="2025-12-22T11:24:51+01:00" level=info msg="processed block 962:  0 total tx, 0 tx confirmed from 0 wallets (983.416µs, 5.5µs)"
+time="2025-12-22T11:24:57+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:24:57+01:00" level=info msg="processed block 963:  0 total tx, 0 tx confirmed from 0 wallets (574µs, 2.417µs)"
+time="2025-12-22T11:25:03+01:00" level=info msg="processed block 964:  0 total tx, 0 tx confirmed from 0 wallets (1.326208ms, 7.125µs)"
+time="2025-12-22T11:25:09+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:25:09+01:00" level=info msg="processed block 965:  0 total tx, 0 tx confirmed from 0 wallets (1.026458ms, 9.917µs)"
+time="2025-12-22T11:25:15+01:00" level=info msg="processed block 966:  0 total tx, 0 tx confirmed from 0 wallets (1.128541ms, 7µs)"
+time="2025-12-22T11:25:21+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:25:21+01:00" level=info msg="processed block 967:  0 total tx, 0 tx confirmed from 0 wallets (444.583µs, 5.583µs)"
+time="2025-12-22T11:25:27+01:00" level=info msg="processed block 968:  0 total tx, 0 tx confirmed from 0 wallets (477.667µs, 3.083µs)"
+time="2025-12-22T11:25:33+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:25:33+01:00" level=info msg="processed block 969:  0 total tx, 0 tx confirmed from 0 wallets (1.096458ms, 7.125µs)"
+time="2025-12-22T11:25:39+01:00" level=info msg="processed block 970:  0 total tx, 0 tx confirmed from 0 wallets (961.542µs, 6.583µs)"
+time="2025-12-22T11:25:44+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T11:25:45+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:25:45+01:00" level=info msg="processed block 971:  0 total tx, 0 tx confirmed from 0 wallets (491.916µs, 4.875µs)"
+time="2025-12-22T11:25:51+01:00" level=info msg="processed block 972:  0 total tx, 0 tx confirmed from 0 wallets (415.5µs, 3.834µs)"
+time="2025-12-22T11:25:57+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:25:57+01:00" level=info msg="processed block 973:  0 total tx, 0 tx confirmed from 0 wallets (496.583µs, 3.25µs)"
+time="2025-12-22T11:26:03+01:00" level=info msg="processed block 974:  0 total tx, 0 tx confirmed from 0 wallets (668.708µs, 5.875µs)"
+time="2025-12-22T11:26:09+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:26:09+01:00" level=info msg="processed block 975:  0 total tx, 0 tx confirmed from 0 wallets (1.149292ms, 5.25µs)"
+time="2025-12-22T11:26:15+01:00" level=info msg="processed block 976:  0 total tx, 0 tx confirmed from 0 wallets (1.274959ms, 9.125µs)"
+time="2025-12-22T11:26:21+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:26:21+01:00" level=info msg="processed block 977:  0 total tx, 0 tx confirmed from 0 wallets (958.583µs, 5.416µs)"
+time="2025-12-22T11:26:27+01:00" level=info msg="processed block 978:  0 total tx, 0 tx confirmed from 0 wallets (508.25µs, 2.292µs)"
+time="2025-12-22T11:26:33+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:26:33+01:00" level=info msg="processed block 979:  0 total tx, 0 tx confirmed from 0 wallets (830.833µs, 6.041µs)"
+time="2025-12-22T11:26:39+01:00" level=info msg="processed block 980:  0 total tx, 0 tx confirmed from 0 wallets (317.417µs, 2.916µs)"
+time="2025-12-22T11:26:45+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:26:45+01:00" level=info msg="processed block 981:  0 total tx, 0 tx confirmed from 0 wallets (829.458µs, 7.416µs)"
+time="2025-12-22T11:26:51+01:00" level=info msg="processed block 982:  0 total tx, 0 tx confirmed from 0 wallets (719.708µs, 8.042µs)"
+time="2025-12-22T11:26:57+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:26:57+01:00" level=info msg="processed block 983:  0 total tx, 0 tx confirmed from 0 wallets (1.245208ms, 7.917µs)"
+time="2025-12-22T11:27:03+01:00" level=info msg="processed block 984:  0 total tx, 0 tx confirmed from 0 wallets (507.958µs, 2.666µs)"
+time="2025-12-22T11:27:09+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:27:09+01:00" level=info msg="processed block 985:  0 total tx, 0 tx confirmed from 0 wallets (928.75µs, 6.541µs)"
+time="2025-12-22T11:27:15+01:00" level=info msg="processed block 986:  0 total tx, 0 tx confirmed from 0 wallets (1.02225ms, 6.709µs)"
+time="2025-12-22T11:27:21+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:27:21+01:00" level=info msg="processed block 987:  0 total tx, 0 tx confirmed from 0 wallets (381.042µs, 4.916µs)"
+time="2025-12-22T11:27:27+01:00" level=info msg="processed block 988:  0 total tx, 0 tx confirmed from 0 wallets (948.208µs, 6.833µs)"
+time="2025-12-22T11:27:33+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:27:33+01:00" level=info msg="processed block 989:  0 total tx, 0 tx confirmed from 0 wallets (1.328125ms, 6.667µs)"
+time="2025-12-22T11:27:39+01:00" level=info msg="processed block 990:  0 total tx, 0 tx confirmed from 0 wallets (1.218458ms, 6.292µs)"
+time="2025-12-22T11:27:45+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T11:27:45+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:27:45+01:00" level=info msg="processed block 991:  0 total tx, 0 tx confirmed from 0 wallets (1.431042ms, 7.875µs)"
+time="2025-12-22T11:27:51+01:00" level=info msg="processed block 992:  0 total tx, 0 tx confirmed from 0 wallets (750.833µs, 7.125µs)"
+time="2025-12-22T11:27:57+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:27:57+01:00" level=info msg="processed block 993:  0 total tx, 0 tx confirmed from 0 wallets (1.16225ms, 6.125µs)"
+time="2025-12-22T11:28:03+01:00" level=info msg="processed block 994:  0 total tx, 0 tx confirmed from 0 wallets (503.333µs, 4.917µs)"
+time="2025-12-22T11:28:09+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:28:09+01:00" level=info msg="processed block 995:  0 total tx, 0 tx confirmed from 0 wallets (576.667µs, 4.083µs)"
+time="2025-12-22T11:28:15+01:00" level=info msg="processed block 996:  0 total tx, 0 tx confirmed from 0 wallets (969.25µs, 5.25µs)"
+time="2025-12-22T11:28:21+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:28:21+01:00" level=info msg="processed block 997:  0 total tx, 0 tx confirmed from 0 wallets (1.113458ms, 6µs)"
+time="2025-12-22T11:28:27+01:00" level=info msg="processed block 998:  0 total tx, 0 tx confirmed from 0 wallets (1.029709ms, 7.292µs)"
+time="2025-12-22T11:28:33+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:28:33+01:00" level=info msg="processed block 999:  0 total tx, 0 tx confirmed from 0 wallets (891.625µs, 6.584µs)"
+time="2025-12-22T11:28:39+01:00" level=info msg="processed block 1000:  0 total tx, 0 tx confirmed from 0 wallets (862.833µs, 4.667µs)"
+time="2025-12-22T11:28:45+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:28:45+01:00" level=info msg="processed block 1001:  0 total tx, 0 tx confirmed from 0 wallets (619.834µs, 4.75µs)"
+time="2025-12-22T11:28:51+01:00" level=info msg="processed block 1002:  0 total tx, 0 tx confirmed from 0 wallets (584.542µs, 3.084µs)"
+time="2025-12-22T11:28:57+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:28:57+01:00" level=info msg="processed block 1003:  0 total tx, 0 tx confirmed from 0 wallets (810.959µs, 7.125µs)"
+time="2025-12-22T11:29:03+01:00" level=info msg="processed block 1004:  0 total tx, 0 tx confirmed from 0 wallets (609.875µs, 5.583µs)"
+time="2025-12-22T11:29:09+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:29:09+01:00" level=info msg="processed block 1005:  0 total tx, 0 tx confirmed from 0 wallets (892.708µs, 8.125µs)"
+time="2025-12-22T11:29:15+01:00" level=info msg="processed block 1006:  0 total tx, 0 tx confirmed from 0 wallets (864.084µs, 4.833µs)"
+time="2025-12-22T11:29:21+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:29:21+01:00" level=info msg="processed block 1007:  0 total tx, 0 tx confirmed from 0 wallets (541.792µs, 4.042µs)"
+time="2025-12-22T11:29:27+01:00" level=info msg="processed block 1008:  0 total tx, 0 tx confirmed from 0 wallets (900.292µs, 6.625µs)"
+time="2025-12-22T11:29:33+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:29:33+01:00" level=info msg="processed block 1009:  0 total tx, 0 tx confirmed from 0 wallets (545.209µs, 4.917µs)"
+time="2025-12-22T11:29:39+01:00" level=info msg="processed block 1010:  0 total tx, 0 tx confirmed from 0 wallets (1.529625ms, 7.083µs)"
+time="2025-12-22T11:29:45+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T11:29:45+01:00" level=info msg="waiting for root wallet funding. Current: 49 ETH, still need: 1 ETH"
+time="2025-12-22T11:29:45+01:00" level=info msg="processed block 1011:  0 total tx, 0 tx confirmed from 0 wallets (679.458µs, 5.834µs)"
+time="2025-12-22T11:29:51+01:00" level=info msg="processed block 1012:  1 total tx, 0 tx confirmed from 0 wallets (426.25µs, 192.541µs)"
+time="2025-12-22T11:29:57+01:00" level=info msg="funding child wallets... (0/10)" module=walletpool
+time="2025-12-22T11:29:57+01:00" level=info msg="processed block 1013:  0 total tx, 0 tx confirmed from 0 wallets (315.709µs, 2.375µs)"
+time="2025-12-22T11:30:03+01:00" level=info msg="processed block 1014:  10 total tx, 10 tx confirmed from 1 wallets (2.022ms, 759.292µs)"
+time="2025-12-22T11:30:03+01:00" level=info msg="initialized 10 child wallets" module=walletpool
+time="2025-12-22T11:30:03+01:00" level=info msg="Phase 1: Funding auxiliary accounts" scenario=storage-trie-brancher
+time="2025-12-22T11:30:03+01:00" level=info msg="Total unique auxiliary accounts to fund: 30" scenario=storage-trie-brancher
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    30: 0x04cdfb59808f72bd363d5931e128de808bd6ef997bc07bdab07deb559d148b36 to 0x4343e2ae9abbfdba0aa7d1225c275ed1e6f00e31" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=10
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    14: 0x5df1f7d0e357ed993b1f654517bf83daff71a1691bccd75e57da1273c1253a6a to 0x0773103e2026e25890c0eaffd929eb7271e344cb" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=4
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    18: 0xc50d7b41f76d3650d79ad220956205893b87abf144c343711ed29ad0b6a2b9bd to 0x2b721072c4fe4f955378dc36fe3834bd8f0f484f" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=8
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #     1: 0xbd7040aa94299050a875c23f179f0a83530435cbdcbede01d5b1f57b63dbd121 to 0xe0edaf8adb497c92b7ed31a39752f3f625a373b5" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=1
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    22: 0x92999713f2be4620b87b80d3460221c430cdf3c8cd8721db131bcf200df56733 to 0x5485b886e74f3a7a7530b40d306437f5967f3613" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=2
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #     4: 0x68b279f6a020e422e9a8a565e0e563e82e8acefc03457db7198016361f2cb055 to 0x4eb376d917de77c432927e7541971fafd99d4ea4" nonce=1 rpc="localhost:8545" scenario=storage-trie-brancher wallet=4
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    10: 0x3d73a8130e32834d268014e62cdeb302ec384652965c2b0f53b29a94fab1088d to 0xbbc3c1390eab0bb3ef3dbdebc62a24903d2a33d7" nonce=1 rpc="localhost:8545" scenario=storage-trie-brancher wallet=10
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #     8: 0xeb2b7a7a7ee72961e3c1b454b3eada875b2d62de3aa076404b795c523c11bd05 to 0x8104633b06773a7b2038c8fcaaf2a375e3ad8f5e" nonce=1 rpc="localhost:8545" scenario=storage-trie-brancher wallet=8
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    20: 0xf208396ccfeac9bf81ded0248200ba28d6c54084ba12ac100fd5718b467050e9 to 0xa58f77279e40a07be0ca1fcde0e9e22a2e1152dd" nonce=2 rpc="localhost:8545" scenario=storage-trie-brancher wallet=10
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #     5: 0x60b1bcb84d0b2704a866e2487303a73adb6e3c07feb591f7ebdc9b16f6d67994 to 0xe10370a3794ee2fed9c8058be2a7f98c0aeca95f" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=5
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #     6: 0x9d724e9b11fc3fb3fabe1027384276fdb226c83ed93b2e78db30ee142dc25b45 to 0xded36c055104964abe7f45419379879775e6fe67" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=6
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    16: 0x49ccec528ab443409f7e76fd706cac99567ad0ebd8b586da76f5f25d5213b7a9 to 0x0b9bcecfe5b86397c9304c5e5c1122d22f2ccdd0" nonce=1 rpc="localhost:8545" scenario=storage-trie-brancher wallet=6
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    26: 0x23539b64bbb5def38ea298fe7e0703e00b4087739dd4d189e6919bee19105d72 to 0xe2fe872901ec2c7eee80a818a47fcc193f8f6c84" nonce=2 rpc="localhost:8545" scenario=storage-trie-brancher wallet=6
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #     3: 0x7ea1ae51cf25514fa563ae7a800f69e5098ebd91a3ba52af140340e5113c428e to 0x1d00b0e559030297853c5746b14ffc054ac0878b" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=3
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #     2: 0x39cb540c41d41b574181147bf6469aeccb9e1769dfbbb0e81640dc76d97ebc9c to 0x6a62703a01592f1fde45c2c29d9effc8d631c3f0" nonce=1 rpc="localhost:8545" scenario=storage-trie-brancher wallet=2
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    12: 0x222e94796a27715ced16726db8c8e90603f4ec519b6c4d70c3ce1a2b604fe624 to 0x9b9091a48e9fc72e399bc5ea9e5dffef7056cc0f" nonce=2 rpc="localhost:8545" scenario=storage-trie-brancher wallet=2
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    23: 0x20d51e1e370f17fc3921cef1f31b94245359aa472844e9ed0f7d86fb72d4bf01 to 0xd9a87069bd5034e94f872ff8ebd4d2cbeeea7340" nonce=1 rpc="localhost:8545" scenario=storage-trie-brancher wallet=3
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    13: 0x7898b35d3679c8fe4f8e2216e40efd7b85195bc7ac7a1f32a9d5c7e5d55a70fc to 0x1b1e0166b6d5ec1b1154f2a36dc6d25c1a92ac39" nonce=2 rpc="localhost:8545" scenario=storage-trie-brancher wallet=3
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    28: 0x3c0fdfea69573c9b2a719a32d408cfc8e641d06fa1380bd2aa986305f291b876 to 0xaf32e1f91cf0e3ee8fe906d1f88005872120b441" nonce=2 rpc="localhost:8545" scenario=storage-trie-brancher wallet=8
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #     7: 0x204bbfc13efac4828e1a83aadac85d7d461147490353069fd1168a4367b3d6e2 to 0x33dd9bdf7168f3fe1dc6a69f883f03f6f12120e3" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=7
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    27: 0xfdfec8c9a95bd9163501d2ed37b830ecd6b8fa856e5207f303112769368569bb to 0x90d6414112e7a9a184a8859ac622c0755cdd6726" nonce=1 rpc="localhost:8545" scenario=storage-trie-brancher wallet=7
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    17: 0xe43724605c895343b500be5ac747e4d16348deea70143494ebea6504e532d57d to 0xe7b6086e50ea91f71bdd4a90be1a2fa54a19d7bf" nonce=2 rpc="localhost:8545" scenario=storage-trie-brancher wallet=7
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    15: 0x95cda37ab269f73de192b2c249f009ec1c5cfe00754797b5e63c5a33f90f62e8 to 0x460e6f08338ec3a5fe9a4f18ccf34d774c75381a" nonce=1 rpc="localhost:8545" scenario=storage-trie-brancher wallet=5
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    25: 0x2046185f2426f3ba9ab89072e0e2973d0ea3d41cc6efd695e15af4d26e6e2afe to 0x3aa0217c1f33a050c47d576500d75a924f864a64" nonce=2 rpc="localhost:8545" scenario=storage-trie-brancher wallet=5
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    24: 0x786f67c0298f22f0caf73dc011bdc7f9fef9067babf6f7a7cf9cc3f05f63a872 to 0xf96d1ad6e1f6227caa4a0fcbff8207cc4301bbdd" nonce=2 rpc="localhost:8545" scenario=storage-trie-brancher wallet=4
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #     9: 0x8960fc22336a8aca38d3ed834e73f058816f3190a4fd2ea2f4d2d15ef042e3dc to 0x058e15417f3a06220fee658c1b212e0a160ec80b" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=9
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    29: 0x69bd616f9e76b808c2840f777e7fa5f8001e9479dba70f0e94cf953ba82121aa to 0x4ab617cc8c21e8f94e90f12fb385b5e7c07cd7c3" nonce=1 rpc="localhost:8545" scenario=storage-trie-brancher wallet=9
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    19: 0x8f8d141e317769c88457440fb8f9d38cde546e5598036fe1ccea47d48aa25566 to 0x9bd9e77578899b168bcc3657f39b1ed0a7c17f19" nonce=2 rpc="localhost:8545" scenario=storage-trie-brancher wallet=9
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    11: 0x4ab637ef4d2de8ad09caa469f0357d9617f523100c0c8e33b2d982e77ce2df2d to 0xd5890c51cd2070add5c3b001059c8b773dcef730" nonce=1 rpc="localhost:8545" scenario=storage-trie-brancher wallet=1
+time="2025-12-22T11:30:09+01:00" level=info msg="processed block 1015:  30 total tx, 30 tx confirmed from 10 wallets (3.301ms, 4.36825ms)"
+time="2025-12-22T11:30:09+01:00" level=info msg="sent funding tx #    21: 0xf9fe5b38893a6a07ec045ffdaa37fceccbf2a650e8a69305348354cb331b7bf2 to 0xe25e73f13c319895f3fab5d4365ef228dc43211d" nonce=2 rpc="localhost:8545" scenario=storage-trie-brancher wallet=1
+time="2025-12-22T11:30:09+01:00" level=info msg="Funded 30 auxiliary accounts" scenario=storage-trie-brancher
+time="2025-12-22T11:30:09+01:00" level=info msg="Phase 2: Deploying contracts via Nick's factory" scenario=storage-trie-brancher
+time="2025-12-22T11:30:09+01:00" level=info msg="block 1015: submitted=30, pending=0, confirmed=30, throughput: 5B=30.00 tx/B, 20B=30.00 tx/B, 60B=30.00 tx/B" scenario=storage-trie-brancher wallets=10
+time="2025-12-22T11:30:15+01:00" level=info msg="sent deployment tx #     2: 0xb6bc2c7771b6e3157ff86b74d0b3e79717af2200899329272df858767252196f (contract: 0x1Fa25EDA39aD5E256C00A805732f449D97AC5b7F)" nonce=3 rpc="localhost:8545" scenario=storage-trie-brancher wallet=2
+time="2025-12-22T11:30:15+01:00" level=info msg="sent deployment tx #    10: 0xb1cc411338f5508952a9a0149c7562b383e79840a1d78069aeb602adac951997 (contract: 0x7f7BEDc0F00617fBa88eE895F346ABF16A5660fb)" nonce=3 rpc="localhost:8545" scenario=storage-trie-brancher wallet=10
+time="2025-12-22T11:30:15+01:00" level=info msg="sent deployment tx #     5: 0xc0869ee94b3c79ec2d0cbf1b6a22df03b5ba2683aab1ce5a84cdf608ef4bd4a3 (contract: 0xd63A1339627c1e14dC1f8c632c03C0CAE55667F7)" nonce=3 rpc="localhost:8545" scenario=storage-trie-brancher wallet=5
+time="2025-12-22T11:30:15+01:00" level=info msg="sent deployment tx #     1: 0x856f7b0520a63ce538797cc1db9b02bdce83bfe4acef80702df3810edcff7bb7 (contract: 0x64b0879E1Dd6637c0A56CcE9d4b24DBee095c6DC)" nonce=3 rpc="localhost:8545" scenario=storage-trie-brancher wallet=1
+time="2025-12-22T11:30:15+01:00" level=info msg="sent deployment tx #     4: 0xcc028cbaaff79128971cf06993d1c104c1c7d6249658386d23650eb950ec6d88 (contract: 0x91EE288937E5Ac8dCeCa64759b714cF141146b03)" nonce=3 rpc="localhost:8545" scenario=storage-trie-brancher wallet=4
+time="2025-12-22T11:30:15+01:00" level=info msg="sent deployment tx #     7: 0x74543896763a4ccdebdaa3e138a7ee4480e14f7f62ee141fb7af70f9913e7ee6 (contract: 0x4d51c7842c380BaD2Dc1c904cb67038a599b75F9)" nonce=3 rpc="localhost:8545" scenario=storage-trie-brancher wallet=7
+time="2025-12-22T11:30:15+01:00" level=info msg="sent deployment tx #     8: 0xe16162dfbe0d7d2367384a6aedbd49e971c4533e827d1d256024bc9d4c3f72e0 (contract: 0x279831D1933c33F57ab46690bF0D01A011cc336e)" nonce=3 rpc="localhost:8545" scenario=storage-trie-brancher wallet=8
+time="2025-12-22T11:30:15+01:00" level=info msg="sent deployment tx #     6: 0x4dd6f4c58ed362d65bfd575b68b62e9b9279bc99ac2c8470205256836ccca3e0 (contract: 0x2c303B8f04500e74cDa725F170662e0Ed8d8eB32)" nonce=3 rpc="localhost:8545" scenario=storage-trie-brancher wallet=6
+time="2025-12-22T11:30:15+01:00" level=info msg="sent deployment tx #     9: 0x9f44c83733da0c98c0243f855272f65ed562599a6cf9061d158509b921a7838c (contract: 0xBB47D3115f13b3ea43640bF53Ae57F29E3BF0179)" nonce=3 rpc="localhost:8545" scenario=storage-trie-brancher wallet=9
+time="2025-12-22T11:30:15+01:00" level=info msg="processed block 1016:  10 total tx, 10 tx confirmed from 10 wallets (1.123958ms, 1.373333ms)"
+time="2025-12-22T11:30:15+01:00" level=info msg="block 1016: submitted=40, pending=0, confirmed=10, throughput: 5B=10.00 tx/B, 20B=10.00 tx/B, 60B=10.00 tx/B" scenario=storage-trie-brancher wallets=10
+time="2025-12-22T11:30:15+01:00" level=info msg="sent deployment tx #     3: 0x847ed3cce8f4e6cd5cda664f0409fb47cd7ee783ca0598b230fd49bd7b1a2c5e (contract: 0x2125fCE343EA04Df58FEe480f2fBb99F2d318471)" nonce=3 rpc="localhost:8545" scenario=storage-trie-brancher wallet=3
+time="2025-12-22T11:30:15+01:00" level=info msg="Deployed 10 contracts" scenario=storage-trie-brancher
+time="2025-12-22T11:30:15+01:00" level=info msg="Deployment info saved to scenarios/statebloat/storage_trie_brancher/deployed_contracts.json" scenario=storage-trie-brancher
+time="2025-12-22T11:30:15+01:00" level=info msg="Contract addresses saved to scenarios/statebloat/storage_trie_brancher/stubs.json" scenario=storage-trie-brancher
+time="2025-12-22T11:30:15+01:00" level=info msg="storage trie brancher scenario completed" accounts_funded=30 contracts_deployed=10 scenario=storage-trie-brancher

@@ -1,0 +1,2108 @@
+time="2025-12-22T10:59:12+01:00" level=info msg="starting spamoor" buildtime= version=git-
+time="2025-12-22T10:59:12+01:00" level=info msg="initialized client pool with 1 clients (chain id: 1337)" module=clientpool
+time="2025-12-22T10:59:12+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T10:59:12+01:00" level=info msg="initialized root wallet (addr: 0xFABB0ac9d68B0B445fB7357272Ff202C5651694a balance: 0 ETH, nonce: 0)"
+time="2025-12-22T10:59:12+01:00" level=info msg="processed block 705:  0 total tx, 0 tx confirmed from 0 wallets (291.459µs, 262.375µs)"
+time="2025-12-22T10:59:12+01:00" level=info msg="Compiled contract, init code size: 1870 bytes" scenario=storage-trie-brancher
+time="2025-12-22T10:59:12+01:00" level=info msg="initialized storage trie brancher scenario" account_depth=3 contract_file=scenarios/statebloat/storage_trie_brancher/depth_9.sol contracts=1000 data_file=scenarios/statebloat/storage_trie_brancher/s9_acc3.json scenario=storage-trie-brancher storage_depth=9
+time="2025-12-22T10:59:12+01:00" level=info msg="root wallet is locked, insufficient root wallet balance. awaiting addtional funds. needed: 51 ETH" module=walletpool
+time="2025-12-22T10:59:15+01:00" level=info msg="processed block 706:  0 total tx, 0 tx confirmed from 0 wallets (1.693375ms, 2.375µs)"
+time="2025-12-22T10:59:21+01:00" level=info msg="processed block 707:  0 total tx, 0 tx confirmed from 0 wallets (683.709µs, 4.125µs)"
+time="2025-12-22T10:59:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T10:59:27+01:00" level=info msg="processed block 708:  0 total tx, 0 tx confirmed from 0 wallets (646.417µs, 3.459µs)"
+time="2025-12-22T10:59:33+01:00" level=info msg="processed block 709:  0 total tx, 0 tx confirmed from 0 wallets (689.875µs, 3.5µs)"
+time="2025-12-22T10:59:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T10:59:39+01:00" level=info msg="processed block 710:  0 total tx, 0 tx confirmed from 0 wallets (931.959µs, 5.166µs)"
+time="2025-12-22T10:59:45+01:00" level=info msg="processed block 711:  0 total tx, 0 tx confirmed from 0 wallets (590.834µs, 2.042µs)"
+time="2025-12-22T10:59:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T10:59:51+01:00" level=info msg="processed block 712:  0 total tx, 0 tx confirmed from 0 wallets (738.875µs, 3.959µs)"
+time="2025-12-22T10:59:57+01:00" level=info msg="processed block 713:  0 total tx, 0 tx confirmed from 0 wallets (826.125µs, 6.958µs)"
+time="2025-12-22T11:00:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:00:03+01:00" level=info msg="processed block 714:  0 total tx, 0 tx confirmed from 0 wallets (976µs, 4.792µs)"
+time="2025-12-22T11:00:09+01:00" level=info msg="processed block 715:  0 total tx, 0 tx confirmed from 0 wallets (1.352166ms, 5.75µs)"
+time="2025-12-22T11:00:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:00:15+01:00" level=info msg="processed block 716:  0 total tx, 0 tx confirmed from 0 wallets (660.5µs, 3.167µs)"
+time="2025-12-22T11:00:21+01:00" level=info msg="processed block 717:  0 total tx, 0 tx confirmed from 0 wallets (1.450458ms, 4.958µs)"
+time="2025-12-22T11:00:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:00:27+01:00" level=info msg="processed block 718:  0 total tx, 0 tx confirmed from 0 wallets (1.205084ms, 12.708µs)"
+time="2025-12-22T11:00:33+01:00" level=info msg="processed block 719:  0 total tx, 0 tx confirmed from 0 wallets (590.041µs, 4.875µs)"
+time="2025-12-22T11:00:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:00:39+01:00" level=info msg="processed block 720:  0 total tx, 0 tx confirmed from 0 wallets (401.708µs, 5.458µs)"
+time="2025-12-22T11:00:45+01:00" level=info msg="processed block 721:  0 total tx, 0 tx confirmed from 0 wallets (302.209µs, 2.792µs)"
+time="2025-12-22T11:00:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:00:51+01:00" level=info msg="processed block 722:  0 total tx, 0 tx confirmed from 0 wallets (1.185875ms, 10µs)"
+time="2025-12-22T11:00:57+01:00" level=info msg="processed block 723:  0 total tx, 0 tx confirmed from 0 wallets (869.208µs, 6.291µs)"
+time="2025-12-22T11:01:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:01:03+01:00" level=info msg="processed block 724:  0 total tx, 0 tx confirmed from 0 wallets (701.292µs, 3.375µs)"
+time="2025-12-22T11:01:09+01:00" level=info msg="processed block 725:  0 total tx, 0 tx confirmed from 0 wallets (1.094375ms, 6.333µs)"
+time="2025-12-22T11:01:12+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T11:01:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:01:15+01:00" level=info msg="processed block 726:  0 total tx, 0 tx confirmed from 0 wallets (663.25µs, 3.834µs)"
+time="2025-12-22T11:01:21+01:00" level=info msg="processed block 727:  0 total tx, 0 tx confirmed from 0 wallets (505.375µs, 4.375µs)"
+time="2025-12-22T11:01:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:01:27+01:00" level=info msg="processed block 728:  0 total tx, 0 tx confirmed from 0 wallets (789.208µs, 6.5µs)"
+time="2025-12-22T11:01:33+01:00" level=info msg="processed block 729:  0 total tx, 0 tx confirmed from 0 wallets (815.875µs, 5.459µs)"
+time="2025-12-22T11:01:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:01:39+01:00" level=info msg="processed block 730:  0 total tx, 0 tx confirmed from 0 wallets (550.875µs, 4.083µs)"
+time="2025-12-22T11:01:45+01:00" level=info msg="processed block 731:  0 total tx, 0 tx confirmed from 0 wallets (551.417µs, 2.75µs)"
+time="2025-12-22T11:01:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:01:51+01:00" level=info msg="processed block 732:  0 total tx, 0 tx confirmed from 0 wallets (737.667µs, 3.709µs)"
+time="2025-12-22T11:01:57+01:00" level=info msg="processed block 733:  0 total tx, 0 tx confirmed from 0 wallets (292.542µs, 2.042µs)"
+time="2025-12-22T11:02:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:02:03+01:00" level=info msg="processed block 734:  0 total tx, 0 tx confirmed from 0 wallets (998.708µs, 7.167µs)"
+time="2025-12-22T11:02:09+01:00" level=info msg="processed block 735:  0 total tx, 0 tx confirmed from 0 wallets (1.097959ms, 13.625µs)"
+time="2025-12-22T11:02:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:02:15+01:00" level=info msg="processed block 736:  0 total tx, 0 tx confirmed from 0 wallets (510.916µs, 2.166µs)"
+time="2025-12-22T11:02:21+01:00" level=info msg="processed block 737:  0 total tx, 0 tx confirmed from 0 wallets (826.458µs, 6.125µs)"
+time="2025-12-22T11:02:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:02:27+01:00" level=info msg="processed block 738:  0 total tx, 0 tx confirmed from 0 wallets (819.375µs, 8µs)"
+time="2025-12-22T11:02:33+01:00" level=info msg="processed block 739:  0 total tx, 0 tx confirmed from 0 wallets (454.5µs, 4.75µs)"
+time="2025-12-22T11:02:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:02:39+01:00" level=info msg="processed block 740:  0 total tx, 0 tx confirmed from 0 wallets (663.459µs, 5.709µs)"
+time="2025-12-22T11:02:45+01:00" level=info msg="processed block 741:  0 total tx, 0 tx confirmed from 0 wallets (560.958µs, 4.833µs)"
+time="2025-12-22T11:02:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:02:51+01:00" level=info msg="processed block 742:  0 total tx, 0 tx confirmed from 0 wallets (732.083µs, 4.208µs)"
+time="2025-12-22T11:02:57+01:00" level=info msg="processed block 743:  0 total tx, 0 tx confirmed from 0 wallets (972.5µs, 6.167µs)"
+time="2025-12-22T11:03:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:03:03+01:00" level=info msg="processed block 744:  0 total tx, 0 tx confirmed from 0 wallets (961.584µs, 6.542µs)"
+time="2025-12-22T11:03:09+01:00" level=info msg="processed block 745:  0 total tx, 0 tx confirmed from 0 wallets (489.708µs, 3.375µs)"
+time="2025-12-22T11:03:12+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T11:03:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:03:15+01:00" level=info msg="processed block 746:  0 total tx, 0 tx confirmed from 0 wallets (531.083µs, 4.5µs)"
+time="2025-12-22T11:03:21+01:00" level=info msg="processed block 747:  0 total tx, 0 tx confirmed from 0 wallets (604µs, 5.334µs)"
+time="2025-12-22T11:03:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:03:27+01:00" level=info msg="processed block 748:  0 total tx, 0 tx confirmed from 0 wallets (1.088458ms, 5.792µs)"
+time="2025-12-22T11:03:33+01:00" level=info msg="processed block 749:  0 total tx, 0 tx confirmed from 0 wallets (1.155291ms, 3.625µs)"
+time="2025-12-22T11:03:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:03:39+01:00" level=info msg="processed block 750:  0 total tx, 0 tx confirmed from 0 wallets (1.123833ms, 9.209µs)"
+time="2025-12-22T11:03:45+01:00" level=info msg="processed block 751:  0 total tx, 0 tx confirmed from 0 wallets (629.5µs, 6.083µs)"
+time="2025-12-22T11:03:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:03:51+01:00" level=info msg="processed block 752:  0 total tx, 0 tx confirmed from 0 wallets (2.409958ms, 6.583µs)"
+time="2025-12-22T11:03:57+01:00" level=info msg="processed block 753:  0 total tx, 0 tx confirmed from 0 wallets (589.667µs, 6.083µs)"
+time="2025-12-22T11:04:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:04:03+01:00" level=info msg="processed block 754:  0 total tx, 0 tx confirmed from 0 wallets (1.15925ms, 5.542µs)"
+time="2025-12-22T11:04:09+01:00" level=info msg="processed block 755:  0 total tx, 0 tx confirmed from 0 wallets (600.584µs, 9.625µs)"
+time="2025-12-22T11:04:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:04:15+01:00" level=info msg="processed block 756:  0 total tx, 0 tx confirmed from 0 wallets (425.292µs, 3.209µs)"
+time="2025-12-22T11:04:21+01:00" level=info msg="processed block 757:  0 total tx, 0 tx confirmed from 0 wallets (399.708µs, 2.917µs)"
+time="2025-12-22T11:04:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:04:27+01:00" level=info msg="processed block 758:  0 total tx, 0 tx confirmed from 0 wallets (536.583µs, 6.667µs)"
+time="2025-12-22T11:04:33+01:00" level=info msg="processed block 759:  0 total tx, 0 tx confirmed from 0 wallets (543.875µs, 8.291µs)"
+time="2025-12-22T11:04:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:04:39+01:00" level=info msg="processed block 760:  0 total tx, 0 tx confirmed from 0 wallets (571.333µs, 6.25µs)"
+time="2025-12-22T11:04:45+01:00" level=info msg="processed block 761:  0 total tx, 0 tx confirmed from 0 wallets (1.105709ms, 8.542µs)"
+time="2025-12-22T11:04:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:04:51+01:00" level=info msg="processed block 762:  0 total tx, 0 tx confirmed from 0 wallets (295.708µs, 1.875µs)"
+time="2025-12-22T11:04:57+01:00" level=info msg="processed block 763:  0 total tx, 0 tx confirmed from 0 wallets (803.708µs, 7.583µs)"
+time="2025-12-22T11:05:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:05:03+01:00" level=info msg="processed block 764:  0 total tx, 0 tx confirmed from 0 wallets (2.057209ms, 6.959µs)"
+time="2025-12-22T11:05:09+01:00" level=info msg="processed block 765:  0 total tx, 0 tx confirmed from 0 wallets (795.708µs, 6.375µs)"
+time="2025-12-22T11:05:12+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T11:05:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:05:15+01:00" level=info msg="processed block 766:  0 total tx, 0 tx confirmed from 0 wallets (787.208µs, 6.5µs)"
+time="2025-12-22T11:05:21+01:00" level=info msg="processed block 767:  0 total tx, 0 tx confirmed from 0 wallets (1.289792ms, 7.708µs)"
+time="2025-12-22T11:05:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:05:27+01:00" level=info msg="processed block 768:  0 total tx, 0 tx confirmed from 0 wallets (478.292µs, 4.541µs)"
+time="2025-12-22T11:05:33+01:00" level=info msg="processed block 769:  0 total tx, 0 tx confirmed from 0 wallets (1.258166ms, 6.958µs)"
+time="2025-12-22T11:05:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:05:39+01:00" level=info msg="processed block 770:  0 total tx, 0 tx confirmed from 0 wallets (949.958µs, 5.416µs)"
+time="2025-12-22T11:05:45+01:00" level=info msg="processed block 771:  0 total tx, 0 tx confirmed from 0 wallets (1.204416ms, 8.917µs)"
+time="2025-12-22T11:05:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:05:51+01:00" level=info msg="processed block 772:  0 total tx, 0 tx confirmed from 0 wallets (479.917µs, 3.292µs)"
+time="2025-12-22T11:05:57+01:00" level=info msg="processed block 773:  0 total tx, 0 tx confirmed from 0 wallets (628.375µs, 4.542µs)"
+time="2025-12-22T11:06:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:06:03+01:00" level=info msg="processed block 774:  0 total tx, 0 tx confirmed from 0 wallets (1.080125ms, 7.416µs)"
+time="2025-12-22T11:06:09+01:00" level=info msg="processed block 775:  0 total tx, 0 tx confirmed from 0 wallets (611.084µs, 5.083µs)"
+time="2025-12-22T11:06:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:06:15+01:00" level=info msg="processed block 776:  0 total tx, 0 tx confirmed from 0 wallets (375µs, 4.5µs)"
+time="2025-12-22T11:06:21+01:00" level=info msg="processed block 777:  0 total tx, 0 tx confirmed from 0 wallets (518.292µs, 3.167µs)"
+time="2025-12-22T11:06:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:06:27+01:00" level=info msg="processed block 778:  0 total tx, 0 tx confirmed from 0 wallets (722.833µs, 7.667µs)"
+time="2025-12-22T11:06:33+01:00" level=info msg="processed block 779:  0 total tx, 0 tx confirmed from 0 wallets (529.25µs, 5.208µs)"
+time="2025-12-22T11:06:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:06:39+01:00" level=info msg="processed block 780:  0 total tx, 0 tx confirmed from 0 wallets (1.305166ms, 22.334µs)"
+time="2025-12-22T11:06:45+01:00" level=info msg="processed block 781:  0 total tx, 0 tx confirmed from 0 wallets (957.959µs, 4.834µs)"
+time="2025-12-22T11:06:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:06:51+01:00" level=info msg="processed block 782:  0 total tx, 0 tx confirmed from 0 wallets (922.25µs, 5.917µs)"
+time="2025-12-22T11:06:57+01:00" level=info msg="processed block 783:  0 total tx, 0 tx confirmed from 0 wallets (964.625µs, 5.791µs)"
+time="2025-12-22T11:07:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:07:03+01:00" level=info msg="processed block 784:  0 total tx, 0 tx confirmed from 0 wallets (560.084µs, 4.875µs)"
+time="2025-12-22T11:07:09+01:00" level=info msg="processed block 785:  0 total tx, 0 tx confirmed from 0 wallets (447.458µs, 2.333µs)"
+time="2025-12-22T11:07:12+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T11:07:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:07:15+01:00" level=info msg="processed block 786:  0 total tx, 0 tx confirmed from 0 wallets (370.458µs, 3.917µs)"
+time="2025-12-22T11:07:21+01:00" level=info msg="processed block 787:  0 total tx, 0 tx confirmed from 0 wallets (634.875µs, 6.625µs)"
+time="2025-12-22T11:07:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:07:27+01:00" level=info msg="processed block 788:  0 total tx, 0 tx confirmed from 0 wallets (670.333µs, 5.125µs)"
+time="2025-12-22T11:07:33+01:00" level=info msg="processed block 789:  0 total tx, 0 tx confirmed from 0 wallets (981.292µs, 5.709µs)"
+time="2025-12-22T11:07:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:07:39+01:00" level=info msg="processed block 790:  0 total tx, 0 tx confirmed from 0 wallets (557.125µs, 7.125µs)"
+time="2025-12-22T11:07:45+01:00" level=info msg="processed block 791:  0 total tx, 0 tx confirmed from 0 wallets (382.167µs, 4.708µs)"
+time="2025-12-22T11:07:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:07:51+01:00" level=info msg="processed block 792:  0 total tx, 0 tx confirmed from 0 wallets (696.584µs, 5.209µs)"
+time="2025-12-22T11:07:58+01:00" level=info msg="processed block 793:  0 total tx, 0 tx confirmed from 0 wallets (484.792µs, 5µs)"
+time="2025-12-22T11:08:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:08:04+01:00" level=info msg="processed block 794:  0 total tx, 0 tx confirmed from 0 wallets (890.084µs, 6.125µs)"
+time="2025-12-22T11:08:10+01:00" level=info msg="processed block 795:  0 total tx, 0 tx confirmed from 0 wallets (832.042µs, 5.625µs)"
+time="2025-12-22T11:08:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:08:16+01:00" level=info msg="processed block 796:  0 total tx, 0 tx confirmed from 0 wallets (461.541µs, 3.875µs)"
+time="2025-12-22T11:08:22+01:00" level=info msg="processed block 797:  0 total tx, 0 tx confirmed from 0 wallets (1.063416ms, 6.458µs)"
+time="2025-12-22T11:08:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:08:28+01:00" level=info msg="processed block 798:  0 total tx, 0 tx confirmed from 0 wallets (768.5µs, 5.959µs)"
+time="2025-12-22T11:08:34+01:00" level=info msg="processed block 799:  0 total tx, 0 tx confirmed from 0 wallets (558.5µs, 5.958µs)"
+time="2025-12-22T11:08:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:08:40+01:00" level=info msg="processed block 800:  0 total tx, 0 tx confirmed from 0 wallets (991.875µs, 9.333µs)"
+time="2025-12-22T11:08:46+01:00" level=info msg="processed block 801:  0 total tx, 0 tx confirmed from 0 wallets (503.875µs, 3µs)"
+time="2025-12-22T11:08:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:08:52+01:00" level=info msg="processed block 802:  0 total tx, 0 tx confirmed from 0 wallets (662.584µs, 3.417µs)"
+time="2025-12-22T11:08:58+01:00" level=info msg="processed block 803:  0 total tx, 0 tx confirmed from 0 wallets (1.010042ms, 5.458µs)"
+time="2025-12-22T11:09:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:09:04+01:00" level=info msg="processed block 804:  0 total tx, 0 tx confirmed from 0 wallets (398.583µs, 3.375µs)"
+time="2025-12-22T11:09:10+01:00" level=info msg="processed block 805:  0 total tx, 0 tx confirmed from 0 wallets (779.25µs, 5.583µs)"
+time="2025-12-22T11:09:12+01:00" level=info msg="client check completed (1 good clients, 0 bad clients)" module=clientpool
+time="2025-12-22T11:09:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:09:16+01:00" level=info msg="processed block 806:  0 total tx, 0 tx confirmed from 0 wallets (790.583µs, 4.667µs)"
+time="2025-12-22T11:09:22+01:00" level=info msg="processed block 807:  0 total tx, 0 tx confirmed from 0 wallets (799.292µs, 7µs)"
+time="2025-12-22T11:09:24+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:09:28+01:00" level=info msg="processed block 808:  0 total tx, 0 tx confirmed from 0 wallets (1.524ms, 6.708µs)"
+time="2025-12-22T11:09:34+01:00" level=info msg="processed block 809:  0 total tx, 0 tx confirmed from 0 wallets (933.625µs, 4.042µs)"
+time="2025-12-22T11:09:36+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:09:40+01:00" level=info msg="processed block 810:  0 total tx, 0 tx confirmed from 0 wallets (656.917µs, 5.417µs)"
+time="2025-12-22T11:09:46+01:00" level=info msg="processed block 811:  0 total tx, 0 tx confirmed from 0 wallets (1.165083ms, 4.75µs)"
+time="2025-12-22T11:09:48+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:09:52+01:00" level=info msg="processed block 812:  0 total tx, 0 tx confirmed from 0 wallets (510.625µs, 2.708µs)"
+time="2025-12-22T11:09:58+01:00" level=info msg="processed block 813:  0 total tx, 0 tx confirmed from 0 wallets (610.416µs, 6.417µs)"
+time="2025-12-22T11:10:00+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:10:04+01:00" level=info msg="processed block 814:  0 total tx, 0 tx confirmed from 0 wallets (495.458µs, 2.334µs)"
+time="2025-12-22T11:10:10+01:00" level=info msg="processed block 815:  0 total tx, 0 tx confirmed from 0 wallets (598.709µs, 6µs)"
+time="2025-12-22T11:10:12+01:00" level=info msg="waiting for root wallet funding. Current: 0 ETH, still need: 51 ETH"
+time="2025-12-22T11:10:16+01:00" level=info msg="processed block 816:  1 total tx, 0 tx confirmed from 0 wallets (1.476042ms, 1.287375ms)"
+time="2025-12-22T11:10:22+01:00" level=info msg="processed block 817:  0 total tx, 0 tx confirmed from 0 wallets (597µs, 4.167µs)"
+time="2025-12-22T11:10:24+01:00" level=info msg="funding child wallets... (0/10)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=info msg="processed block 818:  10 total tx, 10 tx confirmed from 1 wallets (1.997708ms, 935.875µs)"
+time="2025-12-22T11:10:28+01:00" level=debug msg="initialized child wallet    0 (addr: 0x49b27a073d042a7F73155Db2f44a04132FEb3eae, balance: 5 ETH, nonce: 0)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=debug msg="initialized child wallet    1 (addr: 0x7Da575c39544CA67F7EF4181F936a4e2d52Ac349, balance: 5 ETH, nonce: 0)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=debug msg="initialized child wallet    2 (addr: 0x934d68410DB4e1Fa621B40F69AaC614Cde0CA77E, balance: 5 ETH, nonce: 0)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=debug msg="initialized child wallet    3 (addr: 0x153e43a9af68Ef5690d11ceF67e59C98fF71AF7A, balance: 5 ETH, nonce: 0)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=debug msg="initialized child wallet    4 (addr: 0xDFbdD9d845AB539d204063888D07Bcac08C3De6F, balance: 5 ETH, nonce: 0)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=debug msg="initialized child wallet    5 (addr: 0xd7690f43dc85e3aDE052da1867AC076809240fB7, balance: 5 ETH, nonce: 0)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=debug msg="initialized child wallet    6 (addr: 0x6F67d4E02Abe855c822C2b3eee93ADe597CE9ad2, balance: 5 ETH, nonce: 0)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=debug msg="initialized child wallet    7 (addr: 0x3c480A8BC69e7b05479be4Cd99702DC5bB6261Cc, balance: 5 ETH, nonce: 0)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=debug msg="initialized child wallet    8 (addr: 0x5eaF6160243f3E73deBEcAf21B91AF1Ed113c39c, balance: 5 ETH, nonce: 0)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=debug msg="initialized child wallet    9 (addr: 0x0E287f6E99A65Bcb8D26Da3cf9c9A82D3CDfD752, balance: 5 ETH, nonce: 0)" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=info msg="initialized 10 child wallets" module=walletpool
+time="2025-12-22T11:10:28+01:00" level=info msg="Phase 1: Funding auxiliary accounts" scenario=storage-trie-brancher
+time="2025-12-22T11:10:28+01:00" level=info msg="Total unique auxiliary accounts to fund: 3000" scenario=storage-trie-brancher
+time="2025-12-22T11:10:34+01:00" level=info msg="sent funding tx #    92: 0x894f480d92a961f2ebc7812e6c28fc171b8a790245cf8a380dd2060b666b1694 to 0x4397fbaf5e1f5a2da7a51a17947c6c93dc73f232" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=2
+time="2025-12-22T11:10:34+01:00" level=info msg="sent funding tx #    25: 0x9e233e586cfc42ad8ed9cda67832ed282f1bf6b43c1675cab8052f1006910f0f to 0x3aa0217c1f33a050c47d576500d75a924f864a64" nonce=0 rpc="localhost:8545" scenario=storage-trie-brancher wallet=5
+fatal error: concurrent map read and map write
+
+goroutine 1478 [running]:
+internal/runtime/maps.fatal({0x1048b6a40?, 0x10445647c?})
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/runtime/panic.go:1058 +0x20
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140002830c8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:343 +0x80c
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x64, 0x14000e12fa0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 1 [runnable]:
+sync.runtime_notifyListWait(0x1400050c910, 0x1)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/runtime/sema.go:597 +0x150
+sync.(*Cond).Wait(0x1400050c900)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/sync/cond.go:71 +0xc4
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario({0x104bade80, 0x140002b8000}, {0xbb8, 0x0, 0x64, 0x0, 0x0, 0x14000160360, 0x0, 0x14000280310, ...})
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:232 +0xb24
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).Run(0x140002c6000, {0x104bade80, 0x140002b8000})
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:283 +0x628
+main.main()
+	/Users/random_anon/dev/spamoor/cmd/spamoor/main.go:185 +0xf20
+
+goroutine 4 [chan receive]:
+github.com/ethereum/go-ethereum/metrics.(*meterTicker).loop(0x104efd480)
+	/Users/random_anon/go/pkg/mod/github.com/!marius!van!der!wijden/go-ethereum@v0.0.0-20250401090816-5ab5127f5408/metrics/meter.go:159 +0x50
+created by github.com/ethereum/go-ethereum/metrics.(*meterTicker).add in goroutine 1
+	/Users/random_anon/go/pkg/mod/github.com/!marius!van!der!wijden/go-ethereum@v0.0.0-20250401090816-5ab5127f5408/metrics/meter.go:145 +0xc0
+
+goroutine 24 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*RootWallet).balanceUpdateLoop(0x14000118360, 0x140002803f0)
+	/Users/random_anon/dev/spamoor/spamoor/rootwallet.go:186 +0xa8
+created by github.com/ethpandaops/spamoor/spamoor.InitRootWallet in goroutine 1
+	/Users/random_anon/dev/spamoor/spamoor/rootwallet.go:74 +0x31c
+
+goroutine 25 [runnable]:
+github.com/ethereum/go-ethereum/crypto/secp256k1._Cfunc_secp256k1_ext_ecdsa_recover(0x156704aa0, 0x1400160a550, 0x1400160a500, 0x140003e80a0)
+	_cgo_gotypes.go:254 +0x34
+github.com/ethereum/go-ethereum/crypto/secp256k1.RecoverPubkey.func1(...)
+	/Users/random_anon/go/pkg/mod/github.com/!marius!van!der!wijden/go-ethereum@v0.0.0-20250401090816-5ab5127f5408/crypto/secp256k1/secp256.go:121
+github.com/ethereum/go-ethereum/crypto/secp256k1.RecoverPubkey({0x140003e80a0, 0x14000bda8a0?, 0x14000bda8c0?}, {0x1400160a500, 0x41, 0x0?})
+	/Users/random_anon/go/pkg/mod/github.com/!marius!van!der!wijden/go-ethereum@v0.0.0-20250401090816-5ab5127f5408/crypto/secp256k1/secp256.go:121 +0xe4
+github.com/ethereum/go-ethereum/crypto.Ecrecover(...)
+	/Users/random_anon/go/pkg/mod/github.com/!marius!van!der!wijden/go-ethereum@v0.0.0-20250401090816-5ab5127f5408/crypto/signature_cgo.go:33
+github.com/ethereum/go-ethereum/core/types.recoverPlain({0xdb, 0xbd, 0xa, 0xe5, 0xd, 0xa1, 0x45, 0x3e, 0xed, 0x8c, ...}, ...)
+	/Users/random_anon/go/pkg/mod/github.com/!marius!van!der!wijden/go-ethereum@v0.0.0-20250401090816-5ab5127f5408/core/types/transaction_signing.go:635 +0x1b4
+github.com/ethereum/go-ethereum/core/types.londonSigner.Sender({{{0x14000110120?, 0x14001095380?}}}, 0x14000fc4ac0)
+	/Users/random_anon/go/pkg/mod/github.com/!marius!van!der!wijden/go-ethereum@v0.0.0-20250401090816-5ab5127f5408/core/types/transaction_signing.go:343 +0x1c8
+github.com/ethereum/go-ethereum/core/types.cancunSigner.Sender({{{{0x14000110120?, 0x14001095380?}}}}, 0x14000fc4ac0)
+	/Users/random_anon/go/pkg/mod/github.com/!marius!van!der!wijden/go-ethereum@v0.0.0-20250401090816-5ab5127f5408/core/types/transaction_signing.go:266 +0x228
+github.com/ethereum/go-ethereum/core/types.pragueSigner.Sender({{{{{...}}}}}, 0x14000fc4ac0?)
+	/Users/random_anon/go/pkg/mod/github.com/!marius!van!der!wijden/go-ethereum@v0.0.0-20250401090816-5ab5127f5408/core/types/transaction_signing.go:197 +0x228
+github.com/ethereum/go-ethereum/core/types.Sender({0x104baef60, 0x14000d96e70}, 0x140008d2000?)
+	/Users/random_anon/go/pkg/mod/github.com/!marius!van!der!wijden/go-ethereum@v0.0.0-20250401090816-5ab5127f5408/core/types/transaction_signing.go:150 +0x80
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).processBlockTxs(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002ba6c0, 0x333, 0x140009ae480, 0x14000110120, 0x14000041cd8, 0x140002e9560)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:356 +0x28c
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).processBlock(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002ba6c0, 0x333)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:324 +0x66c
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).runTxPoolLoop(0x1400017a000)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:197 +0x2ec
+created by github.com/ethpandaops/spamoor/spamoor.NewTxPool in goroutine 1
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:168 +0x22c
+
+goroutine 26 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).processStaleTransactionsLoop(0x1400017a000)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:238 +0xa4
+created by github.com/ethpandaops/spamoor/spamoor.NewTxPool in goroutine 1
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:169 +0x26c
+
+goroutine 933 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011ad70}, 0x140002e00b0, 0x14000e02300, 0x140009a8170)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 608
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 157 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140000fe640}, 0x140000dc210, 0x14000e02480, 0x14000c16160)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 573
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 23 [select, 2 minutes]:
+github.com/ethpandaops/spamoor/spamoor.(*ClientPool).watchClientStatusLoop(0x140002803f0)
+	/Users/random_anon/dev/spamoor/spamoor/clientpool.go:187 +0x8c
+created by github.com/ethpandaops/spamoor/spamoor.(*ClientPool).PrepareClients in goroutine 1
+	/Users/random_anon/dev/spamoor/spamoor/clientpool.go:176 +0x64
+
+goroutine 27 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).runRebroadcastLoop(0x1400017a000)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:1440 +0xc4
+created by github.com/ethpandaops/spamoor/spamoor.NewTxPool in goroutine 1
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:170 +0x2ac
+
+goroutine 563 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140000dc210, 0x14000be3400, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140009b0030)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0xa, 0x14000201520)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 575 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000e94000, 0x1400050ca80, 0x1400090f880?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000e10078)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x16, 0x14000201840)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 762 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8410}, 0x14000d8a000, 0x14000c12080, 0x14000c16120)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 630
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 574 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140001620b0, 0x14000f020c0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140009b0060)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x15, 0x14000201800)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 542 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002e00b0, 0x14000e02c80, 0x10474a018?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000782678)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x5, 0x140002013c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 567 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f8c000, 0x14000f02500, 0x10459ae84?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140007826a8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0xe, 0x14000201620)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 573 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140000dc210, 0x14000e02480, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000282948)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x14, 0x140002017c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 576 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000c18000, 0x14000e9a2c0, 0x1044cee40?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006824b0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x17, 0x14000201880)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 565 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000e94000, 0x140011b0980, 0x1044b30d8?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000602108)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0xc, 0x140002015a0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 541 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f8c000, 0x14000e9a040, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006820c0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x4, 0x14000201380)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 568 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002e00b0, 0x14000e02600, 0x104458a78?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a180)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0xf, 0x14000201680)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 572 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d7a000, 0x1400100a780, 0x1044cee40?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000282918)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x13, 0x14000201780)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 564 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140001620b0, 0x14000be2880, 0x10459ae84?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000134918)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0xb, 0x14000201560)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 570 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d8a000, 0x14000e02900, 0x10474a018?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140002828b8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x11, 0x14000201700)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 675 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140005005f0}, 0x140001620b0, 0x1400108a600, 0x14000be0530)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 594
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 214 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000708140}, 0x140000dc210, 0x14000890080, 0x14000710100)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 633
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 543 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x1400101c000, 0x1400108a740, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682240)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x6, 0x14000201400)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 539 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000e94000, 0x14000be2700, 0x1044b30d8?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400000e810)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x2, 0x14000201300)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 158 [runnable]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000600140}, 0x140001620b0, 0x1400100a0c0, 0x14000f8a0f0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 634
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 569 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x1400101c000, 0x14000e02a40, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a120)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x10, 0x140002016c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 566 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000c18000, 0x140011b0e00, 0x10459ae84?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a150)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0xd, 0x140002015e0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 540 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000c18000, 0x1400050d5c0, 0x14000538ae0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c060)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x3, 0x14000201340)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 571 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f0c000, 0x14000be2a80, 0x104458a78?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140002828e8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x12, 0x14000201740)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 526 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000780500}, 0x14000f0c000, 0x1400050c280, 0x14000d881b0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 631
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 536 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*WalletPool).watchWalletBalancesLoop(0x14000160360)
+	/Users/random_anon/dev/spamoor/spamoor/walletpool.go:609 +0x118
+created by github.com/ethpandaops/spamoor/spamoor.(*WalletPool).PrepareWallets in goroutine 1
+	/Users/random_anon/dev/spamoor/spamoor/walletpool.go:481 +0x614
+
+goroutine 548 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011a190}, 0x140001620b0, 0x14000be2880, 0x14000d5c1c0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 564
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 545 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f0c000, 0x14000c7e900, 0x10474a018?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a1b0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x8, 0x14000201480)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 495 [runnable]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8190}, 0x140001620b0, 0x14000e02100, 0x14000f0a0f0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 624
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 562 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d7a000, 0x1400050da40, 0x104458a78?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000d98150)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x9, 0x140002014e0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 690 [runnable]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000680140}, 0x1400101c000, 0x140007c2080, 0x14000e92180)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 619
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 550 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011a500}, 0x1400101c000, 0x14000be2ac0, 0x14000d5c4f0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 589
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 160 [runnable]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140006003c0}, 0x14000d7a000, 0x1400100a340, 0x14000f8a1f0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 632
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 547 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011a0a0}, 0x140000dc210, 0x14000be2740, 0x14000d5c0d0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 613
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 537 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140000dc210, 0x140011b0180, 0x1044cee40?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400000e840)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x0, 0x14000201280)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 538 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140001620b0, 0x140011b0680, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000c2e018)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x1, 0x140002012c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 544 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d8a000, 0x1400050c080, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000c2e000)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x7, 0x14000201440)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 144 [runnable]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140000fe190}, 0x14000f0c000, 0x14000c12140, 0x14000c16180)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 591
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 513 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140005003c0}, 0x140002e00b0, 0x1400108a300, 0x14000be0450)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 648
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 746 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000f3a190}, 0x14000e94000, 0x14000e9a500, 0x14000d5c570)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 625
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 496 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8370}, 0x140000dc210, 0x14000e02380, 0x14000f0a1e0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 643
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 555 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000680190}, 0x14000d8a000, 0x140011b0000, 0x14000e92070)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 600
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 170 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b20f0}, 0x140000dc210, 0x140011b0180, 0x140009a80d0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 537
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 524 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140007802d0}, 0x14000d8a000, 0x1400050c080, 0x14000d880a0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 544
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 578 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002e00b0, 0x14000c7e600, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006824e0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x19, 0x14000201900)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 579 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x1400101c000, 0x1400050c6c0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682348)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x1a, 0x14000201940)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 580 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d8a000, 0x1400100a100, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c240)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x1b, 0x14000201980)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 581 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f0c000, 0x1400050cac0, 0x2a?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682390)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x1c, 0x140002019c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 582 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d7a000, 0x1400050c880, 0x1?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682378)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x1d, 0x14000201a20)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 583 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140000dc210, 0x14000e9a1c0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006823a8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x1e, 0x14000201a60)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 584 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140001620b0, 0x140007c2a80, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006823d8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x1f, 0x14000201aa0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 585 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000e94000, 0x14000e02740, 0x10445528c?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682408)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x20, 0x14000201ae0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 586 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000c18000, 0x1400050d8c0, 0x10474a018?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000282888)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x21, 0x14000201b20)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 587 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f8c000, 0x1400108aac0, 0x1044b30d8?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000d981b0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x22, 0x14000201b60)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 588 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002e00b0, 0x1400050d140, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c210)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x23, 0x14000201ba0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 589 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x1400101c000, 0x14000be2ac0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000d982b8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x24, 0x14000201be0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 590 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d8a000, 0x14000f02800, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c1e0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x25, 0x14000201c20)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 591 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f0c000, 0x14000c12140, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a318)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x26, 0x14000201c60)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 592 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d7a000, 0x1400108a900, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a300)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x27, 0x14000201ca0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 593 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140000dc210, 0x14000be3280, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000e10048)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x28, 0x14000201ce0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 594 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140001620b0, 0x1400108a600, 0x1044cee40?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000d98180)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x29, 0x14000201d20)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 595 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000e94000, 0x14000c7e300, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a240)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x2a, 0x14000201d60)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 596 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000c18000, 0x14000f02980, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a270)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x2b, 0x14000201da0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 597 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f8c000, 0x140011b0b00, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a2a0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x2c, 0x14000201de0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 598 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002e00b0, 0x14000c12740, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a2d0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x2d, 0x14000201e20)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 599 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x1400101c000, 0x1400108ae00, 0x10474a018?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000d981e0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x2e, 0x14000201e60)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 600 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d8a000, 0x140011b0000, 0x140007dcbc0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140009b00d8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x2f, 0x14000201ea0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 601 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f0c000, 0x1400050d440, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000c2e048)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x30, 0x14000201ee0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 602 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d7a000, 0x14000c128c0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a210)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x31, 0x14000201f20)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 603 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140000dc210, 0x1400100a680, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000602168)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x32, 0x14000201f60)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 604 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140001620b0, 0x14000be3840, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000602198)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x33, 0x1400029a100)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 605 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000e94000, 0x140011b0c80, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006021c8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x34, 0x1400029a180)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 606 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000c18000, 0x14000c7e480, 0x2a?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000782798)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x35, 0x1400029a1c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 607 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f8c000, 0x1400050cfc0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682318)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x36, 0x1400029a200)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 608 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002e00b0, 0x14000e02300, 0x1400095a420?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000782768)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x37, 0x1400029a240)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 609 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x1400101c000, 0x140011b0800, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000282288)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x38, 0x1400029a280)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 610 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d8a000, 0x140011b0440, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682330)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x39, 0x1400029a2e0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 611 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f0c000, 0x1400050cc80, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682360)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x3a, 0x1400029a320)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 612 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d7a000, 0x14000be3080, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000e10000)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x3b, 0x1400029a360)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 613 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140000dc210, 0x14000be2740, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006021f8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x3c, 0x1400029a3a0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 614 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140001620b0, 0x1400100a640, 0x140007dcbc0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000e10030)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x3d, 0x1400029a3e0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 615 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000e94000, 0x1400108a100, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140007827c8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x3e, 0x1400029a440)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 616 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000c18000, 0x1400108ac40, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000502690)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x3f, 0x1400029a4a0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 617 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f8c000, 0x140001161c0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140009b00f0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x40, 0x1400029a4e0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 618 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002e00b0, 0x1400108b140, 0x10474a018?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140009b00c0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x41, 0x1400029a540)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 619 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x1400101c000, 0x140007c2080, 0x1044cee40?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000602138)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x42, 0x1400029a580)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 620 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d8a000, 0x14000be2d40, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c0c0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x43, 0x1400029a5c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 621 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f0c000, 0x1400100a900, 0x14000c1de20?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682120)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x44, 0x1400029a600)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 622 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d7a000, 0x1400050cc40, 0x14000c1d7e0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682150)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x45, 0x1400029a640)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 623 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140000dc210, 0x14000c7ee00, 0x1044b30d8?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682180)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x46, 0x1400029a680)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 624 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140001620b0, 0x14000e02100, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006821b0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x47, 0x1400029a6c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 625 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000e94000, 0x14000e9a500, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006821e0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x48, 0x1400029a700)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 626 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000c18000, 0x14000e02780, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682210)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x49, 0x1400029a740)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 627 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f8c000, 0x14000e02200, 0x1044cee40?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006820f0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x4a, 0x1400029a780)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 628 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002e00b0, 0x1400108af80, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c0f0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x4b, 0x1400029a7c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 629 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x1400101c000, 0x14000e02b40, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c120)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x4c, 0x1400029a800)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 630 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d8a000, 0x14000c12080, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c150)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x4d, 0x1400029a840)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 631 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f0c000, 0x1400050c280, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682270)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x4e, 0x1400029a880)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 632 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d7a000, 0x1400100a340, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000782738)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x4f, 0x1400029a8c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 633 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140000dc210, 0x14000890080, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c180)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x50, 0x1400029a900)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 634 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140001620b0, 0x1400100a0c0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c1b0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x51, 0x1400029a940)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 635 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000e94000, 0x140011b0200, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400080c090)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x52, 0x1400029a980)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 636 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000c18000, 0x14000c7e100, 0x10474a018?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000134978)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x53, 0x1400029a9c0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 637 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f8c000, 0x1400050d2c0, 0x10449f0bc?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140001349a8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x54, 0x1400029aa00)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 638 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002e00b0, 0x14000f02680, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140001349d8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x55, 0x1400029aa40)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 639 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x1400101c000, 0x1400100aa80, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000782708)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x56, 0x1400029aa80)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 640 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d8a000, 0x14000c7e780, 0x10459ae84?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140007826d8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x57, 0x1400029aac0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 641 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f0c000, 0x14000c7ea80, 0x1044b30d8?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x1400070a1e0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x58, 0x1400029ab00)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 642 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d7a000, 0x140008901c0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000e80000)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x59, 0x1400029ab40)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 643 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140000dc210, 0x14000e02380, 0x140006d1730?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000134948)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x5a, 0x1400029ab80)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 645 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000e94000, 0x14000fc4580, 0x104458a78?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000502600)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x5c, 0x1400029ac00)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 646 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000c18000, 0x14000c12380, 0x1044cee40?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000502630)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x5d, 0x1400029ac40)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 647 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f8c000, 0x14000c125c0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000282960)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x5e, 0x1400029ac80)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 648 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x140002e00b0, 0x1400108a300, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000e80030)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x5f, 0x1400029acc0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 649 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x1400101c000, 0x14000fc43c0, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000502660)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x60, 0x1400029ad00)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 650 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d8a000, 0x14000c7ec00, 0x38500000394?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140006822e8)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x61, 0x1400029ad40)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 651 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000f0c000, 0x1400100a480, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x14000682300)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x62, 0x1400029ad80)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 652 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).SendAndAwaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8000}, 0x14000d7a000, 0x1400108a580, 0x0?)
+	/Users/random_anon/dev/spamoor/spamoor/submitter.go:170 +0x1f4
+github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher.(*Scenario).sendFundingTx(0x140002c6000, {0x104bade80, 0x140002b8000}, 0x140005025a0)
+	/Users/random_anon/dev/spamoor/scenarios/statebloat/storage_trie_brancher/storage_trie_brancher.go:398 +0x424
+github.com/ethpandaops/spamoor/scenario.RunTransactionScenario.func4(0x63, 0x1400029adc0)
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:294 +0x1c0
+created by github.com/ethpandaops/spamoor/scenario.RunTransactionScenario in goroutine 1
+	/Users/random_anon/dev/spamoor/scenario/txscenario.go:254 +0xac4
+
+goroutine 935 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011b450}, 0x14000e94000, 0x14000e02740, 0x140009a82a0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 585
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 937 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011b680}, 0x1400101c000, 0x14000e02a40, 0x140009a8410)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 569
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 703 [select]:
+net/http.(*persistConn).writeLoop(0x1400069e240)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/http/transport.go:2590 +0x9c
+created by net/http.(*Transport).dialConn in goroutine 552
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/http/transport.go:1945 +0x120c
+
+goroutine 676 [runnable]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140005007d0}, 0x1400101c000, 0x1400108a740, 0x14000be0630)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 543
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 708 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000600690}, 0x140000dc210, 0x1400100a680, 0x14000f8a310)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 603
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1018 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000601180}, 0x1400101c000, 0x1400100aa80, 0x14000710480)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 639
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 653 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140007800a0}, 0x14000f8c000, 0x14000e9a040, 0x14000794050)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 541
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 679 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000500c30}, 0x14000d7a000, 0x1400108a900, 0x14000be0830)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 592
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 710 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140006008c0}, 0x14000d7a000, 0x1400100a780, 0x14000f8a380)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 572
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 680 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000500e10}, 0x14000f8c000, 0x1400108aac0, 0x14000be0990)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 587
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 711 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009a6190}, 0x14000c18000, 0x14000c7e100, 0x14000f8a100)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 636
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 528 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000780730}, 0x1400101c000, 0x1400050c6c0, 0x14000d88290)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 579
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 681 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140000fe1e0}, 0x14000e94000, 0x1400108a100, 0x14000f0a0f0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 615
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 738 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000780960}, 0x14000d7a000, 0x1400050c880, 0x14000d88380)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 582
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 754 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b61e0}, 0x14000e94000, 0x14000be2700, 0x14000c16120)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 539
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 661 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011a410}, 0x14000f8c000, 0x14000e02200, 0x14000794160)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 627
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 682 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140000fe5a0}, 0x14000d7a000, 0x1400108a580, 0x14000f0a2c0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 652
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 741 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000780b90}, 0x14000f0c000, 0x1400050cac0, 0x14000d88460)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 581
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 663 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011a8c0}, 0x140002e00b0, 0x14000e02600, 0x14000794240)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 568
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 684 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140000fe870}, 0x14000c18000, 0x1400108ac40, 0x14000f0a390)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 616
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 756 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b6640}, 0x14000f0c000, 0x14000be2a80, 0x14000c16260)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 571
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 665 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011aaf0}, 0x14000c18000, 0x14000e02780, 0x14000794330)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 626
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 686 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140000feaa0}, 0x1400101c000, 0x1400108ae00, 0x14000f0a460)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 599
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 667 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011ad20}, 0x14000d8a000, 0x14000e02900, 0x14000794440)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 570
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 743 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000780dc0}, 0x14000f0c000, 0x1400050cc80, 0x14000d88570)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 611
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 688 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140000fecd0}, 0x140002e00b0, 0x1400108af80, 0x14000f0a540)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 628
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 758 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b6910}, 0x14000d8a000, 0x14000be2d40, 0x14000c16350)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 620
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 669 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011b040}, 0x1400101c000, 0x14000e02b40, 0x140007945e0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 629
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 770 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140000fef00}, 0x140002e00b0, 0x1400108b140, 0x14000f0a610)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 618
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 692 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400084a0f0}, 0x140001620b0, 0x14000f020c0, 0x140009a8200)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 574
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 694 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400084a320}, 0x14000f8c000, 0x14000f02500, 0x140009a82e0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 567
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 696 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400084a550}, 0x140002e00b0, 0x14000f02680, 0x140009a83b0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 638
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 698 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400084a780}, 0x14000d8a000, 0x14000f02800, 0x140009a8480)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 590
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 700 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400084a9b0}, 0x14000c18000, 0x14000f02980, 0x140009a8550)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 596
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 802 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000708320}, 0x14000d7a000, 0x140008901c0, 0x14000860160)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 642
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 702 [IO wait]:
+internal/poll.runtime_pollWait(0x14be77548, 0x72)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/runtime/netpoll.go:351 +0xa0
+internal/poll.(*pollDesc).wait(0x14000eb4680?, 0x1400051c000?, 0x0)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/internal/poll/fd_poll_runtime.go:84 +0x28
+internal/poll.(*pollDesc).waitRead(...)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x14000eb4680, {0x1400051c000, 0x1000, 0x1000})
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/internal/poll/fd_unix.go:165 +0x1fc
+net.(*netFD).Read(0x14000eb4680, {0x1400051c000?, 0xf?, 0x8?})
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/fd_posix.go:55 +0x28
+net.(*conn).Read(0x14000dea028, {0x1400051c000?, 0x14000284c30?, 0xb2fc4305bd1956b3?})
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/net.go:194 +0x34
+net/http.(*persistConn).Read(0x1400069e240, {0x1400051c000?, 0x104ba9888?, 0x104ee5ed0?})
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/http/transport.go:2122 +0x4c
+bufio.(*Reader).fill(0x14000118ae0)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/bufio/bufio.go:113 +0xf8
+bufio.(*Reader).Peek(0x14000118ae0, 0x1)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/bufio/bufio.go:152 +0x60
+net/http.(*persistConn).readLoop(0x1400069e240)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/http/transport.go:2275 +0x12c
+created by net/http.(*Transport).dialConn in goroutine 552
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/http/transport.go:1944 +0x11c4
+
+goroutine 810 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000f2e050}, 0x14000f8c000, 0x140001161c0, 0x14000a02090)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 617
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 826 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000f3a5f0}, 0x14000c18000, 0x14000e9a2c0, 0x14000d5c070)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 576
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 939 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x1400011b8b0}, 0x140002e00b0, 0x14000e02c80, 0x140009a8520)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 542
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 907 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000781810}, 0x14000e94000, 0x1400050ca80, 0x14000d884e0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 575
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 914 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000680af0}, 0x14000d8a000, 0x140011b0440, 0x14000e922a0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 610
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 918 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000680e10}, 0x140001620b0, 0x140011b0680, 0x14000e92380)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 538
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 920 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000681040}, 0x1400101c000, 0x140011b0800, 0x14000e92440)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 609
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 922 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000681270}, 0x14000e94000, 0x140011b0980, 0x14000e92500)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 565
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 924 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140006814a0}, 0x14000f8c000, 0x140011b0b00, 0x14000e925d0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 597
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 926 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140006816d0}, 0x14000e94000, 0x140011b0c80, 0x14000e92690)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 605
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 928 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000681900}, 0x14000c18000, 0x140011b0e00, 0x14000e92760)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 566
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 910 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000781950}, 0x14000d7a000, 0x1400050cc40, 0x14000d88a80)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 622
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 912 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000781b80}, 0x14000f8c000, 0x1400050cfc0, 0x14000d88b50)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 607
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 946 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000781db0}, 0x140002e00b0, 0x1400050d140, 0x14000d88c10)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 588
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 948 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b2230}, 0x14000f8c000, 0x1400050d2c0, 0x14000d88cd0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 637
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 950 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b3220}, 0x14000f0c000, 0x1400050d440, 0x14000d88da0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 601
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 952 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b3450}, 0x14000c18000, 0x1400050d5c0, 0x14000d88e60)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 540
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 848 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140006001e0}, 0x14000d8a000, 0x1400100a100, 0x14000710150)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 580
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 764 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140002b86e0}, 0x14000f8c000, 0x14000c125c0, 0x14000c162e0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 647
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1010 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000600820}, 0x14000f0c000, 0x1400100a480, 0x14000710220)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 651
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 766 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8910}, 0x140002e00b0, 0x14000c12740, 0x14000c16420)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 598
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1340 [IO wait]:
+internal/poll.runtime_pollWait(0x14bf638f0, 0x72)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/runtime/netpoll.go:351 +0xa0
+internal/poll.(*pollDesc).wait(0x1400152c380?, 0x1400040e000?, 0x0)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/internal/poll/fd_poll_runtime.go:84 +0x28
+internal/poll.(*pollDesc).waitRead(...)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x1400152c380, {0x1400040e000, 0x1000, 0x1000})
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/internal/poll/fd_unix.go:165 +0x1fc
+net.(*netFD).Read(0x1400152c380, {0x1400040e000?, 0xf?, 0x8?})
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/fd_posix.go:55 +0x28
+net.(*conn).Read(0x1400050a090, {0x1400040e000?, 0x14000284c30?, 0x901bacedd0dd58eb?})
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/net.go:194 +0x34
+net/http.(*persistConn).Read(0x1400150a120, {0x1400040e000?, 0x104ba9888?, 0x104ee5ed0?})
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/http/transport.go:2122 +0x4c
+bufio.(*Reader).fill(0x140011a42a0)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/bufio/bufio.go:113 +0xf8
+bufio.(*Reader).Peek(0x140011a42a0, 0x1)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/bufio/bufio.go:152 +0x60
+net/http.(*persistConn).readLoop(0x1400150a120)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/http/transport.go:2275 +0x12c
+created by net/http.(*Transport).dialConn in goroutine 1432
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/http/transport.go:1944 +0x11c4
+
+goroutine 1229 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140015d0b90}, 0x14000e94000, 0x14000fc4580, 0x14000be06d0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 645
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1016 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000600f50}, 0x14000f0c000, 0x1400100a900, 0x140007103c0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 621
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1012 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000600af0}, 0x140001620b0, 0x1400100a640, 0x140007102f0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 614
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 768 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8b90}, 0x14000d7a000, 0x14000c128c0, 0x14000c164f0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 602
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 713 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009a63c0}, 0x14000e94000, 0x14000c7e300, 0x14000f8a260)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 595
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 957 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b38b0}, 0x14000c18000, 0x1400050d8c0, 0x14000d88fc0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 586
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 959 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b3ae0}, 0x14000d7a000, 0x1400050da40, 0x14000d89080)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 562
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 715 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009a65f0}, 0x14000c18000, 0x14000c7e480, 0x14000f8a3a0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 606
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 717 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009a6820}, 0x140002e00b0, 0x14000c7e600, 0x14000f8a460)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 578
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 719 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009a6a50}, 0x14000d8a000, 0x14000c7e780, 0x14000f8a520)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 640
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 721 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009a6c80}, 0x14000f0c000, 0x14000c7e900, 0x14000f8a5e0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 545
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1107 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009a6eb0}, 0x14000f0c000, 0x14000c7ea80, 0x14000f8a6b0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 641
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1109 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009a70e0}, 0x14000d8a000, 0x14000c7ec00, 0x14000f8a770)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 650
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1133 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b71d0}, 0x14000d7a000, 0x14000be3080, 0x14000794290)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 612
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1135 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b7400}, 0x140000dc210, 0x14000be3280, 0x14000794490)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 593
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1137 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b7630}, 0x140000dc210, 0x14000be3400, 0x14000794640)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 563
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1181 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009b7d60}, 0x140001620b0, 0x14000be3840, 0x140007946b0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 604
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1065 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000501ea0}, 0x140001620b0, 0x140007c2a80, 0x14000be0560)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 584
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1111 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140009a7360}, 0x140000dc210, 0x14000c7ee00, 0x14000f8a8b0)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 623
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1431 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140002b8500}, 0x14000c18000, 0x14000c12380, 0x14000e92140)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 646
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1384 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x14000faea50}, 0x14000e94000, 0x140011b0200, 0x14000d88160)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 635
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1228 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140015d09b0}, 0x1400101c000, 0x14000fc43c0, 0x14000be0340)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 649
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150
+
+goroutine 1341 [select]:
+net/http.(*persistConn).writeLoop(0x1400150a120)
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/http/transport.go:2590 +0x9c
+created by net/http.(*Transport).dialConn in goroutine 1432
+	/Users/random_anon/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.24.1.darwin-arm64/src/net/http/transport.go:1945 +0x120c
+
+goroutine 1338 [select]:
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).awaitTransaction(0x1400017a000, {0x104bade80, 0x140014fd040}, 0x140000dc210, 0x14000e9a1c0, 0x14000d5c210)
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:995 +0xf4
+github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction.func1()
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:882 +0xb8
+created by github.com/ethpandaops/spamoor/spamoor.(*TxPool).submitTransaction in goroutine 583
+	/Users/random_anon/dev/spamoor/spamoor/txpool.go:841 +0x150

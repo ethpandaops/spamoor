@@ -1,0 +1,27 @@
+# Storage Trie Brancher Test Configuration
+# This scenario creates deep branches in Ethereum storage tries through hash collisions
+
+# Core parameters
+target_branches: 10        # Create 10 branches for testing
+target_depth: 16           # Each exactly 16 nibbles deep (8 bytes)
+seed: "trie-branch-test-1" # Deterministic seed for reproducibility
+
+# Mining configuration
+mining_workers: 4          # 4 parallel mining threads
+batch_size: 1              # 1 address per tx (for exact depth targeting)
+mining_iterations: 100000  # Try 100k addresses per round
+
+# Checkpointing
+checkpoint_every: 5        # Save every 5 transactions
+
+# Gas settings
+basefee: 1
+tipfee: 1
+gas_limit: 10000000        # 10M gas per transaction
+
+# Tracking
+min_recordable: 12         # Only track branches >= 12 nibbles
+max_tracked: 100           # Keep top 100 branches
+
+# Wallet configuration (inherits from global settings)
+wallet_count: 5            # Use 5 wallets for parallelism

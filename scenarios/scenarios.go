@@ -24,6 +24,8 @@ import (
 	replayeest "github.com/ethpandaops/spamoor/scenarios/replay-eest"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	erc20bloater "github.com/ethpandaops/spamoor/scenarios/statebloat/erc20_bloater"
+	extcodesizesetup "github.com/ethpandaops/spamoor/scenarios/statebloat/extcodesize_setup"
+	storagetriebrancher "github.com/ethpandaops/spamoor/scenarios/statebloat/storage_trie_brancher"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
 	"github.com/ethpandaops/spamoor/scenarios/taskrunner"
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
@@ -49,11 +51,13 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&erc721tx.ScenarioDescriptor,
 	&erc1155tx.ScenarioDescriptor,
 	&evmfuzz.ScenarioDescriptor,
+	&extcodesizesetup.ScenarioDescriptor,
 	&factorydeploytx.ScenarioDescriptor,
 	&gasburnertx.ScenarioDescriptor,
 	&geastx.ScenarioDescriptor,
 	&replayeest.ScenarioDescriptor,
 	&setcodetx.ScenarioDescriptor,
+	&storagetriebrancher.ScenarioDescriptor,
 	&storagespam.ScenarioDescriptor,
 	&taskrunner.ScenarioDescriptor,
 	&uniswapswaps.ScenarioDescriptor,
