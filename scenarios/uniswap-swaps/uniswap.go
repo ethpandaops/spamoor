@@ -19,6 +19,8 @@ import (
 type UniswapOptions struct {
 	BaseFee             float64
 	TipFee              float64
+	BaseFeeWei          string
+	TipFeeWei           string
 	DaiPairs            uint64
 	EthLiquidityPerPair *uint256.Int
 	DaiLiquidityFactor  uint64
@@ -199,7 +201,8 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 		return fmt.Errorf("no client available")
 	}
 
-	feeCap, tipCap, err := u.walletPool.GetTxPool().GetSuggestedFees(client, u.options.BaseFee, u.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(u.options.BaseFee, u.options.TipFee, u.options.BaseFeeWei, u.options.TipFeeWei)
+	feeCap, tipCap, err := u.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return fmt.Errorf("could not get tx fee: %v", err)
 	}

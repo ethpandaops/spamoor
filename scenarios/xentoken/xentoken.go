@@ -27,6 +27,8 @@ type ScenarioOptions struct {
 	Rebroadcast uint64  `yaml:"rebroadcast"`
 	BaseFee     float64 `yaml:"base_fee"`
 	TipFee      float64 `yaml:"tip_fee"`
+	BaseFeeWei  string  `yaml:"base_fee_wei"`
+	TipFeeWei   string  `yaml:"tip_fee_wei"`
 	GasLimit    uint64  `yaml:"gas_limit"`
 	XenAddress  string  `yaml:"xen_address"`
 	ClaimTerm   uint64  `yaml:"claim_term"`
@@ -81,6 +83,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transfer transactions (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transfer transactions (in gwei)")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.Uint64Var(&s.options.GasLimit, "gas-limit", ScenarioDefaultOptions.GasLimit, "Gas limit for the sybil attack transaction")
 	flags.StringVar(&s.options.XenAddress, "xen-address", ScenarioDefaultOptions.XenAddress, "XEN token address")
 	flags.Uint64Var(&s.options.ClaimTerm, "claim-term", ScenarioDefaultOptions.ClaimTerm, "XEN claim term in days")
@@ -249,7 +253,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, nil, client, wallet, err
 	}

@@ -58,6 +58,8 @@ type ScenarioOptions struct {
 	TargetGasRatio   float64 `yaml:"target_gas_ratio" json:"target_gas_ratio"`
 	BaseFee          float64 `yaml:"base_fee" json:"base_fee"`
 	TipFee           float64 `yaml:"tip_fee" json:"tip_fee"`
+	BaseFeeWei       string  `yaml:"base_fee_wei"`
+	TipFeeWei        string  `yaml:"tip_fee_wei"`
 	ExistingContract string  `yaml:"existing_contract" json:"existing_contract"` // Optional override for edge cases
 	WalletCount      int     `yaml:"wallet_count" json:"wallet_count"`           // Number of wallets to initialize
 }
@@ -98,6 +100,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Float64Var(&s.options.TargetGasRatio, "target-gas-ratio", ScenarioDefaultOptions.TargetGasRatio, "Target gas usage as ratio of block gas limit (default 0.50 = 50%)")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.StringVar(&s.options.ExistingContract, "existing-contract", ScenarioDefaultOptions.ExistingContract, "(Optional) Override contract address for edge cases")
 	flags.IntVar(&s.options.WalletCount, "wallet-count", ScenarioDefaultOptions.WalletCount, "Number of wallets to initialize for parallel execution")
 	return nil
@@ -493,7 +497,8 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 		}
 
 		// Build transfer transaction
-		feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+		baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+		feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 		if err != nil {
 			return fmt.Errorf("failed to get suggested fees: %w", err)
 		}
@@ -547,7 +552,8 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 		return nil, nil, fmt.Errorf("failed to parse initial supply")
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
@@ -592,7 +598,8 @@ func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, sta
 		return nil, fmt.Errorf("no client available")
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
