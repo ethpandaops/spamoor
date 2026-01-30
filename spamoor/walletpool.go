@@ -1122,7 +1122,7 @@ func (pool *WalletPool) ReclaimFunds(ctx context.Context, client *Client) error 
 			}
 
 			tx, err := pool.buildWalletReclaimTx(ctx, wallet, client, pool.rootWallet.wallet.GetAddress())
-			if err != nil {
+			if err != nil || tx == nil {
 				return
 			}
 
