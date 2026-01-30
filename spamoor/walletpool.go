@@ -39,11 +39,12 @@ var (
 // WalletPoolConfig contains configuration settings for the wallet pool including
 // wallet count, funding amounts, and automatic refill behavior.
 type WalletPoolConfig struct {
-	WalletCount    uint64       `yaml:"wallet_count,omitempty"`
-	RefillAmount   *uint256.Int `yaml:"refill_amount"`
-	RefillBalance  *uint256.Int `yaml:"refill_balance"`
-	RefillInterval uint64       `yaml:"refill_interval"`
-	WalletSeed     string       `yaml:"seed"`
+	WalletCount     uint64       `yaml:"wallet_count,omitempty"`
+	RefillAmount    *uint256.Int `yaml:"refill_amount"`
+	RefillBalance   *uint256.Int `yaml:"refill_balance"`
+	RefillInterval  uint64       `yaml:"refill_interval"`
+	WalletSeed      string       `yaml:"seed"`
+	FundingGasLimit uint64       `yaml:"funding_gas_limit"`
 }
 
 // WellKnownWalletConfig defines configuration for a named wallet with custom funding settings.
@@ -211,6 +212,20 @@ func (pool *WalletPool) SetWalletSeed(seed string) {
 // SetRefillInterval sets the interval in seconds between automatic balance checks.
 func (pool *WalletPool) SetRefillInterval(interval uint64) {
 	pool.config.RefillInterval = interval
+}
+
+// SetFundingGasLimit sets the gas limit for wallet funding transactions.
+// Use 100000+ for L2 chains like Arbitrum/Optimism.
+func (pool *WalletPool) SetFundingGasLimit(gasLimit uint64) {
+	pool.config.FundingGasLimit = gasLimit
+}
+
+// GetFundingGasLimit returns the gas limit for funding transactions, defaulting to 21000.
+func (pool *WalletPool) GetFundingGasLimit() uint64 {
+	if pool.config.FundingGasLimit == 0 {
+		return 21000
+	}
+	return pool.config.FundingGasLimit
 }
 
 // SetTransactionTracker sets the optional callback to track transaction results for metrics.
@@ -886,7 +901,7 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client
 	refillTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       21000,
+		Gas:       pool.GetFundingGasLimit(),
 		To:        &toAddr,
 		Value:     refillAmount,
 	})
@@ -988,7 +1003,8 @@ func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *W
 		tipCap = feeCap
 	}
 
-	feeAmount := big.NewInt(0).Mul(tipCap, big.NewInt(21000))
+	gasLimit := pool.GetFundingGasLimit()
+	feeAmount := big.NewInt(0).Mul(tipCap, big.NewInt(int64(gasLimit)))
 	reclaimAmount := big.NewInt(0).Sub(childWallet.GetBalance(), feeAmount)
 
 	if reclaimAmount.Cmp(big.NewInt(0)) <= 0 {
@@ -998,7 +1014,7 @@ func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *W
 	reclaimTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       21000,
+		Gas:       gasLimit,
 		To:        &target,
 		Value:     uint256.MustFromBig(reclaimAmount),
 	})
