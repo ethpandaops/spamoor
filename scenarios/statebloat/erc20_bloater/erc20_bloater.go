@@ -152,7 +152,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
-	var startSlot uint64 = 1 // Default: start from address 0x01
+	var nextAddressIndex uint64 = 1 // Default: start from address 0x01 (matches contract's nextStorageSlot)
 
 	// Determine contract address using nonce-based approach
 	if s.options.ExistingContract != "" {
@@ -173,7 +173,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			s.contractAddr = receipt.ContractAddress
 			s.logger.Infof("deployed contract: %s (block #%d)", s.contractAddr.Hex(), receipt.BlockNumber.Uint64())
 			s.logger.Infof("to resume later, use same wallet (--seed) - contract will be auto-detected")
-			startSlot = 1
+			nextAddressIndex = 1
 		} else {
 			// Wallet has history - contract should exist at nonce 0 address
 			s.contractAddr = crypto.CreateAddress(wallet.GetAddress(), 0)
@@ -219,19 +219,20 @@ func (s *Scenario) Run(ctx context.Context) error {
 			return fmt.Errorf("failed to query nextStorageSlot from contract: %w", err)
 		}
 
-		startSlot = nextSlot.Uint64()
-		if startSlot == 0 {
-			startSlot = 1 // Contract not yet bloated, start from slot 1
+		nextAddressIndex = nextSlot.Uint64()
+		if nextAddressIndex == 0 {
+			nextAddressIndex = 1 // Contract not yet bloated, start from slot 1
 		}
 
 		// Calculate and log current progress
+		// Note: nextAddressIndex is in address units; each address = 2 storage slots = 64 bytes
 		targetBytes := uint64(s.options.TargetStorageGB * 1024 * 1024 * 1024)
-		targetSlots := targetBytes / BytesPerSlot
-		currentGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
-		progress := float64(startSlot) / float64(targetSlots) * 100
+		targetAddresses := targetBytes / (BytesPerSlot * SlotsPerBloatCycle)
+		currentGB := float64(nextAddressIndex*SlotsPerBloatCycle*BytesPerSlot) / (1024 * 1024 * 1024)
+		progress := float64(nextAddressIndex) / float64(targetAddresses) * 100
 
-		s.logger.Infof("resuming from on-chain state: contract %s | slot %d (%.2f%% complete, %.3f GB / %.3f GB)",
-			s.contractAddr.Hex(), startSlot, progress, currentGB, s.options.TargetStorageGB)
+		s.logger.Infof("resuming from on-chain state: contract %s | address %d (%.2f%% complete, %.3f GB / %.3f GB)",
+			s.contractAddr.Hex(), nextAddressIndex, progress, currentGB, s.options.TargetStorageGB)
 	}
 
 	// Query network gas limit (reuse existing if already fetched)
@@ -242,17 +243,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
-	// Calculate target slots needed
+	// Calculate target addresses needed (each address = 2 storage slots = 64 bytes)
 	targetBytes := uint64(s.options.TargetStorageGB * 1024 * 1024 * 1024)
-	targetSlots := targetBytes / BytesPerSlot
-	s.logger.Infof("target: %.2f GB = %d slots (%.2f million addresses)",
-		s.options.TargetStorageGB, targetSlots, float64(targetSlots)/float64(SlotsPerBloatCycle)/1000000)
+	targetAddresses := targetBytes / (BytesPerSlot * SlotsPerBloatCycle)
+	s.logger.Infof("target: %.2f GB = %d addresses (%.2f million)",
+		s.options.TargetStorageGB, targetAddresses, float64(targetAddresses)/1000000)
 
 	// Start bloating with EIP-7825 compliant transaction splitting
 	totalTxCount := uint64(0)
 	errorCount := 0
 
-	for startSlot < targetSlots {
+	for nextAddressIndex < targetAddresses {
 		select {
 		case <-ctx.Done():
 			s.logger.Info("context cancelled, exiting")
@@ -274,17 +275,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 
 		// Process batch of transactions for this round
-		roundStartSlot := startSlot
+		roundStartAddressIndex := nextAddressIndex
 		roundSuccess := true
 		batchTxCount := 0
 
 		// Structure to hold transaction data for parallel processing
 		type txBatch struct {
-			tx           *types.Transaction
-			wallet       *spamoor.Wallet
-			numAddresses uint64
-			gasLimit     uint64
-			endSlot      uint64
+			tx              *types.Transaction
+			wallet          *spamoor.Wallet
+			numAddresses    uint64
+			gasLimit        uint64
+			endAddressIndex uint64
 		}
 		var txBatches []txBatch
 
@@ -306,11 +307,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 			// Use the maximum number of addresses that fit within EIP-7825 limit
 			numAddresses := uint64(MaxBloatedAddressesPerTx)
 
-			// Check if we would exceed our target slots
-			endSlot := startSlot + numAddresses*SlotsPerBloatCycle
-			if endSlot > targetSlots {
-				endSlot = targetSlots
-				numAddresses = (endSlot - startSlot) / SlotsPerBloatCycle
+			// Check if we would exceed our target addresses
+			endAddressIndex := nextAddressIndex + numAddresses
+			if endAddressIndex > targetAddresses {
+				endAddressIndex = targetAddresses
+				numAddresses = endAddressIndex - nextAddressIndex
 			}
 
 			if numAddresses == 0 {
@@ -321,7 +322,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 				i+1, len(txSplits), numAddresses, FixedGasLimitPerTx/1000000)
 
 			// Build bloating transaction with calculated number of addresses
-			tx, err := s.buildBloatTx(ctx, wallet, startSlot/SlotsPerBloatCycle, numAddresses)
+			// NOTE: nextAddressIndex is already in address units (matching contract's nextStorageSlot)
+			tx, err := s.buildBloatTx(ctx, wallet, nextAddressIndex, numAddresses)
 			if err != nil {
 				s.logger.Errorf("failed to build batch tx %d/%d: %v", i+1, len(txSplits), err)
 				roundSuccess = false
@@ -329,11 +331,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}
 
 			txBatches = append(txBatches, txBatch{
-				tx:           tx,
-				wallet:       wallet,
-				numAddresses: numAddresses,
-				gasLimit:     FixedGasLimitPerTx,
-				endSlot:      endSlot,
+				tx:              tx,
+				wallet:          wallet,
+				numAddresses:    numAddresses,
+				gasLimit:        FixedGasLimitPerTx,
+				endAddressIndex: endAddressIndex,
 			})
 
 			s.logger.WithFields(logrus.Fields{
@@ -343,17 +345,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 				"gas_limit": FixedGasLimitPerTx,
 			}).Debugf("built bloat tx")
 
-			startSlot = endSlot
+			nextAddressIndex = endAddressIndex
 
 			// Break if we've reached target
-			if startSlot >= targetSlots {
+			if nextAddressIndex >= targetAddresses {
 				break
 			}
 		}
 
 		if !roundSuccess {
 			// Revert to beginning of round on failure
-			startSlot = roundStartSlot
+			nextAddressIndex = roundStartAddressIndex
 			errorCount++
 			time.Sleep(time.Second * time.Duration(errorCount))
 			continue
@@ -416,14 +418,14 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}
 
 			if roundSuccess {
-				startSlot = txBatches[len(txBatches)-1].endSlot
+				nextAddressIndex = txBatches[len(txBatches)-1].endAddressIndex
 				totalTxCount += uint64(batchTxCount)
 			}
 		}
 
 		if !roundSuccess {
 			// Revert to beginning of round on failure
-			startSlot = roundStartSlot
+			nextAddressIndex = roundStartAddressIndex
 			errorCount++
 			time.Sleep(time.Second * time.Duration(errorCount))
 			continue
@@ -433,16 +435,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 		errorCount = 0
 
 		// Log progress after successful round
-		currentGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
-		progress := float64(startSlot) / float64(targetSlots) * 100
-		s.logger.Infof("progress: %.2f%% | contract: %s | slots: %d / %d | storage: %.3f GB / %.3f GB | round txs: %d",
-			progress, s.contractAddr.Hex(), startSlot, targetSlots, currentGB, s.options.TargetStorageGB, batchTxCount)
+		// Note: each address = 2 storage slots = 64 bytes
+		currentGB := float64(nextAddressIndex*SlotsPerBloatCycle*BytesPerSlot) / (1024 * 1024 * 1024)
+		progress := float64(nextAddressIndex) / float64(targetAddresses) * 100
+		s.logger.Infof("progress: %.2f%% | contract: %s | addresses: %d / %d | storage: %.3f GB / %.3f GB | round txs: %d",
+			progress, s.contractAddr.Hex(), nextAddressIndex, targetAddresses, currentGB, s.options.TargetStorageGB, batchTxCount)
 	}
 
 	// Log completion
-	finalGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
-	s.logger.Infof("bloating complete! contract: %s | total slots: %d | estimated storage: %.3f GB | total txs: %d",
-		s.contractAddr.Hex(), startSlot, finalGB, totalTxCount)
+	finalGB := float64(nextAddressIndex*SlotsPerBloatCycle*BytesPerSlot) / (1024 * 1024 * 1024)
+	s.logger.Infof("bloating complete! contract: %s | total addresses: %d | estimated storage: %.3f GB | total txs: %d",
+		s.contractAddr.Hex(), nextAddressIndex, finalGB, totalTxCount)
 
 	return nil
 }
@@ -585,8 +588,9 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 	return receipt, tx, nil
 }
 
-// buildBloatTx builds a bloating transaction without sending it
-func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, startSlot uint64, numAddresses uint64) (*types.Transaction, error) {
+// buildBloatTx builds a bloating transaction without sending it.
+// nextAddressIndex is the starting address index (matching contract's nextStorageSlot semantics).
+func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, startAddressIndex uint64, numAddresses uint64) (*types.Transaction, error) {
 	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
 	if client == nil {
 		return nil, fmt.Errorf("no client available")
@@ -608,7 +612,7 @@ func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, sta
 		Gas:       gasLimit,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		return s.contractInstance.BloatStorage(transactOpts, new(big.Int).SetUint64(startSlot), new(big.Int).SetUint64(numAddresses))
+		return s.contractInstance.BloatStorage(transactOpts, new(big.Int).SetUint64(startAddressIndex), new(big.Int).SetUint64(numAddresses))
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build bloat tx: %w", err)
