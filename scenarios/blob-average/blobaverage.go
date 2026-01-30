@@ -217,7 +217,7 @@ outer:
 			// Wait for pending transactions to complete before exiting
 			break outer
 		case <-s.blockChan:
-		case <-time.After(slotDuration + 4*time.Second):
+		case <-time.After(slotDuration * 2): // Fallback timeout if block notification missed
 		}
 
 		// Check if we need to send more blobs

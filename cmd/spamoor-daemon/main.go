@@ -34,7 +34,7 @@ type CliArgs struct {
 	withoutBatcher   bool
 	disableTxMetrics bool
 	disableAuditLogs bool
-	slotDuration     string
+	slotDuration     time.Duration
 	auditUserHeader  string
 	startupDelay     uint64
 }
@@ -56,7 +56,7 @@ func main() {
 	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
 	flags.BoolVar(&cliArgs.disableTxMetrics, "disable-tx-metrics", false, "Disable transaction metrics collection and graphs page (keeps Prometheus metrics)")
 	flags.BoolVar(&cliArgs.disableAuditLogs, "disable-audit-logs", false, "Disable audit logs")
-	flags.StringVar(&cliArgs.slotDuration, "slot-duration", "12s", "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
+	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 	flags.StringVar(&cliArgs.auditUserHeader, "audit-user-header", "Cf-Access-Authenticated-User-Email", "HTTP header containing the authenticated user email for audit logs")
 	flags.Uint64Var(&cliArgs.startupDelay, "startup-delay", 30, "Delay in seconds before starting spammers on daemon startup (to allow cancellation)")
 	flags.Parse(os.Args)
@@ -79,11 +79,7 @@ func main() {
 	}).Infof("starting spamoor daemon")
 
 	// Set global slot duration for rate limiting
-	slotDuration, err := time.ParseDuration(cliArgs.slotDuration)
-	if err != nil {
-		panic(fmt.Errorf("invalid slot-duration '%s': %v", cliArgs.slotDuration, err))
-	}
-	scenario.GlobalSlotDuration = slotDuration
+	scenario.GlobalSlotDuration = cliArgs.slotDuration
 
 	// start client pool
 	rpcHosts := []string{}
@@ -102,7 +98,7 @@ func main() {
 	}
 
 	clientPool := spamoor.NewClientPool(ctx, logger.WithField("module", "clientpool"))
-	err = clientPool.InitClients(rpcHosts)
+	err := clientPool.InitClients(rpcHosts)
 	if err != nil {
 		panic(fmt.Errorf("failed to init clients: %v", err))
 	}
