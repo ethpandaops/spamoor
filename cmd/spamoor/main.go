@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
@@ -27,7 +28,7 @@ type CliArgs struct {
 	refillAmount   uint64
 	refillBalance  uint64
 	refillInterval uint64
-	secondsPerSlot uint64
+	slotDuration   string
 }
 
 func main() {
@@ -49,7 +50,7 @@ func main() {
 	flags.Uint64Var(&cliArgs.refillAmount, "refill-amount", 5, "Amount of ETH to fund/refill each child wallet with.")
 	flags.Uint64Var(&cliArgs.refillBalance, "refill-balance", 2, "Min amount of ETH each child wallet should hold before refilling.")
 	flags.Uint64Var(&cliArgs.refillInterval, "refill-interval", 300, "Interval for child wallet rbalance check and refilling if needed (in sec).")
-	flags.Uint64Var(&cliArgs.secondsPerSlot, "seconds-per-slot", 12, "Seconds per slot for rate limiting (used for throughput calculation).")
+	flags.StringVar(&cliArgs.slotDuration, "slot-duration", "12s", "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 
 	flags.Parse(os.Args)
 
@@ -109,8 +110,12 @@ func main() {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
-	// Set global seconds per slot
-	scenario.GlobalSecondsPerSlot = cliArgs.secondsPerSlot
+	// Set global slot duration for rate limiting
+	slotDuration, err := time.ParseDuration(cliArgs.slotDuration)
+	if err != nil {
+		panic(fmt.Errorf("invalid slot-duration '%s': %v", cliArgs.slotDuration, err))
+	}
+	scenario.GlobalSlotDuration = slotDuration
 
 	// start client pool
 	rpcHosts := []string{}
@@ -130,7 +135,7 @@ func main() {
 
 	clientPool := spamoor.NewClientPool(ctx, logger.WithField("module", "clientpool"))
 
-	err := clientPool.InitClients(rpcHosts)
+	err = clientPool.InitClients(rpcHosts)
 	if err != nil {
 		panic(fmt.Errorf("failed to init clients: %v", err))
 	}
