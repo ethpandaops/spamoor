@@ -247,27 +247,7 @@ func (client *Client) GetRPCHost() string {
 // UpdateWallet refreshes the wallet's chain ID, nonce, and balance by querying the blockchain.
 // If the wallet doesn't have a chain ID set, it will be fetched and assigned.
 func (client *Client) UpdateWallet(ctx context.Context, wallet *Wallet) error {
-	if wallet.GetChainId() == nil {
-		chainId, err := client.GetChainId(ctx)
-		if err != nil {
-			return err
-		}
-		wallet.SetChainId(chainId)
-	}
-
-	nonce, err := client.GetNonceAt(ctx, wallet.GetAddress(), nil)
-	if err != nil {
-		return err
-	}
-	wallet.SetNonce(nonce)
-
-	balance, err := client.GetBalanceAt(ctx, wallet.GetAddress())
-	if err != nil {
-		return err
-	}
-	wallet.SetBalance(balance)
-
-	return nil
+	return wallet.UpdateWallet(ctx, client, true)
 }
 
 // SetClientGroups sets multiple client group names for the client, replacing all existing groups.

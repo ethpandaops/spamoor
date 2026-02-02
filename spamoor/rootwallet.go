@@ -40,8 +40,7 @@ func InitRootWallet(ctx context.Context, privkey string, clientPool *ClientPool,
 		return nil, err
 	}
 	rootWallet := NewWallet(privateKey, address)
-
-	txpool.RegisterWallet(rootWallet, ctx)
+	rootWallet = txpool.RegisterWallet(rootWallet, ctx)
 
 	client := clientPool.GetClient()
 	if client == nil {

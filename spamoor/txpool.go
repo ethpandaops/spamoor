@@ -140,7 +140,7 @@ type ExternalBlockSource struct {
 
 type ExternalBlockEvent struct {
 	Number   uint64
-	Client   *Client
+	Clients  []*Client
 	Block    *BlockWithHash
 	Receipts []*types.Receipt
 }
@@ -188,6 +188,10 @@ func (pool *TxPool) RegisterWallet(wallet *Wallet, ctx context.Context) *Wallet 
 	defer pool.walletsMutex.Unlock()
 
 	if registration, ok := pool.wallets[wallet.address]; ok {
+		if registration.wallet.privkey == nil && wallet.privkey != nil {
+			registration.wallet.privkey = wallet.privkey
+		}
+
 		for _, regctx := range registration.ctxs {
 			if regctx == ctx {
 				return registration.wallet
@@ -310,12 +314,51 @@ func (pool *TxPool) runExternalBlockSourceLoop() {
 		utils.RecoverPanic(pool.options.Logger, "TxPool.runExternalBlockSourceLoop", pool.runExternalBlockSourceLoop)
 	}()
 
+	blockChan := pool.options.ExternalBlockSource.SubscribeBlocks(pool.options.Context, 10)
+	highestBlockNumber := uint64(0)
 	for {
 		select {
 		case <-pool.options.Context.Done():
 			return
-		case blockEvent := <-pool.options.ExternalBlockSource.SubscribeBlocks(pool.options.Context, 1):
-			pool.processBlock(pool.options.Context, blockEvent.Client, blockEvent.Number, blockEvent.Block, blockEvent.Receipts)
+		case blockEvent := <-blockChan:
+
+			if blockEvent.Number > highestBlockNumber {
+				// Skip processing historical blocks on startup unless blockchain is young (< 10 blocks)
+				// This prevents processing millions of blocks when connecting to a long running chain
+				if highestBlockNumber == 0 && blockEvent.Number > 10 {
+					highestBlockNumber = blockEvent.Number - 1
+				}
+
+				for blockNumber := highestBlockNumber + 1; blockNumber <= blockEvent.Number; blockNumber++ {
+					processedBlock := false
+					for _, client := range blockEvent.Clients {
+						var blockWithHash *BlockWithHash
+						if blockNumber == blockEvent.Number {
+							blockWithHash = blockEvent.Block
+						}
+						err := pool.processBlock(pool.options.Context, client, blockNumber, blockWithHash, nil)
+						if err != nil {
+							logrus.WithField("client", client.GetName()).WithError(err).Errorf("error processing block %v", blockNumber)
+							continue
+						}
+
+						highestBlockNumber = blockNumber
+						processedBlock = true
+						break
+					}
+
+					if !processedBlock {
+						logrus.Errorf("failed to process block %v", blockNumber)
+					}
+				}
+
+				select {
+				case <-pool.options.Context.Done():
+					return
+				case pool.processStaleChan <- highestBlockNumber:
+				default:
+				}
+			}
 		}
 	}
 }
