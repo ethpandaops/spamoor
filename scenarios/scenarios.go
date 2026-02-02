@@ -53,7 +53,7 @@ func init() {
 }
 
 // loadExternalScenariosOnStartup attempts to load external scenarios from the default directory.
-// This runs during package initialization and silently fails if the directory doesn't exist.
+// This runs during package initialization and logs warnings if the directory exists but cannot be read.
 func loadExternalScenariosOnStartup() {
 	// Try to find external scenarios directory
 	dir := findExternalDir()
@@ -67,6 +67,7 @@ func loadExternalScenariosOnStartup() {
 	// Load from each subdirectory (eoatx/, erc20_bloater/, etc.)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		logger.Warnf("failed to read external scenarios directory %s: %v", dir, err)
 		return
 	}
 
@@ -80,9 +81,11 @@ func loadExternalScenariosOnStartup() {
 	}
 
 	if len(newScenarios) > 0 {
+		scenarioMu.Lock()
 		externalScenarios = newScenarios
 		externalDir = dir
 		ScenarioDescriptors = append(ScenarioDescriptors, newScenarios...)
+		scenarioMu.Unlock()
 		logger.Infof("auto-loaded %d external scenario(s) from %s", len(newScenarios), dir)
 	}
 }

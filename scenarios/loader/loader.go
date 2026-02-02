@@ -141,12 +141,13 @@ func (l *ScenarioLoader) wrapEvalError(filename string, err error) error {
 // Files that fail to load are logged and skipped.
 func (l *ScenarioLoader) LoadFromDir(dir string) []*scenario.Descriptor {
 	var descriptors []*scenario.Descriptor
+	var failedCount int
 
 	// Find all .go files in the directory
 	pattern := filepath.Join(dir, "*.go")
 	files, err := filepath.Glob(pattern)
 	if err != nil {
-		l.logger.Warnf("failed to glob scenario directory: %v", err)
+		l.logger.Errorf("failed to glob scenario directory %s: %v", dir, err)
 		return descriptors
 	}
 
@@ -159,12 +160,17 @@ func (l *ScenarioLoader) LoadFromDir(dir string) []*scenario.Descriptor {
 		desc, err := l.LoadFromFile(f)
 		if err != nil {
 			l.logger.Warnf("failed to load scenario from %s: %v", filepath.Base(f), err)
+			failedCount++
 			continue
 		}
 		descriptors = append(descriptors, desc)
 	}
 
-	l.logger.Infof("loaded %d dynamic scenario(s) from %s", len(descriptors), dir)
+	if failedCount > 0 {
+		l.logger.Warnf("loaded %d dynamic scenario(s) from %s (%d failed to load)", len(descriptors), dir, failedCount)
+	} else {
+		l.logger.Infof("loaded %d dynamic scenario(s) from %s", len(descriptors), dir)
+	}
 	return descriptors
 }
 

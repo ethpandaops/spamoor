@@ -213,20 +213,16 @@ type ReloadScenariosResponse struct {
 // @Id reloadScenarios
 // @Summary Reload external scenarios
 // @Tags Scenario
-// @Description Reloads external scenarios from the specified directory (or default scenarios/external/)
+// @Description Reloads external scenarios from the configured external directory
 // @Produce json
-// @Param dir query string false "Directory to load scenarios from"
 // @Success 200 {object} ReloadScenariosResponse "Success"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/scenarios/reload [post]
 func (ah *APIHandler) ReloadScenarios(w http.ResponseWriter, r *http.Request) {
-	dir := r.URL.Query().Get("dir")
+	// Use previously loaded directory or default - no user-controllable path for security
+	dir := scenarios.GetExternalDir()
 	if dir == "" {
-		// Use previously loaded directory or default
-		dir = scenarios.GetExternalDir()
-		if dir == "" {
-			dir = "scenarios/external"
-		}
+		dir = "scenarios/external"
 	}
 
 	count, err := scenarios.ReloadExternalScenarios(dir, logrus.StandardLogger())
@@ -243,7 +239,9 @@ func (ah *APIHandler) ReloadScenarios(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logrus.WithError(err).Error("failed to encode reload response")
+	}
 }
 
 // GetVersion godoc

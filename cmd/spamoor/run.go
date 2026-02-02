@@ -71,7 +71,7 @@ func RunCommand(args []string) {
 	}
 	if cliArgs.scenarioFile != "" {
 		if err := scenarios.LoadDynamicScenarioFromFile(cliArgs.scenarioFile, logger); err != nil {
-			logger.WithError(err).Warnf("failed to load dynamic scenario from file")
+			logger.WithError(err).Fatalf("failed to load explicitly requested scenario file")
 		}
 	}
 

@@ -89,7 +89,8 @@ var ScenarioDescriptor = scenario.Descriptor{
 
 func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 	return &Scenario{
-		logger: logger.WithField("scenario", ScenarioName),
+		options: ScenarioDefaultOptions,
+		logger:  logger.WithField("scenario", ScenarioName),
 	}
 }
 
