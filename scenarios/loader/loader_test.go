@@ -91,3 +91,95 @@ func TestNewInterpreter(t *testing.T) {
 		t.Error("Interpreter should not be nil")
 	}
 }
+
+func TestLoadExternalEoatx(t *testing.T) {
+	// Find the external eoatx scenario file
+	externalPath := filepath.Join("..", "external", "eoatx", "eoatx.go")
+
+	// Check if file exists
+	if _, err := os.Stat(externalPath); os.IsNotExist(err) {
+		t.Skipf("External eoatx scenario not found at %s - skipping test", externalPath)
+	}
+
+	// Create loader
+	logger := logrus.New()
+	logger.SetLevel(logrus.DebugLevel)
+	loader := NewScenarioLoader(logger)
+
+	// Load the scenario
+	desc, err := loader.LoadFromFile(externalPath)
+	if err != nil {
+		t.Fatalf("Failed to load eoatx scenario: %v", err)
+	}
+
+	// Verify descriptor
+	if desc == nil {
+		t.Fatal("Descriptor is nil")
+	}
+
+	if desc.Name != "eoatx" {
+		t.Errorf("Expected name 'eoatx', got '%s'", desc.Name)
+	}
+
+	if desc.Description == "" {
+		t.Error("Description should not be empty")
+	}
+
+	if desc.NewScenario == nil {
+		t.Error("NewScenario function should not be nil")
+	}
+
+	// Try to create a scenario instance
+	scenarioInstance := desc.NewScenario(logger)
+	if scenarioInstance == nil {
+		t.Error("NewScenario returned nil")
+	}
+
+	t.Logf("Successfully loaded external scenario: %s - %s", desc.Name, desc.Description)
+}
+
+func TestLoadExternalERC20Bloater(t *testing.T) {
+	// Find the external erc20_bloater scenario file
+	externalPath := filepath.Join("..", "external", "erc20_bloater", "erc20_bloater.go")
+
+	// Check if file exists
+	if _, err := os.Stat(externalPath); os.IsNotExist(err) {
+		t.Skipf("External erc20_bloater scenario not found at %s - skipping test", externalPath)
+	}
+
+	// Create loader
+	logger := logrus.New()
+	logger.SetLevel(logrus.DebugLevel)
+	loader := NewScenarioLoader(logger)
+
+	// Load the scenario
+	desc, err := loader.LoadFromFile(externalPath)
+	if err != nil {
+		t.Fatalf("Failed to load erc20_bloater scenario: %v", err)
+	}
+
+	// Verify descriptor
+	if desc == nil {
+		t.Fatal("Descriptor is nil")
+	}
+
+	if desc.Name != "erc20_bloater" {
+		t.Errorf("Expected name 'erc20_bloater', got '%s'", desc.Name)
+	}
+
+	if desc.Description == "" {
+		t.Error("Description should not be empty")
+	}
+
+	if desc.NewScenario == nil {
+		t.Error("NewScenario function should not be nil")
+	}
+
+	// Try to create a scenario instance
+	scenarioInstance := desc.NewScenario(logger)
+	if scenarioInstance == nil {
+		t.Error("NewScenario returned nil")
+	}
+
+	t.Logf("Successfully loaded external scenario: %s - %s", desc.Name, desc.Description)
+}

@@ -96,3 +96,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Info("scenario complete")
 	return nil
 }
+
+// main is a placeholder required for package main compilation.
+// This file is loaded dynamically by Yaegi at runtime, not executed directly.
+func main() {}
