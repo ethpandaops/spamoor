@@ -38,6 +38,8 @@ func RunCommand(args []string) {
 	flags.StringVarP(&cliArgs.privkey, "privkey", "p", "", "The private key of the wallet to send funds from.")
 	flags.IntSliceVarP(&selectedSpammers, "spammers", "s", []int{}, "Indexes of spammers to run (0-based). If not specified, runs all spammers.")
 	flags.Uint64Var(&cliArgs.secondsPerSlot, "seconds-per-slot", 12, "Seconds per slot for rate limiting (used for throughput calculation).")
+	flags.StringVar(&cliArgs.scenarioDir, "scenario-dir", "", "Directory to load dynamic scenarios from (.go files).")
+	flags.StringVar(&cliArgs.scenarioFile, "scenario-file", "", "Path to a single dynamic scenario file (.go file).")
 
 	flags.Parse(args)
 
@@ -62,6 +64,16 @@ func RunCommand(args []string) {
 		"version":   utils.GetBuildVersion(),
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor run command")
+
+	// Load dynamic scenarios if specified
+	if cliArgs.scenarioDir != "" {
+		scenarios.LoadDynamicScenarios(cliArgs.scenarioDir, logger)
+	}
+	if cliArgs.scenarioFile != "" {
+		if err := scenarios.LoadDynamicScenarioFromFile(cliArgs.scenarioFile, logger); err != nil {
+			logger.WithError(err).Warnf("failed to load dynamic scenario from file")
+		}
+	}
 
 	// Set global seconds per slot
 	scenario.GlobalSecondsPerSlot = cliArgs.secondsPerSlot
