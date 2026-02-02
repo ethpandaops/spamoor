@@ -68,6 +68,7 @@ require (
 	github.com/tdewolff/test v1.0.11 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
+	github.com/traefik/yaegi v0.16.1 // indirect
 	github.com/urfave/cli/v2 v2.27.7 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect

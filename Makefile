@@ -5,7 +5,7 @@ GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildVersion="$(VERSION)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildTime="$(BUILDTIME)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildRelease="$(RELEASE)"'
 
-.PHONY: all docs build test clean generate-spammer-index
+.PHONY: all docs build test clean generate-spammer-index generate-symbols
 
 all: docs build
 
@@ -28,6 +28,27 @@ docs:
 generate-spammer-index:
 	@echo "Generating spammer configuration index..."
 	scripts/generate-spammer-index.sh spammer-configs
+
+generate-symbols:
+	@echo "Regenerating Yaegi symbol files for dynamic scenario loading..."
+	@cd scenarios/loader && go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1
+	cd scenarios/loader && yaegi extract github.com/ethpandaops/spamoor/spamoor
+	cd scenarios/loader && yaegi extract github.com/ethpandaops/spamoor/scenario
+	cd scenarios/loader && yaegi extract github.com/ethpandaops/spamoor/txbuilder
+	cd scenarios/loader && yaegi extract github.com/ethpandaops/spamoor/utils
+	cd scenarios/loader && yaegi extract github.com/sirupsen/logrus
+	cd scenarios/loader && yaegi extract github.com/spf13/pflag
+	cd scenarios/loader && yaegi extract github.com/holiman/uint256
+	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/common
+	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/core/types
+	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/accounts/abi
+	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/accounts/abi/bind
+	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/crypto
+	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/event
+	cd scenarios/loader && yaegi extract gopkg.in/yaml.v3
+	@echo "Fixing package declarations..."
+	perl -i -pe 's/^package \w+$$/package loader/' scenarios/loader/symbols_*.go
+	@echo "Symbols generated. Run 'go build ./...' to verify."
 
 clean:
 	rm -f bin/*

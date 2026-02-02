@@ -201,6 +201,49 @@ func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(entries)
 }
 
+// ReloadScenariosResponse represents the response for reloading scenarios
+type ReloadScenariosResponse struct {
+	Status    string   `json:"status"`
+	Count     int      `json:"count"`
+	Directory string   `json:"directory"`
+	Scenarios []string `json:"scenarios"`
+}
+
+// ReloadScenarios godoc
+// @Id reloadScenarios
+// @Summary Reload external scenarios
+// @Tags Scenario
+// @Description Reloads external scenarios from the configured external directory
+// @Produce json
+// @Success 200 {object} ReloadScenariosResponse "Success"
+// @Failure 500 {string} string "Server Error"
+// @Router /api/scenarios/reload [post]
+func (ah *APIHandler) ReloadScenarios(w http.ResponseWriter, r *http.Request) {
+	// Use previously loaded directory or default - no user-controllable path for security
+	dir := scenarios.GetExternalDir()
+	if dir == "" {
+		dir = "scenarios/external"
+	}
+
+	count, err := scenarios.ReloadExternalScenarios(dir, logrus.StandardLogger())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to reload scenarios: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := ReloadScenariosResponse{
+		Status:    "reloaded",
+		Count:     count,
+		Directory: dir,
+		Scenarios: scenarios.GetScenarioNames(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logrus.WithError(err).Error("failed to encode reload response")
+	}
+}
+
 // GetVersion godoc
 // @Id getVersion
 // @Summary Get spamoor version
