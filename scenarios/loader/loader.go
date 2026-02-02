@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"strings"
 
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/sirupsen/logrus"
@@ -45,10 +47,12 @@ func (l *ScenarioLoader) newInterpreter() *interp.Interpreter {
 // LoadFromFile loads a scenario from a single Go source file.
 // The file must define a variable named 'ScenarioDescriptor' of type scenario.Descriptor.
 func (l *ScenarioLoader) LoadFromFile(path string) (*scenario.Descriptor, error) {
+	filename := filepath.Base(path)
+
 	// Read the source file
 	source, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read scenario file: %w", err)
+		return nil, fmt.Errorf("failed to read scenario file %s: %w", filename, err)
 	}
 
 	// Create a new interpreter for this scenario
@@ -57,23 +61,80 @@ func (l *ScenarioLoader) LoadFromFile(path string) (*scenario.Descriptor, error)
 	// Evaluate the source code
 	_, err = i.Eval(string(source))
 	if err != nil {
-		return nil, fmt.Errorf("failed to evaluate scenario: %w", err)
+		return nil, l.wrapEvalError(filename, err)
 	}
 
 	// Try to get the ScenarioDescriptor variable
 	v, err := i.Eval("ScenarioDescriptor")
 	if err != nil {
-		return nil, fmt.Errorf("scenario must export 'ScenarioDescriptor' variable: %w", err)
+		return nil, fmt.Errorf("scenario %s must export 'ScenarioDescriptor' variable: %w", filename, err)
 	}
 
 	// Extract the descriptor
 	desc, ok := extractDescriptor(v)
 	if !ok {
-		return nil, fmt.Errorf("ScenarioDescriptor is not of type scenario.Descriptor (got %T)", v.Interface())
+		return nil, fmt.Errorf("ScenarioDescriptor in %s is not of type scenario.Descriptor (got %T)", filename, v.Interface())
 	}
 
-	l.logger.Infof("loaded dynamic scenario: %s from %s", desc.Name, filepath.Base(path))
+	l.logger.Infof("loaded dynamic scenario: %s from %s", desc.Name, filename)
 	return desc, nil
+}
+
+// wrapEvalError wraps Yaegi evaluation errors with helpful hints.
+func (l *ScenarioLoader) wrapEvalError(filename string, err error) error {
+	errStr := err.Error()
+
+	// Try to detect missing symbols and suggest yaegi extract
+	if strings.Contains(errStr, "undefined:") {
+		// Parse error like: undefined: "github.com/some/package".Function
+		// or: 1:2: undefined: packagename
+		re := regexp.MustCompile(`undefined: "([^"]+)"\.(\w+)`)
+		matches := re.FindStringSubmatch(errStr)
+		if len(matches) == 3 {
+			pkg := matches[1]
+			symbol := matches[2]
+			return fmt.Errorf("failed to evaluate scenario %s: missing symbol %s.%s\n"+
+				"Hint: The package %q may not have extracted symbols.\n"+
+				"Run: cd scenarios/loader && yaegi extract %s\n"+
+				"Then: perl -i -pe 's/^package \\w+$/package loader/' scenarios/loader/symbols_*.go",
+				filename, pkg, symbol, pkg, pkg)
+		}
+
+		// Simpler undefined pattern
+		simpleRe := regexp.MustCompile(`undefined: (\w+)`)
+		simpleMatches := simpleRe.FindStringSubmatch(errStr)
+		if len(simpleMatches) == 2 {
+			return fmt.Errorf("failed to evaluate scenario %s: %w (hint: symbol %q is undefined, check imports and ensure all required packages have extracted symbols)",
+				filename, err, simpleMatches[1])
+		}
+	}
+
+	// Detect CFG/panic errors (Yaegi internal issues)
+	if strings.Contains(errStr, "CFG") || strings.Contains(errStr, "panic") {
+		return fmt.Errorf("failed to evaluate scenario %s: %w\n"+
+			"Hint: This may be a Yaegi interpreter limitation.\n"+
+			"Common causes:\n"+
+			"  - Channel sends to custom type aliases in closures (use raw channel type)\n"+
+			"  - Complex type assertions\n"+
+			"  - Unsupported language features",
+			filename, err)
+	}
+
+	// Detect type-related errors
+	if strings.Contains(errStr, "type") && (strings.Contains(errStr, "cannot") || strings.Contains(errStr, "mismatch")) {
+		return fmt.Errorf("failed to evaluate scenario %s: %w (hint: type mismatch detected, ensure types match the extracted symbols exactly)",
+			filename, err)
+	}
+
+	// Detect import errors
+	if strings.Contains(errStr, "import") || strings.Contains(errStr, "could not import") {
+		return fmt.Errorf("failed to evaluate scenario %s: %w (hint: import failed, check that all imported packages have been extracted with 'yaegi extract', run 'make generate-symbols' to regenerate)",
+			filename, err)
+	}
+
+	// Generic error with general hint
+	return fmt.Errorf("failed to evaluate scenario %s: %w (hint: run 'spamoor validate-scenario %s' for detailed diagnostics)",
+		filename, err, filename)
 }
 
 // LoadFromDir loads all scenarios from .go files in a directory.

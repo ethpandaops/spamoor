@@ -33,10 +33,16 @@ type CliArgs struct {
 }
 
 func main() {
-	// Check if "run" subcommand is used
-	if len(os.Args) >= 2 && os.Args[1] == "run" {
-		RunCommand(os.Args[2:])
-		return
+	// Check for subcommands
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "run":
+			RunCommand(os.Args[2:])
+			return
+		case "validate-scenario":
+			ValidateCommand(os.Args[2:])
+			return
+		}
 	}
 
 	cliArgs := CliArgs{}

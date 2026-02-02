@@ -43,6 +43,9 @@
       </div>
       
       <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" onclick="reloadScenarios()" title="Reload external scenarios">
+          <i class="fas fa-sync-alt"></i> Reload Scenarios
+        </button>
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newSpammerModal">
           <i class="fas fa-plus"></i> Create Spammer
         </button>
@@ -839,6 +842,47 @@ document.addEventListener('DOMContentLoaded', () => {
   const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
   tooltipTriggerList.map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
 });
+
+async function reloadScenarios() {
+  const button = document.querySelector('button[onclick="reloadScenarios()"]');
+  const icon = button.querySelector('i');
+
+  try {
+    // Show loading state
+    icon.classList.add('fa-spin');
+    button.disabled = true;
+
+    const response = await fetch('/api/scenarios/reload', {method: 'POST'});
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    alert(`Reloaded ${result.count} external scenario(s) from ${result.directory}`);
+
+    // Refresh the scenario dropdown if the new spammer modal is open
+    const modal = document.getElementById('newSpammerModal');
+    if (modal.classList.contains('show')) {
+      const select = document.querySelector('[name="scenario"]');
+      select.querySelectorAll('option:not(:first-child)').forEach(opt => opt.remove());
+
+      const scenarios = await fetch('/api/scenarios').then(r => r.json());
+      scenarios.forEach(scenario => {
+        const option = document.createElement('option');
+        option.value = scenario.name;
+        option.textContent = scenario.name + (scenario.description ? ' - ' + scenario.description : '');
+        select.appendChild(option);
+      });
+    }
+  } catch (err) {
+    alert('Failed to reload scenarios: ' + err.message);
+  } finally {
+    // Reset button state
+    icon.classList.remove('fa-spin');
+    button.disabled = false;
+  }
+}
 
 function toggleSelectAll(checkbox) {
   const checkboxes = document.querySelectorAll('.spammer-checkbox');
