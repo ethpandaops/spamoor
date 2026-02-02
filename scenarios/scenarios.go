@@ -4,6 +4,8 @@ import (
 	"slices"
 
 	"github.com/ethpandaops/spamoor/scenario"
+	"github.com/ethpandaops/spamoor/scenarios/loader"
+	"github.com/sirupsen/logrus"
 
 	blobaverage "github.com/ethpandaops/spamoor/scenarios/blob-average"
 	blobcombined "github.com/ethpandaops/spamoor/scenarios/blob-combined"
@@ -86,4 +88,25 @@ func GetScenarioNames() []string {
 		names[i] = scenario.Name
 	}
 	return names
+}
+
+// LoadDynamicScenarios loads scenarios from Go source files in the specified directory
+// and adds them to the ScenarioDescriptors list. This enables runtime scenario loading
+// without recompilation.
+func LoadDynamicScenarios(dir string, logger logrus.FieldLogger) {
+	l := loader.NewScenarioLoader(logger)
+	dynamicScenarios := l.LoadFromDir(dir)
+	ScenarioDescriptors = append(ScenarioDescriptors, dynamicScenarios...)
+}
+
+// LoadDynamicScenarioFromFile loads a single scenario from a Go source file
+// and adds it to the ScenarioDescriptors list.
+func LoadDynamicScenarioFromFile(path string, logger logrus.FieldLogger) error {
+	l := loader.NewScenarioLoader(logger)
+	desc, err := l.LoadFromFile(path)
+	if err != nil {
+		return err
+	}
+	ScenarioDescriptors = append(ScenarioDescriptors, desc)
+	return nil
 }
