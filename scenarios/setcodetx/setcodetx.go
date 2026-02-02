@@ -405,5 +405,10 @@ func (s *Scenario) prepareDelegator(delegatorIndex uint64) (*spamoor.Wallet, err
 		idxBytes = append(idxBytes, seedBytes...)
 	}
 	childKey := sha256.Sum256(append(common.FromHex(s.walletPool.GetRootWallet().GetWallet().GetAddress().Hex()), idxBytes...))
-	return spamoor.NewWallet(fmt.Sprintf("%x", childKey))
+	privateKey, address, err := spamoor.LoadPrivateKey(fmt.Sprintf("%x", childKey))
+	if err != nil {
+		return nil, err
+	}
+
+	return spamoor.NewWallet(privateKey, address), nil
 }

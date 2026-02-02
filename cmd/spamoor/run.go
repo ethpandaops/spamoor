@@ -101,7 +101,14 @@ func RunCommand(args []string) {
 
 	clientPool := spamoor.NewClientPool(ctx, logger.WithField("module", "clientpool"))
 
-	err := clientPool.InitClients(rpcHosts)
+	clientOptions := []*spamoor.ClientOptions{}
+	for _, rpcHost := range rpcHosts {
+		clientOptions = append(clientOptions, &spamoor.ClientOptions{
+			RpcHost: rpcHost,
+		})
+	}
+
+	err := clientPool.InitClients(clientOptions)
 	if err != nil {
 		panic(fmt.Errorf("failed to init clients: %v", err))
 	}
@@ -110,13 +117,6 @@ func RunCommand(args []string) {
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to prepare clients")
 	}
-
-	// Initialize root wallet
-	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, logger)
-	if err != nil {
-		logger.WithError(err).Fatal("Failed to init root wallet")
-	}
-	defer rootWallet.Shutdown()
 
 	// Load and parse YAML file using scenario config logic
 	spammerConfigs, err := configs.ResolveConfigImports(yamlFile, "", make(map[string]bool))
@@ -160,21 +160,20 @@ func RunCommand(args []string) {
 
 	logger.Infof("Preparing to run %d spammer(s)", len(configsToRun))
 
-	// Create wallet pools slice for txpool
-	walletPools := []*spamoor.WalletPool{}
-	walletPoolMutex := &sync.RWMutex{}
-
 	// Initialize transaction pool
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
 		Context:    ctx,
 		Logger:     logger.WithField("module", "txpool"),
 		ClientPool: clientPool,
-		GetActiveWalletPools: func() []*spamoor.WalletPool {
-			walletPoolMutex.RLock()
-			defer walletPoolMutex.RUnlock()
-			return walletPools
-		},
+		ChainId:    clientPool.GetChainId(),
 	})
+
+	// Initialize root wallet
+	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, txpool, logger)
+	if err != nil {
+		logger.WithError(err).Fatal("Failed to init root wallet")
+	}
+	defer rootWallet.Shutdown()
 
 	// Create and initialize spammers
 	spammers := make([]*RunSpammer, len(configsToRun))
@@ -184,11 +183,6 @@ func RunCommand(args []string) {
 			logger.WithError(err).Fatalf("Failed to create spammer %d (%s)", i, config.Name)
 		}
 		spammers[i] = spammer
-
-		// Add wallet pool to the slice
-		walletPoolMutex.Lock()
-		walletPools = append(walletPools, spammer.walletPool)
-		walletPoolMutex.Unlock()
 	}
 
 	// Prepare all wallet pools

@@ -98,7 +98,13 @@ func main() {
 	}
 
 	clientPool := spamoor.NewClientPool(ctx, logger.WithField("module", "clientpool"))
-	err := clientPool.InitClients(rpcHosts)
+	clientOptions := []*spamoor.ClientOptions{}
+	for _, rpcHost := range rpcHosts {
+		clientOptions = append(clientOptions, &spamoor.ClientOptions{
+			RpcHost: rpcHost,
+		})
+	}
+	err := clientPool.InitClients(clientOptions)
 	if err != nil {
 		panic(fmt.Errorf("failed to init clients: %v", err))
 	}
@@ -124,16 +130,7 @@ func main() {
 		Context:    ctx,
 		Logger:     logger.WithField("module", "txpool"),
 		ClientPool: clientPool,
-		GetActiveWalletPools: func() []*spamoor.WalletPool {
-			walletPools := make([]*spamoor.WalletPool, 0)
-			for _, sp := range spamoorDaemon.GetAllSpammers() {
-				walletPool := sp.GetWalletPool()
-				if walletPool != nil {
-					walletPools = append(walletPools, walletPool)
-				}
-			}
-			return walletPools
-		},
+		ChainId:    clientPool.GetChainId(),
 	})
 
 	// init daemon
@@ -174,7 +171,7 @@ func main() {
 	}
 
 	// init root wallet
-	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, logger)
+	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, txpool, logger)
 	if err != nil {
 		panic(fmt.Errorf("failed to init root wallet: %v", err))
 	}

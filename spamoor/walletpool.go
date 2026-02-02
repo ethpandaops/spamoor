@@ -109,7 +109,7 @@ func GetDefaultWalletConfig(scenarioName string) *WalletPoolConfig {
 // NewWalletPool creates a new wallet pool with the specified dependencies.
 // The pool must be configured and prepared with PrepareWallets() before use.
 func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *RootWallet, clientPool *ClientPool, txpool *TxPool) *WalletPool {
-	return &WalletPool{
+	pool := &WalletPool{
 		ctx:                  ctx,
 		logger:               logger,
 		rootWallet:           rootWallet,
@@ -120,6 +120,10 @@ func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *R
 		runFundings:          true,
 		lowBalanceNotifyChan: make(chan struct{}, 100), // buffered channel
 	}
+
+	txpool.RegisterWalletPool(pool)
+
+	return pool
 }
 
 // GetContext returns the context associated with this wallet pool.
@@ -541,12 +545,23 @@ func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, cl
 // Updates the wallet's state from the blockchain and creates a funding request if
 // the wallet's balance is below the specified refill threshold.
 func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmount *uint256.Int, refillBalance *uint256.Int) (*Wallet, *FundingRequest, error) {
-	//TODO: deduplicate wallet creation to avoid issues when using the same privkey for multiple scenarios/wallets
+	var err error
 
-	childWallet, err := NewWallet(privkey)
+	privateKey, address, err := LoadPrivateKey(privkey)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	childWallet := pool.txpool.GetRegisteredWallet(address)
+	if childWallet == nil {
+		childWallet = NewWallet(privateKey, address)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		childWallet = pool.txpool.RegisterWallet(childWallet, pool.ctx)
+	}
+
 	err = client.UpdateWallet(pool.ctx, childWallet)
 	if err != nil {
 		return nil, nil, err

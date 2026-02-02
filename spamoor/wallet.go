@@ -64,22 +64,21 @@ type PendingTx struct {
 // NewWallet creates a new wallet from a private key string.
 // If privkey is empty, generates a new random private key.
 // The privkey parameter accepts hex strings with or without "0x" prefix.
-func NewWallet(privkey string) (*Wallet, error) {
+func NewWallet(privkey *ecdsa.PrivateKey, address common.Address) *Wallet {
 	wallet := &Wallet{
+		privkey:      privkey,
+		address:      address,
 		txNonceChans: map[uint64]*nonceStatus{},
 	}
-	err := wallet.loadPrivateKey(privkey)
-	if err != nil {
-		return nil, err
-	}
-	return wallet, nil
+
+	return wallet
 }
 
 // loadPrivateKey loads a private key from a hex string or generates a new random key.
 // If privkey is empty, it generates a new random private key.
 // If privkey is provided, it accepts hex strings with or without "0x" prefix.
 // Also derives and sets the wallet's Ethereum address from the private key.
-func (wallet *Wallet) loadPrivateKey(privkey string) error {
+func LoadPrivateKey(privkey string) (*ecdsa.PrivateKey, common.Address, error) {
 	var (
 		privateKey *ecdsa.PrivateKey
 		err        error
@@ -93,18 +92,16 @@ func (wallet *Wallet) loadPrivateKey(privkey string) error {
 		privateKey, err = crypto.HexToECDSA(privkey)
 	}
 	if err != nil {
-		return err
+		return nil, common.Address{}, err
 	}
 
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return errors.New("error casting public key to ECDSA")
+		return nil, common.Address{}, errors.New("error casting public key to ECDSA")
 	}
 
-	wallet.privkey = privateKey
-	wallet.address = crypto.PubkeyToAddress(*publicKeyECDSA)
-	return nil
+	return privateKey, crypto.PubkeyToAddress(*publicKeyECDSA), nil
 }
 
 // GetAddress returns the Ethereum address associated with this wallet.
