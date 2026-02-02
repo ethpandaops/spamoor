@@ -321,6 +321,14 @@ Comprehensive guide for implementing custom transaction scenarios. Covers:
 - Contract interaction patterns
 - Testing and debugging scenarios
 
+### 🔌 [Dynamic Scenario Guide](./docs/dynamic-scenarios.md)
+Guide for creating and loading scenarios at runtime without recompiling. Covers:
+- Writing dynamic scenarios with Yaegi interpreter
+- Available packages and symbols
+- Auto-loading and hot-reload features
+- Validation and troubleshooting
+- See [example implementation](./examples/dynamic-scenarios/simple_transfer.go)
+
 ## ✨ Key Features
 
 - **🎯 14+ Transaction Scenarios**: From basic EOA transfers to complex DeFi interactions

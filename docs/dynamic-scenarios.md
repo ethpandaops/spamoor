@@ -27,6 +27,8 @@ Dynamic scenarios are interpreted at runtime by Yaegi and have access to a subse
 
 ## Quick Start
 
+> **Working Example**: See [`examples/dynamic-scenarios/simple_transfer.go`](../examples/dynamic-scenarios/simple_transfer.go) for a complete, runnable example.
+
 1. Create a directory for your scenario:
 ```bash
 mkdir -p scenarios/external/my-scenario
@@ -153,26 +155,26 @@ The following packages have extracted symbols and are available for use in dynam
 
 ### Spamoor Packages
 
-| Package | Import Path | Purpose |
-|---------|-------------|---------|
-| scenario | `github.com/ethpandaops/spamoor/scenario` | Core scenario interfaces and helpers |
-| spamoor | `github.com/ethpandaops/spamoor/spamoor` | Client pool, wallet pool, transaction pool |
-| txbuilder | `github.com/ethpandaops/spamoor/txbuilder` | Transaction building utilities |
-| utils | `github.com/ethpandaops/spamoor/utils` | Common utilities |
+| Package   | Import Path                                | Purpose                                    |
+| --------- | ------------------------------------------ | ------------------------------------------ |
+| scenario  | `github.com/ethpandaops/spamoor/scenario`  | Core scenario interfaces and helpers       |
+| spamoor   | `github.com/ethpandaops/spamoor/spamoor`   | Client pool, wallet pool, transaction pool |
+| txbuilder | `github.com/ethpandaops/spamoor/txbuilder` | Transaction building utilities             |
+| utils     | `github.com/ethpandaops/spamoor/utils`     | Common utilities                           |
 
 ### Third-party Packages
 
-| Package | Import Path | Purpose |
-|---------|-------------|---------|
-| logrus | `github.com/sirupsen/logrus` | Structured logging |
-| pflag | `github.com/spf13/pflag` | CLI flag parsing |
-| uint256 | `github.com/holiman/uint256` | Big integer operations |
-| common | `github.com/ethereum/go-ethereum/common` | Ethereum types (Address, Hash) |
-| types | `github.com/ethereum/go-ethereum/core/types` | Transaction types |
-| abi | `github.com/ethereum/go-ethereum/accounts/abi` | ABI encoding/decoding |
-| bind | `github.com/ethereum/go-ethereum/accounts/abi/bind` | Contract bindings |
-| crypto | `github.com/ethereum/go-ethereum/crypto` | Cryptographic functions |
-| yaml | `gopkg.in/yaml.v3` | YAML parsing |
+| Package | Import Path                                         | Purpose                        |
+| ------- | --------------------------------------------------- | ------------------------------ |
+| logrus  | `github.com/sirupsen/logrus`                        | Structured logging             |
+| pflag   | `github.com/spf13/pflag`                            | CLI flag parsing               |
+| uint256 | `github.com/holiman/uint256`                        | Big integer operations         |
+| common  | `github.com/ethereum/go-ethereum/common`            | Ethereum types (Address, Hash) |
+| types   | `github.com/ethereum/go-ethereum/core/types`        | Transaction types              |
+| abi     | `github.com/ethereum/go-ethereum/accounts/abi`      | ABI encoding/decoding          |
+| bind    | `github.com/ethereum/go-ethereum/accounts/abi/bind` | Contract bindings              |
+| crypto  | `github.com/ethereum/go-ethereum/crypto`            | Cryptographic functions        |
+| yaml    | `gopkg.in/yaml.v3`                                  | YAML parsing                   |
 
 ## CLI Usage
 
@@ -294,31 +296,14 @@ make generate-symbols
 
 Yaegi is a Go interpreter with some limitations. Here are common issues and solutions:
 
-### Channel Type Aliases in Closures
-
-**Problem**: Sending to channels with type aliases inside closures may cause panics.
-
-**Workaround**: Use raw channel types instead of aliases, or extract the send operation outside the closure.
-
-### Complex Type Assertions
-
-**Problem**: Some complex type assertions may fail.
-
-**Workaround**: Use intermediate interface conversions or restructure the code.
-
-### Unsupported Language Features
-
-Yaegi doesn't support all Go features. If you encounter issues:
-- Avoid `go:embed` directives
-- Avoid CGO
-- Keep generics usage simple
-- Avoid reflection on unexported fields
-
-### Interface Satisfaction
-
-**Problem**: Types defined in dynamic scenarios may not satisfy interfaces defined in extracted symbols.
-
-**Workaround**: Ensure your types exactly match the expected interface, including method receiver types (pointer vs value).
+- Sending to channels with type aliases inside closures may cause panics.
+- Some complex type assertions may fail.
+- Yaegi doesn't support all Go features. If you encounter issues:
+    - Avoid `go:embed` directives
+    - Avoid CGO
+    - Keep generics usage simple
+    - Avoid`` reflection on unexported fields
+- Ensure your types exactly match the expected interface, including method receiver types (pointer vs value).
 
 ## Troubleshooting
 
@@ -334,13 +319,6 @@ perl -i -pe 's/^package \w+$/package loader/' symbols_*.go
 ### Error: "ScenarioDescriptor is not of type scenario.Descriptor"
 
 Ensure you're using the correct type from extracted symbols, not a locally defined type.
-
-### Error: "CFG post-order panic"
-
-This is usually a Yaegi limitation. Try:
-- Simplifying the code structure
-- Moving complex operations outside closures
-- Using explicit type conversions
 
 ### Scenario Not Found
 
@@ -359,112 +337,3 @@ Check:
 1. The `Run()` method is implemented correctly
 2. Context cancellation is handled
 3. Errors are returned, not just logged
-
-## Example: EOA Transfer Scenario
-
-Here's a complete example of a dynamic EOA transfer scenario:
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-
-    "github.com/ethereum/go-ethereum/common"
-    "github.com/ethereum/go-ethereum/core/types"
-    "github.com/ethpandaops/spamoor/scenario"
-    "github.com/ethpandaops/spamoor/spamoor"
-    "github.com/holiman/uint256"
-    "github.com/sirupsen/logrus"
-    "github.com/spf13/pflag"
-)
-
-var ScenarioDescriptor = scenario.Descriptor{
-    Name:           "dynamic-eoatx",
-    Description:    "Simple EOA transfer scenario (dynamic)",
-    DefaultOptions: DefaultOptions,
-    NewScenario:    NewScenario,
-}
-
-type Scenario struct {
-    logger     *logrus.Entry
-    walletPool *spamoor.WalletPool
-    options    *Options
-}
-
-type Options struct {
-    TotalCount uint64 `yaml:"total_count"`
-    Throughput uint64 `yaml:"throughput"`
-    MaxPending uint64 `yaml:"max_pending"`
-    MaxWallets uint64 `yaml:"max_wallets"`
-    Amount     uint64 `yaml:"amount"`
-}
-
-var DefaultOptions = &Options{
-    TotalCount: 0,
-    Throughput: 10,
-    MaxPending: 100,
-    MaxWallets: 50,
-    Amount:     1000000000000, // 0.000001 ETH
-}
-
-func NewScenario(logger logrus.FieldLogger) scenario.Scenario {
-    return &Scenario{
-        logger:  logger.WithField("scenario", "dynamic-eoatx"),
-        options: &Options{},
-    }
-}
-
-func (s *Scenario) Flags(flags *pflag.FlagSet) error {
-    flags.Uint64VarP(&s.options.TotalCount, "count", "c", DefaultOptions.TotalCount, "Total transaction count")
-    flags.Uint64VarP(&s.options.Throughput, "throughput", "t", DefaultOptions.Throughput, "Transactions per slot")
-    flags.Uint64VarP(&s.options.MaxPending, "max-pending", "p", DefaultOptions.MaxPending, "Max pending transactions")
-    flags.Uint64VarP(&s.options.MaxWallets, "max-wallets", "w", DefaultOptions.MaxWallets, "Max wallets to use")
-    flags.Uint64Var(&s.options.Amount, "amount", DefaultOptions.Amount, "Transfer amount in wei")
-    return nil
-}
-
-func (s *Scenario) Init(opts *scenario.Options) error {
-    s.walletPool = opts.WalletPool
-    s.walletPool.SetWalletCount(s.options.MaxWallets)
-    return nil
-}
-
-func (s *Scenario) Run(ctx context.Context) error {
-    return scenario.RunTransactionScenario(ctx, &scenario.TransactionScenarioOptions{
-        WalletPool:    s.walletPool,
-        Logger:        s.logger,
-        Throughput:    s.options.Throughput,
-        MaxPending:    s.options.MaxPending,
-        TotalCount:    s.options.TotalCount,
-        ProcessNextTx: s.processNextTx,
-    })
-}
-
-func (s *Scenario) processNextTx(ctx context.Context, txIdx uint64, opts *scenario.TransactionScenarioTxOptions) (*types.Transaction, *spamoor.Wallet, func(), error) {
-    wallet := s.walletPool.GetWallet(spamoor.SelectByIndex, int(txIdx))
-    if wallet == nil {
-        return nil, nil, nil, fmt.Errorf("no wallet available")
-    }
-
-    toAddr := s.walletPool.GetWallet(spamoor.SelectRandom, 0).GetAddress()
-    amount := uint256.NewInt(s.options.Amount)
-
-    tx, err := wallet.BuildTransaction(ctx, func(txData *types.DynamicFeeTx) (*types.DynamicFeeTx, error) {
-        txData.To = (*common.Address)(&toAddr)
-        txData.Value = amount.ToBig()
-        txData.Gas = 21000
-        return txData, nil
-    })
-    if err != nil {
-        return nil, wallet, nil, err
-    }
-
-    return tx, wallet, nil, nil
-}
-
-func main() {}
-```
-
-Save this as `scenarios/external/dynamic-eoatx/dynamic-eoatx.go` and it will be auto-loaded.
