@@ -170,6 +170,9 @@ func main() {
 	}
 	defer rootWallet.Shutdown()
 
+	// Initialize transaction batcher for efficient bulk wallet funding
+	rootWallet.InitTxBatcher(ctx, txpool)
+
 	// init wallet pool
 	walletPool := spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
 	walletPool.SetWalletCount(100)
