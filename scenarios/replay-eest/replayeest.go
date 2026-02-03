@@ -39,6 +39,8 @@ type ScenarioOptions struct {
 	Rebroadcast     uint64  `yaml:"rebroadcast"`
 	BaseFee         float64 `yaml:"base_fee"`
 	TipFee          float64 `yaml:"tip_fee"`
+	BaseFeeWei      string  `yaml:"base_fee_wei"`
+	TipFeeWei       string  `yaml:"tip_fee_wei"`
 	Timeout         string  `yaml:"timeout"`
 	PayloadTimeout  string  `yaml:"payload_timeout"` // Timeout for each payload (default: 30m)
 	ClientGroup     string  `yaml:"client_group"`
@@ -128,6 +130,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 		"Base fee in gwei (0 = use suggested)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee,
 		"Tip fee in gwei (0 = use suggested)")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout,
 		"Timeout for the scenario (e.g., '1h', '30m')")
 	flags.StringVar(&s.options.PayloadTimeout, "payload-timeout", ScenarioDefaultOptions.PayloadTimeout,
@@ -405,7 +409,8 @@ func (s *Scenario) executeTestCase(
 	addressMap := s.buildAddressMap(deployer, senderWallets, deployerNonce, payload)
 
 	// Get suggested fees
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		result.err = fmt.Errorf("failed to get suggested fees: %w", err)
 		return result

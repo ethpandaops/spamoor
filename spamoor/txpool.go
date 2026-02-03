@@ -1384,24 +1384,52 @@ func (pool *TxPool) initBlockStats() error {
 }
 
 // GetSuggestedFees returns the suggested fees for a transaction.
-// If baseFeeGwei and tipFeeGwei are provided, they are used as the base fee and tip fee.
-// If not provided, the fees are fetched from the client. The fees are returned in wei.
-func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeGwei float64, tipFeeGwei float64) (feeCap *big.Int, tipCap *big.Int, err error) {
-	if baseFeeGwei > 0 {
-		feeCap = new(big.Int).SetUint64(uint64(baseFeeGwei * 1e9))
+// If baseFeeWei and tipFeeWei are provided (non-nil), they are used directly.
+// If not provided (nil), the fees are fetched from the client.
+func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int) (feeCap *big.Int, tipCap *big.Int, err error) {
+	if baseFeeWei != nil && baseFeeWei.Sign() > 0 {
+		feeCap = new(big.Int).Set(baseFeeWei)
 	}
-	if tipFeeGwei > 0 {
-		tipCap = new(big.Int).SetUint64(uint64(tipFeeGwei * 1e9))
+	if tipFeeWei != nil && tipFeeWei.Sign() > 0 {
+		tipCap = new(big.Int).Set(tipFeeWei)
 	}
 
 	if feeCap == nil || tipCap == nil {
-		feeCap, tipCap, err = client.GetSuggestedFee(pool.options.Context)
-		if err != nil {
-			return nil, nil, err
+		networkFeeCap, networkTipCap, fetchErr := client.GetSuggestedFee(pool.options.Context)
+		if fetchErr != nil {
+			return nil, nil, fetchErr
+		}
+		if feeCap == nil {
+			feeCap = networkFeeCap
+		}
+		if tipCap == nil {
+			tipCap = networkTipCap
 		}
 	}
 
 	return feeCap, tipCap, nil
+}
+
+// ResolveFees resolves fee values with precedence: Wei > Gwei > nil (network fetch).
+// Wei values are parsed from strings to support precise sub-Gwei fees on L2s.
+func ResolveFees(baseFeeGwei, tipFeeGwei float64, baseFeeWei, tipFeeWei string) (baseFee, tipFee *big.Int) {
+	// Parse Wei strings first (highest precedence)
+	if baseFeeWei != "" && baseFeeWei != "0" {
+		baseFee, _ = new(big.Int).SetString(baseFeeWei, 10)
+	}
+	if tipFeeWei != "" && tipFeeWei != "0" {
+		tipFee, _ = new(big.Int).SetString(tipFeeWei, 10)
+	}
+
+	// Fall back to Gwei conversion if Wei not provided
+	if baseFee == nil && baseFeeGwei > 0 {
+		baseFee = new(big.Int).SetUint64(uint64(baseFeeGwei * 1e9))
+	}
+	if tipFee == nil && tipFeeGwei > 0 {
+		tipFee = new(big.Int).SetUint64(uint64(tipFeeGwei * 1e9))
+	}
+
+	return baseFee, tipFee
 }
 
 // calculateBackoffDelay calculates the exponential backoff delay for rebroadcast attempts.

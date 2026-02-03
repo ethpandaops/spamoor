@@ -104,7 +104,8 @@ func (t *DeployTask) BuildTransaction(ctx context.Context, wallet *spamoor.Walle
 	}
 
 	// Get suggested fees from execution context
-	feeCap, tipCap, err := execCtx.TxPool.GetSuggestedFees(nil, execCtx.BaseFee, execCtx.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(execCtx.BaseFee, execCtx.TipFee, execCtx.BaseFeeWei, execCtx.TipFeeWei)
+	feeCap, tipCap, err := execCtx.TxPool.GetSuggestedFees(nil, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}

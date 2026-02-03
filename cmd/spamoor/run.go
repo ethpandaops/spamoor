@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -37,7 +38,7 @@ func RunCommand(args []string) {
 	flags.StringVar(&cliArgs.rpchostsFile, "rpchost-file", "", "File with a list of RPC hosts to send transactions to.")
 	flags.StringVarP(&cliArgs.privkey, "privkey", "p", "", "The private key of the wallet to send funds from.")
 	flags.IntSliceVarP(&selectedSpammers, "spammers", "s", []int{}, "Indexes of spammers to run (0-based). If not specified, runs all spammers.")
-	flags.Uint64Var(&cliArgs.secondsPerSlot, "seconds-per-slot", 12, "Seconds per slot for rate limiting (used for throughput calculation).")
+	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 
 	flags.Parse(args)
 
@@ -63,8 +64,8 @@ func RunCommand(args []string) {
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor run command")
 
-	// Set global seconds per slot
-	scenario.GlobalSecondsPerSlot = cliArgs.secondsPerSlot
+	// Set global slot duration for rate limiting
+	scenario.GlobalSlotDuration = cliArgs.slotDuration
 
 	// Create context
 	ctx, cancel := context.WithCancel(context.Background())

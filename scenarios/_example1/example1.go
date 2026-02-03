@@ -32,6 +32,8 @@ type ScenarioOptions struct {
 	Rebroadcast     uint64  `yaml:"rebroadcast"`
 	BaseFee         float64 `yaml:"base_fee"`
 	TipFee          float64 `yaml:"tip_fee"`
+	BaseFeeWei      string  `yaml:"base_fee_wei"`
+	TipFeeWei       string  `yaml:"tip_fee_wei"`
 	InitialValue    uint64  `yaml:"initial_value"`
 	MaxIncrement    uint64  `yaml:"max_increment"`
 	RandomizeValues bool    `yaml:"randomize_values"`
@@ -88,6 +90,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.Uint64Var(&s.options.InitialValue, "initial-value", ScenarioDefaultOptions.InitialValue, "Initial value for the storage contract")
 	flags.Uint64Var(&s.options.MaxIncrement, "max-increment", ScenarioDefaultOptions.MaxIncrement, "Maximum increment value for random increments")
 	flags.BoolVar(&s.options.RandomizeValues, "randomize-values", ScenarioDefaultOptions.RandomizeValues, "Use random values for contract interactions")
@@ -231,7 +235,8 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, error) {
 	}
 
 	// Get suggested fees
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
@@ -304,7 +309,8 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 	}
 
 	// Get suggested fees
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, client, wallet, fmt.Errorf("failed to get suggested fees: %w", err)
 	}

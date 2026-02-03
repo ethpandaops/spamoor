@@ -26,6 +26,8 @@ type ScenarioOptions struct {
 	Rebroadcast uint64  `yaml:"rebroadcast"`
 	BaseFee     float64 `yaml:"base_fee"`
 	TipFee      float64 `yaml:"tip_fee"`
+	BaseFeeWei  string  `yaml:"base_fee_wei"`
+	TipFeeWei   string  `yaml:"tip_fee_wei"`
 
 	TasksConfig string `yaml:"tasks_config"` // Inline YAML/JSON task configuration
 	TasksFile   string `yaml:"tasks_file"`   // Path to task configuration file or URL
@@ -85,6 +87,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast with unlimited retries and exponential backoff")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 
 	flags.StringVar(&s.options.TasksConfig, "tasks", ScenarioDefaultOptions.TasksConfig, "Inline task configuration (YAML/JSON string)")
 	flags.StringVar(&s.options.TasksFile, "tasks-file", ScenarioDefaultOptions.TasksFile, "Path to task configuration file or URL (http/https)")
@@ -264,9 +268,11 @@ func (s *Scenario) executeInitTasks(ctx context.Context) error {
 func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTaskIndex int, wallet *spamoor.Wallet, client *spamoor.Client, registry *ContractRegistry, txIdx uint64) error {
 	// Create execution context with scenario fee settings
 	execCtx := &TaskExecutionContext{
-		BaseFee: s.options.BaseFee,
-		TipFee:  s.options.TipFee,
-		TxPool:  s.walletPool.GetTxPool(),
+		BaseFee:    s.options.BaseFee,
+		TipFee:     s.options.TipFee,
+		BaseFeeWei: s.options.BaseFeeWei,
+		TipFeeWei:  s.options.TipFeeWei,
+		TxPool:     s.walletPool.GetTxPool(),
 	}
 
 	// Handle transaction processing based on await-txs mode
