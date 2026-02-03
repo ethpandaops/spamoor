@@ -138,7 +138,14 @@ func main() {
 
 	clientPool := spamoor.NewClientPool(ctx, logger.WithField("module", "clientpool"))
 
-	err := clientPool.InitClients(rpcHosts)
+	clientOptions := []*spamoor.ClientOptions{}
+	for _, rpcHost := range rpcHosts {
+		clientOptions = append(clientOptions, &spamoor.ClientOptions{
+			RpcHost: rpcHost,
+		})
+	}
+
+	err := clientPool.InitClients(clientOptions)
 	if err != nil {
 		panic(fmt.Errorf("failed to init clients: %v", err))
 	}
@@ -148,27 +155,23 @@ func main() {
 		panic(fmt.Errorf("failed to prepare clients: %v", err))
 	}
 
+	// prepare txpool
+	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
+		Context:    ctx,
+		Logger:     logger.WithField("module", "txpool"),
+		ClientPool: clientPool,
+		ChainId:    clientPool.GetChainId(),
+	})
+
 	// init root wallet
-	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, logger)
+	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, txpool, logger)
 	if err != nil {
 		panic(fmt.Errorf("failed to init root wallet: %v", err))
 	}
 	defer rootWallet.Shutdown()
 
-	// prepare txpool
-	var walletPool *spamoor.WalletPool
-
-	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
-		Context:    ctx,
-		Logger:     logger.WithField("module", "txpool"),
-		ClientPool: clientPool,
-		GetActiveWalletPools: func() []*spamoor.WalletPool {
-			return []*spamoor.WalletPool{walletPool}
-		},
-	})
-
 	// init wallet pool
-	walletPool = spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
+	walletPool := spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
 	walletPool.SetWalletCount(100)
 
 	// Set refill amount (Wei flag overrides ETH flag)

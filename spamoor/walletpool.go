@@ -86,6 +86,10 @@ type WalletPool struct {
 	// Low balance notification system
 	lowBalanceNotifyChan chan struct{}
 	lastFundingTime      time.Time
+
+	// Stop funding loop signal
+	stopFundingChan chan struct{}
+	fundingLoopDone chan struct{}
 }
 
 // FundingRequest represents a request to fund a wallet with a specific amount.
@@ -110,7 +114,7 @@ func GetDefaultWalletConfig(scenarioName string) *WalletPoolConfig {
 // NewWalletPool creates a new wallet pool with the specified dependencies.
 // The pool must be configured and prepared with PrepareWallets() before use.
 func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *RootWallet, clientPool *ClientPool, txpool *TxPool) *WalletPool {
-	return &WalletPool{
+	pool := &WalletPool{
 		ctx:                  ctx,
 		logger:               logger,
 		rootWallet:           rootWallet,
@@ -120,7 +124,13 @@ func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *R
 		wellKnownWallets:     make(map[string]*Wallet),
 		runFundings:          true,
 		lowBalanceNotifyChan: make(chan struct{}, 100), // buffered channel
+		stopFundingChan:      make(chan struct{}),
+		fundingLoopDone:      make(chan struct{}),
 	}
+
+	txpool.RegisterWalletPool(pool)
+
+	return pool
 }
 
 // GetContext returns the context associated with this wallet pool.
@@ -183,8 +193,34 @@ func (pool *WalletPool) SetWalletPrivkeys(privkeys []string) {
 
 // SetRunFundings enables or disables automatic wallet funding.
 // When disabled, wallets will not be automatically refilled when their balance drops.
+// This should be called before PrepareWallets(). To stop an already running funding loop,
+// use StopFunding() instead.
 func (pool *WalletPool) SetRunFundings(runFundings bool) {
 	pool.runFundings = runFundings
+}
+
+// StopFunding stops the automatic wallet funding loop.
+// This can be called after PrepareWallets() to stop the background funding goroutine.
+// It blocks until the funding loop has fully stopped.
+func (pool *WalletPool) StopFunding() {
+	if !pool.runFundings {
+		return
+	}
+
+	pool.runFundings = false
+
+	select {
+	case <-pool.stopFundingChan:
+		// Already closed
+	default:
+		close(pool.stopFundingChan)
+	}
+
+	// Wait for the funding loop to finish
+	select {
+	case <-pool.fundingLoopDone:
+	case <-pool.ctx.Done():
+	}
 }
 
 // AddWellKnownWallet adds a named wallet with custom funding configuration.
@@ -552,16 +588,40 @@ func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, cl
 	return pool.prepareWallet(walletPrivkey, client, refillAmount, refillBalance)
 }
 
+// calculateFundingAmount calculates the amount to fund a wallet.
+// It returns the maximum of refillAmount and (refillBalance - currentBalance),
+// ensuring the wallet reaches at least the refillBalance threshold.
+func calculateFundingAmount(currentBalance *uint256.Int, refillAmount *uint256.Int, refillBalance *uint256.Int) *uint256.Int {
+	fundingAmount := new(uint256.Int).Set(refillAmount)
+
+	// If refillBalance > currentBalance, calculate the difference
+	if refillBalance.Cmp(currentBalance) > 0 {
+		neededAmount := new(uint256.Int).Sub(refillBalance, currentBalance)
+		if neededAmount.Cmp(fundingAmount) > 0 {
+			fundingAmount = neededAmount
+		}
+	}
+
+	return fundingAmount
+}
+
 // prepareWallet creates a wallet from a private key and checks if it needs funding.
 // Updates the wallet's state from the blockchain and creates a funding request if
 // the wallet's balance is below the specified refill threshold.
 func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmount *uint256.Int, refillBalance *uint256.Int) (*Wallet, *FundingRequest, error) {
-	//TODO: deduplicate wallet creation to avoid issues when using the same privkey for multiple scenarios/wallets
+	var err error
 
-	childWallet, err := NewWallet(privkey)
+	privateKey, address, err := LoadPrivateKey(privkey)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	childWallet := pool.txpool.GetRegisteredWallet(address)
+	if childWallet == nil {
+		childWallet = NewWallet(privateKey, address)
+		childWallet = pool.txpool.RegisterWallet(childWallet, pool.ctx)
+	}
+
 	err = client.UpdateWallet(pool.ctx, childWallet)
 	if err != nil {
 		return nil, nil, err
@@ -574,9 +634,10 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 
 	var fundingReq *FundingRequest
 	if pool.runFundings && childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
+		currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 		fundingReq = &FundingRequest{
 			Wallet: childWallet,
-			Amount: refillAmount,
+			Amount: calculateFundingAmount(currentBalance, refillAmount, refillBalance),
 		}
 	}
 	return childWallet, fundingReq, nil
@@ -585,8 +646,10 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 // watchWalletBalancesLoop runs continuously to monitor and refill wallet balances.
 // It periodically checks all wallets and funds those below the refill threshold.
 // Also listens for low balance notifications to trigger immediate checks.
-// Exits when the context is cancelled or funds have been reclaimed.
+// Exits when the context is cancelled, funds have been reclaimed, or StopFunding is called.
 func (pool *WalletPool) watchWalletBalancesLoop() {
+	defer close(pool.fundingLoopDone)
+
 	sleepTime := time.Duration(pool.config.RefillInterval) * time.Second
 	timer := time.NewTimer(sleepTime)
 	defer timer.Stop()
@@ -623,6 +686,10 @@ func (pool *WalletPool) watchWalletBalancesLoop() {
 	for {
 		select {
 		case <-pool.ctx.Done():
+			return
+
+		case <-pool.stopFundingChan:
+			pool.logger.Debugf("funding loop stopped")
 			return
 
 		case <-timer.C:
@@ -711,10 +778,11 @@ func (pool *WalletPool) resupplyChildWallets() error {
 			}
 
 			if childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
+				currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 				reqsMutex.Lock()
 				fundingReqs = append(fundingReqs, &FundingRequest{
 					Wallet: childWallet,
-					Amount: refillAmount,
+					Amount: calculateFundingAmount(currentBalance, refillAmount, refillBalance),
 				})
 				reqsMutex.Unlock()
 			}
@@ -740,10 +808,11 @@ func (pool *WalletPool) resupplyChildWallets() error {
 				return
 			}
 			if childWallet.GetBalance().Cmp(pool.config.RefillBalance.ToBig()) < 0 {
+				currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 				reqsMutex.Lock()
 				fundingReqs = append(fundingReqs, &FundingRequest{
 					Wallet: childWallet,
-					Amount: pool.config.RefillAmount,
+					Amount: calculateFundingAmount(currentBalance, pool.config.RefillAmount, pool.config.RefillBalance),
 				})
 				reqsMutex.Unlock()
 			}
@@ -1030,18 +1099,6 @@ func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *W
 	return tx, nil
 }
 
-// collectPoolWallets adds all wallets (root, child, and well-known) to the provided map.
-// This is used by the transaction pool to track which addresses belong to this wallet pool.
-func (pool *WalletPool) collectPoolWallets(walletMap map[common.Address]*Wallet) {
-	walletMap[pool.rootWallet.wallet.GetAddress()] = pool.rootWallet.wallet
-	for _, wallet := range pool.childWallets {
-		walletMap[wallet.GetAddress()] = wallet
-	}
-	for _, wallet := range pool.wellKnownWallets {
-		walletMap[wallet.GetAddress()] = wallet
-	}
-}
-
 // CheckChildWalletBalance checks and refills a specific wallet if needed.
 // This can be used to manually trigger funding for a single wallet.
 func (pool *WalletPool) CheckChildWalletBalance(childWallet *Wallet) error {
@@ -1075,10 +1132,12 @@ func (pool *WalletPool) CheckChildWalletBalance(childWallet *Wallet) error {
 		return nil
 	}
 
+	currentBalance := uint256.MustFromBig(childWallet.GetBalance())
+
 	return pool.processFundingRequests([]*FundingRequest{
 		{
 			Wallet: childWallet,
-			Amount: refillAmount,
+			Amount: calculateFundingAmount(currentBalance, refillAmount, refillBalance),
 		},
 	})
 }

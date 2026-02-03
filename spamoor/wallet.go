@@ -31,6 +31,7 @@ type Wallet struct {
 	privkey          *ecdsa.PrivateKey
 	address          common.Address
 	needNonceResync  bool
+	isSynced         bool
 	chainid          *big.Int
 	pendingTxCount   atomic.Uint64
 	submittedTxCount atomic.Uint64
@@ -64,22 +65,21 @@ type PendingTx struct {
 // NewWallet creates a new wallet from a private key string.
 // If privkey is empty, generates a new random private key.
 // The privkey parameter accepts hex strings with or without "0x" prefix.
-func NewWallet(privkey string) (*Wallet, error) {
+func NewWallet(privkey *ecdsa.PrivateKey, address common.Address) *Wallet {
 	wallet := &Wallet{
+		privkey:      privkey,
+		address:      address,
 		txNonceChans: map[uint64]*nonceStatus{},
 	}
-	err := wallet.loadPrivateKey(privkey)
-	if err != nil {
-		return nil, err
-	}
-	return wallet, nil
+
+	return wallet
 }
 
 // loadPrivateKey loads a private key from a hex string or generates a new random key.
 // If privkey is empty, it generates a new random private key.
 // If privkey is provided, it accepts hex strings with or without "0x" prefix.
 // Also derives and sets the wallet's Ethereum address from the private key.
-func (wallet *Wallet) loadPrivateKey(privkey string) error {
+func LoadPrivateKey(privkey string) (*ecdsa.PrivateKey, common.Address, error) {
 	var (
 		privateKey *ecdsa.PrivateKey
 		err        error
@@ -93,17 +93,43 @@ func (wallet *Wallet) loadPrivateKey(privkey string) error {
 		privateKey, err = crypto.HexToECDSA(privkey)
 	}
 	if err != nil {
-		return err
+		return nil, common.Address{}, err
 	}
 
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return errors.New("error casting public key to ECDSA")
+		return nil, common.Address{}, errors.New("error casting public key to ECDSA")
 	}
 
-	wallet.privkey = privateKey
-	wallet.address = crypto.PubkeyToAddress(*publicKeyECDSA)
+	return privateKey, crypto.PubkeyToAddress(*publicKeyECDSA), nil
+}
+
+func (wallet *Wallet) UpdateWallet(ctx context.Context, client *Client, refresh bool) error {
+	if wallet.isSynced && !refresh {
+		return nil
+	}
+
+	if wallet.GetChainId() == nil {
+		chainId, err := client.GetChainId(ctx)
+		if err != nil {
+			return err
+		}
+		wallet.SetChainId(chainId)
+	}
+
+	nonce, err := client.GetNonceAt(ctx, wallet.GetAddress(), nil)
+	if err != nil {
+		return err
+	}
+	wallet.SetNonce(nonce)
+
+	balance, err := client.GetBalanceAt(ctx, wallet.GetAddress())
+	if err != nil {
+		return err
+	}
+	wallet.SetBalance(balance)
+
 	return nil
 }
 
@@ -161,6 +187,81 @@ func (wallet *Wallet) GetBalance() *big.Int {
 	wallet.balanceMutex.RLock()
 	defer wallet.balanceMutex.RUnlock()
 	return wallet.balance
+}
+
+func (wallet *Wallet) GetReadableBalance(unitDigits, maxPreCommaDigitsBeforeTrim, digits int, addPositiveSign, trimAmount bool) string {
+	// Initialize trimmedAmount and postComma variables to "0"
+	fullAmount := ""
+	trimmedAmount := "0"
+	postComma := "0"
+	proceed := ""
+	amount := wallet.GetBalance()
+
+	if amount != nil {
+		s := amount.String()
+
+		if amount.Sign() > 0 && addPositiveSign {
+			proceed = "+"
+		} else if amount.Sign() < 0 {
+			proceed = "-"
+			s = strings.Replace(s, "-", "", 1)
+		}
+
+		l := len(s)
+
+		// Check if there is a part of the amount before the decimal point
+		switch {
+		case l > unitDigits:
+			// Calculate length of preComma part
+			l -= unitDigits
+			// Set preComma to part of the string before the decimal point
+			trimmedAmount = s[:l]
+			// Set postComma to part of the string after the decimal point, after removing trailing zeros
+			postComma = strings.TrimRight(s[l:], "0")
+
+			// Check if the preComma part exceeds the maximum number of digits before the decimal point
+			if maxPreCommaDigitsBeforeTrim > 0 && l > maxPreCommaDigitsBeforeTrim {
+				// Reduce the number of digits after the decimal point by the excess number of digits in the preComma part
+				l -= maxPreCommaDigitsBeforeTrim
+				if digits < l {
+					digits = 0
+				} else {
+					digits -= l
+				}
+			}
+			// Check if there is only a part of the amount after the decimal point, and no leading zeros need to be added
+		case l == unitDigits:
+			// Set postComma to part of the string after the decimal point, after removing trailing zeros
+			postComma = strings.TrimRight(s, "0")
+			// Check if there is only a part of the amount after the decimal point, and leading zeros need to be added
+		case l != 0:
+			// Use fmt package to add leading zeros to the string
+			d := fmt.Sprintf("%%0%dd", unitDigits-l)
+			// Set postComma to resulting string, after removing trailing zeros
+			postComma = strings.TrimRight(fmt.Sprintf(d, 0)+s, "0")
+		}
+
+		fullAmount = trimmedAmount
+		if postComma != "" {
+			fullAmount += "." + postComma
+		}
+
+		// limit floating part
+		if len(postComma) > digits {
+			postComma = postComma[:digits]
+		}
+
+		// set floating point
+		if postComma != "" {
+			trimmedAmount += "." + postComma
+		}
+	}
+
+	if trimAmount {
+		return proceed + trimmedAmount
+	}
+
+	return proceed + fullAmount
 }
 
 // setLowBalanceNotification sets up low balance notification for this wallet.
@@ -319,6 +420,10 @@ func (wallet *Wallet) BuildSetCodeTx(txData *types.SetCodeTx) (*types.Transactio
 // It sets up a TransactOpts with the wallet's credentials and calls the provided
 // buildFn to construct the actual transaction. Useful for contract interactions.
 func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMetadata, buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
+	if wallet.privkey == nil {
+		return nil, errors.New("wallet has no private key")
+	}
+
 	transactor, err := bind.NewKeyedTransactorWithChainID(wallet.privkey, wallet.chainid)
 	if err != nil {
 		return nil, err
@@ -363,6 +468,14 @@ func (wallet *Wallet) ReplaceLegacyTx(txData *types.LegacyTx, nonce uint64) (*ty
 // This is useful for replacing stuck transactions with higher gas prices.
 func (wallet *Wallet) ReplaceAccessListTx(txData *types.AccessListTx, nonce uint64) (*types.Transaction, error) {
 	txData.ChainID = wallet.chainid
+	txData.Nonce = nonce
+	return wallet.signTx(txData)
+}
+
+// ReplaceSetCodeTx builds a replacement set code transaction with a specific nonce.
+// This is useful for replacing stuck set code transactions with higher gas prices.
+func (wallet *Wallet) ReplaceSetCodeTx(txData *types.SetCodeTx, nonce uint64) (*types.Transaction, error) {
+	txData.ChainID = uint256.NewInt(wallet.chainid.Uint64())
 	txData.Nonce = nonce
 	return wallet.signTx(txData)
 }
@@ -417,6 +530,10 @@ func (wallet *Wallet) MarkNeedResync() {
 // It creates a new transaction from the provided transaction data and signs it
 // using the latest signer for the wallet's configured chain ID.
 func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
+	if wallet.privkey == nil {
+		return nil, errors.New("wallet has no private key")
+	}
+
 	tx := types.NewTx(txData)
 	signedTx, err := types.SignTx(tx, types.LatestSignerForChainID(wallet.chainid), wallet.privkey)
 	if err != nil {

@@ -93,6 +93,11 @@ type TxPool struct {
 	processStaleChan chan uint64
 	lastBlockNumber  uint64
 
+	// wallet and wallet pool tracking
+	walletsMutex sync.RWMutex
+	wallets      map[common.Address]*txPoolWalletRegistration
+	walletPools  map[*WalletPool]struct{}
+
 	// Block tracking for reorg detection
 	blocksMutex sync.RWMutex
 	blocks      map[uint64]*BlockInfo
@@ -114,13 +119,30 @@ type TxPool struct {
 	nextSubscriptionID atomic.Uint64
 }
 
+type txPoolWalletRegistration struct {
+	ctxs   []context.Context
+	wallet *Wallet
+}
+
 // TxPoolOptions contains configuration options for the transaction pool.
 type TxPoolOptions struct {
-	Context              context.Context
-	Logger               *logrus.Entry
-	ClientPool           *ClientPool
-	ReorgDepth           int // Number of blocks to keep in memory for reorg tracking
-	GetActiveWalletPools func() []*WalletPool
+	Context             context.Context
+	Logger              *logrus.Entry
+	ClientPool          *ClientPool
+	ReorgDepth          int // Number of blocks to keep in memory for reorg tracking
+	ChainId             *big.Int
+	ExternalBlockSource *ExternalBlockSource
+}
+
+type ExternalBlockSource struct {
+	SubscribeBlocks func(ctx context.Context, capacity int) chan *ExternalBlockEvent
+}
+
+type ExternalBlockEvent struct {
+	Number   uint64
+	Clients  []*Client
+	Block    *BlockWithHash
+	Receipts []*types.Receipt
 }
 
 // NewTxPool creates a new transaction pool with the specified options.
@@ -130,6 +152,8 @@ type TxPoolOptions struct {
 func NewTxPool(options *TxPoolOptions) *TxPool {
 	pool := &TxPool{
 		options:           options,
+		wallets:           make(map[common.Address]*txPoolWalletRegistration),
+		walletPools:       make(map[*WalletPool]struct{}),
 		processStaleChan:  make(chan uint64, 1),
 		blocks:            map[uint64]*BlockInfo{},
 		confirmedTxs:      map[uint64][]*TxInfo{},
@@ -152,6 +176,80 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 	return pool
 }
 
+// RegisterWallet registers a wallet with the transaction pool.
+// It is used to track the wallets that are active and need to be processed.
+// The registration is removed when the context is cancelled.
+func (pool *TxPool) RegisterWallet(wallet *Wallet, ctx context.Context) *Wallet {
+	if ctx.Err() != nil {
+		return nil
+	}
+
+	pool.walletsMutex.Lock()
+	defer pool.walletsMutex.Unlock()
+
+	if registration, ok := pool.wallets[wallet.address]; ok {
+		if registration.wallet.privkey == nil && wallet.privkey != nil {
+			registration.wallet.privkey = wallet.privkey
+		}
+
+		for _, regctx := range registration.ctxs {
+			if regctx == ctx {
+				return registration.wallet
+			}
+		}
+
+		registration.ctxs = append(registration.ctxs, ctx)
+		return registration.wallet
+	}
+
+	pool.wallets[wallet.address] = &txPoolWalletRegistration{
+		ctxs:   []context.Context{ctx},
+		wallet: wallet,
+	}
+
+	return wallet
+}
+
+// RegisterWalletPool registers a wallet pool with the transaction pool.
+// It is used to track the wallet pools that are active and need to be processed.
+func (pool *TxPool) RegisterWalletPool(walletPool *WalletPool) {
+	if walletPool.ctx.Err() != nil {
+		return
+	}
+
+	pool.walletsMutex.Lock()
+	defer pool.walletsMutex.Unlock()
+
+	pool.walletPools[walletPool] = struct{}{}
+}
+
+// GetRegisteredWallet returns a wallet by address.
+func (pool *TxPool) GetRegisteredWallet(address common.Address) *Wallet {
+	pool.walletsMutex.RLock()
+	defer pool.walletsMutex.RUnlock()
+
+	registration, found := pool.wallets[address]
+	if found {
+		for {
+			if registration.ctxs[0].Err() != nil {
+				registration.ctxs = registration.ctxs[1:]
+				if len(registration.ctxs) == 0 {
+					delete(pool.wallets, registration.wallet.address)
+					break
+				}
+			} else {
+				break
+			}
+		}
+
+		if len(registration.ctxs) > 0 {
+			return registration.wallet
+		}
+	}
+
+	return nil
+}
+
 // runTxPoolLoop continuously monitors for new blocks and processes them.
 // It tracks the highest block number across all clients and processes new blocks
 // sequentially. Also triggers stale transaction processing when new blocks arrive.
@@ -160,6 +258,11 @@ func (pool *TxPool) runTxPoolLoop() {
 	defer func() {
 		utils.RecoverPanic(pool.options.Logger, "TxPool.runTxPoolLoop", pool.runTxPoolLoop)
 	}()
+
+	if pool.options.ExternalBlockSource != nil {
+		pool.runExternalBlockSourceLoop()
+		return
+	}
 
 	highestBlockNumber := uint64(0)
 	for {
@@ -174,7 +277,7 @@ func (pool *TxPool) runTxPoolLoop() {
 			for blockNumber := highestBlockNumber + 1; blockNumber <= newHighestBlockNumber; blockNumber++ {
 				processedBlock := false
 				for _, client := range clients {
-					err := pool.processBlock(pool.options.Context, client, blockNumber)
+					err := pool.processBlock(pool.options.Context, client, blockNumber, nil, nil)
 					if err != nil {
 						logrus.WithField("client", client.GetName()).WithError(err).Errorf("error processing block %v", blockNumber)
 						continue
@@ -206,6 +309,60 @@ func (pool *TxPool) runTxPoolLoop() {
 	}
 }
 
+func (pool *TxPool) runExternalBlockSourceLoop() {
+	defer func() {
+		utils.RecoverPanic(pool.options.Logger, "TxPool.runExternalBlockSourceLoop", pool.runExternalBlockSourceLoop)
+	}()
+
+	blockChan := pool.options.ExternalBlockSource.SubscribeBlocks(pool.options.Context, 10)
+	highestBlockNumber := uint64(0)
+	for {
+		select {
+		case <-pool.options.Context.Done():
+			return
+		case blockEvent := <-blockChan:
+
+			if blockEvent.Number > highestBlockNumber {
+				// Skip processing historical blocks on startup unless blockchain is young (< 10 blocks)
+				// This prevents processing millions of blocks when connecting to a long running chain
+				if highestBlockNumber == 0 && blockEvent.Number > 10 {
+					highestBlockNumber = blockEvent.Number - 1
+				}
+
+				for blockNumber := highestBlockNumber + 1; blockNumber <= blockEvent.Number; blockNumber++ {
+					processedBlock := false
+					for _, client := range blockEvent.Clients {
+						var blockWithHash *BlockWithHash
+						if blockNumber == blockEvent.Number {
+							blockWithHash = blockEvent.Block
+						}
+						err := pool.processBlock(pool.options.Context, client, blockNumber, blockWithHash, nil)
+						if err != nil {
+							logrus.WithField("client", client.GetName()).WithError(err).Errorf("error processing block %v", blockNumber)
+							continue
+						}
+
+						highestBlockNumber = blockNumber
+						processedBlock = true
+						break
+					}
+
+					if !processedBlock {
+						logrus.Errorf("failed to process block %v", blockNumber)
+					}
+				}
+
+				select {
+				case <-pool.options.Context.Done():
+					return
+				case pool.processStaleChan <- highestBlockNumber:
+				default:
+				}
+			}
+		}
+	}
+}
+
 // processStaleTransactionsLoop handles stale transaction confirmation checking.
 // It listens for block number updates and processes stale confirmations for all
 // active wallets. Runs until the context is cancelled and recovers from panics.
@@ -226,14 +383,14 @@ func (pool *TxPool) processStaleTransactionsLoop() {
 	}
 }
 
-// getWalletMap collects all wallets from active wallet pools into a single map.
-// It iterates through all active wallet pools and calls their collectPoolWallets
-// method to build a comprehensive address-to-wallet mapping.
+// getWalletMap collects all registered wallets into a single map.
 func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
-	walletMap := map[common.Address]*Wallet{}
-	walletPools := pool.options.GetActiveWalletPools()
-	for _, walletPool := range walletPools {
-		walletPool.collectPoolWallets(walletMap)
+	pool.walletsMutex.RLock()
+	defer pool.walletsMutex.RUnlock()
+
+	walletMap := make(map[common.Address]*Wallet)
+	for _, registration := range pool.wallets {
+		walletMap[registration.wallet.address] = registration.wallet
 	}
 	return walletMap
 }
@@ -242,28 +399,20 @@ func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
 // It loads the block body, checks for chain reorganizations by comparing parent hashes,
 // stores block information for reorg tracking, and processes all transactions in the block.
 // Also handles cleanup of old block data based on the reorg depth setting.
-func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumber uint64) error {
+func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, receipts []*types.Receipt) error {
 	pool.lastBlockNumber = blockNumber
 
-	walletPools := pool.options.GetActiveWalletPools()
-	walletMap := map[common.Address]*Wallet{}
-
-	var chainId *big.Int
-	for _, walletPool := range walletPools {
-		if walletPool.GetChainId() == nil {
-			continue
-		}
-		chainId = walletPool.GetChainId()
-		walletPool.collectPoolWallets(walletMap)
-	}
-
+	walletMap := pool.getWalletMap()
 	if len(walletMap) == 0 {
 		return nil
 	}
 
-	blockWithHash, txSkipMap := pool.getBlockBody(ctx, client, blockNumber)
-	if blockWithHash == nil {
-		return fmt.Errorf("could not load block body")
+	txSkipMap := make(map[uint32]bool)
+	if blockWithHash == nil || blockWithHash.Block == nil {
+		blockWithHash, txSkipMap = pool.getBlockBody(ctx, client, blockNumber)
+		if blockWithHash == nil {
+			return fmt.Errorf("could not load block body")
+		}
 	}
 
 	// Check for reorg by comparing parent hash
@@ -276,7 +425,7 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 			blockNumber, lastBlock.Hash.Hex(), blockWithHash.Block.ParentHash().Hex())
 
 		// Handle reorg
-		pool.handleReorg(ctx, client, blockNumber, blockWithHash, chainId, walletMap)
+		pool.handleReorg(ctx, client, blockNumber, blockWithHash, walletMap)
 	}
 
 	// Store block info
@@ -301,25 +450,28 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 	pool.blocksMutex.Unlock()
 
-	return pool.processBlockTxs(ctx, client, blockNumber, blockWithHash, chainId, walletMap, txSkipMap)
+	return pool.processBlockTxs(ctx, client, blockNumber, blockWithHash, walletMap, txSkipMap, receipts)
 }
 
 // processBlockTxs processes all transactions in a block for confirmation tracking.
 // It loads block receipts, decodes transaction senders, updates wallet states for
 // confirmed transactions, and tracks transaction information for reorg recovery.
 // Also handles cleanup of old confirmed transaction data.
-func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, chainId *big.Int, walletMap map[common.Address]*Wallet, txSkipMap map[uint32]bool) error {
+func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, walletMap map[common.Address]*Wallet, txSkipMap map[uint32]bool, receipts []*types.Receipt) error {
 	t1 := time.Now()
 	txCount := len(blockWithHash.Block.Transactions())
-	receipts, err := pool.getBlockReceipts(ctx, client, blockWithHash.Hash, txCount, txSkipMap)
-	if err != nil {
-		return fmt.Errorf("could not load block receipts: %w", err)
+	if receipts == nil {
+		var err error
+		receipts, err = pool.getBlockReceipts(ctx, client, blockWithHash.Hash, txCount, txSkipMap)
+		if err != nil {
+			return fmt.Errorf("could not load block receipts: %w", err)
+		}
 	}
 
 	loadingTime := time.Since(t1)
 	t1 = time.Now()
 
-	signer := types.LatestSignerForChainID(chainId)
+	signer := types.LatestSignerForChainID(pool.options.ChainId)
 	confirmCount := 0
 	affectedWalletMap := map[common.Address]bool{}
 	pool.txsMutex.Lock()
@@ -600,10 +752,14 @@ func (pool *TxPool) UnsubscribeFromBlockUpdates(id uint64) {
 
 // GetActiveWalletPools returns all active wallet pools
 func (pool *TxPool) GetActiveWalletPools() []*WalletPool {
-	if pool.options.GetActiveWalletPools != nil {
-		return pool.options.GetActiveWalletPools()
+	pool.walletsMutex.RLock()
+	defer pool.walletsMutex.RUnlock()
+
+	walletPools := make([]*WalletPool, 0, len(pool.walletPools))
+	for walletPool := range pool.walletPools {
+		walletPools = append(walletPools, walletPool)
 	}
-	return []*WalletPool{}
+	return walletPools
 }
 
 // SubscribeToBulkBlockUpdates subscribes to block update notifications for ALL wallet pools.
@@ -840,7 +996,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 			}
 
 			// Track transaction result for metrics
-			walletPools := pool.options.GetActiveWalletPools()
+			walletPools := pool.GetActiveWalletPools()
 			for _, walletPool := range walletPools {
 				if tracker := walletPool.GetTransactionTracker(); tracker != nil {
 					// Check if this wallet belongs to this pool
@@ -1187,7 +1343,7 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 // handleReorg handles a detected chain reorganization by re-submitting affected transactions.
 // It finds the common ancestor, identifies reorged-out transactions, resets wallet nonces,
 // and re-submits the affected transactions as pending. Also processes the new canonical blocks.
-func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlockWithHash *BlockWithHash, chainId *big.Int, walletMap map[common.Address]*Wallet) error {
+func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlockWithHash *BlockWithHash, walletMap map[common.Address]*Wallet) error {
 	type newBlockInfo struct {
 		blockWithHash *BlockWithHash
 		txSkipMap     map[uint32]bool
@@ -1305,7 +1461,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	// re-process the new parent blocks
 	slices.Reverse(newBlockParents)
 	for _, parentBlockInfo := range newBlockParents {
-		pool.processBlockTxs(ctx, client, parentBlockInfo.blockWithHash.Block.NumberU64(), parentBlockInfo.blockWithHash, chainId, walletMap, parentBlockInfo.txSkipMap)
+		pool.processBlockTxs(ctx, client, parentBlockInfo.blockWithHash.Block.NumberU64(), parentBlockInfo.blockWithHash, walletMap, parentBlockInfo.txSkipMap, nil)
 	}
 
 	return nil
