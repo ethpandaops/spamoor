@@ -383,9 +383,7 @@ func (pool *TxPool) processStaleTransactionsLoop() {
 	}
 }
 
-// getWalletMap collects all wallets from active wallet pools into a single map.
-// It iterates through all active wallet pools and calls their collectPoolWallets
-// method to build a comprehensive address-to-wallet mapping.
+// getWalletMap collects all registered wallets into a single map.
 func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
 	pool.walletsMutex.RLock()
 	defer pool.walletsMutex.RUnlock()

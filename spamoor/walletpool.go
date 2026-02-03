@@ -1083,18 +1083,6 @@ func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *W
 	return tx, nil
 }
 
-// collectPoolWallets adds all wallets (root, child, and well-known) to the provided map.
-// This is used by the transaction pool to track which addresses belong to this wallet pool.
-func (pool *WalletPool) collectPoolWallets(walletMap map[common.Address]*Wallet) {
-	walletMap[pool.rootWallet.wallet.GetAddress()] = pool.rootWallet.wallet
-	for _, wallet := range pool.childWallets {
-		walletMap[wallet.GetAddress()] = wallet
-	}
-	for _, wallet := range pool.wellKnownWallets {
-		walletMap[wallet.GetAddress()] = wallet
-	}
-}
-
 // CheckChildWalletBalance checks and refills a specific wallet if needed.
 // This can be used to manually trigger funding for a single wallet.
 func (pool *WalletPool) CheckChildWalletBalance(childWallet *Wallet) error {
