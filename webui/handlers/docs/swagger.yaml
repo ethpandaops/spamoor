@@ -224,6 +224,19 @@ definitions:
         description: Human-readable wallet name
         type: string
     type: object
+  api.ReloadScenariosResponse:
+    properties:
+      count:
+        type: integer
+      message:
+        type: string
+      scenarios:
+        items:
+          type: string
+        type: array
+      status:
+        type: string
+    type: object
   api.ScenarioEntries:
     properties:
       description:
@@ -944,6 +957,21 @@ paths:
           schema:
             type: string
       summary: Get scenario configuration
+      tags:
+      - Scenario
+  /api/scenarios/reload:
+    post:
+      description: Returns the current list of scenarios. Hot-reloading is not supported
+        with plugins.
+      operationId: reloadScenarios
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.ReloadScenariosResponse'
+      summary: Reload scenarios (deprecated)
       tags:
       - Scenario
   /api/spammer:

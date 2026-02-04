@@ -5,7 +5,7 @@ GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildVersion="$(VERSION)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildTime="$(BUILDTIME)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildRelease="$(RELEASE)"'
 
-.PHONY: all docs build test clean generate-spammer-index generate-symbols
+.PHONY: all docs build test clean generate-spammer-index generate-symbols plugins
 
 all: docs build
 
@@ -61,3 +61,15 @@ devnet-run: devnet docs build
 
 devnet-clean:
 	.hack/devnet/cleanup.sh
+
+plugins:
+	@echo "Building plugin archives..."
+	@mkdir -p bin/plugins
+	@for dir in plugins/*/; do \
+		if [ -d "$$dir" ]; then \
+			plugin_name=$$(basename "$$dir"); \
+			echo "Building plugin: $$plugin_name"; \
+			tar -czf "bin/plugins/$$plugin_name.tar.gz" -C "plugins/$$plugin_name" .; \
+		fi \
+	done
+	@echo "Plugins built in bin/plugins/"

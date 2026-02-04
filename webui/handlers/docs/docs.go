@@ -617,6 +617,27 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/scenarios/reload": {
+            "post": {
+                "description": "Returns the current list of scenarios. Hot-reloading is not supported with plugins.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Scenario"
+                ],
+                "summary": "Reload scenarios (deprecated)",
+                "operationId": "reloadScenarios",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.ReloadScenariosResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/scenarios/{name}/config": {
             "get": {
                 "description": "Returns the default configuration for a specific scenario",
@@ -1563,6 +1584,26 @@ const docTemplate = `{
                 },
                 "wallet_name": {
                     "description": "Human-readable wallet name",
+                    "type": "string"
+                }
+            }
+        },
+        "api.ReloadScenariosResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "scenarios": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "status": {
                     "type": "string"
                 }
             }

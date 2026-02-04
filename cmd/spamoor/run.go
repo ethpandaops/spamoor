@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/daemon/configs"
+	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -39,8 +40,7 @@ func RunCommand(args []string) {
 	flags.StringVarP(&cliArgs.privkey, "privkey", "p", "", "The private key of the wallet to send funds from.")
 	flags.IntSliceVarP(&selectedSpammers, "spammers", "s", []int{}, "Indexes of spammers to run (0-based). If not specified, runs all spammers.")
 	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
-	flags.StringVar(&cliArgs.scenarioDir, "scenario-dir", "", "Directory to load dynamic scenarios from (.go files).")
-	flags.StringVar(&cliArgs.scenarioFile, "scenario-file", "", "Path to a single dynamic scenario file (.go file).")
+	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files to load (can be specified multiple times).")
 
 	flags.Parse(args)
 
@@ -66,13 +66,20 @@ func RunCommand(args []string) {
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor run command")
 
-	// Load dynamic scenarios if specified
-	if cliArgs.scenarioDir != "" {
-		scenarios.LoadDynamicScenarios(cliArgs.scenarioDir, logger)
-	}
-	if cliArgs.scenarioFile != "" {
-		if err := scenarios.LoadDynamicScenarioFromFile(cliArgs.scenarioFile, logger); err != nil {
-			logger.WithError(err).Fatalf("failed to load explicitly requested scenario file")
+	// Load plugins if specified
+	if len(cliArgs.plugins) > 0 {
+		pluginLoader := plugin.NewPluginLoader(logger)
+		for _, pluginPath := range cliArgs.plugins {
+			desc, err := pluginLoader.LoadFromFile(pluginPath)
+			if err != nil {
+				logger.WithError(err).Fatalf("failed to load plugin: %s", pluginPath)
+			}
+
+			// Register plugin scenarios
+			for _, scenarioDesc := range desc.Scenarios {
+				scenarios.RegisterScenario(scenarioDesc)
+				logger.Infof("registered scenario from plugin: %s", scenarioDesc.Name)
+			}
 		}
 	}
 

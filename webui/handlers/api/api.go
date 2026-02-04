@@ -205,36 +205,24 @@ func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
 type ReloadScenariosResponse struct {
 	Status    string   `json:"status"`
 	Count     int      `json:"count"`
-	Directory string   `json:"directory"`
+	Message   string   `json:"message,omitempty"`
 	Scenarios []string `json:"scenarios"`
 }
 
 // ReloadScenarios godoc
 // @Id reloadScenarios
-// @Summary Reload external scenarios
+// @Summary Reload scenarios (deprecated)
 // @Tags Scenario
-// @Description Reloads external scenarios from the configured external directory
+// @Description Returns the current list of scenarios. Hot-reloading is not supported with plugins.
 // @Produce json
 // @Success 200 {object} ReloadScenariosResponse "Success"
-// @Failure 500 {string} string "Server Error"
 // @Router /api/scenarios/reload [post]
 func (ah *APIHandler) ReloadScenarios(w http.ResponseWriter, r *http.Request) {
-	// Use previously loaded directory or default - no user-controllable path for security
-	dir := scenarios.GetExternalDir()
-	if dir == "" {
-		dir = "scenarios/external"
-	}
-
-	count, err := scenarios.ReloadExternalScenarios(dir, logrus.StandardLogger())
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to reload scenarios: %v", err), http.StatusInternalServerError)
-		return
-	}
-
+	// Plugins are loaded at startup; hot-reloading is not supported
 	response := ReloadScenariosResponse{
-		Status:    "reloaded",
-		Count:     count,
-		Directory: dir,
+		Status:    "unchanged",
+		Count:     len(scenarios.GetScenarioNames()),
+		Message:   "Hot-reloading is not supported. Plugins are loaded at startup via --plugin flag.",
 		Scenarios: scenarios.GetScenarioNames(),
 	}
 

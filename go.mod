@@ -21,6 +21,7 @@ require (
 	github.com/swaggo/http-swagger v1.3.4
 	github.com/swaggo/swag v1.16.6
 	github.com/tdewolff/minify v2.3.6+incompatible
+	github.com/traefik/yaegi v0.16.1
 	github.com/urfave/negroni v1.0.0
 	golang.org/x/time v0.14.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -68,7 +69,6 @@ require (
 	github.com/tdewolff/test v1.0.11 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
-	github.com/traefik/yaegi v0.16.1 // indirect
 	github.com/urfave/cli/v2 v2.27.7 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
@@ -85,3 +85,5 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.38.2 // indirect
 )
+
+replace github.com/traefik/yaegi => github.com/pk910/yaegi v0.0.0-20260206232629-6f9bfdf359cf

@@ -4,26 +4,24 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ethpandaops/spamoor/scenario"
-	"github.com/ethpandaops/spamoor/scenarios/loader"
+	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 )
 
-// ValidateCommand validates a dynamic scenario file.
+// ValidateCommand validates a plugin tar.gz file.
 func ValidateCommand(args []string) {
-	flags := pflag.NewFlagSet("validate-scenario", pflag.ExitOnError)
+	flags := pflag.NewFlagSet("validate-plugin", pflag.ExitOnError)
 	verbose := flags.BoolP("verbose", "v", false, "Show verbose output")
 	flags.Parse(args)
 
 	if flags.NArg() < 1 {
-		fmt.Println("Usage: spamoor validate-scenario [options] <path>")
+		fmt.Println("Usage: spamoor validate-plugin [options] <plugin.tar.gz>")
 		fmt.Println()
-		fmt.Println("Validates a dynamic scenario file by:")
+		fmt.Println("Validates a plugin archive by:")
 		fmt.Println("  1. Loading it via Yaegi interpreter")
-		fmt.Println("  2. Verifying ScenarioDescriptor fields")
-		fmt.Println("  3. Instantiating the scenario")
-		fmt.Println("  4. Checking registered flags")
+		fmt.Println("  2. Verifying PluginDescriptor fields")
+		fmt.Println("  3. Checking registered scenarios")
 		fmt.Println()
 		fmt.Println("Options:")
 		flags.PrintDefaults()
@@ -40,26 +38,25 @@ func ValidateCommand(args []string) {
 		logger.SetLevel(logrus.WarnLevel)
 	}
 
-	fmt.Printf("Validating scenario: %s\n", path)
+	fmt.Printf("Validating plugin: %s\n", path)
 	fmt.Println()
 
-	// Load the scenario
-	l := loader.NewScenarioLoader(logger)
+	// Load the plugin
+	l := plugin.NewPluginLoader(logger)
 	desc, err := l.LoadFromFile(path)
 	if err != nil {
-		fmt.Printf("✗ Failed to load scenario\n")
+		fmt.Printf("✗ Failed to load plugin\n")
 		fmt.Printf("  Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("✓ Scenario loaded successfully\n")
+	fmt.Printf("✓ Plugin loaded successfully\n")
 	fmt.Println()
 
 	// Validate descriptor fields
-	issues := validateDescriptor(desc)
 	hasError := false
 
-	fmt.Println("Descriptor:")
+	fmt.Println("Plugin Descriptor:")
 	fmt.Printf("  Name:        %s", desc.Name)
 	if desc.Name == "" {
 		fmt.Printf(" ⚠ (empty)")
@@ -73,95 +70,61 @@ func ValidateCommand(args []string) {
 	}
 	fmt.Println()
 
-	if len(desc.Aliases) > 0 {
-		fmt.Printf("  Aliases:     %v\n", desc.Aliases)
-	}
-
-	fmt.Printf("  NewScenario: ")
-	if desc.NewScenario != nil {
-		fmt.Printf("✓ defined\n")
-	} else {
-		fmt.Printf("✗ nil\n")
-		hasError = true
-	}
-
-	fmt.Printf("  DefaultOpts: ")
-	if desc.DefaultOptions != nil {
-		fmt.Printf("✓ defined (%T)\n", desc.DefaultOptions)
-	} else {
-		fmt.Printf("⚠ nil (no default configuration)\n")
-	}
-
+	fmt.Printf("  Scenarios:   %d\n", len(desc.Scenarios))
 	fmt.Println()
 
-	// Try to instantiate
-	if desc.NewScenario != nil {
-		fmt.Println("Instantiation:")
-		instance := desc.NewScenario(logger)
-		if instance == nil {
-			fmt.Printf("  ✗ NewScenario returned nil\n")
-			hasError = true
-		} else {
-			fmt.Printf("  ✓ Instance created successfully\n")
-
-			// Count flags
-			flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
-			if err := instance.Flags(flagSet); err != nil {
-				fmt.Printf("  ⚠ Flags() returned error: %v\n", err)
+	// Check each scenario
+	if len(desc.Scenarios) == 0 {
+		fmt.Printf("  ⚠ No scenarios defined in plugin\n")
+	} else {
+		fmt.Println("Scenarios:")
+		for i, scenarioDesc := range desc.Scenarios {
+			fmt.Printf("  [%d] %s\n", i, scenarioDesc.Name)
+			if scenarioDesc.Name == "" {
+				fmt.Printf("      ⚠ Name is empty\n")
+				hasError = true
+			}
+			if scenarioDesc.NewScenario == nil {
+				fmt.Printf("      ✗ NewScenario is nil\n")
+				hasError = true
 			} else {
-				flagCount := 0
-				flagSet.VisitAll(func(f *pflag.Flag) {
-					flagCount++
-				})
-				fmt.Printf("  ✓ Flags registered: %d\n", flagCount)
+				fmt.Printf("      ✓ NewScenario defined\n")
 
-				if *verbose && flagCount > 0 {
-					fmt.Println()
-					fmt.Println("  Available flags:")
-					flagSet.VisitAll(func(f *pflag.Flag) {
-						fmt.Printf("    --%s: %s (default: %s)\n", f.Name, f.Usage, f.DefValue)
-					})
+				// Try to instantiate
+				instance := scenarioDesc.NewScenario(logger)
+				if instance == nil {
+					fmt.Printf("      ✗ NewScenario returned nil\n")
+					hasError = true
+				} else {
+					fmt.Printf("      ✓ Instance created successfully\n")
+
+					// Count flags
+					flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
+					if err := instance.Flags(flagSet); err != nil {
+						fmt.Printf("      ⚠ Flags() returned error: %v\n", err)
+					} else {
+						flagCount := 0
+						flagSet.VisitAll(func(f *pflag.Flag) {
+							flagCount++
+						})
+						fmt.Printf("      ✓ Flags registered: %d\n", flagCount)
+					}
 				}
 			}
+			if *verbose && scenarioDesc.Description != "" {
+				fmt.Printf("      Description: %s\n", scenarioDesc.Description)
+			}
+			fmt.Println()
 		}
-		fmt.Println()
-	}
-
-	// Print warnings
-	if len(issues) > 0 {
-		fmt.Println("Warnings:")
-		for _, issue := range issues {
-			fmt.Printf("  ⚠ %s\n", issue)
-		}
-		fmt.Println()
 	}
 
 	// Final status
 	if hasError {
-		fmt.Printf("Result: ✗ Scenario has errors and may not work correctly\n")
+		fmt.Printf("Result: ✗ Plugin has errors and may not work correctly\n")
 		os.Exit(1)
-	} else if len(issues) > 0 {
-		fmt.Printf("Result: ⚠ Scenario loaded with warnings\n")
+	} else if len(desc.Scenarios) == 0 {
+		fmt.Printf("Result: ⚠ Plugin loaded but has no scenarios\n")
 	} else {
-		fmt.Printf("Result: ✓ Scenario '%s' is valid\n", desc.Name)
+		fmt.Printf("Result: ✓ Plugin '%s' is valid with %d scenario(s)\n", desc.Name, len(desc.Scenarios))
 	}
-}
-
-// validateDescriptor checks for common issues in a scenario descriptor.
-func validateDescriptor(desc *scenario.Descriptor) []string {
-	var issues []string
-
-	if desc.Name == "" {
-		issues = append(issues, "Name is empty - scenario won't be findable by name")
-	}
-
-	if desc.Description == "" {
-		issues = append(issues, "Description is empty - users won't know what this scenario does")
-	}
-
-	if desc.NewScenario == nil {
-		issues = append(issues, "NewScenario is nil - scenario cannot be instantiated")
-	}
-
-	return issues
 }
