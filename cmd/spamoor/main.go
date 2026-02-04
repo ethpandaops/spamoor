@@ -33,13 +33,21 @@ type CliArgs struct {
 	refillInterval   uint64
 	slotDuration     time.Duration
 	fundingGasLimit  uint64
+	scenarioDir      string
+	scenarioFile     string
 }
 
 func main() {
-	// Check if "run" subcommand is used
-	if len(os.Args) >= 2 && os.Args[1] == "run" {
-		RunCommand(os.Args[2:])
-		return
+	// Check for subcommands
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "run":
+			RunCommand(os.Args[2:])
+			return
+		case "validate-scenario":
+			ValidateCommand(os.Args[2:])
+			return
+		}
 	}
 
 	cliArgs := CliArgs{}
@@ -58,6 +66,8 @@ func main() {
 	flags.Uint64Var(&cliArgs.refillInterval, "refill-interval", 300, "Interval for child wallet rbalance check and refilling if needed (in sec).")
 	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 	flags.Uint64Var(&cliArgs.fundingGasLimit, "funding-gas-limit", 21000, "Gas limit for wallet funding transactions (use 100000+ for L2s).")
+	flags.StringVar(&cliArgs.scenarioDir, "scenario-dir", "", "Directory to load dynamic scenarios from (.go files).")
+	flags.StringVar(&cliArgs.scenarioFile, "scenario-file", "", "Path to a single dynamic scenario file (.go file).")
 
 	flags.Parse(os.Args)
 
@@ -71,6 +81,16 @@ func main() {
 		"version":   utils.GetBuildVersion(),
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor")
+
+	// Load dynamic scenarios if specified
+	if cliArgs.scenarioDir != "" {
+		scenarios.LoadDynamicScenarios(cliArgs.scenarioDir, logger)
+	}
+	if cliArgs.scenarioFile != "" {
+		if err := scenarios.LoadDynamicScenarioFromFile(cliArgs.scenarioFile, logger); err != nil {
+			logger.WithError(err).Fatalf("failed to load explicitly requested scenario file")
+		}
+	}
 
 	// load scenario
 	invalidScenario := false
