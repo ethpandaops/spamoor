@@ -46,6 +46,7 @@ type Scenario struct {
 	options    ScenarioOptions
 	logger     logrus.FieldLogger
 	walletPool *spamoor.WalletPool
+	seed       string // Effective seed (either from options or randomly generated once)
 }
 
 var ScenarioName = "evm-fuzz"
@@ -165,6 +166,17 @@ func (s *Scenario) Init(options *scenario.Options) error {
 func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
+
+	// Generate seed once at scenario start if not provided
+	s.seed = s.options.PayloadSeed
+	if s.seed == "" {
+		randomBytes := make([]byte, 32)
+		rand.Read(randomBytes)
+		s.seed = hex.EncodeToString(randomBytes)
+		s.logger.Infof("Generated random seed for this run: 0x%s", s.seed)
+	} else {
+		s.logger.Infof("Using provided seed: %s", s.seed)
+	}
 
 	maxPending := s.options.MaxPending
 	if maxPending == 0 {
@@ -310,18 +322,8 @@ func (s *Scenario) generateFuzzedBytecode(txIdx uint64) ([]byte, *uint256.Int) {
 	// Apply txID offset for fast-forwarding to specific transaction
 	effectiveTxID := txIdx + s.options.TxIdOffset
 
-	// Generate random seed if none provided
-	seed := s.options.PayloadSeed
-	if seed == "" {
-		// Generate a random 32-byte hex seed
-		randomBytes := make([]byte, 32)
-		rand.Read(randomBytes)
-		seed = hex.EncodeToString(randomBytes)
-		s.logger.Debugf("Generated random seed: %s", seed)
-	}
-
-	// Create deterministic generator for this transaction with seed configuration
-	generator := NewOpcodeGenerator(effectiveTxID, seed, int(s.options.MaxCodeSize), s.options.GasLimit)
+	// Create deterministic generator for this transaction with seed (set once at scenario start)
+	generator := NewOpcodeGenerator(effectiveTxID, s.seed, int(s.options.MaxCodeSize), s.options.GasLimit)
 
 	// Set fuzz mode
 	generator.SetFuzzMode(s.options.FuzzMode)
