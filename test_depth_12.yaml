@@ -1,0 +1,23 @@
+# Test mining 1 branch at depth 12 nibbles
+# This will test how long it takes to find a 12-nibble collision
+
+target_branches: 1         # Just find 1 branch
+target_depth: 12          # Exactly 12 nibbles deep (6 bytes)
+seed: "depth-12-test"     # Deterministic seed
+
+# Mining configuration
+mining_workers: 8         # Use 8 parallel workers
+batch_size: 1            # 1 address per tx
+mining_iterations: 100000000  # 100M iterations per round (depth 12 needs many)
+
+# Checkpointing
+checkpoint_every: 1       # Save after the single transaction
+
+# Gas settings
+basefee: 1
+tipfee: 1
+gas_limit: 5000000       # 5M gas
+
+# Tracking
+min_recordable: 10       # Track branches >= 10 nibbles
+max_tracked: 100         # Keep top 100 branches
