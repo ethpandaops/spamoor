@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -490,6 +491,12 @@ func (g *OpcodeGenerator) buildValidOpcodeList() {
 			g.validOpcodes = append(g.validOpcodes, op)
 		}
 	}
+
+	// Sort by opcode value to ensure deterministic iteration order
+	// (map iteration in Go is non-deterministic)
+	sort.Slice(g.validOpcodes, func(i, j int) bool {
+		return g.validOpcodes[i].Opcode < g.validOpcodes[j].Opcode
+	})
 }
 
 // buildInvalidOpcodeList creates a list of invalid opcodes by finding gaps in valid opcodes
