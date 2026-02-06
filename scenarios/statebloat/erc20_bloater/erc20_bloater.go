@@ -484,6 +484,8 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 
 	s.logger.Infof("distributing 10M tokens to each of %d wallets", numWallets-1)
 
+	// Build all transfer transactions upfront
+	var txList []*types.Transaction
 	for i := 1; i < numWallets; i++ {
 		recipientWallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, i)
 		recipientAddr := recipientWallet.GetAddress()
@@ -510,7 +512,7 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 			To:        &s.contractAddr,
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       100000, // Simple transfer shouldn't need much gas
+			Gas:       65000, // ERC20 transfer ~50-55k gas + buffer
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			return s.contractInstance.Transfer(transactOpts, recipientAddr, tokensPerWallet)
@@ -519,20 +521,33 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 			return fmt.Errorf("failed to build transfer tx for wallet %d: %w", i, err)
 		}
 
-		// Send and wait for confirmation
-		receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, deployerWallet, tx, &spamoor.SendTransactionOptions{
+		txList = append(txList, tx)
+	}
+
+	if len(txList) == 0 {
+		s.logger.Infof("all wallets already have sufficient tokens")
+		return nil
+	}
+
+	// Send all transfers in batch with sliding window
+	s.logger.Infof("sending %d token transfer transactions in batch", len(txList))
+	receipts, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, deployerWallet, txList, &spamoor.BatchOptions{
+		SendTransactionOptions: spamoor.SendTransactionOptions{
 			Client:      client,
 			Rebroadcast: true,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to send transfer to wallet %d: %w", i, err)
-		}
+		},
+		MaxRetries:   3,
+		PendingLimit: 200,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to send token transfer batch: %w", err)
+	}
 
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			return fmt.Errorf("token transfer to wallet %d failed", i)
+	// Verify all transfers succeeded
+	for i, receipt := range receipts {
+		if receipt == nil || receipt.Status != types.ReceiptStatusSuccessful {
+			return fmt.Errorf("token transfer %d failed", i)
 		}
-
-		s.logger.Debugf("transferred 10M tokens to wallet %d (tx: %s)", i, tx.Hash().Hex())
 	}
 
 	s.logger.Infof("token distribution complete")
