@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -129,12 +128,12 @@ func main() {
 		fmt.Printf("  spamoor <scenario> [options]     Run a specific scenario\n")
 		fmt.Printf("  spamoor run <yaml-file> [options] Run multiple scenarios from YAML config\n\n")
 		fmt.Printf("Implemented scenarios:\n")
-		scenarioNames := scenarios.GetScenarioNames()
-		sort.Slice(scenarioNames, func(a int, b int) bool {
-			return strings.Compare(scenarioNames[a], scenarioNames[b]) > 0
-		})
-		for _, name := range scenarioNames {
-			fmt.Printf("  %v\n", name)
+		categories := scenarios.GetScenarioCategories()
+		for _, category := range categories {
+			fmt.Printf("  %s: %s\n", category.Name, category.Description)
+			for _, descriptor := range category.Descriptors {
+				fmt.Printf("    - %-20s %s\n", descriptor.Name, descriptor.Description)
+			}
 		}
 		return
 	}
@@ -207,6 +206,9 @@ func main() {
 		panic(fmt.Errorf("failed to init root wallet: %v", err))
 	}
 	defer rootWallet.Shutdown()
+
+	// Initialize transaction batcher for efficient bulk wallet funding
+	rootWallet.InitTxBatcher(ctx, txpool)
 
 	// init wallet pool
 	walletPool := spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
