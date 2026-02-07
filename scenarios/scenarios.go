@@ -1,9 +1,9 @@
 package scenarios
 
 import (
-	"slices"
 	"sync"
 
+	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenario"
 
 	blobaverage "github.com/ethpandaops/spamoor/scenarios/blob-average"
@@ -33,14 +33,15 @@ import (
 )
 
 var (
-	// scenarioMu protects ScenarioDescriptors during registration operations
-	scenarioMu sync.RWMutex
+	pluginRegistry   *plugin.PluginRegistry
+	scenarioRegistry *plugin.ScenarioRegistry
+	initOnce         sync.Once
 )
 
-// ScenarioDescriptors contains all available scenario descriptors for the spamoor tool.
+// nativeScenarios contains all built-in scenario descriptors for the spamoor tool.
 // This registry includes scenarios for testing various Ethereum transaction types and patterns.
 // Each descriptor defines the configuration, constructor, and metadata for a specific test scenario.
-var ScenarioDescriptors = []*scenario.Descriptor{
+var nativeScenarios = []*scenario.Descriptor{
 	&blobaverage.ScenarioDescriptor,
 	&blobcombined.ScenarioDescriptor,
 	&blobconflicting.ScenarioDescriptor,
@@ -67,46 +68,56 @@ var ScenarioDescriptors = []*scenario.Descriptor{
 	&xentoken.ScenarioDescriptor,
 }
 
+// InitRegistries initializes the plugin and scenario registries.
+// This function is idempotent and safe to call multiple times.
+func InitRegistries() (*plugin.PluginRegistry, *plugin.ScenarioRegistry) {
+	initOnce.Do(func() {
+		pluginRegistry = plugin.NewPluginRegistry()
+		scenarioRegistry = plugin.NewScenarioRegistry(nativeScenarios)
+	})
+
+	return pluginRegistry, scenarioRegistry
+}
+
+// GetPluginRegistry returns the global plugin registry.
+// Panics if InitRegistries() has not been called.
+func GetPluginRegistry() *plugin.PluginRegistry {
+	if pluginRegistry == nil {
+		InitRegistries()
+	}
+
+	return pluginRegistry
+}
+
+// GetScenarioRegistry returns the global scenario registry.
+// Panics if InitRegistries() has not been called.
+func GetScenarioRegistry() *plugin.ScenarioRegistry {
+	if scenarioRegistry == nil {
+		InitRegistries()
+	}
+
+	return scenarioRegistry
+}
+
 // GetScenario finds and returns a scenario descriptor by name.
-// It performs a linear search through all registered scenarios and returns
+// It performs a lookup through the scenario registry and returns
 // the matching descriptor, or nil if no scenario with the given name exists.
 // This function is thread-safe.
 func GetScenario(name string) *scenario.Descriptor {
-	scenarioMu.RLock()
-	defer scenarioMu.RUnlock()
+	return GetScenarioRegistry().GetDescriptor(name)
+}
 
-	for _, s := range ScenarioDescriptors {
-		if s.Name == name {
-			return s
-		}
-		if len(s.Aliases) > 0 && slices.Contains(s.Aliases, name) {
-			return s
-		}
-	}
-
-	return nil
+// GetScenarioEntry finds and returns a scenario entry by name.
+// The entry includes the descriptor and metadata about its source (native or plugin).
+// Returns nil if no scenario with the given name exists.
+// This function is thread-safe.
+func GetScenarioEntry(name string) *plugin.ScenarioEntry {
+	return GetScenarioRegistry().Get(name)
 }
 
 // GetScenarioNames returns a slice containing the names of all registered scenarios.
 // This is useful for CLI help text, validation, and displaying available options
-// to users. The order matches the order in ScenarioDescriptors.
-// This function is thread-safe.
+// to users. This function is thread-safe.
 func GetScenarioNames() []string {
-	scenarioMu.RLock()
-	defer scenarioMu.RUnlock()
-
-	names := make([]string, len(ScenarioDescriptors))
-	for i, s := range ScenarioDescriptors {
-		names[i] = s.Name
-	}
-	return names
-}
-
-// RegisterScenario adds a scenario descriptor to the global registry.
-// This function is thread-safe and can be used to register scenarios
-// loaded from plugins or other external sources.
-func RegisterScenario(desc *scenario.Descriptor) {
-	scenarioMu.Lock()
-	defer scenarioMu.Unlock()
-	ScenarioDescriptors = append(ScenarioDescriptors, desc)
+	return GetScenarioRegistry().GetNames()
 }

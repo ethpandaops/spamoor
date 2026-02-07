@@ -5,20 +5,21 @@ import (
 	"os"
 
 	"github.com/ethpandaops/spamoor/plugin"
+	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 )
 
-// ValidateCommand validates a plugin tar.gz file.
+// ValidateCommand validates a plugin tar.gz file or local directory.
 func ValidateCommand(args []string) {
 	flags := pflag.NewFlagSet("validate-plugin", pflag.ExitOnError)
 	verbose := flags.BoolP("verbose", "v", false, "Show verbose output")
 	flags.Parse(args)
 
 	if flags.NArg() < 1 {
-		fmt.Println("Usage: spamoor validate-plugin [options] <plugin.tar.gz>")
+		fmt.Println("Usage: spamoor validate-plugin [options] <plugin.tar.gz | plugin-dir>")
 		fmt.Println()
-		fmt.Println("Validates a plugin archive by:")
+		fmt.Println("Validates a plugin archive or directory by:")
 		fmt.Println("  1. Loading it via Yaegi interpreter")
 		fmt.Println("  2. Verifying PluginDescriptor fields")
 		fmt.Println("  3. Checking registered scenarios")
@@ -41,14 +42,29 @@ func ValidateCommand(args []string) {
 	fmt.Printf("Validating plugin: %s\n", path)
 	fmt.Println()
 
-	// Load the plugin
-	l := plugin.NewPluginLoader(logger)
-	desc, err := l.LoadFromFile(path)
+	// Initialize registries for plugin loading
+	pluginRegistry, scenarioRegistry := scenarios.InitRegistries()
+
+	// Load the plugin - detect source type
+	l := plugin.NewPluginLoader(logger, pluginRegistry, scenarioRegistry)
+
+	var loaded *plugin.LoadedPlugin
+	var err error
+
+	if isDirectory(path) {
+		loaded, err = l.LoadFromLocalPath(path)
+	} else {
+		loaded, err = l.LoadFromFile(path)
+	}
+
 	if err != nil {
 		fmt.Printf("✗ Failed to load plugin\n")
 		fmt.Printf("  Error: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Access the descriptor from loaded plugin
+	desc := loaded.Descriptor
 
 	fmt.Printf("✓ Plugin loaded successfully\n")
 	fmt.Println()
@@ -71,6 +87,22 @@ func ValidateCommand(args []string) {
 	fmt.Println()
 
 	fmt.Printf("  Scenarios:   %d\n", len(desc.Scenarios))
+	fmt.Println()
+
+	fmt.Println("Plugin Metadata (from plugin.yaml):")
+	if loaded.Metadata != nil {
+		fmt.Printf("  Name:        %s\n", loaded.Metadata.Name)
+		fmt.Printf("  BuildTime:   %s\n", loaded.Metadata.BuildTime)
+		fmt.Printf("  GitVersion:  %s\n", loaded.Metadata.GitVersion)
+	} else {
+		fmt.Printf("  (no metadata available)\n")
+	}
+	fmt.Println()
+
+	fmt.Println("Loading Details:")
+	fmt.Printf("  TempDir:     %s\n", loaded.TempDir)
+	fmt.Printf("  PluginPath:  %s\n", loaded.PluginPath)
+	fmt.Printf("  SourceType:  %s\n", loaded.SourceType)
 	fmt.Println()
 
 	// Check each scenario
@@ -126,5 +158,10 @@ func ValidateCommand(args []string) {
 		fmt.Printf("Result: ⚠ Plugin loaded but has no scenarios\n")
 	} else {
 		fmt.Printf("Result: ✓ Plugin '%s' is valid with %d scenario(s)\n", desc.Name, len(desc.Scenarios))
+	}
+
+	// Cleanup temp directory
+	if err := l.CleanupPlugin(loaded); err != nil {
+		fmt.Printf("Warning: Failed to cleanup temp directory: %v\n", err)
 	}
 }

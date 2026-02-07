@@ -81,19 +81,34 @@ func main() {
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor")
 
+	// Initialize registries
+	pluginRegistry, scenarioRegistry := scenarios.InitRegistries()
+
 	// Load plugins if specified
 	if len(cliArgs.plugins) > 0 {
-		loader := plugin.NewPluginLoader(logger)
+		pluginLoader := plugin.NewPluginLoader(logger, pluginRegistry, scenarioRegistry)
+
 		for _, pluginPath := range cliArgs.plugins {
-			desc, err := loader.LoadFromFile(pluginPath)
+			var loaded *plugin.LoadedPlugin
+			var err error
+
+			// Detect source type and load accordingly
+			if isURL(pluginPath) {
+				loaded, err = pluginLoader.LoadFromURL(pluginPath)
+			} else if isDirectory(pluginPath) {
+				loaded, err = pluginLoader.LoadFromLocalPath(pluginPath)
+			} else {
+				loaded, err = pluginLoader.LoadFromFile(pluginPath)
+			}
+
 			if err != nil {
 				logger.WithError(err).Fatalf("failed to load plugin: %s", pluginPath)
 			}
 
 			// Register plugin scenarios
-			for _, scenarioDesc := range desc.Scenarios {
-				scenarios.RegisterScenario(scenarioDesc)
-				logger.Infof("registered scenario from plugin: %s", scenarioDesc.Name)
+			err = pluginLoader.RegisterPluginScenarios(loaded)
+			if err != nil {
+				logger.WithError(err).Fatalf("failed to register plugin scenarios: %s", pluginPath)
 			}
 		}
 	}

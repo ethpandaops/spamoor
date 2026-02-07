@@ -22,6 +22,7 @@ type Options struct {
 	WalletPool *spamoor.WalletPool
 	Config     string
 	GlobalCfg  map[string]any
+	PluginPath string // Path to plugin resources (empty for native scenarios)
 }
 
 type Scenario interface {

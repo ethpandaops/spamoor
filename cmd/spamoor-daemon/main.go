@@ -13,7 +13,9 @@ import (
 
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/daemon/db"
+	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenario"
+	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/ethpandaops/spamoor/webui"
@@ -37,6 +39,7 @@ type CliArgs struct {
 	slotDuration     time.Duration
 	auditUserHeader  string
 	startupDelay     uint64
+	plugins          []string
 }
 
 func main() {
@@ -59,6 +62,7 @@ func main() {
 	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 	flags.StringVar(&cliArgs.auditUserHeader, "audit-user-header", "Cf-Access-Authenticated-User-Email", "HTTP header containing the authenticated user email for audit logs")
 	flags.Uint64Var(&cliArgs.startupDelay, "startup-delay", 30, "Delay in seconds before starting spammers on daemon startup (to allow cancellation)")
+	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files or local directories to load (can be specified multiple times)")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -80,6 +84,38 @@ func main() {
 
 	// Set global slot duration for rate limiting
 	scenario.GlobalSlotDuration = cliArgs.slotDuration
+
+	// Initialize registries and plugin loader
+	pluginRegistry, scenarioRegistry := scenarios.InitRegistries()
+	var pluginLoader *plugin.PluginLoader
+
+	if len(cliArgs.plugins) > 0 {
+		pluginLoader = plugin.NewPluginLoader(logger, pluginRegistry, scenarioRegistry)
+
+		for _, pluginPath := range cliArgs.plugins {
+			var loaded *plugin.LoadedPlugin
+			var err error
+
+			// Detect source type and load accordingly
+			if isURL(pluginPath) {
+				loaded, err = pluginLoader.LoadFromURL(pluginPath)
+			} else if isDirectory(pluginPath) {
+				loaded, err = pluginLoader.LoadFromLocalPath(pluginPath)
+			} else {
+				loaded, err = pluginLoader.LoadFromFile(pluginPath)
+			}
+
+			if err != nil {
+				logger.WithError(err).Fatalf("failed to load plugin: %s", pluginPath)
+			}
+
+			// Register plugin scenarios
+			err = pluginLoader.RegisterPluginScenarios(loaded)
+			if err != nil {
+				logger.WithError(err).Fatalf("failed to register plugin scenarios: %s", pluginPath)
+			}
+		}
+	}
 
 	// start client pool
 	rpcHosts := []string{}
@@ -146,6 +182,11 @@ func main() {
 	auditLogger := daemon.NewAuditLogger(spamoorDaemon, cliArgs.auditUserHeader, "user")
 	spamoorDaemon.SetAuditLogger(auditLogger)
 
+	// set plugin loader if plugins were loaded
+	if pluginLoader != nil {
+		spamoorDaemon.SetPluginLoader(pluginLoader)
+	}
+
 	// start frontend
 	webui.StartHttpServer(&types.FrontendConfig{
 		Host:             "0.0.0.0",
@@ -204,4 +245,19 @@ func main() {
 
 	// Shutdown components
 	spamoorDaemon.Shutdown()
+}
+
+// isURL checks if the given path is a URL.
+func isURL(path string) bool {
+	return len(path) > 7 && (path[:7] == "http://" || path[:8] == "https://")
+}
+
+// isDirectory checks if the given path is an existing directory.
+func isDirectory(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return info.IsDir()
 }

@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethpandaops/spamoor/plugin/symbols"
@@ -27,58 +29,97 @@ const (
 	PluginBasePath = "src/github.com/ethpandaops/spamoor/plugins"
 )
 
-// PluginLoader handles loading plugins from tar archives at runtime.
+// PluginLoader handles loading plugins from various sources at runtime.
 type PluginLoader struct {
-	logger *logrus.Entry
+	logger           *logrus.Entry
+	pluginRegistry   *PluginRegistry
+	scenarioRegistry *ScenarioRegistry
+	mu               sync.Mutex
+	cleanupFn        func(*LoadedPlugin) // callback for cleanup notifications
 }
 
-// NewPluginLoader creates a new plugin loader.
-func NewPluginLoader(logger logrus.FieldLogger) *PluginLoader {
+// NewPluginLoader creates a new plugin loader with the given registries.
+func NewPluginLoader(
+	logger logrus.FieldLogger,
+	pluginRegistry *PluginRegistry,
+	scenarioRegistry *ScenarioRegistry,
+) *PluginLoader {
 	return &PluginLoader{
-		logger: logger.WithField("component", "plugin-loader"),
+		logger:           logger.WithField("component", "plugin-loader"),
+		pluginRegistry:   pluginRegistry,
+		scenarioRegistry: scenarioRegistry,
 	}
 }
 
+// SetCleanupCallback sets a callback function to be called when a plugin
+// may be ready for cleanup (e.g., when a scenario is replaced or unregistered).
+func (l *PluginLoader) SetCleanupCallback(fn func(*LoadedPlugin)) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.cleanupFn = fn
+}
+
 // LoadFromBytes loads a plugin from tar(.gz) bytes.
-// The pluginName is used to construct the proper GOPATH directory structure.
+// The plugin name is determined from plugin.yaml inside the archive.
 // If compressed is true, the data is treated as gzip-compressed.
-func (l *PluginLoader) LoadFromBytes(pluginName string, data []byte, compressed bool) (*Descriptor, error) {
-	return l.LoadFromReader(pluginName, bytes.NewReader(data), compressed)
+func (l *PluginLoader) LoadFromBytes(data []byte, compressed bool) (*LoadedPlugin, error) {
+	return l.LoadFromReader(bytes.NewReader(data), compressed)
 }
 
 // LoadFromFile loads a plugin from a tar(.gz) file path.
-// The plugin name is derived from the filename (without extension).
+// The plugin name is determined from plugin.yaml inside the archive.
 // Compression is auto-detected based on the .gz extension.
-func (l *PluginLoader) LoadFromFile(filePath string) (*Descriptor, error) {
+func (l *PluginLoader) LoadFromFile(filePath string) (*LoadedPlugin, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open plugin file: %w", err)
 	}
 	defer file.Close()
 
-	// Determine plugin name and compression from filename
+	// Determine compression from filename
 	baseName := filepath.Base(filePath)
 	compressed := strings.HasSuffix(baseName, ".gz")
 
-	// Strip extensions to get plugin name
-	pluginName := baseName
-	if compressed {
-		pluginName = strings.TrimSuffix(pluginName, ".gz")
+	// Plugin name will be determined from plugin.yaml
+	loaded, err := l.LoadFromReader(file, compressed)
+	if err != nil {
+		return nil, err
 	}
 
-	pluginName = strings.TrimSuffix(pluginName, ".tar")
+	loaded.SourceType = PluginSourceFile
 
-	return l.LoadFromReader(pluginName, file, compressed)
+	return loaded, nil
 }
 
 // LoadFromReader loads a plugin from a tar(.gz) stream.
-// The pluginName is used to construct the proper GOPATH directory structure.
+// It first extracts and parses plugin.yaml to get the plugin name,
+// then extracts the full archive to the appropriate directory structure.
 // If compressed is true, the stream is treated as gzip-compressed.
-func (l *PluginLoader) LoadFromReader(pluginName string, data io.Reader, compressed bool) (*Descriptor, error) {
-	var tarReader io.Reader = data
+func (l *PluginLoader) LoadFromReader(data io.Reader, compressed bool) (*LoadedPlugin, error) {
+	// Read all data into memory so we can scan for plugin.yaml first
+	allData, err := io.ReadAll(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read plugin data: %w", err)
+	}
+
+	// Extract and parse plugin.yaml from the archive
+	metadata, err := l.extractMetadataFromTar(allData, compressed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read plugin metadata: %w", err)
+	}
+
+	// Use name from metadata instead of filename
+	actualPluginName := metadata.Name
+
+	l.logger.Debugf("loading plugin '%s' (build: %s, version: %s)",
+		metadata.Name, metadata.BuildTime, metadata.GitVersion)
+
+	// Now extract the full archive
+	var tarReader io.Reader = bytes.NewReader(allData)
 
 	if compressed {
-		gzReader, err := gzip.NewReader(data)
+		gzReader, err := gzip.NewReader(bytes.NewReader(allData))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
 		}
@@ -87,19 +128,46 @@ func (l *PluginLoader) LoadFromReader(pluginName string, data io.Reader, compres
 		tarReader = gzReader
 	}
 
-	// Build in-memory filesystem from tar
-	memFS, err := l.buildMemoryFS(tarReader, pluginName)
+	// Create temp directory for this plugin using the actual plugin name
+	tempDir, pluginPath, err := l.createTempDir(actualPluginName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build memory filesystem: %w", err)
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
-	return l.loadFromFS(pluginName, memFS)
+	// Extract tar to the plugin path
+	err = l.extractTar(tarReader, pluginPath)
+	if err != nil {
+		os.RemoveAll(tempDir)
+		return nil, fmt.Errorf("failed to extract plugin: %w", err)
+	}
+
+	// Load from the temp directory filesystem
+	filesys := NewSymlinkFS(tempDir)
+	desc, err := l.loadFromFS(actualPluginName, filesys)
+	if err != nil {
+		os.RemoveAll(tempDir)
+		return nil, err
+	}
+
+	loaded := NewLoadedPlugin(desc, metadata, tempDir, pluginPath, PluginSourceBytes)
+
+	return loaded, nil
 }
 
-// buildMemoryFS creates an in-memory filesystem from tar content.
-// The files are placed under the plugin path structure.
-func (l *PluginLoader) buildMemoryFS(tarReader io.Reader, pluginName string) (fs.FS, error) {
-	memFS := newMemoryFS()
+// extractMetadataFromTar extracts and parses plugin.yaml from a tar archive.
+func (l *PluginLoader) extractMetadataFromTar(data []byte, compressed bool) (*PluginMetadata, error) {
+	var tarReader io.Reader = bytes.NewReader(data)
+
+	if compressed {
+		gzReader, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer gzReader.Close()
+
+		tarReader = gzReader
+	}
+
 	tr := tar.NewReader(tarReader)
 
 	for {
@@ -112,35 +180,189 @@ func (l *PluginLoader) buildMemoryFS(tarReader io.Reader, pluginName string) (fs
 			return nil, fmt.Errorf("failed to read tar entry: %w", err)
 		}
 
-		// Skip directories, we create them implicitly
-		if header.Typeflag == tar.TypeDir {
-			continue
-		}
-
-		// Only process regular files
-		if header.Typeflag != tar.TypeReg {
-			continue
-		}
-
-		// Construct the full path within the virtual GOPATH
-		// Structure: src/github.com/ethpandaops/spamoor/plugins/<plugin_name>/<file_path>
+		// Look for plugin.yaml at the root level
 		cleanPath := filepath.Clean(header.Name)
-		// Remove leading "./" or "/" if present
 		cleanPath = strings.TrimPrefix(cleanPath, "./")
 		cleanPath = strings.TrimPrefix(cleanPath, "/")
 
-		fullPath := filepath.Join(PluginBasePath, pluginName, cleanPath)
+		if cleanPath == PluginMetadataFile && header.Typeflag == tar.TypeReg {
+			content, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read %s: %w", PluginMetadataFile, err)
+			}
 
-		// Read file content
-		content, err := io.ReadAll(tr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read file %s: %w", header.Name, err)
+			return ParsePluginMetadata(content)
 		}
-
-		memFS.addFile(fullPath, content, header.FileInfo().Mode())
 	}
 
-	return memFS, nil
+	return nil, fmt.Errorf("%s not found in plugin archive (required for tar.gz plugins)", PluginMetadataFile)
+}
+
+// LoadFromURL loads a plugin from a remote URL (tar.gz).
+// The plugin name is determined from plugin.yaml inside the archive.
+func (l *PluginLoader) LoadFromURL(url string) (*LoadedPlugin, error) {
+	l.logger.Infof("downloading plugin from URL: %s", url)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download plugin: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to download plugin: HTTP %d", resp.StatusCode)
+	}
+
+	// Plugin name will be determined from plugin.yaml
+	loaded, err := l.LoadFromReader(resp.Body, true)
+	if err != nil {
+		return nil, err
+	}
+
+	loaded.SourceType = PluginSourceURL
+
+	return loaded, nil
+}
+
+// LoadFromLocalPath loads a plugin from a local directory path.
+// This creates a symlink in the temp directory to the local path.
+// Local path plugins use the directory name as plugin name and spamoor's
+// build info for version metadata (no plugin.yaml required).
+func (l *PluginLoader) LoadFromLocalPath(localPath string) (*LoadedPlugin, error) {
+	// Resolve to absolute path
+	absPath, err := filepath.Abs(localPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve path: %w", err)
+	}
+
+	// Check if path exists and is a directory
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat path: %w", err)
+	}
+
+	if !info.IsDir() {
+		return nil, fmt.Errorf("path is not a directory: %s", absPath)
+	}
+
+	// Derive plugin name from directory name
+	pluginName := filepath.Base(absPath)
+
+	// Create metadata using directory name and spamoor's build info
+	metadata := NewLocalPluginMetadata(pluginName)
+
+	l.logger.Debugf("loading local plugin '%s' (using spamoor build: %s, version: %s)",
+		metadata.Name, metadata.BuildTime, metadata.GitVersion)
+
+	// Create temp directory
+	tempDir, pluginPath, err := l.createTempDir(pluginName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	// Create symlink from pluginPath to absPath
+	err = os.Symlink(absPath, pluginPath)
+	if err != nil {
+		os.RemoveAll(tempDir)
+		return nil, fmt.Errorf("failed to create symlink: %w", err)
+	}
+
+	// Load using SymlinkFS which follows symlinks
+	filesys := NewSymlinkFS(tempDir)
+	desc, err := l.loadFromFS(pluginName, filesys)
+	if err != nil {
+		os.RemoveAll(tempDir)
+		return nil, err
+	}
+
+	loaded := NewLoadedPlugin(desc, metadata, tempDir, pluginPath, PluginSourceLocal)
+
+	return loaded, nil
+}
+
+// createTempDir creates the temp directory structure for a plugin.
+// Returns the base temp dir and the plugin path within it.
+func (l *PluginLoader) createTempDir(pluginName string) (tempDir, pluginPath string, err error) {
+	// Create base temp directory
+	tempDir, err = os.MkdirTemp("", fmt.Sprintf("spamoor-plugin-%s-", pluginName))
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	// Create the GOPATH structure: src/github.com/ethpandaops/spamoor/plugins/<plugin-name>
+	pluginPath = filepath.Join(tempDir, PluginBasePath, pluginName)
+
+	// Create parent directories (but not the pluginPath itself - it will be created/symlinked)
+	parentPath := filepath.Dir(pluginPath)
+	err = os.MkdirAll(parentPath, 0755)
+	if err != nil {
+		os.RemoveAll(tempDir)
+		return "", "", fmt.Errorf("failed to create plugin directory structure: %w", err)
+	}
+
+	return tempDir, pluginPath, nil
+}
+
+// extractTar extracts a tar archive to the given destination directory.
+func (l *PluginLoader) extractTar(tarReader io.Reader, destDir string) error {
+	// Create destination directory
+	err := os.MkdirAll(destDir, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	tr := tar.NewReader(tarReader)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to read tar entry: %w", err)
+		}
+
+		// Clean the path and remove leading "./" or "/"
+		cleanPath := filepath.Clean(header.Name)
+		cleanPath = strings.TrimPrefix(cleanPath, "./")
+		cleanPath = strings.TrimPrefix(cleanPath, "/")
+
+		targetPath := filepath.Join(destDir, cleanPath)
+
+		// Ensure the target path is within destDir (prevent path traversal)
+		if !strings.HasPrefix(targetPath, destDir) {
+			return fmt.Errorf("invalid tar path: %s", header.Name)
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			err = os.MkdirAll(targetPath, header.FileInfo().Mode())
+			if err != nil {
+				return fmt.Errorf("failed to create directory %s: %w", targetPath, err)
+			}
+		case tar.TypeReg:
+			// Create parent directories
+			err = os.MkdirAll(filepath.Dir(targetPath), 0755)
+			if err != nil {
+				return fmt.Errorf("failed to create parent directory: %w", err)
+			}
+
+			// Create file
+			outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode())
+			if err != nil {
+				return fmt.Errorf("failed to create file %s: %w", targetPath, err)
+			}
+
+			_, err = io.Copy(outFile, tr)
+			outFile.Close()
+			if err != nil {
+				return fmt.Errorf("failed to write file %s: %w", targetPath, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // loadFromFS interprets a plugin from a filesystem.
@@ -172,6 +394,136 @@ func (l *PluginLoader) loadFromFS(pluginName string, filesys fs.FS) (*Descriptor
 	l.logger.Infof("loaded plugin: %s with %d scenarios", desc.Name, len(desc.Scenarios))
 
 	return desc, nil
+}
+
+// RegisterPluginScenarios registers all scenarios from a loaded plugin.
+func (l *PluginLoader) RegisterPluginScenarios(loaded *LoadedPlugin) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	// Register plugin in the plugin registry
+	oldPlugin := l.pluginRegistry.Register(loaded)
+
+	// Register each scenario
+	for _, scenarioDesc := range loaded.Descriptor.Scenarios {
+		entry := &ScenarioEntry{
+			Descriptor: scenarioDesc,
+			Source:     ScenarioSourcePlugin,
+			Plugin:     loaded,
+		}
+
+		oldEntry, err := l.scenarioRegistry.Register(entry)
+		if err != nil {
+			return fmt.Errorf("failed to register scenario %s: %w", scenarioDesc.Name, err)
+		}
+
+		// Track scenario in the loaded plugin
+		loaded.AddScenario(scenarioDesc.Name)
+
+		// If we replaced a scenario from a different plugin, update that plugin's tracking
+		if oldEntry != nil && oldEntry.Plugin != nil && oldEntry.Plugin != loaded {
+			oldEntry.Plugin.RemoveScenario(scenarioDesc.Name)
+			l.maybeCleanup(oldEntry.Plugin)
+		}
+
+		l.logger.Infof("registered scenario from plugin: %s", scenarioDesc.Name)
+	}
+
+	// If we replaced an old plugin entirely, check if it can be cleaned up
+	if oldPlugin != nil && oldPlugin != loaded {
+		l.maybeCleanup(oldPlugin)
+	}
+
+	return nil
+}
+
+// UnregisterPluginScenarios removes all scenarios from a plugin.
+func (l *PluginLoader) UnregisterPluginScenarios(pluginName string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	plugin := l.pluginRegistry.Get(pluginName)
+	if plugin == nil {
+		return fmt.Errorf("plugin not found: %s", pluginName)
+	}
+
+	// Remove each scenario from the registry
+	for _, scenarioDesc := range plugin.Descriptor.Scenarios {
+		_, err := l.scenarioRegistry.Remove(scenarioDesc.Name)
+		if err != nil {
+			l.logger.Warnf("failed to remove scenario %s: %v", scenarioDesc.Name, err)
+		}
+
+		plugin.RemoveScenario(scenarioDesc.Name)
+	}
+
+	// Remove plugin from registry
+	l.pluginRegistry.Remove(pluginName)
+
+	// Check if plugin can be cleaned up
+	l.maybeCleanup(plugin)
+
+	return nil
+}
+
+// maybeCleanup checks if a plugin can be cleaned up and triggers cleanup if so.
+// Must be called with l.mu held.
+func (l *PluginLoader) maybeCleanup(plugin *LoadedPlugin) {
+	if plugin == nil || plugin.IsCleanedUp() {
+		return
+	}
+
+	if plugin.CanCleanup() {
+		if l.cleanupFn != nil {
+			// Call cleanup callback asynchronously to avoid deadlock
+			go l.cleanupFn(plugin)
+		} else {
+			// Default cleanup: remove temp directory
+			go l.CleanupPlugin(plugin)
+		}
+	}
+}
+
+// CleanupPlugin removes the temp directory for a plugin.
+func (l *PluginLoader) CleanupPlugin(plugin *LoadedPlugin) error {
+	if plugin.IsCleanedUp() {
+		return nil
+	}
+
+	plugin.MarkCleanedUp()
+
+	if plugin.TempDir != "" {
+		l.logger.Infof("cleaning up plugin temp directory: %s", plugin.TempDir)
+
+		err := os.RemoveAll(plugin.TempDir)
+		if err != nil {
+			return fmt.Errorf("failed to remove temp directory: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// Shutdown cleans up all loaded plugins.
+func (l *PluginLoader) Shutdown() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for _, plugin := range l.pluginRegistry.GetAll() {
+		if err := l.CleanupPlugin(plugin); err != nil {
+			l.logger.Warnf("failed to cleanup plugin %s: %v", plugin.Descriptor.Name, err)
+		}
+	}
+}
+
+// GetPluginRegistry returns the plugin registry.
+func (l *PluginLoader) GetPluginRegistry() *PluginRegistry {
+	return l.pluginRegistry
+}
+
+// GetScenarioRegistry returns the scenario registry.
+func (l *PluginLoader) GetScenarioRegistry() *ScenarioRegistry {
+	return l.scenarioRegistry
 }
 
 // newInterpreter creates a new Yaegi interpreter with filesystem support.

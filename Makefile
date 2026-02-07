@@ -31,24 +31,7 @@ generate-spammer-index:
 
 generate-symbols:
 	@echo "Regenerating Yaegi symbol files for dynamic scenario loading..."
-	@cd scenarios/loader && go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1
-	cd scenarios/loader && yaegi extract github.com/ethpandaops/spamoor/spamoor
-	cd scenarios/loader && yaegi extract github.com/ethpandaops/spamoor/scenario
-	cd scenarios/loader && yaegi extract github.com/ethpandaops/spamoor/txbuilder
-	cd scenarios/loader && yaegi extract github.com/ethpandaops/spamoor/utils
-	cd scenarios/loader && yaegi extract github.com/sirupsen/logrus
-	cd scenarios/loader && yaegi extract github.com/spf13/pflag
-	cd scenarios/loader && yaegi extract github.com/holiman/uint256
-	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/common
-	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/core/types
-	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/accounts/abi
-	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/accounts/abi/bind
-	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/crypto
-	cd scenarios/loader && yaegi extract github.com/ethereum/go-ethereum/event
-	cd scenarios/loader && yaegi extract gopkg.in/yaml.v3
-	@echo "Fixing package declarations..."
-	perl -i -pe 's/^package \w+$$/package loader/' scenarios/loader/symbols_*.go
-	@echo "Symbols generated. Run 'go build ./...' to verify."
+	go generate ./plugin/symbols/...
 
 clean:
 	rm -f bin/*
@@ -69,7 +52,11 @@ plugins:
 		if [ -d "$$dir" ]; then \
 			plugin_name=$$(basename "$$dir"); \
 			echo "Building plugin: $$plugin_name"; \
+			echo "name: $$plugin_name" > "plugins/$$plugin_name/plugin.yaml"; \
+			echo "build_time: $(BUILDTIME)" >> "plugins/$$plugin_name/plugin.yaml"; \
+			echo "git_version: $(VERSION)" >> "plugins/$$plugin_name/plugin.yaml"; \
 			tar -czf "bin/plugins/$$plugin_name.tar.gz" -C "plugins/$$plugin_name" .; \
+			rm "plugins/$$plugin_name/plugin.yaml"; \
 		fi \
 	done
 	@echo "Plugins built in bin/plugins/"
