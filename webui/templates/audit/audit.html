@@ -1,181 +1,79 @@
 {{ define "page" }}
   <div class="container mt-2">
-
-    <!-- Filters -->
-    <div class="card mb-3">
-      <div class="card-header">
-        <h5>Filters</h5>
-      </div>
-      <div class="card-body">
-        <form method="GET" class="row g-3">
-          <div class="col-md-3">
-            <label for="user_email" class="form-label">User Email</label>
-            <input type="email" class="form-control" id="user_email" name="user_email" value="{{ .Filters.UserEmail }}">
-          </div>
-          <div class="col-md-3">
-            <label for="action_type" class="form-label">Action Type</label>
-            <select class="form-control" id="action_type" name="action_type">
-              <option value="">All Actions</option>
-              {{ range $action, $count := .Stats.LogsByActionType }}
-                <option value="{{ $action }}" {{ if eq $action $.Filters.ActionType }}selected{{ end }}>
-                  {{ $action }} ({{ $count }})
-                </option>
-              {{ end }}
-            </select>
-          </div>
-          <div class="col-md-3">
-            <label for="entity_type" class="form-label">Entity Type</label>
-            <select class="form-control" id="entity_type" name="entity_type">
-              <option value="">All Entities</option>
-              {{ range $entity, $count := .Stats.LogsByEntityType }}
-                <option value="{{ $entity }}" {{ if eq $entity $.Filters.EntityType }}selected{{ end }}>
-                  {{ $entity }} ({{ $count }})
-                </option>
-              {{ end }}
-            </select>
-          </div>
-          <div class="col-md-3 d-flex align-items-end">
-            <button type="submit" class="btn btn-primary me-2">Filter</button>
-            <a href="/audit" class="btn btn-secondary">Clear</a>
-          </div>
-        </form>
-      </div>
+    <!-- Auth required message (shown when not authenticated) -->
+    <div id="auth-required-message" class="alert alert-warning d-none">
+      <i class="fas fa-lock me-2"></i>
+      <strong>Authentication Required</strong>
+      <p class="mb-0">Please log in to view audit logs.</p>
     </div>
 
-    <!-- Audit Logs Table -->
-    <div class="card">
-      <div class="card-body px-0 py-3">
-        <h2 class="px-2">Audit Logs</h2>
-        <div class="table-responsive px-0 py-1">
-          <table class="table table-nobr" id="audit-logs">
-            <thead>
-              <tr>
-                <th>Timestamp</th>
-                <th>User</th>
-                <th>Action</th>
-                <th>Entity</th>
-                <th>Entity Name</th>
-                <th>Changes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {{ range $log := .Logs }}
+    <!-- Audit content (shown when authenticated) -->
+    <div id="audit-content" class="d-none">
+      <!-- Filters -->
+      <div class="card mb-3">
+        <div class="card-header">
+          <h5 class="mb-0">Filters</h5>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label for="user_email" class="form-label">User Email</label>
+              <input type="email" class="form-control" id="user_email" placeholder="Filter by email...">
+            </div>
+            <div class="col-md-3">
+              <label for="action_type" class="form-label">Action Type</label>
+              <select class="form-control" id="action_type">
+                <option value="">All Actions</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label for="entity_type" class="form-label">Entity Type</label>
+              <select class="form-control" id="entity_type">
+                <option value="">All Entities</option>
+              </select>
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+              <button type="button" class="btn btn-primary me-2" id="filter-btn">Filter</button>
+              <button type="button" class="btn btn-secondary" id="clear-btn">Clear</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Audit Logs Table -->
+      <div class="card">
+        <div class="card-body px-0 py-3">
+          <h2 class="px-3">Audit Logs</h2>
+          <div id="loading-spinner" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="mt-2">Loading audit logs...</div>
+          </div>
+          <div class="table-responsive px-0 py-1 d-none" id="audit-table-container">
+            <table class="table table-nobr" id="audit-logs">
+              <thead>
                 <tr>
-                  <td>
-                    <span title="{{ $log.Timestamp.Format "2006-01-02 15:04:05 UTC" }}">
-                      {{ $log.Timestamp.Format "Jan 2, 15:04" }}
-                    </span>
-                  </td>
-                  <td>{{ $log.UserEmail }}</td>
-                  <td>
-                    {{ if eq $log.ActionType "spammer_create" }}
-                      Create Spammer
-                    {{ else if eq $log.ActionType "spammer_update" }}
-                      Update Spammer
-                    {{ else if eq $log.ActionType "spammer_delete" }}
-                      Delete Spammer
-                    {{ else if eq $log.ActionType "spammer_start" }}
-                      Start Spammer
-                    {{ else if eq $log.ActionType "spammer_pause" }}
-                      Stop Spammer
-                    {{ else if eq $log.ActionType "spammer_reclaim" }}
-                      Reclaim Spammer Funds
-                    {{ else if eq $log.ActionType "client_update" }}
-                      Update Client
-                    {{ else if eq $log.ActionType "client_group_update" }}
-                      Update Client Group
-                    {{ else if eq $log.ActionType "client_name_update" }}
-                      Change Client Name
-                    {{ else if eq $log.ActionType "client_type_update" }}
-                      Change Client Type
-                    {{ else if eq $log.ActionType "client_toggle" }}
-                      {{ $toggleMetadata := UnmarshalAuditMetadata $log.Metadata }}
-                      {{ if and $toggleMetadata (index $toggleMetadata "enabled") }}
-                        {{ if eq (index $toggleMetadata "enabled") true }}
-                          Enable Client
-                        {{ else }}
-                          Disable Client
-                        {{ end }}
-                      {{ else }}
-                        Toggle Client
-                      {{ end }}
-                    {{ else if eq $log.ActionType "spammers_import" }}
-                      Import Spammers
-                    {{ else if eq $log.ActionType "spammers_export" }}
-                      Export Spammers
-                    {{ else }}
-                      {{ $log.ActionType }}
-                    {{ end }}
-                  </td>
-                  <td>
-                    {{ if eq $log.EntityType "spammer" }}
-                      <i class="fas fa-robot me-1"></i>Spammer #{{ $log.EntityID }}
-                    {{ else if eq $log.EntityType "client" }}
-                      <i class="fas fa-server me-1"></i>Client
-                    {{ else }}
-                      <i class="fas fa-cog me-1"></i>{{ $log.EntityType }}
-                    {{ end }}
-                  </td>
-                  <td>{{ $log.EntityName }}</td>
-                  <td>
-                    {{ if $log.Diff }}
-                      {{ $metadata := UnmarshalAuditMetadata $log.Metadata }}
-                      {{ if and $metadata (index $metadata "single_property_change") }}
-                        {{ $propertyName := index $metadata "property_name" }}
-                        <!-- Only show simple display for simple properties, not config changes -->
-                        {{ if and (ne $propertyName "config") (ne $propertyName "configuration") }}
-                          <!-- Simple property change display -->
-                          {{ $oldValue := index $metadata "old_value" }}
-                          {{ $newValue := index $metadata "new_value" }}
-                          <div class="small text-muted">
-                            <strong>{{ $propertyName }}:</strong> 
-                            <span class="text-decoration-line-through">{{ $oldValue }}</span> 
-                            <i class="fas fa-arrow-right mx-1"></i> 
-                            <span class="text-success">{{ $newValue }}</span>
-                          </div>
-                        {{ else }}
-                          <!-- Config changes always show full diff -->
-                          <button class="btn btn-sm btn-outline-info" type="button" 
-                                  data-bs-toggle="collapse" 
-                                  data-bs-target="#diff-{{ $log.ID }}" 
-                                  aria-expanded="false">
-                            <i class="fas fa-code"></i> View Changes
-                          </button>
-                          <div class="collapse mt-2" id="diff-{{ $log.ID }}">
-                            <div class="card card-body">
-                              <pre class="mb-0" style="font-size: 0.8rem; white-space: pre;">{{ $log.Diff }}</pre>
-                            </div>
-                          </div>
-                        {{ end }}
-                      {{ else }}
-                        <!-- Full diff display -->
-                        <button class="btn btn-sm btn-outline-info" type="button" 
-                                data-bs-toggle="collapse" 
-                                data-bs-target="#diff-{{ $log.ID }}" 
-                                aria-expanded="false">
-                          <i class="fas fa-code"></i> View Changes
-                        </button>
-                        <div class="collapse mt-2" id="diff-{{ $log.ID }}">
-                          <div class="card card-body">
-                            <pre class="mb-0" style="font-size: 0.8rem; white-space: pre;">{{ $log.Diff }}</pre>
-                          </div>
-                        </div>
-                      {{ end }}
-                    {{ else }}
-                      <span class="text-muted">No changes</span>
-                    {{ end }}
-                  </td>
+                  <th>Timestamp</th>
+                  <th>User</th>
+                  <th>Action</th>
+                  <th>Entity</th>
+                  <th>Entity Name</th>
+                  <th>Changes</th>
                 </tr>
-              {{ end }}
-              {{ if not .Logs }}
-                <tr>
-                  <td colspan="6" class="text-center text-muted py-4">
-                    No audit logs found
-                  </td>
-                </tr>
-              {{ end }}
-            </tbody>
-          </table>
+              </thead>
+              <tbody id="audit-logs-body">
+              </tbody>
+            </table>
+          </div>
+          <!-- Pagination -->
+          <div id="pagination-container" class="d-none px-3 pt-3">
+            <nav aria-label="Audit logs pagination">
+              <ul class="pagination justify-content-center mb-0" id="pagination">
+              </ul>
+            </nav>
+            <div class="text-center text-muted small mt-2" id="pagination-info"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -183,13 +81,312 @@
 {{ end }}
 
 {{ define "css" }}
+<style>
+.diff-content {
+  font-size: 0.8rem;
+  white-space: pre;
+  max-height: 300px;
+  overflow-y: auto;
+}
+</style>
 {{ end }}
 
 {{ define "js" }}
 <script>
-  var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-  var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-    return new bootstrap.Tooltip(tooltipTriggerEl);
+var currentFilters = {
+  user_email: '',
+  action_type: '',
+  entity_type: '',
+  page: 1,
+  page_size: 50
+};
+
+var statsData = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+  /* Check auth state and show appropriate content */
+  if (window.spamoor && window.spamoor.authState) {
+    updateAuditVisibility(window.spamoor.authState.isAuthenticated);
+  }
+
+  /* Listen for auth state changes */
+  window.addEventListener('authStateChanged', function(e) {
+    updateAuditVisibility(e.detail.isAuthenticated);
   });
+
+  /* Set up filter handlers */
+  document.getElementById('filter-btn').addEventListener('click', applyFilters);
+  document.getElementById('clear-btn').addEventListener('click', clearFilters);
+
+  /* Enter key in filter inputs */
+  document.getElementById('user_email').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') applyFilters();
+  });
+});
+
+function updateAuditVisibility(isAuthenticated) {
+  var authMessage = document.getElementById('auth-required-message');
+  var auditContent = document.getElementById('audit-content');
+
+  if (isAuthenticated) {
+    authMessage.classList.add('d-none');
+    auditContent.classList.remove('d-none');
+    loadAuditData();
+  } else {
+    authMessage.classList.remove('d-none');
+    auditContent.classList.add('d-none');
+  }
+}
+
+function loadAuditData() {
+  /* Load stats first to populate filter dropdowns */
+  spamoor.authFetch('/api/audit-logs/stats')
+    .then(function(response) {
+      if (!response.ok) throw new Error('Failed to load stats');
+      return response.json();
+    })
+    .then(function(stats) {
+      statsData = stats;
+      populateFilterDropdowns(stats);
+      loadAuditLogs();
+    })
+    .catch(function(error) {
+      console.error('Failed to load audit stats:', error);
+      loadAuditLogs();
+    });
+}
+
+function populateFilterDropdowns(stats) {
+  var actionSelect = document.getElementById('action_type');
+  var entitySelect = document.getElementById('entity_type');
+
+  /* Clear existing options except the first */
+  actionSelect.innerHTML = '<option value="">All Actions</option>';
+  entitySelect.innerHTML = '<option value="">All Entities</option>';
+
+  /* Populate action types */
+  if (stats.logs_by_action_type) {
+    Object.keys(stats.logs_by_action_type).sort().forEach(function(action) {
+      var count = stats.logs_by_action_type[action];
+      var option = document.createElement('option');
+      option.value = action;
+      option.textContent = formatActionType(action) + ' (' + count + ')';
+      actionSelect.appendChild(option);
+    });
+  }
+
+  /* Populate entity types */
+  if (stats.logs_by_entity_type) {
+    Object.keys(stats.logs_by_entity_type).sort().forEach(function(entity) {
+      var count = stats.logs_by_entity_type[entity];
+      var option = document.createElement('option');
+      option.value = entity;
+      option.textContent = entity + ' (' + count + ')';
+      entitySelect.appendChild(option);
+    });
+  }
+}
+
+function loadAuditLogs() {
+  var spinner = document.getElementById('loading-spinner');
+  var tableContainer = document.getElementById('audit-table-container');
+  var paginationContainer = document.getElementById('pagination-container');
+
+  spinner.classList.remove('d-none');
+  tableContainer.classList.add('d-none');
+  paginationContainer.classList.add('d-none');
+
+  var url = '/api/audit-logs?page=' + currentFilters.page + '&page_size=' + currentFilters.page_size;
+  if (currentFilters.user_email) url += '&user_email=' + encodeURIComponent(currentFilters.user_email);
+  if (currentFilters.action_type) url += '&action_type=' + encodeURIComponent(currentFilters.action_type);
+  if (currentFilters.entity_type) url += '&entity_type=' + encodeURIComponent(currentFilters.entity_type);
+
+  spamoor.authFetch(url)
+    .then(function(response) {
+      if (!response.ok) throw new Error('Failed to load audit logs');
+      return response.json();
+    })
+    .then(function(data) {
+      renderAuditLogs(data);
+      renderPagination(data);
+      spinner.classList.add('d-none');
+      tableContainer.classList.remove('d-none');
+      paginationContainer.classList.remove('d-none');
+    })
+    .catch(function(error) {
+      console.error('Failed to load audit logs:', error);
+      spinner.classList.add('d-none');
+      tableContainer.classList.remove('d-none');
+      document.getElementById('audit-logs-body').innerHTML =
+        '<tr><td colspan="6" class="text-center text-danger py-4">Failed to load audit logs</td></tr>';
+    });
+}
+
+function renderAuditLogs(data) {
+  var tbody = document.getElementById('audit-logs-body');
+  tbody.innerHTML = '';
+
+  if (!data.logs || data.logs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No audit logs found</td></tr>';
+    return;
+  }
+
+  data.logs.forEach(function(log) {
+    var row = document.createElement('tr');
+
+    var timestamp = new Date(log.timestamp * 1000);
+    var timestampStr = timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', ' +
+                       timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    var fullTimestamp = timestamp.toISOString();
+
+    var entityIcon = 'fa-cog';
+    var entityPrefix = '';
+    if (log.entity_type === 'spammer') {
+      entityIcon = 'fa-robot';
+      entityPrefix = 'Spammer #' + log.entity_id;
+    } else if (log.entity_type === 'client') {
+      entityIcon = 'fa-server';
+      entityPrefix = 'Client';
+    }
+
+    var changesHtml = '<span class="text-muted">No changes</span>';
+    if (log.diff) {
+      var metadata = {};
+      try {
+        if (log.metadata) metadata = JSON.parse(log.metadata);
+      } catch (e) {}
+
+      if (metadata.single_property_change && metadata.property_name !== 'config' && metadata.property_name !== 'configuration') {
+        changesHtml = '<div class="small text-muted">' +
+          '<strong>' + escapeHtml(metadata.property_name) + ':</strong> ' +
+          '<span class="text-decoration-line-through">' + escapeHtml(String(metadata.old_value)) + '</span> ' +
+          '<i class="fas fa-arrow-right mx-1"></i> ' +
+          '<span class="text-success">' + escapeHtml(String(metadata.new_value)) + '</span>' +
+          '</div>';
+      } else {
+        var diffId = 'diff-' + log.id;
+        changesHtml = '<button class="btn btn-sm btn-outline-info" type="button" ' +
+          'data-bs-toggle="collapse" data-bs-target="#' + diffId + '" aria-expanded="false">' +
+          '<i class="fas fa-code"></i> View Changes</button>' +
+          '<div class="collapse mt-2" id="' + diffId + '">' +
+          '<div class="card card-body">' +
+          '<pre class="mb-0 diff-content">' + escapeHtml(log.diff) + '</pre>' +
+          '</div></div>';
+      }
+    }
+
+    row.innerHTML =
+      '<td><span title="' + fullTimestamp + '">' + timestampStr + '</span></td>' +
+      '<td>' + escapeHtml(log.user_email) + '</td>' +
+      '<td>' + formatActionType(log.action_type) + '</td>' +
+      '<td><i class="fas ' + entityIcon + ' me-1"></i>' + entityPrefix + '</td>' +
+      '<td>' + escapeHtml(log.entity_name) + '</td>' +
+      '<td>' + changesHtml + '</td>';
+
+    tbody.appendChild(row);
+  });
+}
+
+function renderPagination(data) {
+  var pagination = document.getElementById('pagination');
+  var paginationInfo = document.getElementById('pagination-info');
+  pagination.innerHTML = '';
+
+  if (data.total_pages <= 1) {
+    paginationInfo.textContent = 'Showing ' + data.logs.length + ' of ' + data.total_count + ' entries';
+    return;
+  }
+
+  var startEntry = (data.page - 1) * data.page_size + 1;
+  var endEntry = Math.min(data.page * data.page_size, data.total_count);
+  paginationInfo.textContent = 'Showing ' + startEntry + '-' + endEntry + ' of ' + data.total_count + ' entries';
+
+  /* Previous button */
+  var prevLi = document.createElement('li');
+  prevLi.className = 'page-item' + (data.page <= 1 ? ' disabled' : '');
+  prevLi.innerHTML = '<a class="page-link" href="#" aria-label="Previous"><span aria-hidden="true">&laquo;</span></a>';
+  if (data.page > 1) {
+    prevLi.querySelector('a').addEventListener('click', function(e) {
+      e.preventDefault();
+      currentFilters.page = data.page - 1;
+      loadAuditLogs();
+    });
+  }
+  pagination.appendChild(prevLi);
+
+  /* Page numbers */
+  var startPage = Math.max(1, data.page - 2);
+  var endPage = Math.min(data.total_pages, data.page + 2);
+
+  for (var i = startPage; i <= endPage; i++) {
+    var li = document.createElement('li');
+    li.className = 'page-item' + (i === data.page ? ' active' : '');
+    li.innerHTML = '<a class="page-link" href="#">' + i + '</a>';
+    (function(pageNum) {
+      li.querySelector('a').addEventListener('click', function(e) {
+        e.preventDefault();
+        currentFilters.page = pageNum;
+        loadAuditLogs();
+      });
+    })(i);
+    pagination.appendChild(li);
+  }
+
+  /* Next button */
+  var nextLi = document.createElement('li');
+  nextLi.className = 'page-item' + (data.page >= data.total_pages ? ' disabled' : '');
+  nextLi.innerHTML = '<a class="page-link" href="#" aria-label="Next"><span aria-hidden="true">&raquo;</span></a>';
+  if (data.page < data.total_pages) {
+    nextLi.querySelector('a').addEventListener('click', function(e) {
+      e.preventDefault();
+      currentFilters.page = data.page + 1;
+      loadAuditLogs();
+    });
+  }
+  pagination.appendChild(nextLi);
+}
+
+function formatActionType(action) {
+  var actionMap = {
+    'spammer_create': 'Create Spammer',
+    'spammer_update': 'Update Spammer',
+    'spammer_delete': 'Delete Spammer',
+    'spammer_start': 'Start Spammer',
+    'spammer_pause': 'Stop Spammer',
+    'spammer_reclaim': 'Reclaim Spammer Funds',
+    'client_update': 'Update Client',
+    'client_group_update': 'Update Client Group',
+    'client_name_update': 'Change Client Name',
+    'client_type_update': 'Change Client Type',
+    'client_toggle': 'Toggle Client',
+    'spammers_import': 'Import Spammers',
+    'spammers_export': 'Export Spammers',
+    'root_wallet_transaction': 'Root Wallet Transaction'
+  };
+  return actionMap[action] || action;
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  var div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function applyFilters() {
+  currentFilters.user_email = document.getElementById('user_email').value.trim();
+  currentFilters.action_type = document.getElementById('action_type').value;
+  currentFilters.entity_type = document.getElementById('entity_type').value;
+  currentFilters.page = 1;
+  loadAuditLogs();
+}
+
+function clearFilters() {
+  document.getElementById('user_email').value = '';
+  document.getElementById('action_type').value = '';
+  document.getElementById('entity_type').value = '';
+  currentFilters = { user_email: '', action_type: '', entity_type: '', page: 1, page_size: 50 };
+  loadAuditLogs();
+}
 </script>
 {{ end }}

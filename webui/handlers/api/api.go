@@ -265,6 +265,10 @@ func (ah *APIHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/scenarios/{name}/config [get]
 func (ah *APIHandler) GetScenarioConfig(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	scenarioName := vars["name"]
 
@@ -338,9 +342,14 @@ func (ah *APIHandler) GetSpammerList(w http.ResponseWriter, r *http.Request) {
 // @Param request body CreateSpammerRequest true "Spammer configuration"
 // @Success 200 {object} int64 "Spammer ID"
 // @Failure 400 {string} string "Invalid request"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer [post]
 func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	var req struct {
 		Name             string `json:"name"`
 		Description      string `json:"description"`
@@ -378,10 +387,15 @@ func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/start [post]
 func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -414,10 +428,15 @@ func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param request body UpdateSpammerRequest true "Updated configuration"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid request"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [put]
 func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -465,10 +484,15 @@ func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/pause [post]
 func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -499,10 +523,15 @@ func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [delete]
 func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -533,10 +562,15 @@ func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/reclaim [post]
 func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -568,9 +602,14 @@ func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Success 200 {object} SpammerDetails "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Router /api/spammer/{id} [get]
 func (ah *APIHandler) GetSpammerDetails(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -620,9 +659,14 @@ type LogEntry struct {
 // @Param id path int true "Spammer ID"
 // @Success 200 {array} LogEntry "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Router /api/spammer/{id}/logs [get]
 func (ah *APIHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -669,10 +713,15 @@ func (ah *APIHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
 // @Param since query string false "Timestamp to start from (RFC3339Nano)"
 // @Success 200 {string} string "SSE stream of log entries"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Streaming unsupported"
 // @Router /api/spammer/{id}/logs/stream [get]
 func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -776,6 +825,9 @@ type PendingTransactionEntry struct {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/pending-transactions [get]
 func (ah *APIHandler) GetPendingTransactions(w http.ResponseWriter, r *http.Request) {
+	// Check if authenticated (don't return error, just flag for filtering)
+	isAuthenticated := ah.isAuthenticated(r)
+
 	walletFilter := r.URL.Query().Get("wallet")
 
 	allPendingTxs := make([]PendingTransactionEntry, 0)
@@ -847,11 +899,13 @@ func (ah *APIHandler) GetPendingTransactions(w http.ResponseWriter, r *http.Requ
 			submittedAt := pendingTx.Submitted.Format(time.RFC3339)
 			lastRebroadcast := pendingTx.LastRebroadcast.Format(time.RFC3339)
 
-			// Encode transaction to RLP
-			rlpBytes, err := tx.MarshalBinary()
+			// Only include RLP encoded transaction for authenticated users
 			rlpHex := ""
-			if err == nil {
-				rlpHex = "0x" + hex.EncodeToString(rlpBytes)
+			if isAuthenticated {
+				rlpBytes, err := tx.MarshalBinary()
+				if err == nil {
+					rlpHex = "0x" + hex.EncodeToString(rlpBytes)
+				}
 			}
 
 			entry := PendingTransactionEntry{
@@ -966,6 +1020,9 @@ type UpdateClientTypeRequest struct {
 // @Success 200 {array} ClientEntry "Success"
 // @Router /api/clients [get]
 func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
+	// Check if authenticated (don't return error, just flag for filtering)
+	isAuthenticated := ah.isAuthenticated(r)
+
 	ctx := r.Context()
 	goodClients := ah.daemon.GetClientPool().GetAllGoodClients()
 	allClients := ah.daemon.GetClientPool().GetAllClients()
@@ -980,6 +1037,11 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 			version = "Unknown"
 		}
 
+		rpcHost := ""
+		if isAuthenticated {
+			rpcHost = client.GetRPCHost()
+		}
+
 		response[i] = ClientEntry{
 			Index:        i,
 			Name:         client.GetName(),
@@ -989,7 +1051,7 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 			Version:      version,
 			BlockHeight:  blockHeight,
 			IsReady:      slices.Contains(goodClients, client),
-			RpcHost:      client.GetRPCHost(),
+			RpcHost:      rpcHost,
 			Enabled:      client.IsEnabled(),
 			NameOverride: client.GetNameOverride(),
 		}
@@ -1009,9 +1071,14 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 // @Param request body UpdateClientGroupRequest true "New group name(s)"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid client index"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/group [put]
 func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	index, err := strconv.Atoi(vars["index"])
 	if err != nil {
@@ -1080,9 +1147,14 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 // @Param request body UpdateClientEnabledRequest true "New enabled state"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid client index"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/enabled [put]
 func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	index, err := strconv.Atoi(vars["index"])
 	if err != nil {
@@ -1139,9 +1211,14 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 // @Param request body UpdateClientNameRequest true "New name override"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid client index"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/name [put]
 func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	index, err := strconv.Atoi(vars["index"])
 	if err != nil {
@@ -1198,9 +1275,14 @@ func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
 // @Param request body UpdateClientTypeRequest true "New client type"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid client index or type"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/type [put]
 func (ah *APIHandler) UpdateClientType(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	index, err := strconv.Atoi(vars["index"])
 	if err != nil {
@@ -1290,9 +1372,14 @@ type SendTransactionResponse struct {
 // @Param request body ExportSpammersRequest false "Spammer IDs to export (optional)"
 // @Success 200 {string} string "YAML configuration"
 // @Failure 400 {string} string "Invalid request"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammers/export [post]
 func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	var req ExportSpammersRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1320,9 +1407,14 @@ func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
 // @Param request body ImportSpammersRequest true "Import configuration"
 // @Success 200 {object} daemon.ImportResult "Success"
 // @Failure 400 {string} string "Invalid request"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammers/import [post]
 func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	var req ImportSpammersRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1455,6 +1547,7 @@ func (ah *APIHandler) GetSpammerLibraryIndex(w http.ResponseWriter, r *http.Requ
 // @Description Returns comprehensive graphs data for the dashboard including all spammers, totals, and time-series data
 // @Produce json
 // @Success 200 {object} GraphsDashboardResponse "Success"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/graphs/dashboard [get]
 func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request) {
@@ -1571,10 +1664,15 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 // @Param id path int true "Spammer ID"
 // @Success 200 {object} SpammerTimeSeriesResponse "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/graphs/spammer/{id}/timeseries [get]
 func (ah *APIHandler) GetSpammerTimeSeries(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	spammerIDStr := vars["id"]
 
@@ -1634,6 +1732,7 @@ func (ah *APIHandler) GetSpammerTimeSeries(w http.ResponseWriter, r *http.Reques
 // @Description Provides real-time graphs updates via Server-Sent Events (SSE)
 // @Produce text/event-stream
 // @Success 200 {string} string "SSE stream"
+// @Failure 401 {string} string "Unauthorized"
 // @Router /api/graphs/stream [get]
 func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
 	// Check if tx metrics are enabled
@@ -2004,9 +2103,14 @@ func sendError(w http.ResponseWriter, message string, statusCode int) {
 // @Param request body SendTransactionRequest true "Transaction parameters"
 // @Success 200 {object} SendTransactionResponse "Success"
 // @Failure 400 {object} ErrorResponse "Invalid request"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {object} ErrorResponse "Server Error"
 // @Router /api/root-wallet/send-transaction [post]
 func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	var req SendTransactionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendError(w, err.Error(), http.StatusBadRequest)

@@ -24,7 +24,7 @@
                      style="cursor: help;"></i>
                 </th>
                 <th>Version</th>
-                <th style="width: 120px;">Actions</th>
+                <th style="width: 120px;" class="auth-required-column">Actions</th>
               </tr>
             </thead>
               <tbody>
@@ -73,29 +73,29 @@
                       <span class="text-truncate d-inline-block" style="max-width: 400px">{{ $client.Version }}</span>
                       <i class="fa fa-copy text-muted p-1" role="button" data-bs-toggle="tooltip" title="Copy to clipboard" data-clipboard-text="{{ $client.Version }}"></i>
                     </td>
-                    <td>
+                    <td class="auth-required-column">
                       <div class="btn-group" role="group">
-                        <button class="btn btn-sm btn-info edit-name-btn" 
-                                data-index="{{ $client.Index }}" 
+                        <button class="btn btn-sm btn-info edit-name-btn"
+                                data-index="{{ $client.Index }}"
                                 data-name="{{ $client.Name | html }}"
                                 data-name-override="{{ $client.NameOverride | html }}"
                                 title="Edit Name" data-bs-toggle="tooltip" data-bs-placement="top">
                           <i class="fas fa-tag"></i>
                         </button>
-                        <button class="btn btn-sm btn-secondary edit-type-btn" 
-                                data-index="{{ $client.Index }}" 
+                        <button class="btn btn-sm btn-secondary edit-type-btn"
+                                data-index="{{ $client.Index }}"
                                 data-type="{{ $client.Type }}"
                                 title="Change Client Type" data-bs-toggle="tooltip" data-bs-placement="top">
                           <i class="fas fa-cogs"></i>
                         </button>
-                        <button class="btn btn-sm btn-primary edit-groups-btn" 
-                                data-index="{{ $client.Index }}" 
+                        <button class="btn btn-sm btn-primary edit-groups-btn"
+                                data-index="{{ $client.Index }}"
                                 data-groups="{{ range $idx, $group := $client.Groups }}{{ if $idx }},{{ end }}{{ $group }}{{ end }}"
                                 title="Edit Groups" data-bs-toggle="tooltip" data-bs-placement="top">
                           <i class="fas fa-edit"></i>
                         </button>
-                        <button class="btn btn-sm {{ if $client.Enabled }}btn-warning{{ else }}btn-success{{ end }} toggle-enabled-btn" 
-                                data-index="{{ $client.Index }}" 
+                        <button class="btn btn-sm {{ if $client.Enabled }}btn-warning{{ else }}btn-success{{ end }} toggle-enabled-btn"
+                                data-index="{{ $client.Index }}"
                                 data-enabled="{{ $client.Enabled }}"
                                 title="{{ if $client.Enabled }}Disable Client{{ else }}Enable Client{{ end }}" data-bs-toggle="tooltip" data-bs-placement="top">
                           <i class="fas {{ if $client.Enabled }}fa-power-off{{ else }}fa-play{{ end }}"></i>
@@ -241,6 +241,31 @@ let currentClientName = null;
 let currentNameOverride = null;
 let currentClientType = null;
 
+/* Listen for auth state changes */
+window.addEventListener('authStateChanged', function(e) {
+  updateAuthColumns(e.detail.isAuthenticated);
+});
+
+function updateAuthColumns(isAuthenticated) {
+  var columns = document.querySelectorAll('.auth-required-column');
+  columns.forEach(function(col) {
+    if (isAuthenticated) {
+      col.style.display = '';
+    } else {
+      col.style.display = 'none';
+    }
+  });
+}
+
+/* Check auth and return false with alert if not authenticated */
+function requireAuth() {
+  if (!window.spamoor || !window.spamoor.isAuthenticated()) {
+    alert('You must be logged in to perform this action');
+    return false;
+  }
+  return true;
+}
+
 function editClientGroups(index, groupsStr) {
   currentClientIndex = index;
   currentGroups = groupsStr ? groupsStr.split(',').map(g => g.trim()).filter(g => g) : [];
@@ -313,31 +338,35 @@ function editClientName(index, displayName, nameOverride) {
 }
 
 function submitClientNameEdit() {
+  if (!requireAuth()) return;
+
   var nameOverride = document.getElementById('clientNameInput').value.trim();
-  var xhr = new XMLHttpRequest();
-  xhr.open('PUT', '/api/client/' + currentClientIndex + '/name', true);
-  xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.onreadystatechange = function() {
-    if (xhr.readyState === 4) {
-      if (xhr.status === 200) {
-        location.reload();
-      } else {
-        alert('Failed to update client name');
-      }
+  spamoor.authFetch('/api/client/' + currentClientIndex + '/name', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name_override: nameOverride})
+  }).then(function(response) {
+    if (response.ok) {
+      location.reload();
+    } else {
+      alert('Failed to update client name');
     }
-  };
-  xhr.send(JSON.stringify({name_override: nameOverride}));
+  }).catch(function(err) {
+    alert('Failed to update client name: ' + err.message);
+  });
 }
 
 async function submitClientGroupsEdit() {
+  if (!requireAuth()) return;
+
   if (currentGroups.length === 0) {
     alert('At least one group must be assigned');
     return;
   }
-  
+
   try {
     const url = '/api/client/' + currentClientIndex + '/group';
-    await fetch(url, {
+    await spamoor.authFetch(url, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({groups: currentGroups})
@@ -367,11 +396,13 @@ async function submitClientGroupsEdit() {
 }
 
 async function toggleClientEnabled(index, currentEnabled) {
+  if (!requireAuth()) return;
+
   const newEnabled = !currentEnabled;
-  
+
   try {
     const url = '/api/client/' + index + '/enabled';
-    await fetch(url, {
+    await spamoor.authFetch(url, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({enabled: newEnabled})
@@ -427,19 +458,21 @@ function editClientType(index, currentType) {
 }
 
 async function submitClientTypeEdit() {
+  if (!requireAuth()) return;
+
   const form = document.getElementById('editClientTypeForm');
   const selectedType = form.querySelector('input[name="clientType"]:checked');
-  
+
   if (!selectedType) {
     alert('Please select a client type');
     return;
   }
-  
+
   const newType = selectedType.value;
-  
+
   try {
     const url = '/api/client/' + currentClientIndex + '/type';
-    await fetch(url, {
+    await spamoor.authFetch(url, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({client_type: newType})
@@ -469,9 +502,12 @@ async function submitClientTypeEdit() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  /* Initially hide auth-required columns until auth state is determined */
+  updateAuthColumns(false);
+
   const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
   tooltipTriggerList.map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
-  
+
   const popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
   popoverTriggerList.map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl));
   

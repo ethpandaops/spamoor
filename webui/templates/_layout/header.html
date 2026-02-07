@@ -61,7 +61,7 @@
             </li>
             {{ end }}
             {{ if not .DisableAuditLogs }}
-            <li class="nav-item px-2">
+            <li class="nav-item px-2 d-none" data-auth-required>
               <a class="nav-link" href="/audit">
                 <span class="nav-text">Audit</span>
               </a>
@@ -104,6 +104,19 @@
                 </li>
               </ul>
             </li>
+
+            {{ if and (not .DisableLocalToken) (not .DisableAuth) }}
+            <li class="nav-item px-2" id="authNavItem">
+              <a class="nav-link d-none" href="/auth/login" id="loginBtn">
+                <i class="fas fa-sign-in-alt me-1"></i>
+                <span class="nav-text">Login</span>
+              </a>
+              <span class="nav-link d-none" id="userInfo">
+                <i class="fas fa-user me-1"></i>
+                <span class="nav-text" id="userName"></span>
+              </span>
+            </li>
+            {{ end }}
           </ul>
         </div>
       </div>
