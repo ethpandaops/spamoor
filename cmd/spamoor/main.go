@@ -44,9 +44,6 @@ func main() {
 		case "run":
 			RunCommand(os.Args[2:])
 			return
-		case "validate-plugin":
-			ValidateCommand(os.Args[2:])
-			return
 		}
 	}
 

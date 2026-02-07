@@ -366,7 +366,7 @@ func (l *PluginLoader) extractTar(tarReader io.Reader, destDir string) error {
 }
 
 // loadFromFS interprets a plugin from a filesystem.
-func (l *PluginLoader) loadFromFS(pluginName string, filesys fs.FS) (*Descriptor, error) {
+func (l *PluginLoader) loadFromFS(pluginName string, filesys fs.FS) (*scenario.PluginDescriptor, error) {
 	// Create interpreter with the filesystem as GOPATH source
 	i := l.newInterpreter(filesys)
 
@@ -613,7 +613,7 @@ func (l *PluginLoader) wrapEvalError(pluginName string, err error) error {
 }
 
 // extractPluginDescriptor attempts to extract a plugin.Descriptor from a reflect.Value.
-func extractPluginDescriptor(v reflect.Value) (*Descriptor, bool) {
+func extractPluginDescriptor(v reflect.Value) (*scenario.PluginDescriptor, bool) {
 	if !v.IsValid() {
 		return nil, false
 	}
@@ -627,18 +627,18 @@ func extractPluginDescriptor(v reflect.Value) (*Descriptor, bool) {
 	iface := v.Interface()
 
 	// Check if it's already a *Descriptor
-	if desc, ok := iface.(*Descriptor); ok {
+	if desc, ok := iface.(*scenario.PluginDescriptor); ok {
 		return desc, true
 	}
 
 	// Check if it's a Descriptor value
-	if desc, ok := iface.(Descriptor); ok {
+	if desc, ok := iface.(scenario.PluginDescriptor); ok {
 		return &desc, true
 	}
 
 	// Try to manually extract fields if type names differ but structure matches
 	if v.Kind() == reflect.Struct {
-		desc := &Descriptor{}
+		desc := &scenario.PluginDescriptor{}
 
 		nameField := v.FieldByName("Name")
 		if nameField.IsValid() && nameField.Kind() == reflect.String {

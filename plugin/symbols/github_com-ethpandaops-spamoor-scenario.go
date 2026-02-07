@@ -26,6 +26,7 @@ func init() {
 		"Descriptor":                 reflect.ValueOf((*scenario.Descriptor)(nil)),
 		"FieldInfo":                  reflect.ValueOf((*scenario.FieldInfo)(nil)),
 		"Options":                    reflect.ValueOf((*scenario.Options)(nil)),
+		"PluginDescriptor":           reflect.ValueOf((*scenario.PluginDescriptor)(nil)),
 		"ProcessNextTxParams":        reflect.ValueOf((*scenario.ProcessNextTxParams)(nil)),
 		"ReceiptChan":                reflect.ValueOf((*scenario.ReceiptChan)(nil)),
 		"Scenario":                   reflect.ValueOf((*scenario.Scenario)(nil)),

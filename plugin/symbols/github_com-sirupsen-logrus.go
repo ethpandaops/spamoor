@@ -120,12 +120,8 @@ type _github_com_sirupsen_logrus_BufferPool struct {
 	WPut   func(a0 *bytes.Buffer)
 }
 
-func (W _github_com_sirupsen_logrus_BufferPool) Get() *bytes.Buffer {
-	return W.WGet()
-}
-func (W _github_com_sirupsen_logrus_BufferPool) Put(a0 *bytes.Buffer) {
-	W.WPut(a0)
-}
+func (W _github_com_sirupsen_logrus_BufferPool) Get() *bytes.Buffer   { return W.WGet() }
+func (W _github_com_sirupsen_logrus_BufferPool) Put(a0 *bytes.Buffer) { W.WPut(a0) }
 
 // _github_com_sirupsen_logrus_Ext1FieldLogger is an interface wrapper for Ext1FieldLogger type
 type _github_com_sirupsen_logrus_Ext1FieldLogger struct {
@@ -162,72 +158,54 @@ type _github_com_sirupsen_logrus_Ext1FieldLogger struct {
 	WWithFields func(fields logrus.Fields) *logrus.Entry
 }
 
-func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Debug(args ...interface{}) {
-	W.WDebug(args...)
-}
+func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Debug(args ...interface{}) { W.WDebug(args...) }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Debugf(format string, args ...interface{}) {
 	W.WDebugf(format, args...)
 }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Debugln(args ...interface{}) {
 	W.WDebugln(args...)
 }
-func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Error(args ...interface{}) {
-	W.WError(args...)
-}
+func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Error(args ...interface{}) { W.WError(args...) }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Errorf(format string, args ...interface{}) {
 	W.WErrorf(format, args...)
 }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Errorln(args ...interface{}) {
 	W.WErrorln(args...)
 }
-func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Fatal(args ...interface{}) {
-	W.WFatal(args...)
-}
+func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Fatal(args ...interface{}) { W.WFatal(args...) }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Fatalf(format string, args ...interface{}) {
 	W.WFatalf(format, args...)
 }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Fatalln(args ...interface{}) {
 	W.WFatalln(args...)
 }
-func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Info(args ...interface{}) {
-	W.WInfo(args...)
-}
+func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Info(args ...interface{}) { W.WInfo(args...) }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Infof(format string, args ...interface{}) {
 	W.WInfof(format, args...)
 }
-func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Infoln(args ...interface{}) {
-	W.WInfoln(args...)
-}
-func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Panic(args ...interface{}) {
-	W.WPanic(args...)
-}
+func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Infoln(args ...interface{}) { W.WInfoln(args...) }
+func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Panic(args ...interface{})  { W.WPanic(args...) }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Panicf(format string, args ...interface{}) {
 	W.WPanicf(format, args...)
 }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Panicln(args ...interface{}) {
 	W.WPanicln(args...)
 }
-func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Print(args ...interface{}) {
-	W.WPrint(args...)
-}
+func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Print(args ...interface{}) { W.WPrint(args...) }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Printf(format string, args ...interface{}) {
 	W.WPrintf(format, args...)
 }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Println(args ...interface{}) {
 	W.WPrintln(args...)
 }
-func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Trace(args ...interface{}) {
-	W.WTrace(args...)
-}
+func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Trace(args ...interface{}) { W.WTrace(args...) }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Tracef(format string, args ...interface{}) {
 	W.WTracef(format, args...)
 }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Traceln(args ...interface{}) {
 	W.WTraceln(args...)
 }
-func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Warn(args ...interface{}) {
-	W.WWarn(args...)
-}
+func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Warn(args ...interface{}) { W.WWarn(args...) }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Warnf(format string, args ...interface{}) {
 	W.WWarnf(format, args...)
 }
@@ -240,9 +218,7 @@ func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Warningf(format string, arg
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Warningln(args ...interface{}) {
 	W.WWarningln(args...)
 }
-func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Warnln(args ...interface{}) {
-	W.WWarnln(args...)
-}
+func (W _github_com_sirupsen_logrus_Ext1FieldLogger) Warnln(args ...interface{}) { W.WWarnln(args...) }
 func (W _github_com_sirupsen_logrus_Ext1FieldLogger) WithError(err error) *logrus.Entry {
 	return W.WWithError(err)
 }
@@ -285,78 +261,48 @@ type _github_com_sirupsen_logrus_FieldLogger struct {
 	WWithFields func(fields logrus.Fields) *logrus.Entry
 }
 
-func (W _github_com_sirupsen_logrus_FieldLogger) Debug(args ...interface{}) {
-	W.WDebug(args...)
-}
+func (W _github_com_sirupsen_logrus_FieldLogger) Debug(args ...interface{}) { W.WDebug(args...) }
 func (W _github_com_sirupsen_logrus_FieldLogger) Debugf(format string, args ...interface{}) {
 	W.WDebugf(format, args...)
 }
-func (W _github_com_sirupsen_logrus_FieldLogger) Debugln(args ...interface{}) {
-	W.WDebugln(args...)
-}
-func (W _github_com_sirupsen_logrus_FieldLogger) Error(args ...interface{}) {
-	W.WError(args...)
-}
+func (W _github_com_sirupsen_logrus_FieldLogger) Debugln(args ...interface{}) { W.WDebugln(args...) }
+func (W _github_com_sirupsen_logrus_FieldLogger) Error(args ...interface{})   { W.WError(args...) }
 func (W _github_com_sirupsen_logrus_FieldLogger) Errorf(format string, args ...interface{}) {
 	W.WErrorf(format, args...)
 }
-func (W _github_com_sirupsen_logrus_FieldLogger) Errorln(args ...interface{}) {
-	W.WErrorln(args...)
-}
-func (W _github_com_sirupsen_logrus_FieldLogger) Fatal(args ...interface{}) {
-	W.WFatal(args...)
-}
+func (W _github_com_sirupsen_logrus_FieldLogger) Errorln(args ...interface{}) { W.WErrorln(args...) }
+func (W _github_com_sirupsen_logrus_FieldLogger) Fatal(args ...interface{})   { W.WFatal(args...) }
 func (W _github_com_sirupsen_logrus_FieldLogger) Fatalf(format string, args ...interface{}) {
 	W.WFatalf(format, args...)
 }
-func (W _github_com_sirupsen_logrus_FieldLogger) Fatalln(args ...interface{}) {
-	W.WFatalln(args...)
-}
-func (W _github_com_sirupsen_logrus_FieldLogger) Info(args ...interface{}) {
-	W.WInfo(args...)
-}
+func (W _github_com_sirupsen_logrus_FieldLogger) Fatalln(args ...interface{}) { W.WFatalln(args...) }
+func (W _github_com_sirupsen_logrus_FieldLogger) Info(args ...interface{})    { W.WInfo(args...) }
 func (W _github_com_sirupsen_logrus_FieldLogger) Infof(format string, args ...interface{}) {
 	W.WInfof(format, args...)
 }
-func (W _github_com_sirupsen_logrus_FieldLogger) Infoln(args ...interface{}) {
-	W.WInfoln(args...)
-}
-func (W _github_com_sirupsen_logrus_FieldLogger) Panic(args ...interface{}) {
-	W.WPanic(args...)
-}
+func (W _github_com_sirupsen_logrus_FieldLogger) Infoln(args ...interface{}) { W.WInfoln(args...) }
+func (W _github_com_sirupsen_logrus_FieldLogger) Panic(args ...interface{})  { W.WPanic(args...) }
 func (W _github_com_sirupsen_logrus_FieldLogger) Panicf(format string, args ...interface{}) {
 	W.WPanicf(format, args...)
 }
-func (W _github_com_sirupsen_logrus_FieldLogger) Panicln(args ...interface{}) {
-	W.WPanicln(args...)
-}
-func (W _github_com_sirupsen_logrus_FieldLogger) Print(args ...interface{}) {
-	W.WPrint(args...)
-}
+func (W _github_com_sirupsen_logrus_FieldLogger) Panicln(args ...interface{}) { W.WPanicln(args...) }
+func (W _github_com_sirupsen_logrus_FieldLogger) Print(args ...interface{})   { W.WPrint(args...) }
 func (W _github_com_sirupsen_logrus_FieldLogger) Printf(format string, args ...interface{}) {
 	W.WPrintf(format, args...)
 }
-func (W _github_com_sirupsen_logrus_FieldLogger) Println(args ...interface{}) {
-	W.WPrintln(args...)
-}
-func (W _github_com_sirupsen_logrus_FieldLogger) Warn(args ...interface{}) {
-	W.WWarn(args...)
-}
+func (W _github_com_sirupsen_logrus_FieldLogger) Println(args ...interface{}) { W.WPrintln(args...) }
+func (W _github_com_sirupsen_logrus_FieldLogger) Warn(args ...interface{})    { W.WWarn(args...) }
 func (W _github_com_sirupsen_logrus_FieldLogger) Warnf(format string, args ...interface{}) {
 	W.WWarnf(format, args...)
 }
-func (W _github_com_sirupsen_logrus_FieldLogger) Warning(args ...interface{}) {
-	W.WWarning(args...)
-}
+func (W _github_com_sirupsen_logrus_FieldLogger) Warning(args ...interface{}) { W.WWarning(args...) }
 func (W _github_com_sirupsen_logrus_FieldLogger) Warningf(format string, args ...interface{}) {
 	W.WWarningf(format, args...)
 }
 func (W _github_com_sirupsen_logrus_FieldLogger) Warningln(args ...interface{}) {
 	W.WWarningln(args...)
 }
-func (W _github_com_sirupsen_logrus_FieldLogger) Warnln(args ...interface{}) {
-	W.WWarnln(args...)
-}
+func (W _github_com_sirupsen_logrus_FieldLogger) Warnln(args ...interface{}) { W.WWarnln(args...) }
 func (W _github_com_sirupsen_logrus_FieldLogger) WithError(err error) *logrus.Entry {
 	return W.WWithError(err)
 }
@@ -384,12 +330,8 @@ type _github_com_sirupsen_logrus_Hook struct {
 	WLevels func() []logrus.Level
 }
 
-func (W _github_com_sirupsen_logrus_Hook) Fire(a0 *logrus.Entry) error {
-	return W.WFire(a0)
-}
-func (W _github_com_sirupsen_logrus_Hook) Levels() []logrus.Level {
-	return W.WLevels()
-}
+func (W _github_com_sirupsen_logrus_Hook) Fire(a0 *logrus.Entry) error { return W.WFire(a0) }
+func (W _github_com_sirupsen_logrus_Hook) Levels() []logrus.Level      { return W.WLevels() }
 
 // _github_com_sirupsen_logrus_StdLogger is an interface wrapper for StdLogger type
 type _github_com_sirupsen_logrus_StdLogger struct {
@@ -405,30 +347,18 @@ type _github_com_sirupsen_logrus_StdLogger struct {
 	WPrintln func(a0 ...interface{})
 }
 
-func (W _github_com_sirupsen_logrus_StdLogger) Fatal(a0 ...interface{}) {
-	W.WFatal(a0...)
-}
+func (W _github_com_sirupsen_logrus_StdLogger) Fatal(a0 ...interface{}) { W.WFatal(a0...) }
 func (W _github_com_sirupsen_logrus_StdLogger) Fatalf(a0 string, a1 ...interface{}) {
 	W.WFatalf(a0, a1...)
 }
-func (W _github_com_sirupsen_logrus_StdLogger) Fatalln(a0 ...interface{}) {
-	W.WFatalln(a0...)
-}
-func (W _github_com_sirupsen_logrus_StdLogger) Panic(a0 ...interface{}) {
-	W.WPanic(a0...)
-}
+func (W _github_com_sirupsen_logrus_StdLogger) Fatalln(a0 ...interface{}) { W.WFatalln(a0...) }
+func (W _github_com_sirupsen_logrus_StdLogger) Panic(a0 ...interface{})   { W.WPanic(a0...) }
 func (W _github_com_sirupsen_logrus_StdLogger) Panicf(a0 string, a1 ...interface{}) {
 	W.WPanicf(a0, a1...)
 }
-func (W _github_com_sirupsen_logrus_StdLogger) Panicln(a0 ...interface{}) {
-	W.WPanicln(a0...)
-}
-func (W _github_com_sirupsen_logrus_StdLogger) Print(a0 ...interface{}) {
-	W.WPrint(a0...)
-}
+func (W _github_com_sirupsen_logrus_StdLogger) Panicln(a0 ...interface{}) { W.WPanicln(a0...) }
+func (W _github_com_sirupsen_logrus_StdLogger) Print(a0 ...interface{})   { W.WPrint(a0...) }
 func (W _github_com_sirupsen_logrus_StdLogger) Printf(a0 string, a1 ...interface{}) {
 	W.WPrintf(a0, a1...)
 }
-func (W _github_com_sirupsen_logrus_StdLogger) Println(a0 ...interface{}) {
-	W.WPrintln(a0...)
-}
+func (W _github_com_sirupsen_logrus_StdLogger) Println(a0 ...interface{}) { W.WPrintln(a0...) }

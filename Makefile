@@ -55,7 +55,7 @@ plugins:
 			echo "name: $$plugin_name" > "plugins/$$plugin_name/plugin.yaml"; \
 			echo "build_time: $(BUILDTIME)" >> "plugins/$$plugin_name/plugin.yaml"; \
 			echo "git_version: $(VERSION)" >> "plugins/$$plugin_name/plugin.yaml"; \
-			tar -czf "bin/plugins/$$plugin_name.tar.gz" -C "plugins/$$plugin_name" .; \
+			tar -czf "plugins/$$plugin_name.tar.gz" -C "plugins/$$plugin_name" .; \
 			rm "plugins/$$plugin_name/plugin.yaml"; \
 		fi \
 	done

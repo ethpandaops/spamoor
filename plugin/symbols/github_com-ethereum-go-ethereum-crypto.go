@@ -101,21 +101,13 @@ type _github_com_ethereum_go_ethereum_crypto_KeccakState struct {
 	WWrite     func(p []byte) (n int, err error)
 }
 
-func (W _github_com_ethereum_go_ethereum_crypto_KeccakState) BlockSize() int {
-	return W.WBlockSize()
-}
+func (W _github_com_ethereum_go_ethereum_crypto_KeccakState) BlockSize() int { return W.WBlockSize() }
 func (W _github_com_ethereum_go_ethereum_crypto_KeccakState) Read(a0 []byte) (int, error) {
 	return W.WRead(a0)
 }
-func (W _github_com_ethereum_go_ethereum_crypto_KeccakState) Reset() {
-	W.WReset()
-}
-func (W _github_com_ethereum_go_ethereum_crypto_KeccakState) Size() int {
-	return W.WSize()
-}
-func (W _github_com_ethereum_go_ethereum_crypto_KeccakState) Sum(b []byte) []byte {
-	return W.WSum(b)
-}
+func (W _github_com_ethereum_go_ethereum_crypto_KeccakState) Reset()              { W.WReset() }
+func (W _github_com_ethereum_go_ethereum_crypto_KeccakState) Size() int           { return W.WSize() }
+func (W _github_com_ethereum_go_ethereum_crypto_KeccakState) Sum(b []byte) []byte { return W.WSum(b) }
 func (W _github_com_ethereum_go_ethereum_crypto_KeccakState) Write(p []byte) (n int, err error) {
 	return W.WWrite(p)
 }

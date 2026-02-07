@@ -7,38 +7,29 @@ import (
 	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
-// ValidateCommand validates a plugin tar.gz file or local directory.
-func ValidateCommand(args []string) {
-	flags := pflag.NewFlagSet("validate-plugin", pflag.ExitOnError)
-	verbose := flags.BoolP("verbose", "v", false, "Show verbose output")
-	flags.Parse(args)
-
-	if flags.NArg() < 1 {
-		fmt.Println("Usage: spamoor validate-plugin [options] <plugin.tar.gz | plugin-dir>")
-		fmt.Println()
-		fmt.Println("Validates a plugin archive or directory by:")
-		fmt.Println("  1. Loading it via Yaegi interpreter")
-		fmt.Println("  2. Verifying PluginDescriptor fields")
-		fmt.Println("  3. Checking registered scenarios")
-		fmt.Println()
-		fmt.Println("Options:")
-		flags.PrintDefaults()
-		os.Exit(1)
+// NewValidatePluginCmd creates the validate-plugin command.
+func NewValidatePluginCmd(logger logrus.FieldLogger) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "validate-plugin <plugin.tar.gz | plugin-dir>",
+		Short: "Validate a plugin archive or directory",
+		Long: `Validates a plugin archive or directory by:
+  1. Loading it via Yaegi interpreter
+  2. Verifying PluginDescriptor fields
+  3. Checking registered scenarios`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runValidatePlugin(logger, args[0])
+		},
 	}
 
-	path := flags.Args()[0]
+	return cmd
+}
 
-	// Configure logger
-	logger := logrus.New()
-	if *verbose {
-		logger.SetLevel(logrus.DebugLevel)
-	} else {
-		logger.SetLevel(logrus.WarnLevel)
-	}
-
+func runValidatePlugin(logger logrus.FieldLogger, path string) error {
 	fmt.Printf("Validating plugin: %s\n", path)
 	fmt.Println()
 
@@ -60,7 +51,7 @@ func ValidateCommand(args []string) {
 	if err != nil {
 		fmt.Printf("✗ Failed to load plugin\n")
 		fmt.Printf("  Error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to load plugin: %w", err)
 	}
 
 	// Access the descriptor from loaded plugin
@@ -136,14 +127,14 @@ func ValidateCommand(args []string) {
 						fmt.Printf("      ⚠ Flags() returned error: %v\n", err)
 					} else {
 						flagCount := 0
-						flagSet.VisitAll(func(f *pflag.Flag) {
+						flagSet.VisitAll(func(_ *pflag.Flag) {
 							flagCount++
 						})
 						fmt.Printf("      ✓ Flags registered: %d\n", flagCount)
 					}
 				}
 			}
-			if *verbose && scenarioDesc.Description != "" {
+			if scenarioDesc.Description != "" {
 				fmt.Printf("      Description: %s\n", scenarioDesc.Description)
 			}
 			fmt.Println()
@@ -153,7 +144,7 @@ func ValidateCommand(args []string) {
 	// Final status
 	if hasError {
 		fmt.Printf("Result: ✗ Plugin has errors and may not work correctly\n")
-		os.Exit(1)
+		return fmt.Errorf("plugin has errors")
 	} else if len(desc.Scenarios) == 0 {
 		fmt.Printf("Result: ⚠ Plugin loaded but has no scenarios\n")
 	} else {
@@ -164,4 +155,16 @@ func ValidateCommand(args []string) {
 	if err := l.CleanupPlugin(loaded); err != nil {
 		fmt.Printf("Warning: Failed to cleanup temp directory: %v\n", err)
 	}
+
+	return nil
+}
+
+// isDirectory checks if the given path is an existing directory.
+func isDirectory(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return info.IsDir()
 }

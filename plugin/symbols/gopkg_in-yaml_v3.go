@@ -50,9 +50,7 @@ type _gopkg_in_yaml_v3_IsZeroer struct {
 	WIsZero func() bool
 }
 
-func (W _gopkg_in_yaml_v3_IsZeroer) IsZero() bool {
-	return W.WIsZero()
-}
+func (W _gopkg_in_yaml_v3_IsZeroer) IsZero() bool { return W.WIsZero() }
 
 // _gopkg_in_yaml_v3_Marshaler is an interface wrapper for Marshaler type
 type _gopkg_in_yaml_v3_Marshaler struct {
@@ -60,9 +58,7 @@ type _gopkg_in_yaml_v3_Marshaler struct {
 	WMarshalYAML func() (interface{}, error)
 }
 
-func (W _gopkg_in_yaml_v3_Marshaler) MarshalYAML() (interface{}, error) {
-	return W.WMarshalYAML()
-}
+func (W _gopkg_in_yaml_v3_Marshaler) MarshalYAML() (interface{}, error) { return W.WMarshalYAML() }
 
 // _gopkg_in_yaml_v3_Unmarshaler is an interface wrapper for Unmarshaler type
 type _gopkg_in_yaml_v3_Unmarshaler struct {

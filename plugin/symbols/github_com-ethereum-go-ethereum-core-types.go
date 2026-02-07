@@ -141,9 +141,7 @@ type _github_com_ethereum_go_ethereum_core_types_DerivableList struct {
 func (W _github_com_ethereum_go_ethereum_core_types_DerivableList) EncodeIndex(a0 int, a1 *bytes.Buffer) {
 	W.WEncodeIndex(a0, a1)
 }
-func (W _github_com_ethereum_go_ethereum_core_types_DerivableList) Len() int {
-	return W.WLen()
-}
+func (W _github_com_ethereum_go_ethereum_core_types_DerivableList) Len() int { return W.WLen() }
 
 // _github_com_ethereum_go_ethereum_core_types_ListHasher is an interface wrapper for ListHasher type
 type _github_com_ethereum_go_ethereum_core_types_ListHasher struct {
@@ -153,12 +151,8 @@ type _github_com_ethereum_go_ethereum_core_types_ListHasher struct {
 	WUpdate func(key []byte, value []byte) error
 }
 
-func (W _github_com_ethereum_go_ethereum_core_types_ListHasher) Hash() common.Hash {
-	return W.WHash()
-}
-func (W _github_com_ethereum_go_ethereum_core_types_ListHasher) Reset() {
-	W.WReset()
-}
+func (W _github_com_ethereum_go_ethereum_core_types_ListHasher) Hash() common.Hash { return W.WHash() }
+func (W _github_com_ethereum_go_ethereum_core_types_ListHasher) Reset()            { W.WReset() }
 func (W _github_com_ethereum_go_ethereum_core_types_ListHasher) Update(key []byte, value []byte) error {
 	return W.WUpdate(key, value)
 }
@@ -173,9 +167,7 @@ type _github_com_ethereum_go_ethereum_core_types_Signer struct {
 	WSignatureValues func(tx *types.Transaction, sig []byte) (r *big.Int, s *big.Int, v *big.Int, err error)
 }
 
-func (W _github_com_ethereum_go_ethereum_core_types_Signer) ChainID() *big.Int {
-	return W.WChainID()
-}
+func (W _github_com_ethereum_go_ethereum_core_types_Signer) ChainID() *big.Int { return W.WChainID() }
 func (W _github_com_ethereum_go_ethereum_core_types_Signer) Equal(a0 types.Signer) bool {
 	return W.WEqual(a0)
 }

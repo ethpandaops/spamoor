@@ -38,9 +38,5 @@ type _github_com_ethereum_go_ethereum_event_Subscription struct {
 	WUnsubscribe func()
 }
 
-func (W _github_com_ethereum_go_ethereum_event_Subscription) Err() <-chan error {
-	return W.WErr()
-}
-func (W _github_com_ethereum_go_ethereum_event_Subscription) Unsubscribe() {
-	W.WUnsubscribe()
-}
+func (W _github_com_ethereum_go_ethereum_event_Subscription) Err() <-chan error { return W.WErr() }
+func (W _github_com_ethereum_go_ethereum_event_Subscription) Unsubscribe()      { W.WUnsubscribe() }

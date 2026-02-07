@@ -42,7 +42,7 @@ func (p PluginSourceType) String() string {
 
 // LoadedPlugin tracks a loaded plugin with its temp directory and reference counting.
 type LoadedPlugin struct {
-	Descriptor *Descriptor
+	Descriptor *scenario.PluginDescriptor
 	Metadata   *PluginMetadata  // Metadata from plugin.yaml
 	TempDir    string           // Base temp directory
 	PluginPath string           // Path to plugin source (for scenario Options.PluginPath)
@@ -56,7 +56,7 @@ type LoadedPlugin struct {
 
 // NewLoadedPlugin creates a new LoadedPlugin instance.
 func NewLoadedPlugin(
-	descriptor *Descriptor,
+	descriptor *scenario.PluginDescriptor,
 	metadata *PluginMetadata,
 	tempDir, pluginPath string,
 	sourceType PluginSourceType,

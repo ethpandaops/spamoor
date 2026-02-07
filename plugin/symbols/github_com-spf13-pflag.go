@@ -220,15 +220,9 @@ type _github_com_spf13_pflag_SliceValue struct {
 	WReplace  func(a0 []string) error
 }
 
-func (W _github_com_spf13_pflag_SliceValue) Append(a0 string) error {
-	return W.WAppend(a0)
-}
-func (W _github_com_spf13_pflag_SliceValue) GetSlice() []string {
-	return W.WGetSlice()
-}
-func (W _github_com_spf13_pflag_SliceValue) Replace(a0 []string) error {
-	return W.WReplace(a0)
-}
+func (W _github_com_spf13_pflag_SliceValue) Append(a0 string) error    { return W.WAppend(a0) }
+func (W _github_com_spf13_pflag_SliceValue) GetSlice() []string        { return W.WGetSlice() }
+func (W _github_com_spf13_pflag_SliceValue) Replace(a0 []string) error { return W.WReplace(a0) }
 
 // _github_com_spf13_pflag_Value is an interface wrapper for Value type
 type _github_com_spf13_pflag_Value struct {
@@ -238,15 +232,11 @@ type _github_com_spf13_pflag_Value struct {
 	WType   func() string
 }
 
-func (W _github_com_spf13_pflag_Value) Set(a0 string) error {
-	return W.WSet(a0)
-}
+func (W _github_com_spf13_pflag_Value) Set(a0 string) error { return W.WSet(a0) }
 func (W _github_com_spf13_pflag_Value) String() string {
 	if W.WString == nil {
 		return ""
 	}
 	return W.WString()
 }
-func (W _github_com_spf13_pflag_Value) Type() string {
-	return W.WType()
-}
+func (W _github_com_spf13_pflag_Value) Type() string { return W.WType() }

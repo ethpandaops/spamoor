@@ -17,6 +17,13 @@ type Descriptor struct {
 	NewScenario    func(logger logrus.FieldLogger) Scenario
 }
 
+// PluginDescriptor describes a plugin.
+type PluginDescriptor struct {
+	Name        string
+	Description string
+	Scenarios   []*Descriptor
+}
+
 // Options contains the options for the scenario initialization.
 type Options struct {
 	WalletPool *spamoor.WalletPool

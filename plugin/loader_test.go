@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/sirupsen/logrus"
 )
 
@@ -295,7 +296,7 @@ func TestPluginRegistry(t *testing.T) {
 	registry := NewPluginRegistry()
 
 	// Create a mock loaded plugin
-	desc := &Descriptor{
+	desc := &scenario.PluginDescriptor{
 		Name:        "test-plugin",
 		Description: "Test plugin",
 	}
@@ -351,7 +352,7 @@ func TestScenarioRegistry(t *testing.T) {
 }
 
 func TestLoadedPluginRefCounting(t *testing.T) {
-	desc := &Descriptor{
+	desc := &scenario.PluginDescriptor{
 		Name: "test",
 	}
 	meta := &PluginMetadata{

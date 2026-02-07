@@ -266,12 +266,8 @@ type _github_com_ethereum_go_ethereum_Subscription struct {
 	WUnsubscribe func()
 }
 
-func (W _github_com_ethereum_go_ethereum_Subscription) Err() <-chan error {
-	return W.WErr()
-}
-func (W _github_com_ethereum_go_ethereum_Subscription) Unsubscribe() {
-	W.WUnsubscribe()
-}
+func (W _github_com_ethereum_go_ethereum_Subscription) Err() <-chan error { return W.WErr() }
+func (W _github_com_ethereum_go_ethereum_Subscription) Unsubscribe()      { W.WUnsubscribe() }
 
 // _github_com_ethereum_go_ethereum_TransactionReader is an interface wrapper for TransactionReader type
 type _github_com_ethereum_go_ethereum_TransactionReader struct {
