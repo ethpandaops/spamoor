@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethpandaops/spamoor/daemon"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
@@ -57,9 +58,18 @@ type VersionResponse struct {
 	Release string `json:"release"`
 }
 
-type ScenarioEntries struct {
+// ScenarioEntry represents a single scenario in the API response.
+type ScenarioEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+}
+
+// ScenarioCategory represents a category of scenarios in the API response.
+type ScenarioCategory struct {
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	Scenarios   []*ScenarioEntry    `json:"scenarios,omitempty"`
+	Children    []*ScenarioCategory `json:"children,omitempty"`
 }
 
 // SpammerLibraryEntry represents a spammer config from the library
@@ -181,24 +191,48 @@ var (
 // @Id getScenarios
 // @Summary Get all scenarios
 // @Tags Scenario
-// @Description Returns a list of all scenarios
+// @Description Returns a list of all scenarios organized by category
 // @Produce json
-// @Success 200 {array} ScenarioEntries "Success"
+// @Success 200 {array} ScenarioCategory "Success"
 // @Failure 400 {string} string "Failure"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/scenarios [get]
 func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
-	scenarioNames := scenarios.GetScenarioNames()
-	entries := make([]*ScenarioEntries, len(scenarioNames))
-	for i, scenarioName := range scenarioNames {
-		entries[i] = &ScenarioEntries{
-			Name:        scenarioName,
-			Description: scenarios.GetScenario(scenarioName).Description,
-		}
+	categories := scenarios.GetScenarioCategories()
+	result := make([]*ScenarioCategory, len(categories))
+
+	for i, category := range categories {
+		result[i] = convertCategory(category)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
+	json.NewEncoder(w).Encode(result)
+}
+
+// convertCategory recursively converts a scenario.Category to a ScenarioCategory.
+func convertCategory(category *scenario.Category) *ScenarioCategory {
+	scenarioEntries := make([]*ScenarioEntry, len(category.Descriptors))
+	for j, descriptor := range category.Descriptors {
+		scenarioEntries[j] = &ScenarioEntry{
+			Name:        descriptor.Name,
+			Description: descriptor.Description,
+		}
+	}
+
+	var children []*ScenarioCategory
+	if len(category.Children) > 0 {
+		children = make([]*ScenarioCategory, len(category.Children))
+		for k, child := range category.Children {
+			children[k] = convertCategory(child)
+		}
+	}
+
+	return &ScenarioCategory{
+		Name:        category.Name,
+		Description: category.Description,
+		Scenarios:   scenarioEntries,
+		Children:    children,
+	}
 }
 
 // GetVersion godoc

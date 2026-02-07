@@ -583,7 +583,7 @@ const docTemplate = `{
         },
         "/api/scenarios": {
             "get": {
-                "description": "Returns a list of all scenarios",
+                "description": "Returns a list of all scenarios organized by category",
                 "produces": [
                     "application/json"
                 ],
@@ -598,7 +598,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/api.ScenarioEntries"
+                                "$ref": "#/definitions/api.ScenarioCategory"
                             }
                         }
                     },
@@ -1567,7 +1567,30 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ScenarioEntries": {
+        "api.ScenarioCategory": {
+            "type": "object",
+            "properties": {
+                "children": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ScenarioCategory"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "scenarios": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ScenarioEntry"
+                    }
+                }
+            }
+        },
+        "api.ScenarioEntry": {
             "type": "object",
             "properties": {
                 "description": {

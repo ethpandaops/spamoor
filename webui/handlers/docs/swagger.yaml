@@ -224,7 +224,22 @@ definitions:
         description: Human-readable wallet name
         type: string
     type: object
-  api.ScenarioEntries:
+  api.ScenarioCategory:
+    properties:
+      children:
+        items:
+          $ref: '#/definitions/api.ScenarioCategory'
+        type: array
+      description:
+        type: string
+      name:
+        type: string
+      scenarios:
+        items:
+          $ref: '#/definitions/api.ScenarioEntry'
+        type: array
+    type: object
+  api.ScenarioEntry:
     properties:
       description:
         type: string
@@ -896,7 +911,7 @@ paths:
       - Wallet
   /api/scenarios:
     get:
-      description: Returns a list of all scenarios
+      description: Returns a list of all scenarios organized by category
       operationId: getScenarios
       produces:
       - application/json
@@ -905,7 +920,7 @@ paths:
           description: Success
           schema:
             items:
-              $ref: '#/definitions/api.ScenarioEntries'
+              $ref: '#/definitions/api.ScenarioCategory'
             type: array
         "400":
           description: Failure
