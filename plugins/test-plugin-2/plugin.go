@@ -1,4 +1,4 @@
-package main
+package plugin
 
 import (
 	"github.com/ethpandaops/spamoor/plugins/test-plugin-2/eoatx"

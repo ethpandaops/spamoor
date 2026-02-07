@@ -48,7 +48,7 @@ type Scenario struct {
 	contractAddr common.Address
 }
 
-var ScenarioName = "erc20tx"
+var ScenarioName = "erc20tx-2"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TotalCount:        0,
 	Throughput:        200,
@@ -67,7 +67,6 @@ var ScenarioDefaultOptions = ScenarioOptions{
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
-	Aliases:        []string{"erctx"},
 	Description:    "Send ERC20 transactions with different configurations",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,

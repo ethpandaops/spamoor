@@ -49,6 +49,9 @@ type Daemon struct {
 	// Plugin loader for managing plugin lifecycle
 	pluginLoader *plugin.PluginLoader
 
+	// Plugin persistence for database storage
+	pluginPersistence *PluginPersistence
+
 	// Startup delay configuration
 	startupDelay time.Duration
 	startupTime  time.Time
@@ -346,6 +349,16 @@ func (d *Daemon) SetPluginLoader(loader *plugin.PluginLoader) {
 // GetPluginLoader returns the plugin loader.
 func (d *Daemon) GetPluginLoader() *plugin.PluginLoader {
 	return d.pluginLoader
+}
+
+// SetPluginPersistence sets the plugin persistence for the daemon.
+func (d *Daemon) SetPluginPersistence(persistence *PluginPersistence) {
+	d.pluginPersistence = persistence
+}
+
+// GetPluginPersistence returns the plugin persistence.
+func (d *Daemon) GetPluginPersistence() *PluginPersistence {
+	return d.pluginPersistence
 }
 
 // NotifyPluginDereference is called when a spammer releases its reference to a plugin.

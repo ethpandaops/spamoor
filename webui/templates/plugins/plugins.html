@@ -1,0 +1,333 @@
+{{ define "page" }}
+  <div class="container mt-2">
+    <div class="card mt-2">
+      <div class="card-body px-0 py-3">
+        <div class="d-flex justify-content-between align-items-center px-3 mb-2">
+          <h2 class="mb-0">Plugins</h2>
+          <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#registerPluginModal">
+            <i class="fas fa-plus"></i> Register Plugin
+          </button>
+        </div>
+        <div class="table-responsive px-0 py-1">
+          <table class="table table-nobr" id="pluginsTable">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Source</th>
+                <th>Status</th>
+                <th>Scenarios</th>
+                <th>Running</th>
+                <th>Version</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{ if eq (len .Plugins) 0 }}
+              <tr>
+                <td colspan="7" class="text-center text-muted py-4">
+                  No plugins registered. Click "Register Plugin" to add one.
+                </td>
+              </tr>
+              {{ else }}
+              {{ range .Plugins }}
+              <tr data-plugin-name="{{ .Name }}">
+                <td>
+                  <strong>{{ .Name }}</strong>
+                  {{ if .MetadataName }}
+                  <br><small class="text-muted">{{ .MetadataName }}</small>
+                  {{ end }}
+                </td>
+                <td>
+                  <span class="badge bg-secondary">{{ .SourceType }}</span>
+                  <br><small class="text-muted text-truncate d-block" style="max-width: 200px;" title="{{ .SourcePath }}">{{ .SourcePath }}</small>
+                </td>
+                <td>
+                  {{ if .LoadError }}
+                  <span class="badge bg-danger" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ .LoadError }}">Error</span>
+                  {{ else if .IsLoaded }}
+                  <span class="badge bg-success">Loaded</span>
+                  {{ else }}
+                  <span class="badge bg-warning">Not Loaded</span>
+                  {{ end }}
+                </td>
+                <td>
+                  {{ range .Scenarios }}
+                  <span class="badge bg-info me-1">{{ . }}</span>
+                  {{ else }}
+                  <span class="text-muted">-</span>
+                  {{ end }}
+                </td>
+                <td>
+                  {{ if gt .RunningCount 0 }}
+                  <span class="badge bg-primary">{{ .RunningCount }}</span>
+                  {{ else }}
+                  <span class="text-muted">0</span>
+                  {{ end }}
+                </td>
+                <td>
+                  {{ if .MetadataGitVersion }}
+                  <small>{{ .MetadataGitVersion }}</small>
+                  {{ else }}
+                  <span class="text-muted">-</span>
+                  {{ end }}
+                  {{ if .MetadataBuildTime }}
+                  <br><small class="text-muted">{{ .MetadataBuildTime }}</small>
+                  {{ end }}
+                </td>
+                <td>
+                  <div class="btn-group" role="group">
+                    {{ if eq .SourceType "url" }}
+                    <button type="button" class="btn btn-sm btn-primary" onclick="reloadPlugin('{{ .Name }}')" title="Reload from URL" data-bs-toggle="tooltip" data-bs-placement="top">
+                      <i class="fas fa-sync-alt"></i>
+                    </button>
+                    {{ end }}
+                    <button type="button" class="btn btn-sm btn-danger" onclick="confirmDeletePlugin('{{ .Name }}', {{ .RunningCount }})" title="Delete" data-bs-toggle="tooltip" data-bs-placement="top">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              {{ end }}
+              {{ end }}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- Register Plugin Modal -->
+<div class="modal fade" id="registerPluginModal" tabindex="-1" aria-labelledby="registerPluginModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="registerPluginModalLabel">Register Plugin</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-tabs" id="pluginSourceTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="url-tab" data-bs-toggle="tab" data-bs-target="#url-content" type="button" role="tab" aria-controls="url-content" aria-selected="true">URL</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload-content" type="button" role="tab" aria-controls="upload-content" aria-selected="false">Upload</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="local-tab" data-bs-toggle="tab" data-bs-target="#local-content" type="button" role="tab" aria-controls="local-content" aria-selected="false">Local Path</button>
+          </li>
+        </ul>
+        <div class="tab-content pt-3" id="pluginSourceTabContent">
+          <div class="tab-pane fade show active" id="url-content" role="tabpanel" aria-labelledby="url-tab">
+            <div class="mb-3">
+              <label for="pluginUrl" class="form-label">Plugin URL</label>
+              <input type="url" class="form-control" id="pluginUrl" placeholder="https://example.com/plugin.tar.gz">
+              <div class="form-text">URL to a tar.gz archive containing the plugin</div>
+            </div>
+          </div>
+          <div class="tab-pane fade" id="upload-content" role="tabpanel" aria-labelledby="upload-tab">
+            <div class="mb-3">
+              <label for="pluginFile" class="form-label">Plugin Archive</label>
+              <input type="file" class="form-control" id="pluginFile" accept=".tar,.tar.gz,.tgz">
+              <div class="form-text">Upload a tar or tar.gz archive containing the plugin</div>
+            </div>
+          </div>
+          <div class="tab-pane fade" id="local-content" role="tabpanel" aria-labelledby="local-tab">
+            <div class="mb-3">
+              <label for="pluginPath" class="form-label">Local Path</label>
+              <input type="text" class="form-control" id="pluginPath" placeholder="/path/to/plugin/directory">
+              <div class="form-text">Path to a local directory containing the plugin source</div>
+            </div>
+          </div>
+        </div>
+        <div id="registerPluginError" class="alert alert-danger d-none" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="registerPluginBtn" onclick="registerPlugin()">Register</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deletePluginModal" tabindex="-1" aria-labelledby="deletePluginModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="deletePluginModalLabel">Delete Plugin</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to delete plugin <strong id="deletePluginName"></strong>?</p>
+        <div id="deletePluginWarning" class="alert alert-warning d-none">
+          This plugin has running spammer(s). You must stop them before deleting the plugin.
+        </div>
+        <div id="deletePluginError" class="alert alert-danger d-none" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="deletePlugin()">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{{ end }}
+
+{{ define "js" }}
+<script>
+  var pluginToDelete = null;
+
+  /* Initialize tooltips */
+  document.addEventListener('DOMContentLoaded', function() {
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+  });
+
+  function registerPlugin() {
+    var errorEl = document.getElementById('registerPluginError');
+    var btnEl = document.getElementById('registerPluginBtn');
+    errorEl.classList.add('d-none');
+    btnEl.disabled = true;
+    btnEl.textContent = 'Registering...';
+
+    var activeTab = document.querySelector('#pluginSourceTabs .nav-link.active').id;
+    var formData = new FormData();
+
+    if (activeTab === 'url-tab') {
+      var url = document.getElementById('pluginUrl').value.trim();
+      if (!url) {
+        showRegisterError('URL is required');
+        return;
+      }
+      formData.append('type', 'url');
+      formData.append('path', url);
+    } else if (activeTab === 'upload-tab') {
+      var file = document.getElementById('pluginFile').files[0];
+      if (!file) {
+        showRegisterError('Please select a file');
+        return;
+      }
+      formData.append('type', 'upload');
+      formData.append('file', file);
+    } else if (activeTab === 'local-tab') {
+      var path = document.getElementById('pluginPath').value.trim();
+      if (!path) {
+        showRegisterError('Path is required');
+        return;
+      }
+      formData.append('type', 'local');
+      formData.append('path', path);
+    }
+
+    fetch('/api/plugins', {
+      method: 'POST',
+      body: formData
+    })
+    .then(function(response) {
+      if (!response.ok) {
+        return response.text().then(function(text) { throw new Error(text) });
+      }
+      return response.json();
+    })
+    .then(function(data) {
+      /* Close modal and reload page */
+      bootstrap.Modal.getInstance(document.getElementById('registerPluginModal')).hide();
+      location.reload();
+    })
+    .catch(function(error) {
+      showRegisterError(error.message);
+    });
+  }
+
+  function showRegisterError(message) {
+    var errorEl = document.getElementById('registerPluginError');
+    var btnEl = document.getElementById('registerPluginBtn');
+    errorEl.textContent = message;
+    errorEl.classList.remove('d-none');
+    btnEl.disabled = false;
+    btnEl.textContent = 'Register';
+  }
+
+  function confirmDeletePlugin(name, runningCount) {
+    pluginToDelete = name;
+    document.getElementById('deletePluginName').textContent = name;
+    document.getElementById('deletePluginError').classList.add('d-none');
+
+    var warningEl = document.getElementById('deletePluginWarning');
+    var confirmBtn = document.getElementById('confirmDeleteBtn');
+
+    if (runningCount > 0) {
+      warningEl.classList.remove('d-none');
+      confirmBtn.disabled = true;
+    } else {
+      warningEl.classList.add('d-none');
+      confirmBtn.disabled = false;
+    }
+
+    new bootstrap.Modal(document.getElementById('deletePluginModal')).show();
+  }
+
+  function deletePlugin() {
+    if (!pluginToDelete) return;
+
+    var errorEl = document.getElementById('deletePluginError');
+    var confirmBtn = document.getElementById('confirmDeleteBtn');
+    errorEl.classList.add('d-none');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Deleting...';
+
+    fetch('/api/plugins/' + encodeURIComponent(pluginToDelete), {
+      method: 'DELETE'
+    })
+    .then(function(response) {
+      if (!response.ok) {
+        return response.text().then(function(text) { throw new Error(text) });
+      }
+      /* Close modal and reload page */
+      bootstrap.Modal.getInstance(document.getElementById('deletePluginModal')).hide();
+      location.reload();
+    })
+    .catch(function(error) {
+      errorEl.textContent = error.message;
+      errorEl.classList.remove('d-none');
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Delete';
+    });
+  }
+
+  function reloadPlugin(name) {
+    if (!confirm('Reload plugin "' + name + '" from its URL? This will download the latest version.')) {
+      return;
+    }
+
+    fetch('/api/plugins/' + encodeURIComponent(name) + '/reload', {
+      method: 'POST'
+    })
+    .then(function(response) {
+      if (!response.ok) {
+        return response.text().then(function(text) { throw new Error(text) });
+      }
+      location.reload();
+    })
+    .catch(function(error) {
+      alert('Failed to reload plugin: ' + error.message);
+    });
+  }
+
+  /* Reset modal forms on close */
+  document.getElementById('registerPluginModal').addEventListener('hidden.bs.modal', function() {
+    document.getElementById('pluginUrl').value = '';
+    document.getElementById('pluginFile').value = '';
+    document.getElementById('pluginPath').value = '';
+    document.getElementById('registerPluginError').classList.add('d-none');
+    document.getElementById('registerPluginBtn').disabled = false;
+    document.getElementById('registerPluginBtn').textContent = 'Register';
+  });
+</script>
+{{ end }}
+
+{{ define "css" }}
+{{ end }}

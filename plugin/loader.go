@@ -373,14 +373,14 @@ func (l *PluginLoader) loadFromFS(pluginName string, filesys fs.FS) (*Descriptor
 	// Import the main plugin package
 	pluginPkg := fmt.Sprintf("github.com/ethpandaops/spamoor/plugins/%s", pluginName)
 
-	// First, import the package
-	_, err := i.Eval(fmt.Sprintf(`import plugin "%s"`, pluginPkg))
+	// First, import the package (using safeEval to catch panics)
+	_, err := l.safeEval(i, fmt.Sprintf(`import plugin "%s"`, pluginPkg))
 	if err != nil {
 		return nil, l.wrapEvalError(pluginName, err)
 	}
 
-	// Then evaluate the PluginDescriptor
-	v, err := i.Eval("plugin.PluginDescriptor")
+	// Then evaluate the PluginDescriptor (using safeEval to catch panics)
+	v, err := l.safeEval(i, "plugin.PluginDescriptor")
 	if err != nil {
 		return nil, l.wrapEvalError(pluginName, err)
 	}
@@ -544,6 +544,18 @@ func (l *PluginLoader) newInterpreter(filesys fs.FS) *interp.Interpreter {
 	}
 
 	return i
+}
+
+// safeEval wraps interpreter Eval calls with panic recovery.
+// Yaegi may panic on invalid plugins; this converts panics to errors.
+func (l *PluginLoader) safeEval(i *interp.Interpreter, src string) (v reflect.Value, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("interpreter panic: %v", r)
+		}
+	}()
+
+	return i.Eval(src)
 }
 
 // wrapEvalError wraps Yaegi evaluation errors with helpful hints.

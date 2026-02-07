@@ -848,7 +848,7 @@ async function reloadScenarios() {
   const icon = button.querySelector('i');
 
   try {
-    // Show loading state
+    /* Show loading state */
     icon.classList.add('fa-spin');
     button.disabled = true;
 
@@ -861,7 +861,7 @@ async function reloadScenarios() {
     const result = await response.json();
     alert(`Reloaded ${result.count} external scenario(s) from ${result.directory}`);
 
-    // Refresh the scenario dropdown if the new spammer modal is open
+    /* Refresh the scenario dropdown if the new spammer modal is open */
     const modal = document.getElementById('newSpammerModal');
     if (modal.classList.contains('show')) {
       const select = document.querySelector('[name="scenario"]');
@@ -878,7 +878,7 @@ async function reloadScenarios() {
   } catch (err) {
     alert('Failed to reload scenarios: ' + err.message);
   } finally {
-    // Reset button state
+    /* Reset button state */
     icon.classList.remove('fa-spin');
     button.disabled = false;
   }

@@ -87,35 +87,9 @@ func main() {
 
 	// Initialize registries and plugin loader
 	pluginRegistry, scenarioRegistry := scenarios.InitRegistries()
-	var pluginLoader *plugin.PluginLoader
+	pluginLoader := plugin.NewPluginLoader(logger, pluginRegistry, scenarioRegistry)
 
-	if len(cliArgs.plugins) > 0 {
-		pluginLoader = plugin.NewPluginLoader(logger, pluginRegistry, scenarioRegistry)
-
-		for _, pluginPath := range cliArgs.plugins {
-			var loaded *plugin.LoadedPlugin
-			var err error
-
-			// Detect source type and load accordingly
-			if isURL(pluginPath) {
-				loaded, err = pluginLoader.LoadFromURL(pluginPath)
-			} else if isDirectory(pluginPath) {
-				loaded, err = pluginLoader.LoadFromLocalPath(pluginPath)
-			} else {
-				loaded, err = pluginLoader.LoadFromFile(pluginPath)
-			}
-
-			if err != nil {
-				logger.WithError(err).Fatalf("failed to load plugin: %s", pluginPath)
-			}
-
-			// Register plugin scenarios
-			err = pluginLoader.RegisterPluginScenarios(loaded)
-			if err != nil {
-				logger.WithError(err).Fatalf("failed to register plugin scenarios: %s", pluginPath)
-			}
-		}
-	}
+	// CLI plugins will be loaded after database is initialized
 
 	// start client pool
 	rpcHosts := []string{}
@@ -182,9 +156,38 @@ func main() {
 	auditLogger := daemon.NewAuditLogger(spamoorDaemon, cliArgs.auditUserHeader, "user")
 	spamoorDaemon.SetAuditLogger(auditLogger)
 
-	// set plugin loader if plugins were loaded
-	if pluginLoader != nil {
-		spamoorDaemon.SetPluginLoader(pluginLoader)
+	// Set plugin loader and create plugin persistence
+	spamoorDaemon.SetPluginLoader(pluginLoader)
+	pluginPersistence := daemon.NewPluginPersistence(logger.WithField("module", "plugin-persistence"), database, pluginLoader)
+	spamoorDaemon.SetPluginPersistence(pluginPersistence)
+
+	// Restore plugins from database first
+	restoredCount, err := pluginPersistence.RestorePlugins()
+	if err != nil {
+		logger.Warnf("failed to restore plugins from database: %v", err)
+	} else if restoredCount > 0 {
+		logger.Infof("restored %d plugins from database", restoredCount)
+	}
+
+	// Load CLI-specified plugins and persist them
+	for _, pluginPath := range cliArgs.plugins {
+		var loaded *plugin.LoadedPlugin
+		var loadErr error
+
+		// Detect source type and load accordingly
+		if isURL(pluginPath) {
+			loaded, loadErr = pluginPersistence.RegisterPluginFromURL(pluginPath)
+		} else if isDirectory(pluginPath) {
+			loaded, loadErr = pluginPersistence.RegisterPluginFromLocal(pluginPath)
+		} else {
+			loaded, loadErr = pluginPersistence.RegisterPluginFromFile(pluginPath)
+		}
+
+		if loadErr != nil {
+			logger.WithError(loadErr).Fatalf("failed to load plugin: %s", pluginPath)
+		}
+
+		logger.Infof("loaded CLI plugin: %s with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.Scenarios))
 	}
 
 	// start frontend

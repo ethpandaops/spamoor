@@ -224,6 +224,46 @@ definitions:
         description: Human-readable wallet name
         type: string
     type: object
+  api.PluginEntry:
+    properties:
+      created_at:
+        type: integer
+      enabled:
+        type: boolean
+      is_loaded:
+        type: boolean
+      load_error:
+        type: string
+      metadata_build_time:
+        type: string
+      metadata_git_version:
+        type: string
+      metadata_name:
+        type: string
+      name:
+        type: string
+      running_count:
+        type: integer
+      scenarios:
+        items:
+          type: string
+        type: array
+      source_path:
+        type: string
+      source_type:
+        type: string
+      updated_at:
+        type: integer
+    type: object
+  api.RegisterPluginResponse:
+    properties:
+      name:
+        type: string
+      scenarios:
+        items:
+          type: string
+        type: array
+    type: object
   api.ReloadScenariosResponse:
     properties:
       count:
@@ -876,6 +916,148 @@ paths:
       summary: Get pending transactions (global or wallet-specific)
       tags:
       - Wallet
+  /api/plugins:
+    get:
+      description: Returns a list of all registered plugins with their status
+      operationId: getPlugins
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            items:
+              $ref: '#/definitions/api.PluginEntry'
+            type: array
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get all plugins
+      tags:
+      - Plugin
+    post:
+      consumes:
+      - multipart/form-data
+      description: Registers a plugin from URL, local path, or file upload
+      operationId: registerPlugin
+      parameters:
+      - description: 'Source type: url, local, or upload'
+        in: formData
+        name: type
+        required: true
+        type: string
+      - description: URL or local path (required for url/local types)
+        in: formData
+        name: path
+        type: string
+      - description: Plugin archive file (required for upload type)
+        in: formData
+        name: file
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.RegisterPluginResponse'
+        "400":
+          description: Invalid request
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Register a new plugin
+      tags:
+      - Plugin
+  /api/plugins/{name}:
+    delete:
+      description: Deletes a plugin by name. Fails if the plugin has running spammers.
+      operationId: deletePlugin
+      parameters:
+      - description: Plugin name
+        in: path
+        name: name
+        required: true
+        type: string
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Plugin has running spammers
+          schema:
+            type: string
+        "404":
+          description: Plugin not found
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Delete a plugin
+      tags:
+      - Plugin
+    get:
+      description: Returns details of a specific plugin by name
+      operationId: getPlugin
+      parameters:
+      - description: Plugin name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.PluginEntry'
+        "404":
+          description: Plugin not found
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get a specific plugin
+      tags:
+      - Plugin
+  /api/plugins/{name}/reload:
+    post:
+      description: Re-downloads a URL plugin and updates the stored archive
+      operationId: reloadPlugin
+      parameters:
+      - description: Plugin name
+        in: path
+        name: name
+        required: true
+        type: string
+      responses:
+        "200":
+          description: Success
+          schema:
+            $ref: '#/definitions/api.RegisterPluginResponse'
+        "400":
+          description: Plugin has running spammers or is not a URL plugin
+          schema:
+            type: string
+        "404":
+          description: Plugin not found
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Reload a plugin from URL
+      tags:
+      - Plugin
   /api/root-wallet/send-transaction:
     post:
       consumes:
