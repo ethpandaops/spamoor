@@ -1912,6 +1912,10 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "plugin": {
+                    "description": "Plugin name if from a plugin, empty for native scenarios",
+                    "type": "string"
                 }
             }
         },

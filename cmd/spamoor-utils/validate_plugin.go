@@ -77,7 +77,9 @@ func runValidatePlugin(logger logrus.FieldLogger, path string) error {
 	}
 	fmt.Println()
 
-	fmt.Printf("  Scenarios:   %d\n", len(desc.Scenarios))
+	allScenarios := desc.GetAllScenarios()
+	fmt.Printf("  Categories:  %d\n", len(desc.Categories))
+	fmt.Printf("  Scenarios:   %d\n", len(allScenarios))
 	fmt.Println()
 
 	fmt.Println("Plugin Metadata (from plugin.yaml):")
@@ -97,11 +99,11 @@ func runValidatePlugin(logger logrus.FieldLogger, path string) error {
 	fmt.Println()
 
 	// Check each scenario
-	if len(desc.Scenarios) == 0 {
+	if len(allScenarios) == 0 {
 		fmt.Printf("  ⚠ No scenarios defined in plugin\n")
 	} else {
 		fmt.Println("Scenarios:")
-		for i, scenarioDesc := range desc.Scenarios {
+		for i, scenarioDesc := range allScenarios {
 			fmt.Printf("  [%d] %s\n", i, scenarioDesc.Name)
 			if scenarioDesc.Name == "" {
 				fmt.Printf("      ⚠ Name is empty\n")
@@ -145,10 +147,10 @@ func runValidatePlugin(logger logrus.FieldLogger, path string) error {
 	if hasError {
 		fmt.Printf("Result: ✗ Plugin has errors and may not work correctly\n")
 		return fmt.Errorf("plugin has errors")
-	} else if len(desc.Scenarios) == 0 {
+	} else if len(allScenarios) == 0 {
 		fmt.Printf("Result: ⚠ Plugin loaded but has no scenarios\n")
 	} else {
-		fmt.Printf("Result: ✓ Plugin '%s' is valid with %d scenario(s)\n", desc.Name, len(desc.Scenarios))
+		fmt.Printf("Result: ✓ Plugin '%s' is valid with %d scenario(s)\n", desc.Name, len(allScenarios))
 	}
 
 	// Cleanup temp directory

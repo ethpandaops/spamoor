@@ -14,7 +14,7 @@ func init() {
 		// function, constant and variable definitions
 		"BatcherBaseGas":               reflect.ValueOf(constant.MakeFromLiteral("50000", token.INT, 0)),
 		"BatcherGasPerTx":              reflect.ValueOf(constant.MakeFromLiteral("35000", token.INT, 0)),
-		"BatcherTxLimit":               reflect.ValueOf(constant.MakeFromLiteral("50", token.INT, 0)),
+		"BatcherTxLimit":               reflect.ValueOf(constant.MakeFromLiteral("450", token.INT, 0)),
 		"ClientTypeBuilder":            reflect.ValueOf(spamoor.ClientTypeBuilder),
 		"ClientTypeClient":             reflect.ValueOf(spamoor.ClientTypeClient),
 		"GetDefaultLogFn":              reflect.ValueOf(spamoor.GetDefaultLogFn),

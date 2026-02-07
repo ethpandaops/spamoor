@@ -7,9 +7,15 @@ import (
 
 // PluginDescriptor defines the plugin metadata and scenarios.
 var PluginDescriptor = scenario.PluginDescriptor{
-	Name:        "test-plugin",
-	Description: "Test plugin with sample scenarios",
-	Scenarios: []*scenario.Descriptor{
-		&example1.ScenarioDescriptor,
+	Name:        "example-plugin",
+	Description: "Example plugin with sample scenarios",
+	Categories: []*scenario.Category{
+		{
+			Name:        "Simple",
+			Description: "Simple example scenarios",
+			Descriptors: []*scenario.Descriptor{
+				&example1.ScenarioDescriptor,
+			},
+		},
 	},
 }

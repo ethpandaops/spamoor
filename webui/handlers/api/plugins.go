@@ -329,8 +329,9 @@ func (ah *APIHandler) GetPlugin(w http.ResponseWriter, r *http.Request) {
 
 // sendPluginResponse sends a successful plugin registration response.
 func sendPluginResponse(w http.ResponseWriter, loaded *plugin.LoadedPlugin) {
-	scenarios := make([]string, 0, len(loaded.Descriptor.Scenarios))
-	for _, s := range loaded.Descriptor.Scenarios {
+	allScenarios := loaded.Descriptor.GetAllScenarios()
+	scenarios := make([]string, 0, len(allScenarios))
+	for _, s := range allScenarios {
 		scenarios = append(scenarios, s.Name)
 	}
 

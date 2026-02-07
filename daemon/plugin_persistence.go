@@ -61,8 +61,9 @@ func (pp *PluginPersistence) SavePlugin(
 	sourcePath string,
 ) error {
 	// Build scenario list
-	scenarioNames := make([]string, 0, len(loaded.Descriptor.Scenarios))
-	for _, s := range loaded.Descriptor.Scenarios {
+	allScenarios := loaded.Descriptor.GetAllScenarios()
+	scenarioNames := make([]string, 0, len(allScenarios))
+	for _, s := range allScenarios {
 		scenarioNames = append(scenarioNames, s.Name)
 	}
 
@@ -177,7 +178,7 @@ func (pp *PluginPersistence) restorePlugin(dbPlugin *db.Plugin) error {
 		return fmt.Errorf("failed to register plugin scenarios: %w", err)
 	}
 
-	pp.logger.Infof("restored plugin %s with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.Scenarios))
+	pp.logger.Infof("restored plugin %s with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.GetAllScenarios()))
 
 	return nil
 }
@@ -249,7 +250,7 @@ func (pp *PluginPersistence) ReloadPluginFromURL(name string) (*plugin.LoadedPlu
 		return nil, fmt.Errorf("failed to save plugin to database: %w", err)
 	}
 
-	pp.logger.Infof("reloaded plugin %s from URL with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.Scenarios))
+	pp.logger.Infof("reloaded plugin %s from URL with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.GetAllScenarios()))
 
 	return loaded, nil
 }
@@ -310,8 +311,9 @@ func (pp *PluginPersistence) GetPluginStatuses() ([]*PluginStatus, error) {
 
 			// Update scenarios from runtime if loaded
 			if status.IsLoaded {
-				status.Scenarios = make([]string, 0, len(loadedPlugin.Descriptor.Scenarios))
-				for _, s := range loadedPlugin.Descriptor.Scenarios {
+				allScenarios := loadedPlugin.Descriptor.GetAllScenarios()
+				status.Scenarios = make([]string, 0, len(allScenarios))
+				for _, s := range allScenarios {
 					status.Scenarios = append(status.Scenarios, s.Name)
 				}
 
@@ -361,8 +363,9 @@ func (pp *PluginPersistence) GetPluginStatus(name string) (*PluginStatus, error)
 
 		// Update scenarios from runtime if loaded
 		if status.IsLoaded {
-			status.Scenarios = make([]string, 0, len(loadedPlugin.Descriptor.Scenarios))
-			for _, s := range loadedPlugin.Descriptor.Scenarios {
+			allScenarios := loadedPlugin.Descriptor.GetAllScenarios()
+			status.Scenarios = make([]string, 0, len(allScenarios))
+			for _, s := range allScenarios {
 				status.Scenarios = append(status.Scenarios, s.Name)
 			}
 		}

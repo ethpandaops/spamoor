@@ -1,4 +1,4 @@
-package example
+package example1
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"math/big"
 	"math/rand"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -105,9 +103,9 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	s.walletPool = options.WalletPool
 
 	if options.Config != "" {
-		err := yaml.Unmarshal([]byte(options.Config), &s.options)
+		err := scenario.ParseAndValidateConfig(&ScenarioDescriptor, options.Config, &s.options, s.logger)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal config: %w", err)
+			return err
 		}
 	}
 
@@ -192,9 +190,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 		Timeout:    timeout,
 		WalletPool: s.walletPool,
 		Logger:     s.logger,
-		ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (func(), error) {
+		ProcessNextTxFn: func(ctx context.Context, params *scenario.ProcessNextTxParams) error {
 			logger := s.logger
-			tx, client, wallet, err := s.sendNextTransaction(ctx, txIdx, onComplete)
+			receiptChan, tx, client, wallet, err := s.sendNextTransaction(ctx, params.TxIdx)
 			if client != nil {
 				logger = logger.WithField("rpc", client.GetName())
 			}
@@ -205,15 +203,23 @@ func (s *Scenario) Run(ctx context.Context) error {
 				logger = logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress()))
 			}
 
-			return func() {
+			params.NotifySubmitted()
+			params.OrderedLogCb(func() {
 				if err != nil {
 					logger.Warnf("could not send transaction: %v", err)
 				} else if s.options.LogTxs {
-					logger.Infof("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+					logger.Infof("sent tx #%6d: %v", params.TxIdx+1, tx.Hash().String())
 				} else {
-					logger.Debugf("sent tx #%6d: %v", txIdx+1, tx.Hash().String())
+					logger.Debugf("sent tx #%6d: %v", params.TxIdx+1, tx.Hash().String())
 				}
-			}, err
+			})
+
+			// wait for receipt
+			if _, err := receiptChan.Wait(ctx); err != nil {
+				return err
+			}
+
+			return err
 		},
 	})
 }
@@ -280,20 +286,11 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, error) {
 	return receipt, nil
 }
 
-func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
-	// Ensure onComplete is called exactly once
-	transactionSubmitted := false
-	defer func() {
-		if !transactionSubmitted {
-			// Call onComplete even if transaction was not sent
-			onComplete()
-		}
-	}()
-
+func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	// Select wallet and client for this transaction
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	if wallet == nil {
-		return nil, nil, nil, scenario.ErrNoWallet
+		return nil, nil, nil, nil, scenario.ErrNoWallet
 	}
 
 	client := s.walletPool.GetClient(
@@ -301,24 +298,24 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {
-		return nil, client, wallet, scenario.ErrNoClients
+		return nil, nil, client, wallet, scenario.ErrNoClients
 	}
 
 	if err := wallet.ResetNoncesIfNeeded(ctx, client); err != nil {
-		return nil, client, wallet, err
+		return nil, nil, client, wallet, err
 	}
 
 	// Get suggested fees
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
 	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
-		return nil, client, wallet, fmt.Errorf("failed to get suggested fees: %w", err)
+		return nil, nil, client, wallet, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
 
 	// Create contract instance for interaction
 	storageContract, err := contract.NewSimpleStorage(s.contractAddr, client.GetEthClient())
 	if err != nil {
-		return nil, client, wallet, fmt.Errorf("failed to create contract instance: %w", err)
+		return nil, nil, client, wallet, fmt.Errorf("failed to create contract instance: %w", err)
 	}
 
 	// Determine which operation to perform (alternating between setValue and increment)
@@ -370,16 +367,18 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 	}
 
 	if err != nil {
-		return nil, client, wallet, fmt.Errorf("failed to build transaction: %w", err)
+		return nil, nil, client, wallet, fmt.Errorf("failed to build transaction: %w", err)
 	}
 
+	receiptChan := make(scenario.ReceiptChan, 1)
+
 	// Submit the transaction
-	transactionSubmitted = true
 	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
+		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			onComplete() // CRITICAL: Signal completion for scenario counting
+			receiptChan <- receipt
 		},
 		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
 			if receipt.Status == types.ReceiptStatusSuccessful {
@@ -393,20 +392,14 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 				}).Debug("contract interaction confirmed")
 			}
 		},
-		// Use the default log function for useful tx debug logging
 		LogFn: spamoor.GetDefaultLogFn(s.logger, "contract", fmt.Sprintf("%6d", txIdx+1), tx),
 	})
-
 	if err != nil {
-		// Reset nonce if transaction was not sent
-		wallet.ResetPendingNonce(ctx, client, func() *spamoor.Client {
-			return s.walletPool.GetClient(
-				spamoor.WithClientSelectionMode(spamoor.SelectClientRandom, 0),
-				spamoor.WithClientGroup(s.options.ClientGroup),
-			)
-		})
-		return tx, client, wallet, fmt.Errorf("failed to send transaction: %w", err)
+		// mark nonce as skipped if tx was not sent
+		wallet.MarkSkippedNonce(tx.Nonce())
+
+		return nil, nil, client, wallet, fmt.Errorf("failed to send transaction: %w", err)
 	}
 
-	return tx, client, wallet, nil
+	return receiptChan, tx, client, wallet, nil
 }

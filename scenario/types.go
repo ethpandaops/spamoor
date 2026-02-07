@@ -29,7 +29,23 @@ type Descriptor struct {
 type PluginDescriptor struct {
 	Name        string
 	Description string
-	Scenarios   []*Descriptor
+	Categories  []*Category
+}
+
+// GetAllScenarios returns all scenario descriptors from all categories (flattened).
+func (p *PluginDescriptor) GetAllScenarios() []*Descriptor {
+	var scenarios []*Descriptor
+	var collect func(cat *Category)
+	collect = func(cat *Category) {
+		scenarios = append(scenarios, cat.Descriptors...)
+		for _, child := range cat.Children {
+			collect(child)
+		}
+	}
+	for _, cat := range p.Categories {
+		collect(cat)
+	}
+	return scenarios
 }
 
 // Options contains the options for the scenario initialization.

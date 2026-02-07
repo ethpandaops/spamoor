@@ -273,7 +273,9 @@ func (s *Spammer) runScenario() {
 	// Track plugin usage for reference counting
 	if scenarioEntry.Plugin != nil {
 		scenarioEntry.Plugin.AddRunning()
-		s.plugin = scenarioEntry.Plugin
+		if loadedPlugin, ok := scenarioEntry.Plugin.(*plugin.LoadedPlugin); ok {
+			s.plugin = loadedPlugin
+		}
 	}
 
 	s.walletPool = spamoor.NewWalletPool(s.scenarioCtx, s.logger, s.daemon.rootWallet, s.daemon.clientPool, s.daemon.txpool)

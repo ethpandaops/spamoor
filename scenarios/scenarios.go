@@ -90,7 +90,7 @@ var nativeScenarioCategories = []*scenario.Category{
 
 var (
 	pluginRegistry   *plugin.PluginRegistry
-	scenarioRegistry *plugin.ScenarioRegistry
+	scenarioRegistry *scenario.Registry
 	initOnce         sync.Once
 )
 
@@ -121,10 +121,10 @@ func init() {
 
 // InitRegistries initializes the plugin and scenario registries.
 // This function is idempotent and safe to call multiple times.
-func InitRegistries() (*plugin.PluginRegistry, *plugin.ScenarioRegistry) {
+func InitRegistries() (*plugin.PluginRegistry, *scenario.Registry) {
 	initOnce.Do(func() {
 		pluginRegistry = plugin.NewPluginRegistry()
-		scenarioRegistry = plugin.NewScenarioRegistry(nativeScenarios)
+		scenarioRegistry = scenario.NewRegistry(nativeScenarios)
 	})
 
 	return pluginRegistry, scenarioRegistry
@@ -142,7 +142,7 @@ func GetPluginRegistry() *plugin.PluginRegistry {
 
 // GetScenarioRegistry returns the global scenario registry.
 // Panics if InitRegistries() has not been called.
-func GetScenarioRegistry() *plugin.ScenarioRegistry {
+func GetScenarioRegistry() *scenario.Registry {
 	if scenarioRegistry == nil {
 		InitRegistries()
 	}
@@ -162,7 +162,7 @@ func GetScenario(name string) *scenario.Descriptor {
 // The entry includes the descriptor and metadata about its source (native or plugin).
 // Returns nil if no scenario with the given name exists.
 // This function is thread-safe.
-func GetScenarioEntry(name string) *plugin.ScenarioEntry {
+func GetScenarioEntry(name string) *scenario.ScenarioEntry {
 	return GetScenarioRegistry().Get(name)
 }
 
@@ -174,67 +174,109 @@ func GetScenarioNames() []string {
 }
 
 // GetScenarioCategories returns a slice containing all scenario categories including
-// both native and plugin scenarios. Plugin scenarios are grouped under a "Plugins"
-// category with sub-categories for each plugin.
+// both native and plugin scenarios. Plugin categories are merged with native categories:
+// - Plugin scenarios are added to existing categories if the category name matches
+// - New categories from plugins are appended to the category list
+// - Category descriptions can be updated by plugins (later plugin registrations override earlier ones)
 // This is useful for CLI help text, validation, and displaying available options to users.
 func GetScenarioCategories() []*scenario.Category {
-	// Start with a copy of native categories
-	result := make([]*scenario.Category, len(nativeScenarioCategories))
-	copy(result, nativeScenarioCategories)
+	// Deep copy native categories so we can safely add plugin scenarios
+	result := deepCopyCategories(nativeScenarioCategories)
 
-	// Get plugin scenarios and group them by plugin name
-	registry := GetScenarioRegistry()
-	pluginScenarios := registry.GetPluginScenarios()
+	// Build a map for quick category lookup by name (including nested categories)
+	categoryMap := make(map[string]*scenario.Category)
+	var buildCategoryMap func(cats []*scenario.Category)
+	buildCategoryMap = func(cats []*scenario.Category) {
+		for _, cat := range cats {
+			categoryMap[cat.Name] = cat
+			buildCategoryMap(cat.Children)
+		}
+	}
+	buildCategoryMap(result)
 
-	if len(pluginScenarios) > 0 {
-		// Group scenarios by plugin name
-		pluginGroups := make(map[string][]*scenario.Descriptor, 8)
-		pluginDescriptions := make(map[string]string, 8)
+	// Get all loaded plugins and merge their categories
+	plugins := GetPluginRegistry().GetAll()
 
-		for _, entry := range pluginScenarios {
-			if entry.Plugin != nil && entry.Plugin.Descriptor != nil {
-				pluginName := entry.Plugin.Descriptor.Name
-				pluginGroups[pluginName] = append(pluginGroups[pluginName], entry.Descriptor)
-				if entry.Plugin.Descriptor.Description != "" {
-					pluginDescriptions[pluginName] = entry.Plugin.Descriptor.Description
-				}
-			}
+	// Sort plugins by name for consistent ordering
+	slices.SortFunc(plugins, func(a, b *plugin.LoadedPlugin) int {
+		if a.Descriptor.Name < b.Descriptor.Name {
+			return -1
+		}
+		if a.Descriptor.Name > b.Descriptor.Name {
+			return 1
+		}
+		return 0
+	})
+
+	for _, loadedPlugin := range plugins {
+		if loadedPlugin.Descriptor == nil {
+			continue
 		}
 
-		// Create sub-categories for each plugin
-		pluginChildren := make([]*scenario.Category, 0, len(pluginGroups))
-		for pluginName, descriptors := range pluginGroups {
-			desc := pluginDescriptions[pluginName]
-			if desc == "" {
-				desc = fmt.Sprintf("Scenarios from %s plugin", pluginName)
-			}
-			pluginChildren = append(pluginChildren, &scenario.Category{
-				Name:        pluginName,
-				Description: desc,
-				Descriptors: descriptors,
-			})
+		// Merge each category from the plugin
+		for _, pluginCat := range loadedPlugin.Descriptor.Categories {
+			result = mergeCategory(result, categoryMap, pluginCat)
+		}
+	}
+
+	return result
+}
+
+// deepCopyCategories creates a deep copy of categories.
+func deepCopyCategories(cats []*scenario.Category) []*scenario.Category {
+	if cats == nil {
+		return nil
+	}
+
+	result := make([]*scenario.Category, len(cats))
+	for i, cat := range cats {
+		result[i] = &scenario.Category{
+			Name:        cat.Name,
+			Description: cat.Description,
+			Descriptors: append([]*scenario.Descriptor(nil), cat.Descriptors...),
+			Children:    deepCopyCategories(cat.Children),
+		}
+	}
+
+	return result
+}
+
+// mergeCategory merges a plugin category into the result categories.
+// If a category with the same name exists, scenarios are added to it.
+// Otherwise, a new category is created.
+func mergeCategory(result []*scenario.Category, categoryMap map[string]*scenario.Category, pluginCat *scenario.Category) []*scenario.Category {
+	if existingCat, ok := categoryMap[pluginCat.Name]; ok {
+		// Category exists - add scenarios and update description if provided
+		if pluginCat.Description != "" {
+			existingCat.Description = pluginCat.Description
 		}
 
-		// Add plugin category if there are any plugin scenarios
-		if len(pluginChildren) > 0 {
-			// Sort plugin categories by name for consistent ordering
-			slices.SortFunc(pluginChildren, func(a, b *scenario.Category) int {
-				if a.Name < b.Name {
-					return -1
-				}
-				if a.Name > b.Name {
-					return 1
-				}
-				return 0
-			})
+		existingCat.Descriptors = append(existingCat.Descriptors, pluginCat.Descriptors...)
 
-			pluginsCategory := &scenario.Category{
-				Name:        "Plugins",
-				Description: "Scenarios loaded from plugins",
-				Children:    pluginChildren,
-			}
-			result = append(result, pluginsCategory)
+		// Recursively merge children
+		for _, child := range pluginCat.Children {
+			existingCat.Children = mergeCategory(existingCat.Children, categoryMap, child)
 		}
+	} else {
+		// Category doesn't exist - create a deep copy and add it
+		newCat := &scenario.Category{
+			Name:        pluginCat.Name,
+			Description: pluginCat.Description,
+			Descriptors: append([]*scenario.Descriptor(nil), pluginCat.Descriptors...),
+			Children:    deepCopyCategories(pluginCat.Children),
+		}
+		result = append(result, newCat)
+		categoryMap[newCat.Name] = newCat
+
+		// Also add children to the map
+		var addChildrenToMap func(cats []*scenario.Category)
+		addChildrenToMap = func(cats []*scenario.Category) {
+			for _, cat := range cats {
+				categoryMap[cat.Name] = cat
+				addChildrenToMap(cat.Children)
+			}
+		}
+		addChildrenToMap(newCat.Children)
 	}
 
 	return result

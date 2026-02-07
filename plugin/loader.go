@@ -15,7 +15,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/ethpandaops/spamoor/plugin/symbols"
 	"github.com/ethpandaops/spamoor/scenario"
@@ -33,7 +32,7 @@ const (
 type PluginLoader struct {
 	logger           *logrus.Entry
 	pluginRegistry   *PluginRegistry
-	scenarioRegistry *ScenarioRegistry
+	scenarioRegistry *scenario.Registry
 	mu               sync.Mutex
 	cleanupFn        func(*LoadedPlugin) // callback for cleanup notifications
 }
@@ -42,7 +41,7 @@ type PluginLoader struct {
 func NewPluginLoader(
 	logger logrus.FieldLogger,
 	pluginRegistry *PluginRegistry,
-	scenarioRegistry *ScenarioRegistry,
+	scenarioRegistry *scenario.Registry,
 ) *PluginLoader {
 	return &PluginLoader{
 		logger:           logger.WithField("component", "plugin-loader"),
@@ -391,7 +390,7 @@ func (l *PluginLoader) loadFromFS(pluginName string, filesys fs.FS) (*scenario.P
 		return nil, fmt.Errorf("PluginDescriptor in %s is not of type plugin.Descriptor (got %T)", pluginName, v.Interface())
 	}
 
-	l.logger.Infof("loaded plugin: %s with %d scenarios", desc.Name, len(desc.Scenarios))
+	l.logger.Infof("loaded plugin: %s with %d scenarios", desc.Name, len(desc.GetAllScenarios()))
 
 	return desc, nil
 }
@@ -404,11 +403,11 @@ func (l *PluginLoader) RegisterPluginScenarios(loaded *LoadedPlugin) error {
 	// Register plugin in the plugin registry
 	oldPlugin := l.pluginRegistry.Register(loaded)
 
-	// Register each scenario
-	for _, scenarioDesc := range loaded.Descriptor.Scenarios {
-		entry := &ScenarioEntry{
+	// Register each scenario from plugin categories
+	for _, scenarioDesc := range loaded.Descriptor.GetAllScenarios() {
+		entry := &scenario.ScenarioEntry{
 			Descriptor: scenarioDesc,
-			Source:     ScenarioSourcePlugin,
+			Source:     scenario.ScenarioSourcePlugin,
 			Plugin:     loaded,
 		}
 
@@ -421,9 +420,11 @@ func (l *PluginLoader) RegisterPluginScenarios(loaded *LoadedPlugin) error {
 		loaded.AddScenario(scenarioDesc.Name)
 
 		// If we replaced a scenario from a different plugin, update that plugin's tracking
-		if oldEntry != nil && oldEntry.Plugin != nil && oldEntry.Plugin != loaded {
-			oldEntry.Plugin.RemoveScenario(scenarioDesc.Name)
-			l.maybeCleanup(oldEntry.Plugin)
+		if oldEntry != nil && oldEntry.Plugin != nil {
+			if oldPlugin, ok := oldEntry.Plugin.(*LoadedPlugin); ok && oldPlugin != loaded {
+				oldPlugin.RemoveScenario(scenarioDesc.Name)
+				l.maybeCleanup(oldPlugin)
+			}
 		}
 
 		l.logger.Infof("registered scenario from plugin: %s", scenarioDesc.Name)
@@ -448,7 +449,7 @@ func (l *PluginLoader) UnregisterPluginScenarios(pluginName string) error {
 	}
 
 	// Remove each scenario from the registry
-	for _, scenarioDesc := range plugin.Descriptor.Scenarios {
+	for _, scenarioDesc := range plugin.Descriptor.GetAllScenarios() {
 		_, err := l.scenarioRegistry.Remove(scenarioDesc.Name)
 		if err != nil {
 			l.logger.Warnf("failed to remove scenario %s: %v", scenarioDesc.Name, err)
@@ -522,7 +523,7 @@ func (l *PluginLoader) GetPluginRegistry() *PluginRegistry {
 }
 
 // GetScenarioRegistry returns the scenario registry.
-func (l *PluginLoader) GetScenarioRegistry() *ScenarioRegistry {
+func (l *PluginLoader) GetScenarioRegistry() *scenario.Registry {
 	return l.scenarioRegistry
 }
 
@@ -650,18 +651,85 @@ func extractPluginDescriptor(v reflect.Value) (*scenario.PluginDescriptor, bool)
 			desc.Description = descField.String()
 		}
 
-		scenariosField := v.FieldByName("Scenarios")
-		if scenariosField.IsValid() && scenariosField.Kind() == reflect.Slice {
-			for i := 0; i < scenariosField.Len(); i++ {
-				elem := scenariosField.Index(i)
-				if scenarioDesc, ok := extractScenarioDescriptor(elem); ok {
-					desc.Scenarios = append(desc.Scenarios, scenarioDesc)
+		// Try to extract Categories (new format)
+		categoriesField := v.FieldByName("Categories")
+		if categoriesField.IsValid() && categoriesField.Kind() == reflect.Slice {
+			for i := 0; i < categoriesField.Len(); i++ {
+				elem := categoriesField.Index(i)
+				if cat, ok := extractCategory(elem); ok {
+					desc.Categories = append(desc.Categories, cat)
 				}
 			}
 		}
 
 		if desc.Name != "" {
 			return desc, true
+		}
+	}
+
+	return nil, false
+}
+
+// extractCategory attempts to extract a scenario.Category from a reflect.Value.
+func extractCategory(v reflect.Value) (*scenario.Category, bool) {
+	if !v.IsValid() {
+		return nil, false
+	}
+
+	// Handle pointer types
+	if v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
+
+	iface := v.Interface()
+
+	// Check if it's already the correct type
+	if cat, ok := iface.(*scenario.Category); ok {
+		return cat, true
+	}
+
+	if cat, ok := iface.(scenario.Category); ok {
+		return &cat, true
+	}
+
+	// Try to manually extract fields
+	if v.Kind() == reflect.Struct {
+		cat := &scenario.Category{}
+
+		nameField := v.FieldByName("Name")
+		if nameField.IsValid() && nameField.Kind() == reflect.String {
+			cat.Name = nameField.String()
+		}
+
+		descField := v.FieldByName("Description")
+		if descField.IsValid() && descField.Kind() == reflect.String {
+			cat.Description = descField.String()
+		}
+
+		// Extract descriptors
+		descriptorsField := v.FieldByName("Descriptors")
+		if descriptorsField.IsValid() && descriptorsField.Kind() == reflect.Slice {
+			for i := 0; i < descriptorsField.Len(); i++ {
+				elem := descriptorsField.Index(i)
+				if desc, ok := extractScenarioDescriptor(elem); ok {
+					cat.Descriptors = append(cat.Descriptors, desc)
+				}
+			}
+		}
+
+		// Extract children recursively
+		childrenField := v.FieldByName("Children")
+		if childrenField.IsValid() && childrenField.Kind() == reflect.Slice {
+			for i := 0; i < childrenField.Len(); i++ {
+				elem := childrenField.Index(i)
+				if child, ok := extractCategory(elem); ok {
+					cat.Children = append(cat.Children, child)
+				}
+			}
+		}
+
+		if cat.Name != "" {
+			return cat, true
 		}
 	}
 
@@ -692,219 +760,3 @@ func extractScenarioDescriptor(v reflect.Value) (*scenario.Descriptor, bool) {
 
 	return nil, false
 }
-
-// memoryFS implements fs.FS using an in-memory file store.
-type memoryFS struct {
-	files map[string]*memoryFile
-	dirs  map[string]bool
-}
-
-type memoryFile struct {
-	name    string
-	content []byte
-	mode    fs.FileMode
-	modTime time.Time
-}
-
-func newMemoryFS() *memoryFS {
-	return &memoryFS{
-		files: make(map[string]*memoryFile, 64),
-		dirs:  make(map[string]bool, 16),
-	}
-}
-
-func (m *memoryFS) addFile(path string, content []byte, mode fs.FileMode) {
-	// Normalize path
-	path = filepath.ToSlash(path)
-	path = strings.TrimPrefix(path, "/")
-
-	m.files[path] = &memoryFile{
-		name:    filepath.Base(path),
-		content: content,
-		mode:    mode,
-		modTime: time.Now(),
-	}
-
-	// Create parent directories
-	dir := filepath.Dir(path)
-	for dir != "." && dir != "" {
-		m.dirs[dir] = true
-		dir = filepath.Dir(dir)
-	}
-}
-
-func (m *memoryFS) Open(name string) (fs.File, error) {
-	// Normalize the path
-	name = filepath.ToSlash(name)
-	name = strings.TrimPrefix(name, "/")
-
-	// Check if it's a file
-	if f, ok := m.files[name]; ok {
-		return &memoryFileReader{
-			file:   f,
-			reader: bytes.NewReader(f.content),
-		}, nil
-	}
-
-	// Check if it's a directory
-	if m.dirs[name] || name == "." || name == "" {
-		return &memoryDirReader{
-			fs:   m,
-			name: name,
-		}, nil
-	}
-
-	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
-}
-
-// memoryFileReader implements fs.File for reading file content.
-type memoryFileReader struct {
-	file   *memoryFile
-	reader *bytes.Reader
-}
-
-func (f *memoryFileReader) Stat() (fs.FileInfo, error) {
-	return &memoryFileInfo{file: f.file}, nil
-}
-
-func (f *memoryFileReader) Read(b []byte) (int, error) {
-	return f.reader.Read(b)
-}
-
-func (f *memoryFileReader) Close() error {
-	return nil
-}
-
-// memoryFileInfo implements fs.FileInfo.
-type memoryFileInfo struct {
-	file *memoryFile
-}
-
-func (fi *memoryFileInfo) Name() string       { return fi.file.name }
-func (fi *memoryFileInfo) Size() int64        { return int64(len(fi.file.content)) }
-func (fi *memoryFileInfo) Mode() fs.FileMode  { return fi.file.mode }
-func (fi *memoryFileInfo) ModTime() time.Time { return fi.file.modTime }
-func (fi *memoryFileInfo) IsDir() bool        { return false }
-func (fi *memoryFileInfo) Sys() any           { return nil }
-
-// memoryDirReader implements fs.File for directories.
-type memoryDirReader struct {
-	fs   *memoryFS
-	name string
-}
-
-func (d *memoryDirReader) Stat() (fs.FileInfo, error) {
-	return &memoryDirInfo{name: filepath.Base(d.name)}, nil
-}
-
-func (d *memoryDirReader) Read([]byte) (int, error) {
-	return 0, &fs.PathError{Op: "read", Path: d.name, Err: fs.ErrInvalid}
-}
-
-func (d *memoryDirReader) Close() error {
-	return nil
-}
-
-// memoryDirInfo implements fs.FileInfo for directories.
-type memoryDirInfo struct {
-	name string
-}
-
-func (di *memoryDirInfo) Name() string       { return di.name }
-func (di *memoryDirInfo) Size() int64        { return 0 }
-func (di *memoryDirInfo) Mode() fs.FileMode  { return fs.ModeDir | 0755 }
-func (di *memoryDirInfo) ModTime() time.Time { return time.Now() }
-func (di *memoryDirInfo) IsDir() bool        { return true }
-func (di *memoryDirInfo) Sys() any           { return nil }
-
-// Ensure memoryFS implements fs.ReadDirFS for yaegi directory listing.
-var _ fs.ReadDirFS = (*memoryFS)(nil)
-
-func (m *memoryFS) ReadDir(name string) ([]fs.DirEntry, error) {
-	name = filepath.ToSlash(name)
-	name = strings.TrimPrefix(name, "/")
-
-	if name == "" {
-		name = "."
-	}
-
-	// Collect entries in this directory
-	entries := make(map[string]fs.DirEntry, 16)
-
-	prefix := name
-	if prefix != "." && prefix != "" {
-		prefix += "/"
-	} else {
-		prefix = ""
-	}
-
-	// Add files
-	for path, file := range m.files {
-		if !strings.HasPrefix(path, prefix) {
-			continue
-		}
-
-		relPath := strings.TrimPrefix(path, prefix)
-		parts := strings.SplitN(relPath, "/", 2)
-
-		if len(parts) == 1 {
-			// Direct file in this directory
-			entries[parts[0]] = &memoryDirEntry{
-				name:  file.name,
-				isDir: false,
-				mode:  file.mode,
-			}
-		} else {
-			// Subdirectory
-			entries[parts[0]] = &memoryDirEntry{
-				name:  parts[0],
-				isDir: true,
-				mode:  fs.ModeDir | 0755,
-			}
-		}
-	}
-
-	// Add explicit directories
-	for dirPath := range m.dirs {
-		if !strings.HasPrefix(dirPath, prefix) {
-			continue
-		}
-
-		relPath := strings.TrimPrefix(dirPath, prefix)
-		parts := strings.SplitN(relPath, "/", 2)
-
-		if _, exists := entries[parts[0]]; !exists {
-			entries[parts[0]] = &memoryDirEntry{
-				name:  parts[0],
-				isDir: true,
-				mode:  fs.ModeDir | 0755,
-			}
-		}
-	}
-
-	// Convert map to slice
-	result := make([]fs.DirEntry, 0, len(entries))
-	for _, entry := range entries {
-		result = append(result, entry)
-	}
-
-	return result, nil
-}
-
-// memoryDirEntry implements fs.DirEntry.
-type memoryDirEntry struct {
-	name  string
-	isDir bool
-	mode  fs.FileMode
-}
-
-func (e *memoryDirEntry) Name() string               { return e.name }
-func (e *memoryDirEntry) IsDir() bool                { return e.isDir }
-func (e *memoryDirEntry) Type() fs.FileMode          { return e.mode.Type() }
-func (e *memoryDirEntry) Info() (fs.FileInfo, error) { return e, nil }
-
-// Implement fs.FileInfo for memoryDirEntry
-func (e *memoryDirEntry) Size() int64        { return 0 }
-func (e *memoryDirEntry) Mode() fs.FileMode  { return e.mode }
-func (e *memoryDirEntry) ModTime() time.Time { return time.Now() }
-func (e *memoryDirEntry) Sys() any           { return nil }

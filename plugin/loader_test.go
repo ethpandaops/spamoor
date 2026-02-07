@@ -14,9 +14,9 @@ import (
 )
 
 // createTestRegistries creates plugin and scenario registries for testing.
-func createTestRegistries() (*PluginRegistry, *ScenarioRegistry) {
+func createTestRegistries() (*PluginRegistry, *scenario.Registry) {
 	pluginRegistry := NewPluginRegistry()
-	scenarioRegistry := NewScenarioRegistry(nil)
+	scenarioRegistry := scenario.NewRegistry(nil)
 
 	return pluginRegistry, scenarioRegistry
 }
@@ -68,7 +68,7 @@ func TestLoadFromFile(t *testing.T) {
 		t.Error("PluginPath should not be empty")
 	}
 
-	t.Logf("Loaded plugin: %s with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.Scenarios))
+	t.Logf("Loaded plugin: %s with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.GetAllScenarios()))
 	t.Logf("TempDir: %s", loaded.TempDir)
 	t.Logf("PluginPath: %s", loaded.PluginPath)
 
@@ -144,36 +144,6 @@ func TestLoadFromReader(t *testing.T) {
 	// Cleanup
 	if err := loader.CleanupPlugin(loaded); err != nil {
 		t.Errorf("Failed to cleanup plugin: %v", err)
-	}
-}
-
-func TestMemoryFSReadDir(t *testing.T) {
-	memFS := newMemoryFS()
-
-	// Add some files
-	memFS.addFile("src/pkg/file1.go", []byte("package pkg"), 0644)
-	memFS.addFile("src/pkg/file2.go", []byte("package pkg"), 0644)
-	memFS.addFile("src/pkg/sub/file3.go", []byte("package sub"), 0644)
-
-	// Test ReadDir on root
-	entries, err := memFS.ReadDir("src")
-	if err != nil {
-		t.Fatalf("ReadDir failed: %v", err)
-	}
-
-	if len(entries) != 1 {
-		t.Errorf("Expected 1 entry in src/, got %d", len(entries))
-	}
-
-	// Test ReadDir on pkg
-	entries, err = memFS.ReadDir("src/pkg")
-	if err != nil {
-		t.Fatalf("ReadDir on pkg failed: %v", err)
-	}
-
-	// Should have file1.go, file2.go, and sub/
-	if len(entries) != 3 {
-		t.Errorf("Expected 3 entries in src/pkg/, got %d", len(entries))
 	}
 }
 
@@ -338,7 +308,7 @@ func TestPluginRegistry(t *testing.T) {
 }
 
 func TestScenarioRegistry(t *testing.T) {
-	registry := NewScenarioRegistry(nil)
+	registry := scenario.NewRegistry(nil)
 
 	// Check empty registry
 	if registry.Get("nonexistent") != nil {

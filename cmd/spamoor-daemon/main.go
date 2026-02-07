@@ -187,7 +187,7 @@ func main() {
 			logger.WithError(loadErr).Fatalf("failed to load plugin: %s", pluginPath)
 		}
 
-		logger.Infof("loaded CLI plugin: %s with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.Scenarios))
+		logger.Infof("loaded CLI plugin: %s with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.GetAllScenarios()))
 	}
 
 	// start frontend
