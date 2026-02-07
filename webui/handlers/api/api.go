@@ -256,37 +256,6 @@ func convertCategory(category *scenario.Category) *ScenarioCategory {
 	}
 }
 
-// ReloadScenariosResponse represents the response for reloading scenarios
-type ReloadScenariosResponse struct {
-	Status    string   `json:"status"`
-	Count     int      `json:"count"`
-	Message   string   `json:"message,omitempty"`
-	Scenarios []string `json:"scenarios"`
-}
-
-// ReloadScenarios godoc
-// @Id reloadScenarios
-// @Summary Reload scenarios (deprecated)
-// @Tags Scenario
-// @Description Returns the current list of scenarios. Hot-reloading is not supported with plugins.
-// @Produce json
-// @Success 200 {object} ReloadScenariosResponse "Success"
-// @Router /api/scenarios/reload [post]
-func (ah *APIHandler) ReloadScenarios(w http.ResponseWriter, r *http.Request) {
-	// Plugins are loaded at startup; hot-reloading is not supported
-	response := ReloadScenariosResponse{
-		Status:    "unchanged",
-		Count:     len(scenarios.GetScenarioNames()),
-		Message:   "Hot-reloading is not supported. Plugins are loaded at startup via --plugin flag.",
-		Scenarios: scenarios.GetScenarioNames(),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logrus.WithError(err).Error("failed to encode reload response")
-	}
-}
-
 // GetVersion godoc
 // @Id getVersion
 // @Summary Get spamoor version
