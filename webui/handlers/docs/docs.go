@@ -1917,6 +1917,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "integer"
                 },
+                "deprecated": {
+                    "type": "boolean"
+                },
                 "enabled": {
                     "type": "boolean"
                 },

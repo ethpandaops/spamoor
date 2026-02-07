@@ -75,6 +75,21 @@ jobs:
           exit 1
         fi
 
+    - name: Verify swagger docs are up to date
+      run: |
+        make docs
+        if [ -n "$(git status --porcelain webui/handlers/docs/)" ]; then
+          echo "Error: Swagger docs are out of date!"
+          echo "Please run 'make docs' and commit the changes."
+          echo ""
+          echo "Changed files:"
+          git status --porcelain webui/handlers/docs/
+          echo ""
+          echo "Diff:"
+          git diff webui/handlers/docs/
+          exit 1
+        fi
+
     - name: Run tests
       run: go test -race -vet=off ./...
 
