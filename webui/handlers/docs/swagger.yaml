@@ -1077,7 +1077,7 @@ paths:
       - Plugin
   /api/plugins/{name}/reload:
     post:
-      description: Re-downloads a URL plugin and updates the stored archive
+      description: Re-loads a plugin from its original source (URL or local path)
       operationId: reloadPlugin
       parameters:
       - description: Plugin name
@@ -1091,7 +1091,7 @@ paths:
           schema:
             $ref: '#/definitions/api.RegisterPluginResponse'
         "400":
-          description: Plugin has running spammers or is not a URL plugin
+          description: Plugin has running spammers or source type not supported
           schema:
             type: string
         "404":
@@ -1102,7 +1102,7 @@ paths:
           description: Server Error
           schema:
             type: string
-      summary: Reload a plugin from URL
+      summary: Reload a plugin from its source
       tags:
       - Plugin
   /api/root-wallet/send-transaction:

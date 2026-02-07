@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/sirupsen/logrus"
@@ -195,19 +196,19 @@ func (pp *PluginPersistence) loadFromStoredArchive(dbPlugin *db.Plugin) (*plugin
 	return pp.pluginLoader.LoadFromBytes(archiveData, true)
 }
 
-// ReloadPluginFromURL re-downloads a URL plugin and updates the stored archive.
-// This allows users to manually trigger an update from the original URL.
-// Returns an error if the plugin has running spammers or is not a URL-based plugin.
-func (pp *PluginPersistence) ReloadPluginFromURL(name string) (*plugin.LoadedPlugin, error) {
+// ReloadPlugin re-loads a plugin from its original source (URL or local path).
+// This allows users to manually trigger an update.
+// Returns an error if the plugin has running spammers or the source type does not support reloading.
+func (pp *PluginPersistence) ReloadPlugin(name string) (*plugin.LoadedPlugin, error) {
 	// Get plugin from database
 	dbPlugin, err := pp.db.GetPlugin(name)
 	if err != nil {
 		return nil, fmt.Errorf("plugin not found: %w", err)
 	}
 
-	// Check source type
-	if dbPlugin.SourceType != "url" {
-		return nil, fmt.Errorf("reload is only supported for URL plugins (plugin is %s type)", dbPlugin.SourceType)
+	// Check source type supports reloading
+	if dbPlugin.SourceType != "url" && dbPlugin.SourceType != "local" {
+		return nil, fmt.Errorf("reload is only supported for URL and local plugins (plugin is %s type)", dbPlugin.SourceType)
 	}
 
 	// Check if plugin has running spammers
@@ -216,7 +217,18 @@ func (pp *PluginPersistence) ReloadPluginFromURL(name string) (*plugin.LoadedPlu
 		return nil, fmt.Errorf("cannot reload plugin with %d running spammer(s)", loadedPlugin.GetRunningCount())
 	}
 
-	// Download fresh from URL
+	switch dbPlugin.SourceType {
+	case "url":
+		return pp.reloadFromURL(dbPlugin)
+	case "local":
+		return pp.reloadFromLocal(dbPlugin)
+	default:
+		return nil, fmt.Errorf("unsupported source type for reload: %s", dbPlugin.SourceType)
+	}
+}
+
+// reloadFromURL re-downloads a URL plugin and updates the stored archive.
+func (pp *PluginPersistence) reloadFromURL(dbPlugin *db.Plugin) (*plugin.LoadedPlugin, error) {
 	resp, err := http.Get(dbPlugin.SourcePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download plugin: %w", err)
@@ -227,13 +239,11 @@ func (pp *PluginPersistence) ReloadPluginFromURL(name string) (*plugin.LoadedPlu
 		return nil, fmt.Errorf("failed to download plugin: HTTP %d", resp.StatusCode)
 	}
 
-	// Read all data for storage
 	archiveData, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read plugin data: %w", err)
 	}
 
-	// Load the plugin
 	loaded, err := pp.pluginLoader.LoadFromBytes(archiveData, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load plugin: %w", err)
@@ -241,17 +251,35 @@ func (pp *PluginPersistence) ReloadPluginFromURL(name string) (*plugin.LoadedPlu
 
 	loaded.SourceType = plugin.PluginSourceURL
 
-	// Register scenarios (this will replace the old registration)
 	if err := pp.pluginLoader.RegisterPluginScenarios(loaded); err != nil {
 		return nil, fmt.Errorf("failed to register plugin scenarios: %w", err)
 	}
 
-	// Update the stored archive in database
 	if err := pp.SavePlugin(loaded, archiveData, dbPlugin.SourcePath); err != nil {
 		return nil, fmt.Errorf("failed to save plugin to database: %w", err)
 	}
 
 	pp.logger.Infof("reloaded plugin %s from URL with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.GetAllScenarios()))
+
+	return loaded, nil
+}
+
+// reloadFromLocal re-reads a local plugin from its directory path.
+func (pp *PluginPersistence) reloadFromLocal(dbPlugin *db.Plugin) (*plugin.LoadedPlugin, error) {
+	loaded, err := pp.pluginLoader.LoadFromLocalPath(dbPlugin.SourcePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load plugin: %w", err)
+	}
+
+	if err := pp.pluginLoader.RegisterPluginScenarios(loaded); err != nil {
+		return nil, fmt.Errorf("failed to register plugin scenarios: %w", err)
+	}
+
+	if err := pp.SavePlugin(loaded, nil, dbPlugin.SourcePath); err != nil {
+		return nil, fmt.Errorf("failed to save plugin to database: %w", err)
+	}
+
+	pp.logger.Infof("reloaded plugin %s from local path with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.GetAllScenarios()))
 
 	return loaded, nil
 }
@@ -350,6 +378,15 @@ func (pp *PluginPersistence) GetPluginStatuses() ([]*PluginStatus, error) {
 
 		statuses = append(statuses, status)
 	}
+
+	// Sort: non-deprecated first, then deprecated; alphabetical by name within each group
+	sort.Slice(statuses, func(i, j int) bool {
+		if statuses[i].Deprecated != statuses[j].Deprecated {
+			return !statuses[i].Deprecated
+		}
+
+		return statuses[i].Name < statuses[j].Name
+	})
 
 	return statuses, nil
 }

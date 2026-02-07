@@ -30,7 +30,7 @@
               </tr>
               {{ else }}
               {{ range .Plugins }}
-              <tr data-plugin-name="{{ .Name }}"{{ if .Deprecated }} class="table-secondary"{{ end }}>
+              <tr data-plugin-name="{{ .Name }}"{{ if .Deprecated }} style="opacity: 0.6;"{{ end }}>
                 <td>
                   <strong>{{ .Name }}</strong>
                   {{ if .Deprecated }}
@@ -88,8 +88,8 @@
                   <span class="text-muted">-</span>
                   {{ else }}
                   <div class="btn-group" role="group">
-                    {{ if eq .SourceType "url" }}
-                    <button type="button" class="btn btn-sm btn-primary" onclick="reloadPlugin('{{ .Name }}')" title="Reload from URL" data-bs-toggle="tooltip" data-bs-placement="top">
+                    {{ if or (eq .SourceType "url") (eq .SourceType "local") }}
+                    <button type="button" class="btn btn-sm btn-primary" onclick="reloadPlugin('{{ .Name }}')" title="Reload from source" data-bs-toggle="tooltip" data-bs-placement="top">
                       <i class="fas fa-sync-alt"></i>
                     </button>
                     {{ end }}
@@ -312,7 +312,7 @@
   }
 
   function reloadPlugin(name) {
-    if (!confirm('Reload plugin "' + name + '" from its URL? This will download the latest version.')) {
+    if (!confirm('Reload plugin "' + name + '" from its source? This will load the latest version.')) {
       return;
     }
 

@@ -763,11 +763,11 @@ const docTemplate = `{
         },
         "/api/plugins/{name}/reload": {
             "post": {
-                "description": "Re-downloads a URL plugin and updates the stored archive",
+                "description": "Re-loads a plugin from its original source (URL or local path)",
                 "tags": [
                     "Plugin"
                 ],
-                "summary": "Reload a plugin from URL",
+                "summary": "Reload a plugin from its source",
                 "operationId": "reloadPlugin",
                 "parameters": [
                     {
@@ -786,7 +786,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Plugin has running spammers or is not a URL plugin",
+                        "description": "Plugin has running spammers or source type not supported",
                         "schema": {
                             "type": "string"
                         }

@@ -119,6 +119,9 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 
 			loaded, err := persistence.RegisterPluginFromURL(sourcePath)
 			if err != nil {
+				ah.auditPluginAction(userEmail, db.AuditActionPluginRegister, sourcePath, db.AuditMetadata{
+					"source_type": "url", "source_path": sourcePath, "error": err.Error(),
+				})
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -134,6 +137,9 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 
 			loaded, err := persistence.RegisterPluginFromLocal(sourcePath)
 			if err != nil {
+				ah.auditPluginAction(userEmail, db.AuditActionPluginRegister, sourcePath, db.AuditMetadata{
+					"source_type": "local", "source_path": sourcePath, "error": err.Error(),
+				})
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -157,6 +163,9 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 
 			loaded, err := persistence.RegisterPluginFromUpload(data, header.Filename)
 			if err != nil {
+				ah.auditPluginAction(userEmail, db.AuditActionPluginRegister, header.Filename, db.AuditMetadata{
+					"source_type": "upload", "source_path": header.Filename, "error": err.Error(),
+				})
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -184,6 +193,9 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 
 			loaded, err := persistence.RegisterPluginFromURL(req.Path)
 			if err != nil {
+				ah.auditPluginAction(userEmail, db.AuditActionPluginRegister, req.Path, db.AuditMetadata{
+					"source_type": "url", "source_path": req.Path, "error": err.Error(),
+				})
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -199,6 +211,9 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 
 			loaded, err := persistence.RegisterPluginFromLocal(req.Path)
 			if err != nil {
+				ah.auditPluginAction(userEmail, db.AuditActionPluginRegister, req.Path, db.AuditMetadata{
+					"source_type": "local", "source_path": req.Path, "error": err.Error(),
+				})
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -260,12 +275,12 @@ func (ah *APIHandler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
 
 // ReloadPlugin godoc
 // @Id reloadPlugin
-// @Summary Reload a plugin from URL
+// @Summary Reload a plugin from its source
 // @Tags Plugin
-// @Description Re-downloads a URL plugin and updates the stored archive
+// @Description Re-loads a plugin from its original source (URL or local path)
 // @Param name path string true "Plugin name"
 // @Success 200 {object} RegisterPluginResponse "Success"
-// @Failure 400 {string} string "Plugin has running spammers or is not a URL plugin"
+// @Failure 400 {string} string "Plugin has running spammers or source type not supported"
 // @Failure 404 {string} string "Plugin not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/plugins/{name}/reload [post]
@@ -286,13 +301,17 @@ func (ah *APIHandler) ReloadPlugin(w http.ResponseWriter, r *http.Request) {
 
 	userEmail := ah.getPluginUserEmail(r)
 
-	loaded, err := persistence.ReloadPluginFromURL(name)
+	loaded, err := persistence.ReloadPlugin(name)
 	if err != nil {
+		ah.auditPluginAction(userEmail, db.AuditActionPluginReload, name, db.AuditMetadata{
+			"error": err.Error(),
+		})
+
 		if strings.Contains(err.Error(), "running spammer") {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		} else if strings.Contains(err.Error(), "not found") {
 			http.Error(w, err.Error(), http.StatusNotFound)
-		} else if strings.Contains(err.Error(), "only supported for URL") {
+		} else if strings.Contains(err.Error(), "only supported for") {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		} else {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -301,7 +320,7 @@ func (ah *APIHandler) ReloadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ah.auditPluginAction(userEmail, db.AuditActionPluginReload, loaded.Descriptor.Name, buildPluginMetadata(loaded, "url", ""))
+	ah.auditPluginAction(userEmail, db.AuditActionPluginReload, loaded.Descriptor.Name, buildPluginMetadata(loaded, loaded.SourceType.String(), ""))
 	sendPluginResponse(w, loaded)
 }
 
