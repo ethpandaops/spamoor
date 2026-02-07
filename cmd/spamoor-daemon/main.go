@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/signal"
@@ -23,23 +24,26 @@ import (
 )
 
 type CliArgs struct {
-	verbose          bool
-	trace            bool
-	debug            bool
-	rpchosts         []string
-	rpchostsFile     string
-	privkey          string
-	port             int
-	dbFile           string
-	startupSpammer   string
-	fuluActivation   uint64
-	withoutBatcher   bool
-	disableTxMetrics bool
-	disableAuditLogs bool
-	slotDuration     time.Duration
-	auditUserHeader  string
-	startupDelay     uint64
-	plugins          []string
+	verbose           bool
+	trace             bool
+	debug             bool
+	rpchosts          []string
+	rpchostsFile      string
+	privkey           string
+	port              int
+	dbFile            string
+	startupSpammer    string
+	fuluActivation    uint64
+	withoutBatcher    bool
+	disableTxMetrics  bool
+	disableAuditLogs  bool
+	slotDuration      time.Duration
+	auditUserHeader   string
+	authTokenKey      string
+	disableLocalToken bool
+	enableAuth        bool
+	startupDelay      uint64
+	plugins           []string
 }
 
 func main() {
@@ -61,6 +65,9 @@ func main() {
 	flags.BoolVar(&cliArgs.disableAuditLogs, "disable-audit-logs", false, "Disable audit logs")
 	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 	flags.StringVar(&cliArgs.auditUserHeader, "audit-user-header", "Cf-Access-Authenticated-User-Email", "HTTP header containing the authenticated user email for audit logs")
+	flags.StringVar(&cliArgs.authTokenKey, "auth-token-key", "", "The key to use for the auth token")
+	flags.BoolVar(&cliArgs.enableAuth, "enable-auth", false, "Enable authentication for protected endpoints")
+	flags.BoolVar(&cliArgs.disableLocalToken, "disable-local-token", false, "Disable local token generation via the /auth/token endpoint (require external token)")
 	flags.Uint64Var(&cliArgs.startupDelay, "startup-delay", 30, "Delay in seconds before starting spammers on daemon startup (to allow cancellation)")
 	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files or local directories to load (can be specified multiple times)")
 	flags.Parse(os.Args)
@@ -191,6 +198,14 @@ func main() {
 	}
 
 	// start frontend
+	authTokenKey := cliArgs.authTokenKey
+	if authTokenKey == "" {
+		authTokenKey = os.Getenv("AUTH_TOKEN_KEY")
+	}
+	if authTokenKey == "" {
+		authTokenKey = fmt.Sprintf("%x-authtoken", sha256.Sum256([]byte(cliArgs.privkey)))
+	}
+
 	webui.StartHttpServer(&types.FrontendConfig{
 		Host:             "0.0.0.0",
 		Port:             cliArgs.port,
@@ -200,6 +215,11 @@ func main() {
 		Minify:           true,
 		DisableTxMetrics: cliArgs.disableTxMetrics,
 		DisableAuditLogs: cliArgs.disableAuditLogs,
+
+		AuthUserHeader:    cliArgs.auditUserHeader,
+		AuthTokenKey:      authTokenKey,
+		DisableLocalToken: cliArgs.disableLocalToken,
+		DisableAuth:       !cliArgs.enableAuth,
 	}, spamoorDaemon)
 
 	// load and apply client configs from database

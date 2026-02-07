@@ -9,6 +9,7 @@ import (
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/webui/handlers"
 	"github.com/ethpandaops/spamoor/webui/handlers/api"
+	"github.com/ethpandaops/spamoor/webui/handlers/auth"
 	"github.com/ethpandaops/spamoor/webui/handlers/docs"
 	"github.com/ethpandaops/spamoor/webui/server"
 	"github.com/ethpandaops/spamoor/webui/types"
@@ -63,8 +64,16 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 		router.HandleFunc("/graphs", frontendHandler.Graphs).Methods("GET")
 	}
 
+	// Auth routes
+	var authHandler *auth.Handler
+	if !config.DisableAuth {
+		authHandler = auth.NewAuthHandler(config.AuthTokenKey, config.AuthUserHeader, config.DisableLocalToken)
+		router.HandleFunc("/auth/token", authHandler.GetToken).Methods("GET")
+		router.HandleFunc("/auth/login", authHandler.GetLogin).Methods("GET")
+	}
+
 	// API routes
-	apiHandler := api.NewAPIHandler(daemon)
+	apiHandler := api.NewAPIHandler(daemon, authHandler)
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	apiRouter.HandleFunc("/spammers", apiHandler.GetSpammerList).Methods("GET")
 	apiRouter.HandleFunc("/scenarios", apiHandler.GetScenarios).Methods("GET")
