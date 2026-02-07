@@ -27,6 +27,8 @@ type ScenarioOptions struct {
 	Rebroadcast uint64  `yaml:"rebroadcast"`
 	BaseFee     float64 `yaml:"base_fee"`
 	TipFee      float64 `yaml:"tip_fee"`
+	BaseFeeWei  string  `yaml:"base_fee_wei"`
+	TipFeeWei   string  `yaml:"tip_fee_wei"`
 	GasLimit    uint64  `yaml:"gas_limit"`
 	Timeout     string  `yaml:"timeout"`
 	ClientGroup string  `yaml:"client_group"`
@@ -44,6 +46,7 @@ type Scenario struct {
 	options    ScenarioOptions
 	logger     logrus.FieldLogger
 	walletPool *spamoor.WalletPool
+	seed       string // Effective seed (either from options or randomly generated once)
 }
 
 var ScenarioName = "evm-fuzz"
@@ -88,6 +91,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast with unlimited retries and exponential backoff")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transactions (in gwei)")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.Uint64Var(&s.options.GasLimit, "gaslimit", ScenarioDefaultOptions.GasLimit, "Gas limit to use in transactions")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
@@ -161,6 +166,17 @@ func (s *Scenario) Init(options *scenario.Options) error {
 func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
+
+	// Generate seed once at scenario start if not provided
+	s.seed = s.options.PayloadSeed
+	if s.seed == "" {
+		randomBytes := make([]byte, 32)
+		rand.Read(randomBytes)
+		s.seed = hex.EncodeToString(randomBytes)
+		s.logger.Infof("Generated random seed for this run: 0x%s", s.seed)
+	} else {
+		s.logger.Infof("Using provided seed: %s", s.seed)
+	}
 
 	maxPending := s.options.MaxPending
 	if maxPending == 0 {
@@ -261,7 +277,8 @@ func (s *Scenario) deployFuzzedContract(ctx context.Context, txIdx uint64) (scen
 		return nil, nil, nil, wallet, fmt.Errorf("no client available")
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, nil, client, wallet, err
 	}
@@ -305,18 +322,8 @@ func (s *Scenario) generateFuzzedBytecode(txIdx uint64) ([]byte, *uint256.Int) {
 	// Apply txID offset for fast-forwarding to specific transaction
 	effectiveTxID := txIdx + s.options.TxIdOffset
 
-	// Generate random seed if none provided
-	seed := s.options.PayloadSeed
-	if seed == "" {
-		// Generate a random 32-byte hex seed
-		randomBytes := make([]byte, 32)
-		rand.Read(randomBytes)
-		seed = hex.EncodeToString(randomBytes)
-		s.logger.Debugf("Generated random seed: %s", seed)
-	}
-
-	// Create deterministic generator for this transaction with seed configuration
-	generator := NewOpcodeGenerator(effectiveTxID, seed, int(s.options.MaxCodeSize), s.options.GasLimit)
+	// Create deterministic generator for this transaction with seed (set once at scenario start)
+	generator := NewOpcodeGenerator(effectiveTxID, s.seed, int(s.options.MaxCodeSize), s.options.GasLimit)
 
 	// Set fuzz mode
 	generator.SetFuzzMode(s.options.FuzzMode)

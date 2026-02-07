@@ -30,6 +30,8 @@ type ScenarioOptions struct {
 	GasLimit      uint64  `yaml:"gas_limit"`
 	BaseFee       float64 `yaml:"base_fee"`
 	TipFee        float64 `yaml:"tip_fee"`
+	BaseFeeWei    string  `yaml:"base_fee_wei"`
+	TipFeeWei     string  `yaml:"tip_fee_wei"`
 	Bytecodes     string  `yaml:"bytecodes"`
 	BytecodesFile string  `yaml:"bytecodes_file"`
 	Timeout       string  `yaml:"timeout"`
@@ -84,6 +86,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.GasLimit, "gaslimit", ScenarioDefaultOptions.GasLimit, "Gas limit to use in deployment transactions (in gwei)")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in deployment transactions (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in deployment transactions (in gwei)")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.StringVar(&s.options.Bytecodes, "bytecodes", ScenarioDefaultOptions.Bytecodes, "Bytecodes to deploy (, separated list of hex bytecodes)")
 	flags.StringVar(&s.options.BytecodesFile, "bytecodes-file", ScenarioDefaultOptions.BytecodesFile, "File with bytecodes to deploy (list with hex bytecodes)")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
@@ -250,7 +254,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, nil, client, wallet, err
 	}

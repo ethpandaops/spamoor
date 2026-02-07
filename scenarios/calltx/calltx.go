@@ -33,6 +33,8 @@ type ScenarioOptions struct {
 	Rebroadcast       uint64  `yaml:"rebroadcast"`
 	BaseFee           float64 `yaml:"base_fee"`
 	TipFee            float64 `yaml:"tip_fee"`
+	BaseFeeWei        string  `yaml:"base_fee_wei"`
+	TipFeeWei         string  `yaml:"tip_fee_wei"`
 	DeployGasLimit    uint64  `yaml:"deploy_gas_limit"`
 	GasLimit          uint64  `yaml:"gas_limit"`
 	Amount            uint64  `yaml:"amount"`
@@ -116,6 +118,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast with unlimited retries and exponential backoff")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in call and deployment transactions (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in call and deployment transactions (in gwei)")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.Uint64Var(&s.options.DeployGasLimit, "deploy-gas-limit", ScenarioDefaultOptions.DeployGasLimit, "Gas limit to use for deployment transaction")
 	flags.Uint64Var(&s.options.GasLimit, "gas-limit", ScenarioDefaultOptions.GasLimit, "Gas limit to use for call transactions")
 	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (in gwei)")
@@ -392,7 +396,8 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, contractCode []byte) (*
 		return nil, client, scenario.ErrNoWallet
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, client, err
 	}
@@ -450,7 +455,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, nil, client, wallet, err
 	}

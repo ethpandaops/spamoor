@@ -34,11 +34,13 @@ type RootWallet struct {
 // It creates the underlying wallet, updates its state from the blockchain,
 // and sets up transaction rate limiting with a default limit of 200 concurrent transactions.
 // Returns the initialized RootWallet and logs wallet information if logger is provided.
-func InitRootWallet(ctx context.Context, privkey string, clientPool *ClientPool, logger logrus.FieldLogger) (*RootWallet, error) {
-	rootWallet, err := NewWallet(privkey)
+func InitRootWallet(ctx context.Context, privkey string, clientPool *ClientPool, txpool *TxPool, logger logrus.FieldLogger) (*RootWallet, error) {
+	privateKey, address, err := LoadPrivateKey(privkey)
 	if err != nil {
 		return nil, err
 	}
+	rootWallet := NewWallet(privateKey, address)
+	rootWallet = txpool.RegisterWallet(rootWallet, ctx)
 
 	client := clientPool.GetClient()
 	if client == nil {

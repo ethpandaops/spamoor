@@ -22,6 +22,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/factorydeploytx"
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/geastx"
+	replayeest "github.com/ethpandaops/spamoor/scenarios/replay-eest"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	erc20bloater "github.com/ethpandaops/spamoor/scenarios/statebloat/erc20_bloater"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
@@ -64,6 +65,7 @@ var scenarioDescriptorTree = []*scenario.Category{
 			&deploytx.ScenarioDescriptor,
 			&factorydeploytx.ScenarioDescriptor,
 			&geastx.ScenarioDescriptor,
+			&replayeest.ScenarioDescriptor,
 			&storagespam.ScenarioDescriptor,
 			&taskrunner.ScenarioDescriptor,
 		},

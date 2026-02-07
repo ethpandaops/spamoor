@@ -58,6 +58,8 @@ type ScenarioOptions struct {
 	TargetGasRatio   float64 `yaml:"target_gas_ratio" json:"target_gas_ratio"`
 	BaseFee          float64 `yaml:"base_fee" json:"base_fee"`
 	TipFee           float64 `yaml:"tip_fee" json:"tip_fee"`
+	BaseFeeWei       string  `yaml:"base_fee_wei"`
+	TipFeeWei        string  `yaml:"tip_fee_wei"`
 	ExistingContract string  `yaml:"existing_contract" json:"existing_contract"` // Optional override for edge cases
 	WalletCount      int     `yaml:"wallet_count" json:"wallet_count"`           // Number of wallets to initialize
 }
@@ -98,6 +100,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Float64Var(&s.options.TargetGasRatio, "target-gas-ratio", ScenarioDefaultOptions.TargetGasRatio, "Target gas usage as ratio of block gas limit (default 0.50 = 50%)")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.StringVar(&s.options.ExistingContract, "existing-contract", ScenarioDefaultOptions.ExistingContract, "(Optional) Override contract address for edge cases")
 	flags.IntVar(&s.options.WalletCount, "wallet-count", ScenarioDefaultOptions.WalletCount, "Number of wallets to initialize for parallel execution")
 	return nil
@@ -152,7 +156,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
-	var startSlot uint64 = 1 // Default: start from address 0x01
+	var nextAddressIndex uint64 = 1 // Default: start from address 0x01 (matches contract's nextStorageSlot)
 
 	// Determine contract address using nonce-based approach
 	if s.options.ExistingContract != "" {
@@ -173,7 +177,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			s.contractAddr = receipt.ContractAddress
 			s.logger.Infof("deployed contract: %s (block #%d)", s.contractAddr.Hex(), receipt.BlockNumber.Uint64())
 			s.logger.Infof("to resume later, use same wallet (--seed) - contract will be auto-detected")
-			startSlot = 1
+			nextAddressIndex = 1
 		} else {
 			// Wallet has history - contract should exist at nonce 0 address
 			s.contractAddr = crypto.CreateAddress(wallet.GetAddress(), 0)
@@ -219,19 +223,20 @@ func (s *Scenario) Run(ctx context.Context) error {
 			return fmt.Errorf("failed to query nextStorageSlot from contract: %w", err)
 		}
 
-		startSlot = nextSlot.Uint64()
-		if startSlot == 0 {
-			startSlot = 1 // Contract not yet bloated, start from slot 1
+		nextAddressIndex = nextSlot.Uint64()
+		if nextAddressIndex == 0 {
+			nextAddressIndex = 1 // Contract not yet bloated, start from slot 1
 		}
 
 		// Calculate and log current progress
+		// Note: nextAddressIndex is in address units; each address = 2 storage slots = 64 bytes
 		targetBytes := uint64(s.options.TargetStorageGB * 1024 * 1024 * 1024)
-		targetSlots := targetBytes / BytesPerSlot
-		currentGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
-		progress := float64(startSlot) / float64(targetSlots) * 100
+		targetAddresses := targetBytes / (BytesPerSlot * SlotsPerBloatCycle)
+		currentGB := float64(nextAddressIndex*SlotsPerBloatCycle*BytesPerSlot) / (1024 * 1024 * 1024)
+		progress := float64(nextAddressIndex) / float64(targetAddresses) * 100
 
-		s.logger.Infof("resuming from on-chain state: contract %s | slot %d (%.2f%% complete, %.3f GB / %.3f GB)",
-			s.contractAddr.Hex(), startSlot, progress, currentGB, s.options.TargetStorageGB)
+		s.logger.Infof("resuming from on-chain state: contract %s | address %d (%.2f%% complete, %.3f GB / %.3f GB)",
+			s.contractAddr.Hex(), nextAddressIndex, progress, currentGB, s.options.TargetStorageGB)
 	}
 
 	// Query network gas limit (reuse existing if already fetched)
@@ -242,17 +247,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
-	// Calculate target slots needed
+	// Calculate target addresses needed (each address = 2 storage slots = 64 bytes)
 	targetBytes := uint64(s.options.TargetStorageGB * 1024 * 1024 * 1024)
-	targetSlots := targetBytes / BytesPerSlot
-	s.logger.Infof("target: %.2f GB = %d slots (%.2f million addresses)",
-		s.options.TargetStorageGB, targetSlots, float64(targetSlots)/float64(SlotsPerBloatCycle)/1000000)
+	targetAddresses := targetBytes / (BytesPerSlot * SlotsPerBloatCycle)
+	s.logger.Infof("target: %.2f GB = %d addresses (%.2f million)",
+		s.options.TargetStorageGB, targetAddresses, float64(targetAddresses)/1000000)
 
 	// Start bloating with EIP-7825 compliant transaction splitting
 	totalTxCount := uint64(0)
 	errorCount := 0
 
-	for startSlot < targetSlots {
+	for nextAddressIndex < targetAddresses {
 		select {
 		case <-ctx.Done():
 			s.logger.Info("context cancelled, exiting")
@@ -274,17 +279,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 
 		// Process batch of transactions for this round
-		roundStartSlot := startSlot
+		roundStartAddressIndex := nextAddressIndex
 		roundSuccess := true
 		batchTxCount := 0
 
 		// Structure to hold transaction data for parallel processing
 		type txBatch struct {
-			tx           *types.Transaction
-			wallet       *spamoor.Wallet
-			numAddresses uint64
-			gasLimit     uint64
-			endSlot      uint64
+			tx              *types.Transaction
+			wallet          *spamoor.Wallet
+			numAddresses    uint64
+			gasLimit        uint64
+			endAddressIndex uint64
 		}
 		var txBatches []txBatch
 
@@ -306,11 +311,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 			// Use the maximum number of addresses that fit within EIP-7825 limit
 			numAddresses := uint64(MaxBloatedAddressesPerTx)
 
-			// Check if we would exceed our target slots
-			endSlot := startSlot + numAddresses*SlotsPerBloatCycle
-			if endSlot > targetSlots {
-				endSlot = targetSlots
-				numAddresses = (endSlot - startSlot) / SlotsPerBloatCycle
+			// Check if we would exceed our target addresses
+			endAddressIndex := nextAddressIndex + numAddresses
+			if endAddressIndex > targetAddresses {
+				endAddressIndex = targetAddresses
+				numAddresses = endAddressIndex - nextAddressIndex
 			}
 
 			if numAddresses == 0 {
@@ -321,7 +326,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 				i+1, len(txSplits), numAddresses, FixedGasLimitPerTx/1000000)
 
 			// Build bloating transaction with calculated number of addresses
-			tx, err := s.buildBloatTx(ctx, wallet, startSlot/SlotsPerBloatCycle, numAddresses)
+			// NOTE: nextAddressIndex is already in address units (matching contract's nextStorageSlot)
+			tx, err := s.buildBloatTx(ctx, wallet, nextAddressIndex, numAddresses)
 			if err != nil {
 				s.logger.Errorf("failed to build batch tx %d/%d: %v", i+1, len(txSplits), err)
 				roundSuccess = false
@@ -329,11 +335,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}
 
 			txBatches = append(txBatches, txBatch{
-				tx:           tx,
-				wallet:       wallet,
-				numAddresses: numAddresses,
-				gasLimit:     FixedGasLimitPerTx,
-				endSlot:      endSlot,
+				tx:              tx,
+				wallet:          wallet,
+				numAddresses:    numAddresses,
+				gasLimit:        FixedGasLimitPerTx,
+				endAddressIndex: endAddressIndex,
 			})
 
 			s.logger.WithFields(logrus.Fields{
@@ -343,17 +349,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 				"gas_limit": FixedGasLimitPerTx,
 			}).Debugf("built bloat tx")
 
-			startSlot = endSlot
+			nextAddressIndex = endAddressIndex
 
 			// Break if we've reached target
-			if startSlot >= targetSlots {
+			if nextAddressIndex >= targetAddresses {
 				break
 			}
 		}
 
 		if !roundSuccess {
 			// Revert to beginning of round on failure
-			startSlot = roundStartSlot
+			nextAddressIndex = roundStartAddressIndex
 			errorCount++
 			time.Sleep(time.Second * time.Duration(errorCount))
 			continue
@@ -416,14 +422,14 @@ func (s *Scenario) Run(ctx context.Context) error {
 			}
 
 			if roundSuccess {
-				startSlot = txBatches[len(txBatches)-1].endSlot
+				nextAddressIndex = txBatches[len(txBatches)-1].endAddressIndex
 				totalTxCount += uint64(batchTxCount)
 			}
 		}
 
 		if !roundSuccess {
 			// Revert to beginning of round on failure
-			startSlot = roundStartSlot
+			nextAddressIndex = roundStartAddressIndex
 			errorCount++
 			time.Sleep(time.Second * time.Duration(errorCount))
 			continue
@@ -433,16 +439,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 		errorCount = 0
 
 		// Log progress after successful round
-		currentGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
-		progress := float64(startSlot) / float64(targetSlots) * 100
-		s.logger.Infof("progress: %.2f%% | contract: %s | slots: %d / %d | storage: %.3f GB / %.3f GB | round txs: %d",
-			progress, s.contractAddr.Hex(), startSlot, targetSlots, currentGB, s.options.TargetStorageGB, batchTxCount)
+		// Note: each address = 2 storage slots = 64 bytes
+		currentGB := float64(nextAddressIndex*SlotsPerBloatCycle*BytesPerSlot) / (1024 * 1024 * 1024)
+		progress := float64(nextAddressIndex) / float64(targetAddresses) * 100
+		s.logger.Infof("progress: %.2f%% | contract: %s | addresses: %d / %d | storage: %.3f GB / %.3f GB | round txs: %d",
+			progress, s.contractAddr.Hex(), nextAddressIndex, targetAddresses, currentGB, s.options.TargetStorageGB, batchTxCount)
 	}
 
 	// Log completion
-	finalGB := float64(startSlot*BytesPerSlot) / (1024 * 1024 * 1024)
-	s.logger.Infof("bloating complete! contract: %s | total slots: %d | estimated storage: %.3f GB | total txs: %d",
-		s.contractAddr.Hex(), startSlot, finalGB, totalTxCount)
+	finalGB := float64(nextAddressIndex*SlotsPerBloatCycle*BytesPerSlot) / (1024 * 1024 * 1024)
+	s.logger.Infof("bloating complete! contract: %s | total addresses: %d | estimated storage: %.3f GB | total txs: %d",
+		s.contractAddr.Hex(), nextAddressIndex, finalGB, totalTxCount)
 
 	return nil
 }
@@ -477,6 +484,8 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 
 	s.logger.Infof("distributing 10M tokens to each of %d wallets", numWallets-1)
 
+	// Build all transfer transactions upfront
+	var txList []*types.Transaction
 	for i := 1; i < numWallets; i++ {
 		recipientWallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, i)
 		recipientAddr := recipientWallet.GetAddress()
@@ -493,7 +502,8 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 		}
 
 		// Build transfer transaction
-		feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+		baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+		feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 		if err != nil {
 			return fmt.Errorf("failed to get suggested fees: %w", err)
 		}
@@ -502,7 +512,7 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 			To:        &s.contractAddr,
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       100000, // Simple transfer shouldn't need much gas
+			Gas:       65000, // ERC20 transfer ~50-55k gas + buffer
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			return s.contractInstance.Transfer(transactOpts, recipientAddr, tokensPerWallet)
@@ -511,20 +521,33 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 			return fmt.Errorf("failed to build transfer tx for wallet %d: %w", i, err)
 		}
 
-		// Send and wait for confirmation
-		receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, deployerWallet, tx, &spamoor.SendTransactionOptions{
+		txList = append(txList, tx)
+	}
+
+	if len(txList) == 0 {
+		s.logger.Infof("all wallets already have sufficient tokens")
+		return nil
+	}
+
+	// Send all transfers in batch with sliding window
+	s.logger.Infof("sending %d token transfer transactions in batch", len(txList))
+	receipts, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, deployerWallet, txList, &spamoor.BatchOptions{
+		SendTransactionOptions: spamoor.SendTransactionOptions{
 			Client:      client,
 			Rebroadcast: true,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to send transfer to wallet %d: %w", i, err)
-		}
+		},
+		MaxRetries:   3,
+		PendingLimit: 200,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to send token transfer batch: %w", err)
+	}
 
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			return fmt.Errorf("token transfer to wallet %d failed", i)
+	// Verify all transfers succeeded
+	for i, receipt := range receipts {
+		if receipt == nil || receipt.Status != types.ReceiptStatusSuccessful {
+			return fmt.Errorf("token transfer %d failed", i)
 		}
-
-		s.logger.Debugf("transferred 10M tokens to wallet %d (tx: %s)", i, tx.Hash().Hex())
 	}
 
 	s.logger.Infof("token distribution complete")
@@ -547,7 +570,8 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 		return nil, nil, fmt.Errorf("failed to parse initial supply")
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
@@ -585,14 +609,16 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 	return receipt, tx, nil
 }
 
-// buildBloatTx builds a bloating transaction without sending it
-func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, startSlot uint64, numAddresses uint64) (*types.Transaction, error) {
+// buildBloatTx builds a bloating transaction without sending it.
+// nextAddressIndex is the starting address index (matching contract's nextStorageSlot semantics).
+func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, startAddressIndex uint64, numAddresses uint64) (*types.Transaction, error) {
 	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
 	if client == nil {
 		return nil, fmt.Errorf("no client available")
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
@@ -608,7 +634,7 @@ func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, sta
 		Gas:       gasLimit,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		return s.contractInstance.BloatStorage(transactOpts, new(big.Int).SetUint64(startSlot), new(big.Int).SetUint64(numAddresses))
+		return s.contractInstance.BloatStorage(transactOpts, new(big.Int).SetUint64(startAddressIndex), new(big.Int).SetUint64(numAddresses))
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build bloat tx: %w", err)

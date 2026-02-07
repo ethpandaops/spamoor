@@ -28,6 +28,8 @@ type ScenarioOptions struct {
 	Rebroadcast       uint64  `yaml:"rebroadcast"`
 	BaseFee           float64 `yaml:"base_fee"`
 	TipFee            float64 `yaml:"tip_fee"`
+	BaseFeeWei        string  `yaml:"base_fee_wei"`
+	TipFeeWei         string  `yaml:"tip_fee_wei"`
 	PairCount         uint64  `yaml:"pair_count"`
 	MinSwapAmount     string  `yaml:"min_swap_amount"`
 	MaxSwapAmount     string  `yaml:"max_swap_amount"`
@@ -91,6 +93,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transfer transactions (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transfer transactions (in gwei)")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.Uint64Var(&s.options.PairCount, "pair-count", ScenarioDefaultOptions.PairCount, "Number of uniswap pairs to deploy")
 	flags.StringVar(&s.options.MinSwapAmount, "min-swap", ScenarioDefaultOptions.MinSwapAmount, "Minimum swap amount in wei")
 	flags.StringVar(&s.options.MaxSwapAmount, "max-swap", ScenarioDefaultOptions.MaxSwapAmount, "Maximum swap amount in wei")
@@ -166,6 +170,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.uniswap = NewUniswap(ctx, s.walletPool, s.logger, UniswapOptions{
 		BaseFee:             s.options.BaseFee,
 		TipFee:              s.options.TipFee,
+		BaseFeeWei:          s.options.BaseFeeWei,
+		TipFeeWei:           s.options.TipFeeWei,
 		DaiPairs:            s.options.PairCount,
 		EthLiquidityPerPair: uint256.NewInt(0).Mul(uint256.NewInt(2000), uint256.NewInt(1000000000000000000)),
 		DaiLiquidityFactor:  10000,
@@ -285,7 +291,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, nil, client, wallet, err
 	}

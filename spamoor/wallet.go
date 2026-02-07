@@ -31,6 +31,7 @@ type Wallet struct {
 	privkey          *ecdsa.PrivateKey
 	address          common.Address
 	needNonceResync  bool
+	isSynced         bool
 	chainid          *big.Int
 	pendingTxCount   atomic.Uint64
 	submittedTxCount atomic.Uint64
@@ -58,27 +59,27 @@ type PendingTx struct {
 	Submitted        time.Time
 	LastRebroadcast  time.Time
 	RebroadcastCount uint64
+	Options          *SendTransactionOptions
 }
 
 // NewWallet creates a new wallet from a private key string.
 // If privkey is empty, generates a new random private key.
 // The privkey parameter accepts hex strings with or without "0x" prefix.
-func NewWallet(privkey string) (*Wallet, error) {
+func NewWallet(privkey *ecdsa.PrivateKey, address common.Address) *Wallet {
 	wallet := &Wallet{
+		privkey:      privkey,
+		address:      address,
 		txNonceChans: map[uint64]*nonceStatus{},
 	}
-	err := wallet.loadPrivateKey(privkey)
-	if err != nil {
-		return nil, err
-	}
-	return wallet, nil
+
+	return wallet
 }
 
 // loadPrivateKey loads a private key from a hex string or generates a new random key.
 // If privkey is empty, it generates a new random private key.
 // If privkey is provided, it accepts hex strings with or without "0x" prefix.
 // Also derives and sets the wallet's Ethereum address from the private key.
-func (wallet *Wallet) loadPrivateKey(privkey string) error {
+func LoadPrivateKey(privkey string) (*ecdsa.PrivateKey, common.Address, error) {
 	var (
 		privateKey *ecdsa.PrivateKey
 		err        error
@@ -92,17 +93,43 @@ func (wallet *Wallet) loadPrivateKey(privkey string) error {
 		privateKey, err = crypto.HexToECDSA(privkey)
 	}
 	if err != nil {
-		return err
+		return nil, common.Address{}, err
 	}
 
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return errors.New("error casting public key to ECDSA")
+		return nil, common.Address{}, errors.New("error casting public key to ECDSA")
 	}
 
-	wallet.privkey = privateKey
-	wallet.address = crypto.PubkeyToAddress(*publicKeyECDSA)
+	return privateKey, crypto.PubkeyToAddress(*publicKeyECDSA), nil
+}
+
+func (wallet *Wallet) UpdateWallet(ctx context.Context, client *Client, refresh bool) error {
+	if wallet.isSynced && !refresh {
+		return nil
+	}
+
+	if wallet.GetChainId() == nil {
+		chainId, err := client.GetChainId(ctx)
+		if err != nil {
+			return err
+		}
+		wallet.SetChainId(chainId)
+	}
+
+	nonce, err := client.GetNonceAt(ctx, wallet.GetAddress(), nil)
+	if err != nil {
+		return err
+	}
+	wallet.SetNonce(nonce)
+
+	balance, err := client.GetBalanceAt(ctx, wallet.GetAddress())
+	if err != nil {
+		return err
+	}
+	wallet.SetBalance(balance)
+
 	return nil
 }
 
@@ -160,6 +187,81 @@ func (wallet *Wallet) GetBalance() *big.Int {
 	wallet.balanceMutex.RLock()
 	defer wallet.balanceMutex.RUnlock()
 	return wallet.balance
+}
+
+func (wallet *Wallet) GetReadableBalance(unitDigits, maxPreCommaDigitsBeforeTrim, digits int, addPositiveSign, trimAmount bool) string {
+	// Initialize trimmedAmount and postComma variables to "0"
+	fullAmount := ""
+	trimmedAmount := "0"
+	postComma := "0"
+	proceed := ""
+	amount := wallet.GetBalance()
+
+	if amount != nil {
+		s := amount.String()
+
+		if amount.Sign() > 0 && addPositiveSign {
+			proceed = "+"
+		} else if amount.Sign() < 0 {
+			proceed = "-"
+			s = strings.Replace(s, "-", "", 1)
+		}
+
+		l := len(s)
+
+		// Check if there is a part of the amount before the decimal point
+		switch {
+		case l > unitDigits:
+			// Calculate length of preComma part
+			l -= unitDigits
+			// Set preComma to part of the string before the decimal point
+			trimmedAmount = s[:l]
+			// Set postComma to part of the string after the decimal point, after removing trailing zeros
+			postComma = strings.TrimRight(s[l:], "0")
+
+			// Check if the preComma part exceeds the maximum number of digits before the decimal point
+			if maxPreCommaDigitsBeforeTrim > 0 && l > maxPreCommaDigitsBeforeTrim {
+				// Reduce the number of digits after the decimal point by the excess number of digits in the preComma part
+				l -= maxPreCommaDigitsBeforeTrim
+				if digits < l {
+					digits = 0
+				} else {
+					digits -= l
+				}
+			}
+			// Check if there is only a part of the amount after the decimal point, and no leading zeros need to be added
+		case l == unitDigits:
+			// Set postComma to part of the string after the decimal point, after removing trailing zeros
+			postComma = strings.TrimRight(s, "0")
+			// Check if there is only a part of the amount after the decimal point, and leading zeros need to be added
+		case l != 0:
+			// Use fmt package to add leading zeros to the string
+			d := fmt.Sprintf("%%0%dd", unitDigits-l)
+			// Set postComma to resulting string, after removing trailing zeros
+			postComma = strings.TrimRight(fmt.Sprintf(d, 0)+s, "0")
+		}
+
+		fullAmount = trimmedAmount
+		if postComma != "" {
+			fullAmount += "." + postComma
+		}
+
+		// limit floating part
+		if len(postComma) > digits {
+			postComma = postComma[:digits]
+		}
+
+		// set floating point
+		if postComma != "" {
+			trimmedAmount += "." + postComma
+		}
+	}
+
+	if trimAmount {
+		return proceed + trimmedAmount
+	}
+
+	return proceed + fullAmount
 }
 
 // setLowBalanceNotification sets up low balance notification for this wallet.
@@ -283,6 +385,21 @@ func (wallet *Wallet) BuildDynamicFeeTx(txData *types.DynamicFeeTx) (*types.Tran
 	return wallet.signTx(txData)
 }
 
+// BuildLegacyTx builds and signs a legacy transaction.
+// It automatically assigns the next available nonce and signs the transaction.
+func (wallet *Wallet) BuildLegacyTx(txData *types.LegacyTx) (*types.Transaction, error) {
+	txData.Nonce = wallet.GetNextNonce()
+	return wallet.signTx(txData)
+}
+
+// BuildAccessListTx builds and signs an access list transaction.
+// It automatically assigns the next available nonce and signs the transaction.
+func (wallet *Wallet) BuildAccessListTx(txData *types.AccessListTx) (*types.Transaction, error) {
+	txData.ChainID = wallet.chainid
+	txData.Nonce = wallet.GetNextNonce()
+	return wallet.signTx(txData)
+}
+
 // BuildBlobTx builds and signs a blob transaction (EIP-4844).
 // It automatically assigns the next available nonce and signs the transaction.
 func (wallet *Wallet) BuildBlobTx(txData *types.BlobTx) (*types.Transaction, error) {
@@ -303,6 +420,10 @@ func (wallet *Wallet) BuildSetCodeTx(txData *types.SetCodeTx) (*types.Transactio
 // It sets up a TransactOpts with the wallet's credentials and calls the provided
 // buildFn to construct the actual transaction. Useful for contract interactions.
 func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMetadata, buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
+	if wallet.privkey == nil {
+		return nil, errors.New("wallet has no private key")
+	}
+
 	transactor, err := bind.NewKeyedTransactorWithChainID(wallet.privkey, wallet.chainid)
 	if err != nil {
 		return nil, err
@@ -332,6 +453,29 @@ func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMeta
 // This is useful for replacing stuck transactions with higher gas prices.
 func (wallet *Wallet) ReplaceDynamicFeeTx(txData *types.DynamicFeeTx, nonce uint64) (*types.Transaction, error) {
 	txData.ChainID = wallet.chainid
+	txData.Nonce = nonce
+	return wallet.signTx(txData)
+}
+
+// ReplaceLegacyTx builds a replacement legacy transaction with a specific nonce.
+// This is useful for replacing stuck transactions with higher gas prices.
+func (wallet *Wallet) ReplaceLegacyTx(txData *types.LegacyTx, nonce uint64) (*types.Transaction, error) {
+	txData.Nonce = nonce
+	return wallet.signTx(txData)
+}
+
+// ReplaceAccessListTx builds a replacement access list transaction with a specific nonce.
+// This is useful for replacing stuck transactions with higher gas prices.
+func (wallet *Wallet) ReplaceAccessListTx(txData *types.AccessListTx, nonce uint64) (*types.Transaction, error) {
+	txData.ChainID = wallet.chainid
+	txData.Nonce = nonce
+	return wallet.signTx(txData)
+}
+
+// ReplaceSetCodeTx builds a replacement set code transaction with a specific nonce.
+// This is useful for replacing stuck set code transactions with higher gas prices.
+func (wallet *Wallet) ReplaceSetCodeTx(txData *types.SetCodeTx, nonce uint64) (*types.Transaction, error) {
+	txData.ChainID = uint256.NewInt(wallet.chainid.Uint64())
 	txData.Nonce = nonce
 	return wallet.signTx(txData)
 }
@@ -386,6 +530,10 @@ func (wallet *Wallet) MarkNeedResync() {
 // It creates a new transaction from the provided transaction data and signs it
 // using the latest signer for the wallet's configured chain ID.
 func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
+	if wallet.privkey == nil {
+		return nil, errors.New("wallet has no private key")
+	}
+
 	tx := types.NewTx(txData)
 	signedTx, err := types.SignTx(tx, types.LatestSignerForChainID(wallet.chainid), wallet.privkey)
 	if err != nil {
@@ -398,7 +546,7 @@ func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
 // It manages a map of nonce channels used to wait for specific transaction confirmations.
 // Returns the nonce status and a boolean indicating if this is the first pending transaction.
 // If the target nonce is already confirmed, returns nil and false.
-func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool) {
+func (wallet *Wallet) getTxNonceChan(tx *types.Transaction, options *SendTransactionOptions) (*nonceStatus, bool) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
@@ -412,6 +560,9 @@ func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool)
 	if nonceChan != nil {
 		for _, existingTx := range nonceChan.txs {
 			if existingTx.Tx.Hash() == tx.Hash() {
+				if existingTx.Options == nil && options != nil {
+					existingTx.Options = options
+				}
 				return nonceChan, false
 			}
 		}
@@ -419,6 +570,7 @@ func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool)
 		nonceChan.txs = append(nonceChan.txs, &PendingTx{
 			Tx:        tx,
 			Submitted: time.Now(),
+			Options:   options,
 		})
 		return nonceChan, false
 	}
@@ -428,6 +580,7 @@ func (wallet *Wallet) getTxNonceChan(tx *types.Transaction) (*nonceStatus, bool)
 			{
 				Tx:        tx,
 				Submitted: time.Now(),
+				Options:   options,
 			},
 		},
 		channel: make(chan bool),
@@ -492,4 +645,79 @@ func (wallet *Wallet) GetPendingTxs() []*PendingTx {
 	}
 
 	return pendingTxs
+}
+
+// GetLowestPendingNonce returns the lowest pending nonce for this wallet.
+// Returns 0, false if there are no pending transactions.
+func (wallet *Wallet) GetLowestPendingNonce() (uint64, bool) {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	if len(wallet.txNonceChans) == 0 {
+		return 0, false
+	}
+
+	lowestNonce := uint64(0)
+	first := true
+	for nonce := range wallet.txNonceChans {
+		if first || nonce < lowestNonce {
+			lowestNonce = nonce
+			first = false
+		}
+	}
+
+	return lowestNonce, true
+}
+
+// GetNonceGaps returns missing nonces between confirmedTxCount and the lowest pending nonce.
+// This helps detect nonce gaps that need to be filled with dummy transactions.
+func (wallet *Wallet) GetNonceGaps() []uint64 {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	if len(wallet.txNonceChans) == 0 {
+		return nil
+	}
+
+	// Find the lowest pending nonce
+	lowestPendingNonce := uint64(0)
+	first := true
+	for nonce := range wallet.txNonceChans {
+		if first || nonce < lowestPendingNonce {
+			lowestPendingNonce = nonce
+			first = false
+		}
+	}
+
+	// No gap if lowest pending nonce equals confirmed count
+	if lowestPendingNonce <= wallet.confirmedTxCount {
+		return nil
+	}
+
+	// Build list of missing nonces
+	gaps := make([]uint64, 0, lowestPendingNonce-wallet.confirmedTxCount)
+	for nonce := wallet.confirmedTxCount; nonce < lowestPendingNonce; nonce++ {
+		// Check if this nonce already has a pending tx
+		if _, exists := wallet.txNonceChans[nonce]; !exists {
+			gaps = append(gaps, nonce)
+		}
+	}
+
+	return gaps
+}
+
+// BuildFillerTx creates a simple self-transfer transaction to fill a nonce gap.
+// The transaction sends 0 value to the wallet's own address with minimal gas.
+func (wallet *Wallet) BuildFillerTx(nonce uint64, gasTipCap, gasFeeCap *big.Int) (*types.Transaction, error) {
+	txData := &types.DynamicFeeTx{
+		ChainID:   wallet.chainid,
+		Nonce:     nonce,
+		GasTipCap: gasTipCap,
+		GasFeeCap: gasFeeCap,
+		Gas:       21000, // Minimum gas for simple transfer
+		To:        &wallet.address,
+		Value:     big.NewInt(0),
+		Data:      nil,
+	}
+	return wallet.signTx(txData)
 }
