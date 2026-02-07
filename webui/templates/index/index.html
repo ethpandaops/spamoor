@@ -16,7 +16,7 @@
     <div class="d-flex justify-content-between align-items-center mb-3">
       <div class="d-flex align-items-center gap-3">
         <!-- Mass actions controls -->
-        <div id="massActionsControls" class="d-none d-flex align-items-center gap-2">
+        <div id="massActionsControls" class="d-none d-flex align-items-center gap-2" data-auth-required>
           <span class="text-muted" id="selectedCount">0 selected</span>
           <div class="dropdown">
             <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
@@ -41,8 +41,8 @@
           </div>
         </div>
       </div>
-      
-      <div class="d-flex gap-2">
+
+      <div class="d-flex gap-2 d-none" data-auth-required>
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newSpammerModal">
           <i class="fas fa-plus"></i> Create Spammer
         </button>
@@ -53,21 +53,21 @@
       <table class="table">
         <thead>
           <tr>
-            <th style="width: 40px">
+            <th style="width: 40px" class="auth-required-column">
               <input type="checkbox" class="form-check-input" id="selectAll" onchange="toggleSelectAll(this)">
             </th>
             <th style="width: 100px">ID</th>
             <th>Name</th>
             <th style="min-width: 100px; width: 10%">Scenario</th>
             <th style="min-width: 100px; width: 10%">Status</th>
-            <th class="text-end" style="width: 180px">Actions</th>
+            <th class="text-end auth-required-column" style="width: 180px">Actions</th>
           </tr>
         </thead>
         <tbody>
           {{ range .Spammers }}
           <tr class="align-middle">
-            <td>
-              <input type="checkbox" class="form-check-input spammer-checkbox" data-spammer-id="{{ .ID }}" 
+            <td class="auth-required-column">
+              <input type="checkbox" class="form-check-input spammer-checkbox" data-spammer-id="{{ .ID }}"
                      onchange="updateMassActions()">
             </td>
             <td>{{ .ID }}</td>
@@ -91,7 +91,7 @@
                 <span class="badge bg-danger">Unknown</span>
               {{ end }}
             </td>
-            <td>
+            <td class="auth-required-column">
               <div class="d-flex gap-2" style="flex-direction: row-reverse;">
                 <button class="btn btn-sm btn-outline-secondary" onclick="toggleLogs(this, {{ .ID }})" title="Toggle Logs" data-bs-toggle="tooltip" data-bs-placement="top">
                   <i class="fas fa-chevron-down"></i>
@@ -380,21 +380,48 @@ const LOG_REFRESH_INTERVAL = 10000;
 const MAX_LOG_ENTRIES = 5000;
 const logRefreshTimers = new Map();
 
+/* Listen for auth state changes */
+window.addEventListener('authStateChanged', function(e) {
+  updateAuthColumns(e.detail.isAuthenticated);
+});
+
+function updateAuthColumns(isAuthenticated) {
+  const columns = document.querySelectorAll('.auth-required-column');
+  columns.forEach(function(col) {
+    if (isAuthenticated) {
+      col.style.display = '';
+    } else {
+      col.style.display = 'none';
+    }
+  });
+}
+
+/* Check auth and return false with alert if not authenticated */
+function requireAuth() {
+  if (!window.spamoor || !window.spamoor.isAuthenticated()) {
+    alert('You must be logged in to perform this action');
+    return false;
+  }
+  return true;
+}
+
 async function startSpammer(id) {
+  if (!requireAuth()) return;
+
   try {
-    const response = await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
+    const response = await spamoor.authFetch(`/api/spammer/${id}/start`, {method: 'POST'});
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-    
+
     const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
     const statusCell = row.querySelector('.status-cell');
     const toggleButton = row.querySelector('.spammer-toggle-btn');
     const reclaimButton = row.querySelector('.spammer-reclaim-btn');
-    
+
     statusCell.innerHTML = '<span class="badge bg-success">Running</span>';
-    
+
     toggleButton.className = 'btn btn-sm btn-warning spammer-toggle-btn';
     toggleButton.setAttribute('onclick', `pauseSpammer(${id})`);
     toggleButton.setAttribute('title', 'Pause Spammer');
@@ -412,20 +439,22 @@ async function startSpammer(id) {
 }
 
 async function pauseSpammer(id) {
+  if (!requireAuth()) return;
+
   try {
-    const response = await fetch(`/api/spammer/${id}/pause`, {method: 'POST'});
+    const response = await spamoor.authFetch(`/api/spammer/${id}/pause`, {method: 'POST'});
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-    
+
     const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
     const statusCell = row.querySelector('.status-cell');
     const toggleButton = row.querySelector('.spammer-toggle-btn');
     const reclaimButton = row.querySelector('.spammer-reclaim-btn');
-    
+
     statusCell.innerHTML = '<span class="badge bg-info">Paused</span>';
-    
+
     toggleButton.className = 'btn btn-sm btn-success spammer-toggle-btn';
     toggleButton.setAttribute('onclick', `startSpammer(${id})`);
     toggleButton.setAttribute('title', 'Start Spammer');
@@ -443,9 +472,11 @@ async function pauseSpammer(id) {
 }
 
 async function deleteSpammer(id) {
+  if (!requireAuth()) return;
   if (!confirm('Are you sure you want to delete this spammer?')) return;
+
   try {
-    const response = await fetch(`/api/spammer/${id}`, {method: 'DELETE'});
+    const response = await spamoor.authFetch(`/api/spammer/${id}`, {method: 'DELETE'});
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
@@ -457,10 +488,11 @@ async function deleteSpammer(id) {
 }
 
 async function reclaimFunds(id) {
+  if (!requireAuth()) return;
   if (!confirm('Are you sure you want to reclaim funds from this spammer? This will return any remaining funds from the spammer\'s wallet pool back to the root wallet.')) return;
-  
+
   try {
-    const response = await fetch(`/api/spammer/${id}/reclaim`, {method: 'POST'});
+    const response = await spamoor.authFetch(`/api/spammer/${id}/reclaim`, {method: 'POST'});
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
@@ -707,6 +739,8 @@ document.querySelector('#newSpammerForm [name="config"]').addEventListener('keyd
 });
 
 async function submitNewSpammer() {
+  if (!requireAuth()) return;
+
   const form = document.getElementById('newSpammerForm');
   const data = {
     name: form.querySelector('[name="name"]').value,
@@ -717,7 +751,7 @@ async function submitNewSpammer() {
   };
 
   try {
-    const response = await fetch('/api/spammer', {
+    const response = await spamoor.authFetch('/api/spammer', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(data)
@@ -756,13 +790,15 @@ function getLogLevelBadge(level) {
 }
 
 function toggleLogs(button, id) {
+  if (!requireAuth()) return;
+
   const tooltips = document.querySelectorAll('[data-bs-toggle="tooltip"]');
   tooltips.forEach(el => bootstrap.Tooltip.getInstance(el)?.hide());
 
   const icon = button.querySelector('i');
   const logRow = document.querySelector(`tr.log-row[data-spammer-id="${id}"]`);
   const logsDiv = logRow.querySelector('.logs');
-  
+
   if (logRow.classList.contains('d-none')) {
     icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
     logRow.classList.remove('d-none');
@@ -784,14 +820,20 @@ function startLogStream(id, logsDiv) {
   function connect() {
     const lastEntry = logsDiv.querySelector('.log-entry:last-child');
     const lastTime = lastEntry?.dataset.time;
-    
+
     const url = new URL(`/api/spammer/${id}/logs/stream`, window.location.origin);
     if (lastTime) {
       url.searchParams.set('since', lastTime);
     }
-    
+
+    /* Add auth token to SSE connection via query param (EventSource doesn't support headers) */
+    const token = spamoor.getAuthToken();
+    if (token) {
+      url.searchParams.set('auth', token);
+    }
+
     const sse = new EventSource(url.toString());
-    
+
     sse.onmessage = (event) => {
       const logs = JSON.parse(event.data);
       appendLogs(logs, logsDiv);
@@ -893,13 +935,15 @@ window.addEventListener('beforeunload', () => {
 });
 
 async function editSpammer(id) {
+  if (!requireAuth()) return;
+
   try {
-    const response = await fetch(`/api/spammer/${id}`);
+    const response = await spamoor.authFetch(`/api/spammer/${id}`);
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-    
+
     const spammer = await response.json();
     const form = document.getElementById('editSpammerForm');
     const warning = document.getElementById('editWarning');
@@ -956,6 +1000,8 @@ async function editSpammer(id) {
 }
 
 async function submitEditSpammer(action) {
+  if (!requireAuth()) return;
+
   const form = document.getElementById('editSpammerForm');
   const id = form.querySelector('[name="id"]').value;
   const data = {
@@ -965,7 +1011,7 @@ async function submitEditSpammer(action) {
   };
 
   try {
-    const response = await fetch(`/api/spammer/${id}`, {
+    const response = await spamoor.authFetch(`/api/spammer/${id}`, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(data)
@@ -974,28 +1020,28 @@ async function submitEditSpammer(action) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-    
+
     if (action === 'restart') {
-      const pauseResponse = await fetch(`/api/spammer/${id}/pause`, {method: 'POST'});
+      const pauseResponse = await spamoor.authFetch(`/api/spammer/${id}/pause`, {method: 'POST'});
       if (!pauseResponse.ok) {
         console.error('Failed to pause spammer before restart');
       }
-      
+
       await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const startResponse = await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
+
+      const startResponse = await spamoor.authFetch(`/api/spammer/${id}/start`, {method: 'POST'});
       if (!startResponse.ok) {
         const errorText = await startResponse.text();
         throw new Error(`Failed to restart spammer: ${errorText}`);
       }
     } else if (action === 'start') {
-      const startResponse = await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
+      const startResponse = await spamoor.authFetch(`/api/spammer/${id}/start`, {method: 'POST'});
       if (!startResponse.ok) {
         const errorText = await startResponse.text();
         throw new Error(`Failed to start spammer: ${errorText}`);
       }
     }
-    
+
     window.location.reload();
   } catch (err) {
     alert('Failed to update spammer: ' + err.message);
@@ -1014,6 +1060,9 @@ document.querySelector('#editSpammerForm [name="config"]').addEventListener('key
 document.addEventListener('DOMContentLoaded', () => {
   const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
   tooltipTriggerList.map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+
+  /* Initially hide auth-required columns until auth state is determined */
+  updateAuthColumns(false);
 });
 
 function toggleSelectAll(checkbox) {
@@ -1049,20 +1098,22 @@ function updateMassActions() {
 }
 
 async function massExport() {
+  if (!requireAuth()) return;
+
   const selectedIds = Array.from(document.querySelectorAll('.spammer-checkbox:checked'))
     .map(cb => parseInt(cb.dataset.spammerId));
-  
+
   if (selectedIds.length === 0) return;
-  
+
   try {
-    const response = await fetch('/api/spammers/export', {
+    const response = await spamoor.authFetch('/api/spammers/export', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({spammer_ids: selectedIds})
     });
-    
+
     if (!response.ok) throw new Error('Export failed');
-    
+
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1078,16 +1129,18 @@ async function massExport() {
 }
 
 async function massStart() {
+  if (!requireAuth()) return;
+
   const selectedIds = Array.from(document.querySelectorAll('.spammer-checkbox:checked'))
     .map(cb => parseInt(cb.dataset.spammerId));
-  
+
   if (selectedIds.length === 0) return;
   if (!confirm(`Start ${selectedIds.length} selected spammers?`)) return;
-  
+
   let successCount = 0;
   for (const id of selectedIds) {
     try {
-      const response = await fetch(`/api/spammer/${id}/start`, {method: 'POST'});
+      const response = await spamoor.authFetch(`/api/spammer/${id}/start`, {method: 'POST'});
       if (response.ok) {
         successCount++;
       } else {
@@ -1097,22 +1150,24 @@ async function massStart() {
       console.error(`Failed to start spammer ${id}:`, err);
     }
   }
-  
+
   alert(`Started ${successCount} out of ${selectedIds.length} spammers`);
   window.location.reload();
 }
 
 async function massStop() {
+  if (!requireAuth()) return;
+
   const selectedIds = Array.from(document.querySelectorAll('.spammer-checkbox:checked'))
     .map(cb => parseInt(cb.dataset.spammerId));
-  
+
   if (selectedIds.length === 0) return;
   if (!confirm(`Stop ${selectedIds.length} selected spammers?`)) return;
-  
+
   let successCount = 0;
   for (const id of selectedIds) {
     try {
-      const response = await fetch(`/api/spammer/${id}/pause`, {method: 'POST'});
+      const response = await spamoor.authFetch(`/api/spammer/${id}/pause`, {method: 'POST'});
       if (response.ok) {
         successCount++;
       } else {
@@ -1122,22 +1177,24 @@ async function massStop() {
       console.error(`Failed to stop spammer ${id}:`, err);
     }
   }
-  
+
   alert(`Stopped ${successCount} out of ${selectedIds.length} spammers`);
   window.location.reload();
 }
 
 async function massDelete() {
+  if (!requireAuth()) return;
+
   const selectedIds = Array.from(document.querySelectorAll('.spammer-checkbox:checked'))
     .map(cb => parseInt(cb.dataset.spammerId));
-  
+
   if (selectedIds.length === 0) return;
   if (!confirm(`Are you sure you want to DELETE ${selectedIds.length} selected spammers?\n\nThis action cannot be undone!`)) return;
-  
+
   let successCount = 0;
   for (const id of selectedIds) {
     try {
-      const response = await fetch(`/api/spammer/${id}`, {method: 'DELETE'});
+      const response = await spamoor.authFetch(`/api/spammer/${id}`, {method: 'DELETE'});
       if (response.ok) {
         successCount++;
       } else {
@@ -1147,7 +1204,7 @@ async function massDelete() {
       console.error(`Failed to delete spammer ${id}:`, err);
     }
   }
-  
+
   alert(`Deleted ${successCount} out of ${selectedIds.length} spammers`);
   window.location.reload();
 }
@@ -1227,25 +1284,27 @@ async function performImport() {
 }
 
 async function doImport(input) {
+  if (!requireAuth()) return;
+
   const importBtn = document.getElementById('primaryAction');
   const originalText = importBtn.textContent;
-  
+
   try {
     importBtn.textContent = 'Importing...';
     importBtn.disabled = true;
-    
-    const response = await fetch('/api/spammers/import', {
+
+    const response = await spamoor.authFetch('/api/spammers/import', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({input: input})
     });
-    
+
     const result = await response.json();
-    
+
     if (!response.ok) {
       throw new Error(result.error || 'Import failed');
     }
-    
+
     showImportResults(result);
   } catch (err) {
     showImportError(err.message);
@@ -1577,20 +1636,22 @@ function renderListView(container) {
 }
 
 async function importFromLibrary(filename) {
+  if (!requireAuth()) return;
+
   try {
     const url = `${libraryIndex.base_url}${filename}`;
-    
-    const response = await fetch('/api/spammers/import', {
+
+    const response = await spamoor.authFetch('/api/spammers/import', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({input: url})
     });
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-    
+
     const data = await response.json();
     hasImportedSpammers = true;
     alert(`Successfully imported ${data.imported_count} spammer(s) from ${filename}`);
