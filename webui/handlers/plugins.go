@@ -26,6 +26,7 @@ type PluginsPageEntry struct {
 	LoadError          string   `json:"load_error,omitempty"`
 	RunningCount       int32    `json:"running_count"`
 	IsLoaded           bool     `json:"is_loaded"`
+	Deprecated         bool     `json:"deprecated"`
 	CreatedAt          int64    `json:"created_at"`
 	UpdatedAt          int64    `json:"updated_at"`
 }
@@ -81,6 +82,7 @@ func (fh *FrontendHandler) getPluginsPageData(_ context.Context) (*PluginsPage, 
 			LoadError:          status.LoadError,
 			RunningCount:       status.RunningCount,
 			IsLoaded:           status.IsLoaded,
+			Deprecated:         status.Deprecated,
 			CreatedAt:          status.CreatedAt,
 			UpdatedAt:          status.UpdatedAt,
 		}

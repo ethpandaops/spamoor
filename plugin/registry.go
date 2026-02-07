@@ -157,8 +157,9 @@ func (p *LoadedPlugin) MarkCleanedUp() {
 
 // PluginRegistry tracks all loaded plugins.
 type PluginRegistry struct {
-	mu      sync.RWMutex
-	plugins map[string]*LoadedPlugin // keyed by plugin name
+	mu         sync.RWMutex
+	plugins    map[string]*LoadedPlugin // keyed by plugin name
+	deprecated []*LoadedPlugin          // old plugins still in use by running spammers
 }
 
 // NewPluginRegistry creates a new PluginRegistry.
@@ -170,12 +171,18 @@ func NewPluginRegistry() *PluginRegistry {
 
 // Register adds or replaces a plugin in the registry.
 // Returns the old plugin if one was replaced.
+// If the old plugin still has running spammers, it is tracked as deprecated.
 func (r *PluginRegistry) Register(plugin *LoadedPlugin) *LoadedPlugin {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	old := r.plugins[plugin.Descriptor.Name]
 	r.plugins[plugin.Descriptor.Name] = plugin
+
+	// Track old plugin as deprecated if it still has running spammers
+	if old != nil && old != plugin && old.GetRunningCount() > 0 {
+		r.deprecated = append(r.deprecated, old)
+	}
 
 	return old
 }
@@ -208,6 +215,30 @@ func (r *PluginRegistry) GetAll() []*LoadedPlugin {
 	for _, p := range r.plugins {
 		plugins = append(plugins, p)
 	}
+
+	return plugins
+}
+
+// RemoveDeprecated removes a plugin from the deprecated list.
+func (r *PluginRegistry) RemoveDeprecated(plugin *LoadedPlugin) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for i, p := range r.deprecated {
+		if p == plugin {
+			r.deprecated = append(r.deprecated[:i], r.deprecated[i+1:]...)
+			return
+		}
+	}
+}
+
+// GetDeprecated returns all deprecated plugins still in use by running spammers.
+func (r *PluginRegistry) GetDeprecated() []*LoadedPlugin {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	plugins := make([]*LoadedPlugin, len(r.deprecated))
+	copy(plugins, r.deprecated)
 
 	return plugins
 }

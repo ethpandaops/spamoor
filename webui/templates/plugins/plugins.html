@@ -30,19 +30,28 @@
               </tr>
               {{ else }}
               {{ range .Plugins }}
-              <tr data-plugin-name="{{ .Name }}">
+              <tr data-plugin-name="{{ .Name }}"{{ if .Deprecated }} class="table-secondary"{{ end }}>
                 <td>
                   <strong>{{ .Name }}</strong>
+                  {{ if .Deprecated }}
+                  <span class="badge bg-warning text-dark ms-1">Deprecated</span>
+                  {{ end }}
                   {{ if .MetadataName }}
                   <br><small class="text-muted">{{ .MetadataName }}</small>
                   {{ end }}
                 </td>
                 <td>
+                  {{ if .Deprecated }}
+                  <span class="text-muted">-</span>
+                  {{ else }}
                   <span class="badge bg-secondary">{{ .SourceType }}</span>
                   <br><small class="text-muted text-truncate d-block" style="max-width: 200px;" title="{{ .SourcePath }}">{{ .SourcePath }}</small>
+                  {{ end }}
                 </td>
                 <td>
-                  {{ if .LoadError }}
+                  {{ if .Deprecated }}
+                  <span class="badge bg-warning text-dark">Deprecated</span>
+                  {{ else if .LoadError }}
                   <span class="badge bg-danger" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ .LoadError }}">Error</span>
                   {{ else if .IsLoaded }}
                   <span class="badge bg-success">Loaded</span>
@@ -75,6 +84,9 @@
                   {{ end }}
                 </td>
                 <td>
+                  {{ if .Deprecated }}
+                  <span class="text-muted">-</span>
+                  {{ else }}
                   <div class="btn-group" role="group">
                     {{ if eq .SourceType "url" }}
                     <button type="button" class="btn btn-sm btn-primary" onclick="reloadPlugin('{{ .Name }}')" title="Reload from URL" data-bs-toggle="tooltip" data-bs-placement="top">
@@ -85,6 +97,7 @@
                       <i class="fas fa-trash"></i>
                     </button>
                   </div>
+                  {{ end }}
                 </td>
               </tr>
               {{ end }}

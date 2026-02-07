@@ -485,13 +485,16 @@ func (l *PluginLoader) maybeCleanup(plugin *LoadedPlugin) {
 	}
 }
 
-// CleanupPlugin removes the temp directory for a plugin.
+// CleanupPlugin removes the temp directory for a plugin and removes it from the deprecated list.
 func (l *PluginLoader) CleanupPlugin(plugin *LoadedPlugin) error {
 	if plugin.IsCleanedUp() {
 		return nil
 	}
 
 	plugin.MarkCleanedUp()
+
+	// Remove from deprecated list if present
+	l.pluginRegistry.RemoveDeprecated(plugin)
 
 	if plugin.TempDir != "" {
 		l.logger.Infof("cleaning up plugin temp directory: %s", plugin.TempDir)

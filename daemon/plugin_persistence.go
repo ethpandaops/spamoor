@@ -29,6 +29,7 @@ type PluginStatus struct {
 	LoadError          string   `json:"load_error,omitempty"`
 	RunningCount       int32    `json:"running_count"`
 	IsLoaded           bool     `json:"is_loaded"`
+	Deprecated         bool     `json:"deprecated"`
 	CreatedAt          int64    `json:"created_at"`
 	UpdatedAt          int64    `json:"updated_at"`
 }
@@ -278,12 +279,14 @@ func (pp *PluginPersistence) DeletePlugin(name string) error {
 }
 
 // GetPluginStatuses returns the combined status of all plugins from DB and runtime.
+// This includes deprecated plugins that have been replaced but still have running spammers.
 func (pp *PluginPersistence) GetPluginStatuses() ([]*PluginStatus, error) {
 	dbPlugins, err := pp.db.GetPlugins()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get plugins from database: %w", err)
 	}
 
+	registry := pp.pluginLoader.GetPluginRegistry()
 	statuses := make([]*PluginStatus, 0, len(dbPlugins))
 
 	for _, dbPlugin := range dbPlugins {
@@ -304,7 +307,7 @@ func (pp *PluginPersistence) GetPluginStatuses() ([]*PluginStatus, error) {
 		}
 
 		// Check runtime status
-		loadedPlugin := pp.pluginLoader.GetPluginRegistry().Get(dbPlugin.Name)
+		loadedPlugin := registry.Get(dbPlugin.Name)
 		if loadedPlugin != nil {
 			status.IsLoaded = !loadedPlugin.IsCleanedUp()
 			status.RunningCount = loadedPlugin.GetRunningCount()
@@ -324,6 +327,25 @@ func (pp *PluginPersistence) GetPluginStatuses() ([]*PluginStatus, error) {
 					status.MetadataGitVersion = loadedPlugin.Metadata.GitVersion
 				}
 			}
+		}
+
+		statuses = append(statuses, status)
+	}
+
+	// Add deprecated plugins (replaced but still running spammers)
+	for _, depPlugin := range registry.GetDeprecated() {
+		status := &PluginStatus{
+			Name:         depPlugin.Descriptor.Name,
+			SourceType:   depPlugin.SourceType.String(),
+			RunningCount: depPlugin.GetRunningCount(),
+			IsLoaded:     !depPlugin.IsCleanedUp(),
+			Deprecated:   true,
+		}
+
+		if depPlugin.Metadata != nil {
+			status.MetadataName = depPlugin.Metadata.Name
+			status.MetadataBuildTime = depPlugin.Metadata.BuildTime
+			status.MetadataGitVersion = depPlugin.Metadata.GitVersion
 		}
 
 		statuses = append(statuses, status)
