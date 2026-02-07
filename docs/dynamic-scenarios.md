@@ -1,42 +1,64 @@
-# Dynamic Scenario Loading Guide
+# Plugin Development Guide
 
-This guide covers how to create and use dynamic scenarios in Spamoor. Dynamic scenarios are Go source files that are loaded at runtime using the Yaegi interpreter, allowing you to add new scenarios without recompiling Spamoor.
+This guide covers how to create and use plugins to extend Spamoor with custom transaction scenarios. Plugins are Go source files loaded at runtime using the [Yaegi](https://github.com/traefik/yaegi) interpreter, allowing you to add new scenarios without recompiling Spamoor.
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Quick Start](#quick-start)
-- [Creating a Dynamic Scenario](#creating-a-dynamic-scenario)
+- [Plugin Structure](#plugin-structure)
+- [Creating a Scenario](#creating-a-scenario)
 - [Available Packages](#available-packages)
 - [CLI Usage](#cli-usage)
-- [Auto-loading and Hot-reload](#auto-loading-and-hot-reload)
-- [Validating Scenarios](#validating-scenarios)
-- [Adding New Symbol Packages](#adding-new-symbol-packages)
-- [Yaegi Limitations and Workarounds](#yaegi-limitations-and-workarounds)
+- [Daemon Mode](#daemon-mode)
+- [Validating Plugins](#validating-plugins)
+- [Yaegi Limitations](#yaegi-limitations)
 - [Troubleshooting](#troubleshooting)
 
 ## Overview
 
-Dynamic scenarios provide a way to extend Spamoor without modifying the core codebase or recompiling. They are useful for:
+Plugins provide a way to extend Spamoor without modifying the core codebase or recompiling. They are useful for:
 
 - **Rapid prototyping**: Test new transaction patterns quickly
 - **Custom deployments**: Add organization-specific scenarios
 - **External contributions**: Share scenarios without core integration
 
-Dynamic scenarios are interpreted at runtime by Yaegi and have access to a subset of Spamoor's APIs through extracted symbols.
+Plugins are interpreted at runtime by Yaegi and have access to Spamoor's APIs through pre-extracted symbols.
 
 ## Quick Start
 
-> **Working Example**: See [`examples/dynamic-scenarios/simple_transfer.go`](../examples/dynamic-scenarios/simple_transfer.go) for a complete, runnable example.
-
-1. Create a directory for your scenario:
+1. Create a plugin directory:
 ```bash
-mkdir -p scenarios/external/my-scenario
+mkdir -p my-plugin/my-scenario
 ```
 
-2. Create a Go source file (e.g., `my-scenario.go`):
+2. Create `my-plugin/plugin.go`:
 ```go
-package main
+package plugin
+
+import (
+    "github.com/ethpandaops/spamoor/plugins/my-plugin/my-scenario"
+    "github.com/ethpandaops/spamoor/scenario"
+)
+
+var PluginDescriptor = scenario.PluginDescriptor{
+    Name:        "my-plugin",
+    Description: "My custom plugin",
+    Categories: []*scenario.Category{
+        {
+            Name:        "Custom",
+            Description: "Custom scenarios",
+            Descriptors: []*scenario.Descriptor{
+                &myscenario.ScenarioDescriptor,
+            },
+        },
+    },
+}
+```
+
+3. Create `my-plugin/my-scenario/scenario.go`:
+```go
+package myscenario
 
 import (
     "context"
@@ -47,29 +69,29 @@ import (
     "github.com/spf13/pflag"
 )
 
-var ScenarioDescriptor = scenario.Descriptor{
-    Name:        "my-scenario",
-    Description: "My custom transaction scenario",
-    NewScenario: NewScenario,
-}
-
-type Scenario struct {
-    logger  *logrus.Entry
-    options *Options
-}
-
 type Options struct {
     Throughput uint64 `yaml:"throughput"`
 }
 
-var DefaultOptions = &Options{
-    Throughput: 10,
+var DefaultOptions = Options{Throughput: 10}
+
+var ScenarioDescriptor = scenario.Descriptor{
+    Name:           "my-scenario",
+    Description:    "My custom scenario",
+    DefaultOptions: DefaultOptions,
+    NewScenario:    newScenario,
 }
 
-func NewScenario(logger logrus.FieldLogger) scenario.Scenario {
+type Scenario struct {
+    options    Options
+    logger     *logrus.Entry
+    walletPool *spamoor.WalletPool
+}
+
+func newScenario(logger logrus.FieldLogger) scenario.Scenario {
     return &Scenario{
+        options: DefaultOptions,
         logger:  logger.WithField("scenario", "my-scenario"),
-        options: &Options{},
     }
 }
 
@@ -79,61 +101,87 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 }
 
 func (s *Scenario) Init(opts *scenario.Options) error {
-    // Initialize scenario with wallet pool
+    s.walletPool = opts.WalletPool
     return nil
 }
 
 func (s *Scenario) Run(ctx context.Context) error {
     s.logger.Info("Running my-scenario")
-    // Implement transaction logic here
     <-ctx.Done()
     return nil
 }
-
-func main() {}
 ```
 
-3. Validate your scenario:
+4. Validate and run:
 ```bash
-spamoor validate-scenario scenarios/external/my-scenario/my-scenario.go
+# Validate the plugin
+spamoor-utils validate-plugin ./my-plugin
+
+# Run a scenario from the plugin
+spamoor --plugin ./plugins/my-plugin my-scenario -h http://localhost:8545 -p YOUR_PRIVATE_KEY
 ```
 
-4. Run with the scenario:
-```bash
-spamoor my-scenario -h localhost:8545 -p YOUR_PRIVATE_KEY
+## Plugin Structure
+
+A plugin consists of a directory with Go source files:
+
+```
+my-plugin/
+├── plugin.go              # Required: exports PluginDescriptor
+├── scenario1/
+│   └── scenario1.go       # Scenario implementation
+├── scenario2/
+│   └── scenario2.go       # Another scenario
+└── contract/              # Optional: generated contract bindings
+    ├── MyContract.go
+    └── MyContract.sol
 ```
 
-## Creating a Dynamic Scenario
+### PluginDescriptor
 
-### Required Structure
-
-Every dynamic scenario must have:
-
-1. **Package declaration**: Must be `package main`
-2. **ScenarioDescriptor variable**: A `scenario.Descriptor` struct exported at package level
-3. **Empty main function**: Required for valid Go syntax
-
-### Scenario Descriptor Fields
+Every plugin must export a `PluginDescriptor` variable in `plugin.go`:
 
 ```go
-var ScenarioDescriptor = scenario.Descriptor{
-    Name:           "scenario-name",      // Unique identifier (required)
-    Description:    "What it does",       // Shown in CLI help (recommended)
-    Aliases:        []string{"alias1"},   // Alternative names (optional)
-    DefaultOptions: DefaultOptions,       // Default config (optional)
-    NewScenario:    NewScenario,          // Factory function (required)
+var PluginDescriptor = scenario.PluginDescriptor{
+    Name:        "plugin-name",        // Unique identifier (required)
+    Description: "What this plugin does",
+    Categories: []*scenario.Category{  // Group scenarios by category
+        {
+            Name:        "Category Name",
+            Description: "Category description",
+            Descriptors: []*scenario.Descriptor{
+                &scenario1.ScenarioDescriptor,
+            },
+        },
+    },
 }
 ```
 
-### Implementing the Scenario Interface
+## Creating a Scenario
 
-Your scenario struct must implement the `scenario.Scenario` interface:
+Each scenario must:
+1. Export a `ScenarioDescriptor` variable of type `scenario.Descriptor`
+2. Implement the `scenario.Scenario` interface
+
+### ScenarioDescriptor
+
+```go
+var ScenarioDescriptor = scenario.Descriptor{
+    Name:           "scenario-name",     // Unique identifier (required)
+    Description:    "What it does",      // Shown in CLI help
+    Aliases:        []string{"alias1"},  // Alternative names (optional)
+    DefaultOptions: DefaultOptions,      // Default config struct
+    NewScenario:    newScenario,         // Factory function (required)
+}
+```
+
+### Scenario Interface
 
 ```go
 type Scenario interface {
-    Flags(flags *pflag.FlagSet) error    // Register CLI flags
-    Init(options *Options) error          // Initialize with wallet pool
-    Run(ctx context.Context) error        // Execute the scenario
+    Flags(flags *pflag.FlagSet) error  // Register CLI flags
+    Init(options *Options) error        // Initialize with wallet pool
+    Run(ctx context.Context) error      // Execute the scenario
 }
 ```
 
@@ -143,15 +191,49 @@ Options are automatically parsed from YAML configuration. Use struct tags:
 
 ```go
 type Options struct {
-    Throughput  uint64 `yaml:"throughput"`
-    TotalCount  uint64 `yaml:"total_count"`
-    MaxPending  uint64 `yaml:"max_pending"`
+    Throughput  uint64  `yaml:"throughput"`
+    TotalCount  uint64  `yaml:"total_count"`
+    MaxPending  uint64  `yaml:"max_pending"`
+    BaseFee     float64 `yaml:"base_fee"`
+}
+```
+
+### Transaction Pattern
+
+For sending transactions, use `scenario.RunTransactionScenario`:
+
+```go
+func (s *Scenario) Run(ctx context.Context) error {
+    return scenario.RunTransactionScenario(ctx, s.logger, &scenario.TransactionScenarioOptions{
+        WalletPool:  s.walletPool,
+        Throughput:  s.options.Throughput,
+        TotalCount:  s.options.TotalCount,
+        MaxPending:  s.options.MaxPending,
+        Rebroadcast: s.options.Rebroadcast,
+    }, s.buildTransaction)
+}
+
+func (s *Scenario) buildTransaction(
+    ctx context.Context,
+    txIdx uint64,
+    wallet *spamoor.Wallet,
+    client *spamoor.Client,
+    txNonce uint64,
+    onComplete scenario.TransactionCompleteCallback,
+) (*types.Transaction, error) {
+    defer onComplete()  // ALWAYS call onComplete!
+
+    // Build and return your transaction
+    tx, err := txbuilder.BuildDynamicFeeTx(&txbuilder.TxMetadata{
+        // ...
+    })
+    return tx, err
 }
 ```
 
 ## Available Packages
 
-The following packages have extracted symbols and are available for use in dynamic scenarios:
+The following packages have pre-extracted symbols for use in plugins:
 
 ### Spamoor Packages
 
@@ -176,164 +258,161 @@ The following packages have extracted symbols and are available for use in dynam
 | crypto  | `github.com/ethereum/go-ethereum/crypto`            | Cryptographic functions        |
 | yaml    | `gopkg.in/yaml.v3`                                  | YAML parsing                   |
 
+See `plugin/symbols/` for the complete list of extracted symbols.
+
 ## CLI Usage
 
-### Loading a Single Scenario File
+### Load from Local Directory (Development)
 
 ```bash
-spamoor --scenario-file /path/to/scenario.go <scenario-name> [options]
+spamoor --plugin ./my-plugin my-scenario -h http://localhost:8545
 ```
 
-### Loading from a Directory
+### Load from Archive
 
 ```bash
-spamoor --scenario-dir /path/to/scenarios/ <scenario-name> [options]
+spamoor --plugin ./my-plugin.tar.gz my-scenario -h http://localhost:8545
 ```
 
-### Using External Directory
-
-Place scenarios in `scenarios/external/<scenario-name>/` and they will be auto-loaded at startup.
-
-## Auto-loading and Hot-reload
-
-### Auto-loading at Startup
-
-Spamoor automatically loads scenarios from `scenarios/external/` on startup:
-
-```
-scenarios/
-  external/
-    eoatx/
-      eoatx.go
-    erc20_bloater/
-      erc20_bloater.go
-```
-
-Each subdirectory should contain `.go` files with scenario definitions.
-
-### Hot-reload in Daemon Mode
-
-In daemon mode, you can reload scenarios without restarting:
-
-**Via API:**
-```bash
-curl -X POST http://localhost:8080/api/scenarios/reload
-```
-
-**Via GUI:**
-Click the "Reload Scenarios" button on the dashboard.
-
-**Specifying a different directory:**
-```bash
-curl -X POST "http://localhost:8080/api/scenarios/reload?dir=/custom/path"
-```
-
-## Validating Scenarios
-
-Use the validation command to check scenarios before running:
+### Load from URL
 
 ```bash
-spamoor validate-scenario /path/to/scenario.go
+spamoor --plugin https://example.com/my-plugin.tar.gz my-scenario -h http://localhost:8545
 ```
 
-This will:
-1. Load the scenario using Yaegi
-2. Verify the `ScenarioDescriptor` fields
-3. Instantiate the scenario
-4. Check registered flags
-5. Report any issues
+### Multiple Plugins
 
-Example output:
-```
-Validating scenario: my-scenario.go
-
-✓ Scenario loaded successfully
-
-Descriptor:
-  Name:        my-scenario
-  Description: My custom scenario
-  NewScenario: ✓ defined
-  DefaultOpts: ✓ defined (*main.Options)
-
-Instantiation:
-  ✓ Instance created successfully
-  ✓ Flags registered: 3
-
-Result: ✓ Scenario 'my-scenario' is valid
-```
-
-## Adding New Symbol Packages
-
-If your scenario needs a package that isn't available, you can extract its symbols:
-
-1. Install yaegi:
 ```bash
-go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1
+spamoor --plugin ./plugin1 --plugin ./plugin2 some-scenario -h http://localhost:8545
 ```
 
-2. Extract symbols:
+### With YAML Configuration
+
 ```bash
-cd scenarios/loader
-yaegi extract github.com/your/package
+spamoor run config.yaml --plugin ./my-plugin
 ```
 
-3. Fix the package declaration:
+## Daemon Mode
+
+In daemon mode, plugins can be managed via the web UI (`/plugins` page) or REST API.
+
+### Register via API
+
 ```bash
-perl -i -pe 's/^package \w+$/package loader/' symbols_*.go
+# From URL
+curl -X POST http://localhost:8080/api/plugins \
+  -F "type=url" \
+  -F "path=https://example.com/my-plugin.tar.gz"
+
+# From local path
+curl -X POST http://localhost:8080/api/plugins \
+  -F "type=local" \
+  -F "path=/path/to/my-plugin"
+
+# Upload archive
+curl -X POST http://localhost:8080/api/plugins \
+  -F "type=upload" \
+  -F "file=@my-plugin.tar.gz"
 ```
 
-4. Rebuild spamoor:
+### Building Plugin Archives
+
+Use `make plugins` to build distributable archives:
+
 ```bash
-go build ./cmd/spamoor
+make plugins
+# Creates plugins/<plugin-name>.tar.gz with auto-generated plugin.yaml
 ```
 
-Alternatively, use the Makefile target:
+## Validating Plugins
+
+Validate plugins before deployment:
+
 ```bash
-make generate-symbols
+# Validate directory
+spamoor-utils validate-plugin ./my-plugin
+
+# Validate archive
+spamoor-utils validate-plugin ./my-plugin.tar.gz
 ```
 
-## Yaegi Limitations and Workarounds
+This checks:
+1. Plugin loads successfully via Yaegi
+2. `PluginDescriptor` is properly defined
+3. All scenarios can be instantiated
+4. Flags are registered correctly
 
-Yaegi is a Go interpreter with some limitations. Here are common issues and solutions:
+## Yaegi Limitations
 
-- Sending to channels with type aliases inside closures may cause panics.
-- Some complex type assertions may fail.
-- Yaegi doesn't support all Go features. If you encounter issues:
-    - Avoid `go:embed` directives
-    - Avoid CGO
-    - Keep generics usage simple
-    - Avoid`` reflection on unexported fields
-- Ensure your types exactly match the expected interface, including method receiver types (pointer vs value).
+Yaegi is a Go interpreter with some limitations:
+
+### Unsupported Features
+
+- **CGO**: Cannot use packages requiring CGO
+- **go:embed**: Embed directives not supported
+- **Complex generics**: Keep generics usage simple
+- **Reflection on unexported fields**: May fail
+
+### Known Issues
+
+- Sending to channels with type aliases inside closures may panic
+- Some complex type assertions may fail
+- Pointer vs value receiver types must match exactly
+
+### Performance
+
+Interpreted code is slower than compiled code. For high-throughput scenarios, consider contributing to the core codebase instead.
 
 ## Troubleshooting
 
-### Error: "undefined: package.Symbol"
+### "undefined: package.Symbol"
 
-The package doesn't have extracted symbols. Extract them:
+The package needs symbols extracted. Add it to `plugin/symbols/generate.go` and run:
 ```bash
-cd scenarios/loader
-yaegi extract github.com/the/package
-perl -i -pe 's/^package \w+$/package loader/' symbols_*.go
+go generate ./plugin/symbols/...
 ```
 
-### Error: "ScenarioDescriptor is not of type scenario.Descriptor"
+### "PluginDescriptor not found"
 
-Ensure you're using the correct type from extracted symbols, not a locally defined type.
+Ensure your `plugin.go` exports a variable named exactly `PluginDescriptor` of type `scenario.PluginDescriptor`.
+
+### "interpreter panic"
+
+Simplify your code:
+- Use explicit function types instead of closures where possible
+- Avoid complex type assertions
+- Use simpler channel patterns
 
 ### Scenario Not Found
 
 Verify:
-1. The scenario file is in the correct directory
-2. The `ScenarioDescriptor` variable is exported (capitalized)
-3. The `Name` field matches what you're trying to run
+1. The `ScenarioDescriptor` is referenced in `PluginDescriptor.Categories`
+2. The `Name` field matches what you're trying to run
+3. The plugin loaded without errors
 
 ### Flags Not Working
 
-Ensure your `Flags()` method returns `nil` on success and registers flags on the provided `*pflag.FlagSet`.
+Ensure your `Flags()` method:
+- Returns `nil` on success
+- Registers flags on the provided `*pflag.FlagSet`
+- Uses unique flag names (no conflicts with global flags)
 
-### Scenario Loads But Doesn't Run
+### Transactions Not Counted
 
-Check:
-1. The `Run()` method is implemented correctly
-2. Context cancellation is handled
-3. Errors are returned, not just logged
+Always call `onComplete()` in your `ProcessNextTxFn`:
+```go
+func (s *Scenario) buildTx(..., onComplete scenario.TransactionCompleteCallback) (*types.Transaction, error) {
+    defer onComplete()  // Required!
+    // ...
+}
+```
+
+## Example Plugin
+
+See `plugins/_example-plugin/` for a complete working example demonstrating:
+
+- Plugin and scenario structure
+- Contract deployment with well-known wallets
+- Contract interactions using `BuildBoundTx`
+- Proper `onComplete` handling
+- Configuration via flags and YAML
