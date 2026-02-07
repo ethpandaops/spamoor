@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ethpandaops/spamoor/daemon"
+	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/gorilla/mux"
 )
@@ -92,6 +93,8 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userEmail := ah.getPluginUserEmail(r)
+
 	// Check content type for multipart
 	contentType := r.Header.Get("Content-Type")
 
@@ -119,6 +122,7 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			ah.auditPluginAction(userEmail, db.AuditActionPluginRegister, loaded.Descriptor.Name, buildPluginMetadata(loaded, "url", sourcePath))
 			sendPluginResponse(w, loaded)
 
 		case "local":
@@ -133,6 +137,7 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			ah.auditPluginAction(userEmail, db.AuditActionPluginRegister, loaded.Descriptor.Name, buildPluginMetadata(loaded, "local", sourcePath))
 			sendPluginResponse(w, loaded)
 
 		case "upload":
@@ -155,6 +160,7 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			ah.auditPluginAction(userEmail, db.AuditActionPluginRegister, loaded.Descriptor.Name, buildPluginMetadata(loaded, "upload", header.Filename))
 			sendPluginResponse(w, loaded)
 
 		default:
@@ -181,6 +187,7 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			ah.auditPluginAction(userEmail, db.AuditActionPluginRegister, loaded.Descriptor.Name, buildPluginMetadata(loaded, "url", req.Path))
 			sendPluginResponse(w, loaded)
 
 		case "local":
@@ -195,6 +202,7 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			ah.auditPluginAction(userEmail, db.AuditActionPluginRegister, loaded.Descriptor.Name, buildPluginMetadata(loaded, "local", req.Path))
 			sendPluginResponse(w, loaded)
 
 		default:
@@ -229,6 +237,8 @@ func (ah *APIHandler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userEmail := ah.getPluginUserEmail(r)
+
 	err := persistence.DeletePlugin(name)
 	if err != nil {
 		if strings.Contains(err.Error(), "running spammer") {
@@ -241,6 +251,8 @@ func (ah *APIHandler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+
+	ah.auditPluginAction(userEmail, db.AuditActionPluginDelete, name, nil)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -271,6 +283,8 @@ func (ah *APIHandler) ReloadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userEmail := ah.getPluginUserEmail(r)
+
 	loaded, err := persistence.ReloadPluginFromURL(name)
 	if err != nil {
 		if strings.Contains(err.Error(), "running spammer") {
@@ -286,6 +300,7 @@ func (ah *APIHandler) ReloadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ah.auditPluginAction(userEmail, db.AuditActionPluginReload, loaded.Descriptor.Name, buildPluginMetadata(loaded, "url", ""))
 	sendPluginResponse(w, loaded)
 }
 
@@ -325,6 +340,52 @@ func (ah *APIHandler) GetPlugin(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entry)
+}
+
+// getPluginUserEmail extracts the user email from the request for audit logging.
+func (ah *APIHandler) getPluginUserEmail(r *http.Request) string {
+	userEmail := "user"
+	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
+		userEmail = auditLogger.GetUserFromRequest(r.Header)
+	}
+
+	return userEmail
+}
+
+// auditPluginAction logs a plugin action to the audit log.
+func (ah *APIHandler) auditPluginAction(
+	userEmail string,
+	action db.AuditActionType,
+	pluginName string,
+	metadata db.AuditMetadata,
+) {
+	auditLogger := ah.daemon.GetAuditLogger()
+	if auditLogger == nil || userEmail == "" {
+		return
+	}
+
+	//nolint:errcheck // best-effort audit logging
+	auditLogger.LogPluginAction(userEmail, action, pluginName, metadata)
+}
+
+// buildPluginMetadata builds audit metadata from a loaded plugin.
+func buildPluginMetadata(
+	loaded *plugin.LoadedPlugin,
+	sourceType string,
+	sourcePath string,
+) db.AuditMetadata {
+	allScenarios := loaded.Descriptor.GetAllScenarios()
+	scenarioNames := make([]string, 0, len(allScenarios))
+	for _, s := range allScenarios {
+		scenarioNames = append(scenarioNames, s.Name)
+	}
+
+	return db.AuditMetadata{
+		"source_type":    sourceType,
+		"source_path":    sourcePath,
+		"scenario_count": len(scenarioNames),
+		"scenarios":      scenarioNames,
+	}
 }
 
 // sendPluginResponse sends a successful plugin registration response.

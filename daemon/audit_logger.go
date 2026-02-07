@@ -314,6 +314,23 @@ func (al *AuditLogger) LogRootWalletTransaction(userEmail string, toAddress stri
 	})
 }
 
+// LogPluginAction logs plugin actions (register, delete, reload)
+func (al *AuditLogger) LogPluginAction(userEmail string, action db.AuditActionType, pluginName string, metadata db.AuditMetadata) error {
+	log := &db.AuditLog{
+		UserEmail:  userEmail,
+		ActionType: string(action),
+		EntityType: string(db.AuditEntityPlugin),
+		EntityID:   pluginName,
+		EntityName: pluginName,
+		Diff:       "",
+		Metadata:   db.MarshalAuditMetadata(metadata),
+	}
+
+	return al.daemon.db.RunDBTransaction(func(tx *sqlx.Tx) error {
+		return al.daemon.db.InsertAuditLog(tx, log)
+	})
+}
+
 // generateConfigDiff generates a unified diff for configuration changes
 func (al *AuditLogger) generateConfigDiff(oldConfig, newConfig, filename string) string {
 	if oldConfig == "" && newConfig == "" {
