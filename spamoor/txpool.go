@@ -225,8 +225,8 @@ func (pool *TxPool) RegisterWalletPool(walletPool *WalletPool) {
 
 // GetRegisteredWallet returns a wallet by address.
 func (pool *TxPool) GetRegisteredWallet(address common.Address) *Wallet {
-	pool.walletsMutex.RLock()
-	defer pool.walletsMutex.RUnlock()
+	pool.walletsMutex.Lock()
+	defer pool.walletsMutex.Unlock()
 
 	registration, found := pool.wallets[address]
 	if found {
