@@ -97,7 +97,7 @@ exit2:
 
 const (
 	// BatcherTxLimit is the maximum number of transactions that can be batched in a single call.
-	BatcherTxLimit = 50
+	BatcherTxLimit = 450
 	// BatcherBaseGas is the base gas cost for executing a batcher transaction.
 	BatcherBaseGas = 50000
 	// BatcherGasPerTx is the additional gas cost per transaction in the batch.
