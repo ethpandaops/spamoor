@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"os"
-	"sort"
 	"strings"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
@@ -18,16 +19,19 @@ import (
 )
 
 type CliArgs struct {
-	verbose        bool
-	trace          bool
-	rpchosts       []string
-	rpchostsFile   string
-	privkey        string
-	seed           string
-	refillAmount   uint64
-	refillBalance  uint64
-	refillInterval uint64
-	secondsPerSlot uint64
+	verbose          bool
+	trace            bool
+	rpchosts         []string
+	rpchostsFile     string
+	privkey          string
+	seed             string
+	refillAmount     uint64
+	refillBalance    uint64
+	refillAmountWei  string
+	refillBalanceWei string
+	refillInterval   uint64
+	slotDuration     time.Duration
+	fundingGasLimit  uint64
 }
 
 func main() {
@@ -48,8 +52,11 @@ func main() {
 	flags.StringVarP(&cliArgs.seed, "seed", "s", "", "The child wallet seed.")
 	flags.Uint64Var(&cliArgs.refillAmount, "refill-amount", 5, "Amount of ETH to fund/refill each child wallet with.")
 	flags.Uint64Var(&cliArgs.refillBalance, "refill-balance", 2, "Min amount of ETH each child wallet should hold before refilling.")
+	flags.StringVar(&cliArgs.refillAmountWei, "refill-amount-wei", "", "Amount in Wei to fund each child wallet (overrides --refill-amount).")
+	flags.StringVar(&cliArgs.refillBalanceWei, "refill-balance-wei", "", "Min balance in Wei before refilling (overrides --refill-balance).")
 	flags.Uint64Var(&cliArgs.refillInterval, "refill-interval", 300, "Interval for child wallet rbalance check and refilling if needed (in sec).")
-	flags.Uint64Var(&cliArgs.secondsPerSlot, "seconds-per-slot", 12, "Seconds per slot for rate limiting (used for throughput calculation).")
+	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
+	flags.Uint64Var(&cliArgs.fundingGasLimit, "funding-gas-limit", 21000, "Gas limit for wallet funding transactions (use 100000+ for L2s).")
 
 	flags.Parse(os.Args)
 
@@ -83,12 +90,12 @@ func main() {
 		fmt.Printf("  spamoor <scenario> [options]     Run a specific scenario\n")
 		fmt.Printf("  spamoor run <yaml-file> [options] Run multiple scenarios from YAML config\n\n")
 		fmt.Printf("Implemented scenarios:\n")
-		scenarioNames := scenarios.GetScenarioNames()
-		sort.Slice(scenarioNames, func(a int, b int) bool {
-			return strings.Compare(scenarioNames[a], scenarioNames[b]) > 0
-		})
-		for _, name := range scenarioNames {
-			fmt.Printf("  %v\n", name)
+		categories := scenarios.GetScenarioCategories()
+		for _, category := range categories {
+			fmt.Printf("  %s: %s\n", category.Name, category.Description)
+			for _, descriptor := range category.Descriptors {
+				fmt.Printf("    - %-20s %s\n", descriptor.Name, descriptor.Description)
+			}
 		}
 		return
 	}
@@ -109,8 +116,8 @@ func main() {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
-	// Set global seconds per slot
-	scenario.GlobalSecondsPerSlot = cliArgs.secondsPerSlot
+	// Set global slot duration for rate limiting
+	scenario.GlobalSlotDuration = cliArgs.slotDuration
 
 	// start client pool
 	rpcHosts := []string{}
@@ -130,7 +137,14 @@ func main() {
 
 	clientPool := spamoor.NewClientPool(ctx, logger.WithField("module", "clientpool"))
 
-	err := clientPool.InitClients(rpcHosts)
+	clientOptions := []*spamoor.ClientOptions{}
+	for _, rpcHost := range rpcHosts {
+		clientOptions = append(clientOptions, &spamoor.ClientOptions{
+			RpcHost: rpcHost,
+		})
+	}
+
+	err := clientPool.InitClients(clientOptions)
 	if err != nil {
 		panic(fmt.Errorf("failed to init clients: %v", err))
 	}
@@ -140,32 +154,53 @@ func main() {
 		panic(fmt.Errorf("failed to prepare clients: %v", err))
 	}
 
+	// prepare txpool
+	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
+		Context:    ctx,
+		Logger:     logger.WithField("module", "txpool"),
+		ClientPool: clientPool,
+		ChainId:    clientPool.GetChainId(),
+	})
+
 	// init root wallet
-	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, logger)
+	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, txpool, logger)
 	if err != nil {
 		panic(fmt.Errorf("failed to init root wallet: %v", err))
 	}
 	defer rootWallet.Shutdown()
 
-	// prepare txpool
-	var walletPool *spamoor.WalletPool
-
-	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
-		Context:    ctx,
-		Logger:     logger.WithField("module", "txpool"),
-		ClientPool: clientPool,
-		GetActiveWalletPools: func() []*spamoor.WalletPool {
-			return []*spamoor.WalletPool{walletPool}
-		},
-	})
+	// Initialize transaction batcher for efficient bulk wallet funding
+	rootWallet.InitTxBatcher(ctx, txpool)
 
 	// init wallet pool
-	walletPool = spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
+	walletPool := spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
 	walletPool.SetWalletCount(100)
-	walletPool.SetRefillAmount(utils.EtherToWei(uint256.NewInt(cliArgs.refillAmount)))
-	walletPool.SetRefillBalance(utils.EtherToWei(uint256.NewInt(cliArgs.refillBalance)))
+
+	// Set refill amount (Wei flag overrides ETH flag)
+	if cliArgs.refillAmountWei != "" {
+		amount, ok := new(big.Int).SetString(cliArgs.refillAmountWei, 10)
+		if !ok {
+			panic(fmt.Errorf("invalid refill-amount-wei value: %s", cliArgs.refillAmountWei))
+		}
+		walletPool.SetRefillAmount(uint256.MustFromBig(amount))
+	} else {
+		walletPool.SetRefillAmount(utils.EtherToWei(uint256.NewInt(cliArgs.refillAmount)))
+	}
+
+	// Set refill balance (Wei flag overrides ETH flag)
+	if cliArgs.refillBalanceWei != "" {
+		balance, ok := new(big.Int).SetString(cliArgs.refillBalanceWei, 10)
+		if !ok {
+			panic(fmt.Errorf("invalid refill-balance-wei value: %s", cliArgs.refillBalanceWei))
+		}
+		walletPool.SetRefillBalance(uint256.MustFromBig(balance))
+	} else {
+		walletPool.SetRefillBalance(utils.EtherToWei(uint256.NewInt(cliArgs.refillBalance)))
+	}
+
 	walletPool.SetRefillInterval(cliArgs.refillInterval)
 	walletPool.SetWalletSeed(cliArgs.seed)
+	walletPool.SetFundingGasLimit(cliArgs.fundingGasLimit)
 
 	// init scenario
 	err = newScenario.Init(&scenario.Options{

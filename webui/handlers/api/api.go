@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethpandaops/spamoor/daemon"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
@@ -57,9 +58,18 @@ type VersionResponse struct {
 	Release string `json:"release"`
 }
 
-type ScenarioEntries struct {
+// ScenarioEntry represents a single scenario in the API response.
+type ScenarioEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+}
+
+// ScenarioCategory represents a category of scenarios in the API response.
+type ScenarioCategory struct {
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	Scenarios   []*ScenarioEntry    `json:"scenarios,omitempty"`
+	Children    []*ScenarioCategory `json:"children,omitempty"`
 }
 
 // SpammerLibraryEntry represents a spammer config from the library
@@ -181,24 +191,48 @@ var (
 // @Id getScenarios
 // @Summary Get all scenarios
 // @Tags Scenario
-// @Description Returns a list of all scenarios
+// @Description Returns a list of all scenarios organized by category
 // @Produce json
-// @Success 200 {array} ScenarioEntries "Success"
+// @Success 200 {array} ScenarioCategory "Success"
 // @Failure 400 {string} string "Failure"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/scenarios [get]
 func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
-	scenarioNames := scenarios.GetScenarioNames()
-	entries := make([]*ScenarioEntries, len(scenarioNames))
-	for i, scenarioName := range scenarioNames {
-		entries[i] = &ScenarioEntries{
-			Name:        scenarioName,
-			Description: scenarios.GetScenario(scenarioName).Description,
-		}
+	categories := scenarios.GetScenarioCategories()
+	result := make([]*ScenarioCategory, len(categories))
+
+	for i, category := range categories {
+		result[i] = convertCategory(category)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
+	json.NewEncoder(w).Encode(result)
+}
+
+// convertCategory recursively converts a scenario.Category to a ScenarioCategory.
+func convertCategory(category *scenario.Category) *ScenarioCategory {
+	scenarioEntries := make([]*ScenarioEntry, len(category.Descriptors))
+	for j, descriptor := range category.Descriptors {
+		scenarioEntries[j] = &ScenarioEntry{
+			Name:        descriptor.Name,
+			Description: descriptor.Description,
+		}
+	}
+
+	var children []*ScenarioCategory
+	if len(category.Children) > 0 {
+		children = make([]*ScenarioCategory, len(category.Children))
+		for k, child := range category.Children {
+			children[k] = convertCategory(child)
+		}
+	}
+
+	return &ScenarioCategory{
+		Name:        category.Name,
+		Description: category.Description,
+		Scenarios:   scenarioEntries,
+		Children:    children,
+	}
 }
 
 // GetVersion godoc
@@ -231,6 +265,10 @@ func (ah *APIHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/scenarios/{name}/config [get]
 func (ah *APIHandler) GetScenarioConfig(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	scenarioName := vars["name"]
 
@@ -304,9 +342,14 @@ func (ah *APIHandler) GetSpammerList(w http.ResponseWriter, r *http.Request) {
 // @Param request body CreateSpammerRequest true "Spammer configuration"
 // @Success 200 {object} int64 "Spammer ID"
 // @Failure 400 {string} string "Invalid request"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer [post]
 func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	var req struct {
 		Name             string `json:"name"`
 		Description      string `json:"description"`
@@ -320,11 +363,7 @@ func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	spammer, err := ah.daemon.NewSpammer(req.Scenario, req.Config, req.Name, req.Description, req.StartImmediately, userEmail, false)
 	if err != nil {
@@ -344,10 +383,15 @@ func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/start [post]
 func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -355,11 +399,7 @@ func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	err = ah.daemon.StartSpammer(id, userEmail)
 	if err != nil {
@@ -380,10 +420,15 @@ func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param request body UpdateSpammerRequest true "Updated configuration"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid request"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [put]
 func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -408,11 +453,7 @@ func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	err = ah.daemon.UpdateSpammer(id, req.Name, req.Description, req.Config, userEmail)
 	if err != nil {
@@ -431,10 +472,15 @@ func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/pause [post]
 func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -442,11 +488,7 @@ func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	err = ah.daemon.PauseSpammer(id, userEmail)
 	if err != nil {
@@ -465,10 +507,15 @@ func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [delete]
 func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -476,11 +523,7 @@ func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	err = ah.daemon.DeleteSpammer(id, userEmail)
 	if err != nil {
@@ -499,10 +542,15 @@ func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/reclaim [post]
 func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -510,11 +558,7 @@ func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	err = ah.daemon.ReclaimSpammer(id, userEmail)
 	if err != nil {
@@ -534,9 +578,14 @@ func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Spammer ID"
 // @Success 200 {object} SpammerDetails "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Router /api/spammer/{id} [get]
 func (ah *APIHandler) GetSpammerDetails(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -586,9 +635,14 @@ type LogEntry struct {
 // @Param id path int true "Spammer ID"
 // @Success 200 {array} LogEntry "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Router /api/spammer/{id}/logs [get]
 func (ah *APIHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -635,10 +689,15 @@ func (ah *APIHandler) GetSpammerLogs(w http.ResponseWriter, r *http.Request) {
 // @Param since query string false "Timestamp to start from (RFC3339Nano)"
 // @Success 200 {string} string "SSE stream of log entries"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Streaming unsupported"
 // @Router /api/spammer/{id}/logs/stream [get]
 func (ah *APIHandler) StreamSpammerLogs(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -742,6 +801,9 @@ type PendingTransactionEntry struct {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/pending-transactions [get]
 func (ah *APIHandler) GetPendingTransactions(w http.ResponseWriter, r *http.Request) {
+	// Check if authenticated (don't return error, just flag for filtering)
+	isAuthenticated := ah.isAuthenticated(r)
+
 	walletFilter := r.URL.Query().Get("wallet")
 
 	allPendingTxs := make([]PendingTransactionEntry, 0)
@@ -813,11 +875,13 @@ func (ah *APIHandler) GetPendingTransactions(w http.ResponseWriter, r *http.Requ
 			submittedAt := pendingTx.Submitted.Format(time.RFC3339)
 			lastRebroadcast := pendingTx.LastRebroadcast.Format(time.RFC3339)
 
-			// Encode transaction to RLP
-			rlpBytes, err := tx.MarshalBinary()
+			// Only include RLP encoded transaction for authenticated users
 			rlpHex := ""
-			if err == nil {
-				rlpHex = "0x" + hex.EncodeToString(rlpBytes)
+			if isAuthenticated {
+				rlpBytes, err := tx.MarshalBinary()
+				if err == nil {
+					rlpHex = "0x" + hex.EncodeToString(rlpBytes)
+				}
 			}
 
 			entry := PendingTransactionEntry{
@@ -932,6 +996,9 @@ type UpdateClientTypeRequest struct {
 // @Success 200 {array} ClientEntry "Success"
 // @Router /api/clients [get]
 func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
+	// Check if authenticated (don't return error, just flag for filtering)
+	isAuthenticated := ah.isAuthenticated(r)
+
 	ctx := r.Context()
 	goodClients := ah.daemon.GetClientPool().GetAllGoodClients()
 	allClients := ah.daemon.GetClientPool().GetAllClients()
@@ -946,6 +1013,11 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 			version = "Unknown"
 		}
 
+		rpcHost := ""
+		if isAuthenticated {
+			rpcHost = client.GetRPCHost()
+		}
+
 		response[i] = ClientEntry{
 			Index:        i,
 			Name:         client.GetName(),
@@ -955,7 +1027,7 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 			Version:      version,
 			BlockHeight:  blockHeight,
 			IsReady:      slices.Contains(goodClients, client),
-			RpcHost:      client.GetRPCHost(),
+			RpcHost:      rpcHost,
 			Enabled:      client.IsEnabled(),
 			NameOverride: client.GetNameOverride(),
 		}
@@ -975,9 +1047,14 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 // @Param request body UpdateClientGroupRequest true "New group name(s)"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid client index"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/group [put]
 func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	index, err := strconv.Atoi(vars["index"])
 	if err != nil {
@@ -1019,11 +1096,7 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	// Update client config with new groups as tags
 	tagsStr := strings.Join(groups, ",")
@@ -1046,9 +1119,14 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 // @Param request body UpdateClientEnabledRequest true "New enabled state"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid client index"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/enabled [put]
 func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	index, err := strconv.Atoi(vars["index"])
 	if err != nil {
@@ -1079,11 +1157,7 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 
 	client.SetEnabled(req.Enabled)
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	// Update client config with new enabled state
 	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, existingConfig.Tags, existingConfig.ClientType, req.Enabled, userEmail)
@@ -1105,9 +1179,14 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 // @Param request body UpdateClientNameRequest true "New name override"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid client index"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/name [put]
 func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	index, err := strconv.Atoi(vars["index"])
 	if err != nil {
@@ -1138,11 +1217,7 @@ func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
 
 	client.SetNameOverride(req.NameOverride)
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	// Update client config with new name override
 	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), req.NameOverride, existingConfig.Tags, existingConfig.ClientType, existingConfig.Enabled, userEmail)
@@ -1164,9 +1239,14 @@ func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
 // @Param request body UpdateClientTypeRequest true "New client type"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid client index or type"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/type [put]
 func (ah *APIHandler) UpdateClientType(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	index, err := strconv.Atoi(vars["index"])
 	if err != nil {
@@ -1203,11 +1283,7 @@ func (ah *APIHandler) UpdateClientType(w http.ResponseWriter, r *http.Request) {
 
 	client.SetClientTypeOverride(req.ClientType)
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	// Update client config with new type
 	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, existingConfig.Tags, req.ClientType, existingConfig.Enabled, userEmail)
@@ -1256,9 +1332,14 @@ type SendTransactionResponse struct {
 // @Param request body ExportSpammersRequest false "Spammer IDs to export (optional)"
 // @Success 200 {string} string "YAML configuration"
 // @Failure 400 {string} string "Invalid request"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammers/export [post]
 func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	var req ExportSpammersRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1286,9 +1367,14 @@ func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
 // @Param request body ImportSpammersRequest true "Import configuration"
 // @Success 200 {object} daemon.ImportResult "Success"
 // @Failure 400 {string} string "Invalid request"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammers/import [post]
 func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	var req ImportSpammersRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1300,11 +1386,7 @@ func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	result, err := ah.daemon.ImportSpammers(req.Input, userEmail)
 	if err != nil {
@@ -1421,6 +1503,7 @@ func (ah *APIHandler) GetSpammerLibraryIndex(w http.ResponseWriter, r *http.Requ
 // @Description Returns comprehensive graphs data for the dashboard including all spammers, totals, and time-series data
 // @Produce json
 // @Success 200 {object} GraphsDashboardResponse "Success"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/graphs/dashboard [get]
 func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request) {
@@ -1537,10 +1620,15 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 // @Param id path int true "Spammer ID"
 // @Success 200 {object} SpammerTimeSeriesResponse "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Spammer not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/graphs/spammer/{id}/timeseries [get]
 func (ah *APIHandler) GetSpammerTimeSeries(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	spammerIDStr := vars["id"]
 
@@ -1600,6 +1688,7 @@ func (ah *APIHandler) GetSpammerTimeSeries(w http.ResponseWriter, r *http.Reques
 // @Description Provides real-time graphs updates via Server-Sent Events (SSE)
 // @Produce text/event-stream
 // @Success 200 {string} string "SSE stream"
+// @Failure 401 {string} string "Unauthorized"
 // @Router /api/graphs/stream [get]
 func (ah *APIHandler) StreamGraphs(w http.ResponseWriter, r *http.Request) {
 	// Check if tx metrics are enabled
@@ -1970,9 +2059,14 @@ func sendError(w http.ResponseWriter, message string, statusCode int) {
 // @Param request body SendTransactionRequest true "Transaction parameters"
 // @Success 200 {object} SendTransactionResponse "Success"
 // @Failure 400 {object} ErrorResponse "Invalid request"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {object} ErrorResponse "Server Error"
 // @Router /api/root-wallet/send-transaction [post]
 func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	var req SendTransactionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendError(w, err.Error(), http.StatusBadRequest)
@@ -2053,11 +2147,7 @@ func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	// Build and send transaction
 	wallet := rootWallet.GetWallet()

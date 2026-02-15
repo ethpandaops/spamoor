@@ -12,9 +12,10 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// GlobalSecondsPerSlot is the global setting for seconds per slot used in rate limiting.
-// This can be set via CLI flag (--seconds-per-slot) and applies to all scenarios.
-var GlobalSecondsPerSlot uint64 = 12
+// GlobalSlotDuration is the global setting for slot/block duration used in rate limiting.
+// This can be set via CLI flag (--slot-duration) and applies to all scenarios.
+// For L1 chains, this is typically 12s. For L2s like Arbitrum, it can be 250ms or less.
+var GlobalSlotDuration time.Duration = 12 * time.Second
 
 // TransactionScenarioOptions configures how the transaction scenario is executed.
 type TransactionScenarioOptions struct {
@@ -55,8 +56,8 @@ type ProcessNextTxParams struct {
 // Returns an error only if the scenario cannot be started. Transaction failures
 // should be handled within ProcessNextTxFn.
 func RunTransactionScenario(ctx context.Context, options TransactionScenarioOptions) error {
-	// Use global SecondsPerSlot
-	secondsPerSlot := GlobalSecondsPerSlot
+	// Use global slot duration for rate limiting
+	slotDuration := GlobalSlotDuration
 
 	txIdxCounter := uint64(0)
 	pendingCount := atomic.Int64{}
@@ -122,7 +123,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 		pendingCond = sync.NewCond(&pendingMutex)
 	}
 
-	initialRate := rate.Limit(float64(options.Throughput) / float64(secondsPerSlot))
+	initialRate := rate.Limit(float64(options.Throughput) / slotDuration.Seconds())
 	if initialRate == 0 {
 		initialRate = rate.Inf
 	}
@@ -179,14 +180,14 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			for {
 				select {
 				case <-ticker.C:
-					throughput := limiter.Limit() * 12
+					throughput := limiter.Limit() * rate.Limit(slotDuration.Seconds())
 					newThroughput := throughput + 1
 					newMaxPending := uint64(float64(newThroughput) * pendingRatio)
 
 					options.Logger.Infof("Increasing throughput from %.3f to %.3f and max pending from %d to %d",
 						throughput, newThroughput, maxPending.Load(), newMaxPending)
 
-					limiter.SetLimit(rate.Limit(float64(newThroughput) / float64(secondsPerSlot)))
+					limiter.SetLimit(rate.Limit(float64(newThroughput) / slotDuration.Seconds()))
 					maxPending.Store(newMaxPending)
 
 					// Signal one waiting goroutine that capacity has increased

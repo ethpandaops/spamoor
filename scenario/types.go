@@ -8,9 +8,18 @@ import (
 	"github.com/spf13/pflag"
 )
 
+// Category describes the category of a scenario.
+type Category struct {
+	Name        string
+	Description string
+	Descriptors []*Descriptor
+	Children    []*Category
+}
+
 // Descriptor describes a scenario.
 type Descriptor struct {
 	Name           string
+	Aliases        []string
 	Description    string
 	DefaultOptions any
 	NewScenario    func(logger logrus.FieldLogger) Scenario

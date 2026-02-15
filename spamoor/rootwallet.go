@@ -34,20 +34,33 @@ type RootWallet struct {
 // It creates the underlying wallet, updates its state from the blockchain,
 // and sets up transaction rate limiting with a default limit of 200 concurrent transactions.
 // Returns the initialized RootWallet and logs wallet information if logger is provided.
-func InitRootWallet(ctx context.Context, privkey string, clientPool *ClientPool, logger logrus.FieldLogger) (*RootWallet, error) {
-	rootWallet, err := NewWallet(privkey)
+// If a client fails, it will retry with other available clients before giving up.
+func InitRootWallet(ctx context.Context, privkey string, clientPool *ClientPool, txpool *TxPool, logger logrus.FieldLogger) (*RootWallet, error) {
+	privateKey, address, err := LoadPrivateKey(privkey)
 	if err != nil {
 		return nil, err
 	}
+	rootWallet := NewWallet(privateKey, address)
+	rootWallet = txpool.RegisterWallet(rootWallet, ctx)
 
-	client := clientPool.GetClient()
-	if client == nil {
+	clients := clientPool.GetAllClients()
+	if len(clients) == 0 {
 		return nil, fmt.Errorf("no client available")
 	}
 
-	err = client.UpdateWallet(ctx, rootWallet)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for _, client := range clients {
+		err = client.UpdateWallet(ctx, rootWallet)
+		if err == nil {
+			break
+		}
+		lastErr = err
+		if logger != nil {
+			logger.Warnf("failed to update root wallet via %s: %v, trying next client", client.GetName(), err)
+		}
+	}
+	if lastErr != nil && err != nil {
+		return nil, fmt.Errorf("all clients failed to update root wallet, last error: %w", lastErr)
 	}
 
 	if logger != nil {
