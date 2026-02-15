@@ -21,7 +21,7 @@ Before using Spamoor, you need:
 1. **Prefunded Root Private Key**: A private key with sufficient ETH to fund child wallets and pay for transaction fees
 2. **Execution Layer RPC Endpoints**: At least one Ethereum RPC endpoint to send transactions to
 3. **System Requirements**: 
-   - Go 1.24+ (if building from source)
+   - Go 1.25+ (if building from source)
    - Docker (for containerized deployment)
 
 ## Installation
@@ -665,7 +665,7 @@ docker run -p 8080:8080 \
 
 5. **Build Errors**
    - Ensure CGO build is available (needs proper c compiler)
-   - Check Go version: requires 1.24+
+   - Check Go version: requires 1.25+
    - Install required build tags: `make build` uses proper tags
 
 ### Debug Options
