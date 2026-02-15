@@ -247,6 +247,9 @@ function renderAuditLogs(data) {
     } else if (log.entity_type === 'client') {
       entityIcon = 'fa-server';
       entityPrefix = 'Client';
+    } else if (log.entity_type === 'plugin') {
+      entityIcon = 'fa-puzzle-piece';
+      entityPrefix = 'Plugin';
     }
 
     var changesHtml = '<span class="text-muted">No changes</span>';
@@ -361,7 +364,10 @@ function formatActionType(action) {
     'client_toggle': 'Toggle Client',
     'spammers_import': 'Import Spammers',
     'spammers_export': 'Export Spammers',
-    'root_wallet_transaction': 'Root Wallet Transaction'
+    'root_wallet_transaction': 'Root Wallet Transaction',
+    'plugin_register': 'Register Plugin',
+    'plugin_delete': 'Delete Plugin',
+    'plugin_reload': 'Reload Plugin'
   };
   return actionMap[action] || action;
 }

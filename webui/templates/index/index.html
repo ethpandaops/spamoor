@@ -190,6 +190,7 @@
                         <div class="mt-1">
                           <i class="fas fa-cube text-primary me-2"></i>
                           <strong id="selectedScenarioName"></strong>
+                          <span id="selectedScenarioPlugin" class="badge bg-info ms-2 plugin-badge d-none"></span>
                         </div>
                         <small class="text-muted" id="selectedScenarioDesc"></small>
                       </div>
@@ -584,11 +585,13 @@ function renderScenarioCategories(categories, container = null, depth = 0) {
         scenarioItem.className = 'list-group-item list-group-item-action scenario-item';
         scenarioItem.style.paddingLeft = `${((depth + 1) * 16) + 12}px`;
         scenarioItem.setAttribute('data-scenario', scenario.name);
+        const pluginBadge = scenario.plugin ? `<span class="badge bg-info ms-2 plugin-badge">${scenario.plugin}</span>` : '';
         scenarioItem.innerHTML = `
           <div class="d-flex justify-content-between align-items-center">
             <div>
               <i class="fas fa-cube text-primary me-2"></i>
               <span class="scenario-name">${scenario.name}</span>
+              ${pluginBadge}
             </div>
           </div>
           ${scenario.description ? `<small class="text-muted ms-4 d-block">${scenario.description}</small>` : ''}
@@ -648,6 +651,15 @@ async function selectScenario(scenarioName) {
   document.getElementById('selectedScenarioPath').textContent = info ? info.path.join(' > ') : '';
   document.getElementById('selectedScenarioName').textContent = scenarioName;
   document.getElementById('selectedScenarioDesc').textContent = info ? info.scenario.description : '';
+
+  /* Show plugin badge if from a plugin */
+  const pluginBadge = document.getElementById('selectedScenarioPlugin');
+  if (info && info.scenario.plugin) {
+    pluginBadge.textContent = info.scenario.plugin;
+    pluginBadge.classList.remove('d-none');
+  } else {
+    pluginBadge.classList.add('d-none');
+  }
 
   /* Hide selector, show selected display */
   document.getElementById('scenarioSelectorContainer').classList.add('d-none');
@@ -2007,6 +2019,13 @@ updateCountdown();
 
 [data-bs-theme="dark"] .scenario-selector .scenario-item:hover {
   background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Plugin badge styling */
+.plugin-badge {
+  font-size: 0.7em;
+  font-weight: 500;
+  vertical-align: middle;
 }
 
 /* Library content responsive height */

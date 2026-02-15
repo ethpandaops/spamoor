@@ -5,7 +5,7 @@ GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildVersion="$(VERSION)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildTime="$(BUILDTIME)"'
 GOLDFLAGS += -X 'github.com/ethpandaops/spamoor/utils.BuildRelease="$(RELEASE)"'
 
-.PHONY: all docs build test clean generate-spammer-index
+.PHONY: all docs build test clean generate-spammer-index generate-symbols plugins
 
 all: docs build
 
@@ -29,6 +29,10 @@ generate-spammer-index:
 	@echo "Generating spammer configuration index..."
 	scripts/generate-spammer-index.sh spammer-configs
 
+generate-symbols:
+	@echo "Regenerating Yaegi symbol files for dynamic scenario loading..."
+	go generate ./plugin/symbols/...
+
 clean:
 	rm -f bin/*
 
@@ -40,3 +44,19 @@ devnet-run: devnet docs build
 
 devnet-clean:
 	.hack/devnet/cleanup.sh
+
+plugins:
+	@echo "Building plugin archives..."
+	@mkdir -p bin/plugins
+	@for dir in plugins/*/; do \
+		if [ -d "$$dir" ]; then \
+			plugin_name=$$(basename "$$dir"); \
+			echo "Building plugin: $$plugin_name"; \
+			echo "name: $$plugin_name" > "plugins/$$plugin_name/plugin.yaml"; \
+			echo "build_time: $(BUILDTIME)" >> "plugins/$$plugin_name/plugin.yaml"; \
+			echo "git_version: $(VERSION)" >> "plugins/$$plugin_name/plugin.yaml"; \
+			tar -czf "plugins/$$plugin_name.tar.gz" -C "plugins/$$plugin_name" .; \
+			rm "plugins/$$plugin_name/plugin.yaml"; \
+		fi \
+	done
+	@echo "Plugins built in bin/plugins/"

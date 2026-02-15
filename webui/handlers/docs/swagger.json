@@ -583,6 +583,218 @@
                 }
             }
         },
+        "/api/plugins": {
+            "get": {
+                "description": "Returns a list of all registered plugins with their status",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Plugin"
+                ],
+                "summary": "Get all plugins",
+                "operationId": "getPlugins",
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.PluginEntry"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Registers a plugin from URL, local path, or file upload",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Plugin"
+                ],
+                "summary": "Register a new plugin",
+                "operationId": "registerPlugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Source type: url, local, or upload",
+                        "name": "type",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "URL or local path (required for url/local types)",
+                        "name": "path",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Plugin archive file (required for upload type)",
+                        "name": "file",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegisterPluginResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugins/{name}": {
+            "get": {
+                "description": "Returns details of a specific plugin by name",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Plugin"
+                ],
+                "summary": "Get a specific plugin",
+                "operationId": "getPlugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.PluginEntry"
+                        }
+                    },
+                    "404": {
+                        "description": "Plugin not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Deletes a plugin by name. Fails if the plugin has running spammers.",
+                "tags": [
+                    "Plugin"
+                ],
+                "summary": "Delete a plugin",
+                "operationId": "deletePlugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "description": "Plugin has running spammers",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Plugin not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/plugins/{name}/reload": {
+            "post": {
+                "description": "Re-loads a plugin from its original source (URL or local path)",
+                "tags": [
+                    "Plugin"
+                ],
+                "summary": "Reload a plugin from its source",
+                "operationId": "reloadPlugin",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plugin name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegisterPluginResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Plugin has running spammers or source type not supported",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Plugin not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/api/root-wallet/send-transaction": {
             "post": {
                 "description": "Sends a transaction from the root wallet with specified parameters",
@@ -1688,6 +1900,70 @@
                 }
             }
         },
+        "api.PluginEntry": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "integer"
+                },
+                "deprecated": {
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "is_loaded": {
+                    "type": "boolean"
+                },
+                "load_error": {
+                    "type": "string"
+                },
+                "metadata_build_time": {
+                    "type": "string"
+                },
+                "metadata_git_version": {
+                    "type": "string"
+                },
+                "metadata_name": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "running_count": {
+                    "type": "integer"
+                },
+                "scenarios": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "source_path": {
+                    "type": "string"
+                },
+                "source_type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.RegisterPluginResponse": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "scenarios": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "api.ScenarioCategory": {
             "type": "object",
             "properties": {
@@ -1718,6 +1994,10 @@
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "plugin": {
+                    "description": "Plugin name if from a plugin, empty for native scenarios",
                     "type": "string"
                 }
             }

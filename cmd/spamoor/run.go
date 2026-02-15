@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/daemon/configs"
+	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -39,6 +40,7 @@ func RunCommand(args []string) {
 	flags.StringVarP(&cliArgs.privkey, "privkey", "p", "", "The private key of the wallet to send funds from.")
 	flags.IntSliceVarP(&selectedSpammers, "spammers", "s", []int{}, "Indexes of spammers to run (0-based). If not specified, runs all spammers.")
 	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
+	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files to load (can be specified multiple times).")
 
 	flags.Parse(args)
 
@@ -63,6 +65,38 @@ func RunCommand(args []string) {
 		"version":   utils.GetBuildVersion(),
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor run command")
+
+	// Initialize registries
+	pluginRegistry, scenarioRegistry := scenarios.InitRegistries()
+
+	// Load plugins if specified
+	if len(cliArgs.plugins) > 0 {
+		pluginLoader := plugin.NewPluginLoader(logger, pluginRegistry, scenarioRegistry)
+
+		for _, pluginPath := range cliArgs.plugins {
+			var loaded *plugin.LoadedPlugin
+			var err error
+
+			// Detect source type and load accordingly
+			if isURL(pluginPath) {
+				loaded, err = pluginLoader.LoadFromURL(pluginPath)
+			} else if isDirectory(pluginPath) {
+				loaded, err = pluginLoader.LoadFromLocalPath(pluginPath)
+			} else {
+				loaded, err = pluginLoader.LoadFromFile(pluginPath)
+			}
+
+			if err != nil {
+				logger.WithError(err).Fatalf("failed to load plugin: %s", pluginPath)
+			}
+
+			// Register plugin scenarios
+			err = pluginLoader.RegisterPluginScenarios(loaded)
+			if err != nil {
+				logger.WithError(err).Fatalf("failed to register plugin scenarios: %s", pluginPath)
+			}
+		}
+	}
 
 	// Set global slot duration for rate limiting
 	scenario.GlobalSlotDuration = cliArgs.slotDuration
@@ -287,4 +321,19 @@ func createSpammer(ctx context.Context, config configs.SpammerConfig, rootWallet
 		walletPool: walletPool,
 		logger:     spammerLogger,
 	}, nil
+}
+
+// isURL checks if the given path is a URL.
+func isURL(path string) bool {
+	return len(path) > 7 && (path[:7] == "http://" || path[:8] == "https://")
+}
+
+// isDirectory checks if the given path is an existing directory.
+func isDirectory(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return info.IsDir()
 }
