@@ -124,14 +124,14 @@ func NewClientPool(ctx context.Context, logger logrus.FieldLogger) *ClientPool {
 }
 
 // InitClients initializes the clients in the pool.
-func (pool *ClientPool) InitClients(rpcHosts []string) error {
+func (pool *ClientPool) InitClients(clientOptions []*ClientOptions) error {
 	pool.allClients = make([]*Client, 0)
 
 	var chainId *big.Int
-	for _, rpcHost := range rpcHosts {
-		client, err := NewClient(rpcHost)
+	for _, clientOption := range clientOptions {
+		client, err := NewClient(clientOption)
 		if err != nil {
-			pool.logger.Errorf("failed creating client for '%v': %v", rpcHost, err.Error())
+			pool.logger.Errorf("failed creating client for '%v': %v", clientOption.RpcHost, err.Error())
 			continue
 		}
 
@@ -220,7 +220,22 @@ func (pool *ClientPool) watchClientStatus() error {
 		go func(idx int, client *Client) {
 			defer wg.Done()
 
-			blockHeight, err := client.GetBlockHeight(pool.ctx)
+			var blockHeight uint64
+			var err error
+			hasBlockHeight := false
+
+			if client.externalClient != nil {
+				blockHeight, err = client.externalClient.GetBlockHeight(pool.ctx)
+				if err != nil {
+					pool.logger.Warnf("external client check failed: %v", err)
+				} else {
+					hasBlockHeight = true
+				}
+			}
+
+			if !hasBlockHeight {
+				blockHeight, err = client.GetBlockHeight(pool.ctx)
+			}
 			if err != nil {
 				pool.logger.Warnf("client check failed: %v", err)
 			} else {
@@ -361,4 +376,9 @@ func (pool *ClientPool) GetAllGoodClients() []*Client {
 	clients := make([]*Client, len(pool.goodClients))
 	copy(clients, pool.goodClients)
 	return clients
+}
+
+// GetChainId returns the chain ID of the clients in the pool.
+func (pool *ClientPool) GetChainId() *big.Int {
+	return pool.chainId
 }

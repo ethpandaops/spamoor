@@ -48,6 +48,8 @@ type ScenarioOptions struct {
 	Bytecode       string  `yaml:"bytecode"` // Bytecode hex string (or path/URL to bytecode file)
 	BaseFee        float64 `yaml:"base_fee"`
 	TipFee         float64 `yaml:"tip_fee"`
+	BaseFeeWei     string  `yaml:"base_fee_wei"`
+	TipFeeWei      string  `yaml:"tip_fee_wei"`
 	ClientGroup    string  `yaml:"client_group"`
 	LogTxs         bool    `yaml:"log_txs"`
 }
@@ -103,6 +105,8 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Bytecode:       "",
 	BaseFee:        20,
 	TipFee:         2,
+	BaseFeeWei:     "",
+	TipFeeWei:      "",
 	ClientGroup:    "",
 	LogTxs:         false,
 }
@@ -134,6 +138,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.Bytecode, "bytecode", ScenarioDefaultOptions.Bytecode, "Contract bytecode hex string or path/URL to bytecode file (required)")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas (in gwei)")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas (in gwei)")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
@@ -360,7 +366,8 @@ func (s *Scenario) deployNicksFactory(ctx context.Context) error {
 			return err
 		}
 
-		feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+		baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+		feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 		if err != nil {
 			return err
 		}
@@ -548,7 +555,8 @@ func (s *Scenario) sendFundingTx(ctx context.Context, params *scenario.ProcessNe
 		return err
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return err
 	}
@@ -639,7 +647,8 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, params *scenario.Proces
 		return err
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return err
 	}

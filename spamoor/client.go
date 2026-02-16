@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -16,6 +17,19 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/sirupsen/logrus"
 )
+
+// sharedHTTPClient is reused across all RPC clients to enable TCP connection
+// pooling. Go's default MaxIdleConnsPerHost is 2, which forces a new TCP
+// connection for nearly every request under any concurrency. This transport
+// raises the per-host pool to 100, letting high-throughput callers (like
+// transaction spammers) reuse connections instead of churning them.
+var sharedHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
 
 // ClientType represents the type of Ethereum client
 type ClientType string
@@ -44,11 +58,12 @@ func (ct ClientType) IsValid() bool {
 // gas estimation caching, and block height tracking. It wraps the standard go-ethereum ethclient
 // with enhanced features for spam testing and transaction automation.
 type Client struct {
-	Timeout   time.Duration
-	rpchost   string
-	client    *ethclient.Client
-	rpcClient *rpc.Client
-	logger    *logrus.Entry
+	Timeout        time.Duration
+	rpchost        string
+	client         *ethclient.Client
+	rpcClient      *rpc.Client
+	externalClient *ExternalClientOptions
+	logger         *logrus.Entry
 
 	clientGroups     []string
 	clientType       ClientType
@@ -75,6 +90,15 @@ type Client struct {
 	totalRpcFailures uint64
 }
 
+type ClientOptions struct {
+	RpcHost        string
+	ExternalClient *ExternalClientOptions
+}
+
+type ExternalClientOptions struct {
+	GetBlockHeight func(ctx context.Context) (uint64, error)
+}
+
 // NewClient creates a new Client instance with the specified RPC host URL.
 // The rpchost parameter supports special prefixes:
 //   - headers(key:value|key2:value2) - sets custom HTTP headers
@@ -86,11 +110,12 @@ type Client struct {
 // Example: "headers(Authorization:Bearer token|User-Agent:MyApp)group(mainnet)group(primary)name(My Custom Node)http://localhost:8545"
 // Example: "group(mainnet,primary,backup)name(MainNet Primary)http://localhost:8545"
 // Example: "type(builder)group(builders)name(Builder Node)http://localhost:8545"
-func NewClient(rpchost string) (*Client, error) {
+func NewClient(options *ClientOptions) (*Client, error) {
 	headers := map[string]string{}
 	clientGroups := []string{"default"}
 	nameOverride := ""
 	clientType := ClientTypeClient
+	rpchost := options.RpcHost
 
 	for {
 		if strings.HasPrefix(rpchost, "headers(") {
@@ -145,7 +170,13 @@ func NewClient(rpchost string) (*Client, error) {
 	}
 
 	ctx := context.Background()
-	rpcClient, err := rpc.DialContext(ctx, rpchost)
+
+	dialOpts := []rpc.ClientOption{rpc.WithWebsocketMessageSizeLimit(0)}
+	if strings.HasPrefix(rpchost, "http://") || strings.HasPrefix(rpchost, "https://") {
+		dialOpts = append(dialOpts, rpc.WithHTTPClient(sharedHTTPClient))
+	}
+
+	rpcClient, err := rpc.DialOptions(ctx, rpchost, dialOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -236,27 +267,7 @@ func (client *Client) GetRPCHost() string {
 // UpdateWallet refreshes the wallet's chain ID, nonce, and balance by querying the blockchain.
 // If the wallet doesn't have a chain ID set, it will be fetched and assigned.
 func (client *Client) UpdateWallet(ctx context.Context, wallet *Wallet) error {
-	if wallet.GetChainId() == nil {
-		chainId, err := client.GetChainId(ctx)
-		if err != nil {
-			return err
-		}
-		wallet.SetChainId(chainId)
-	}
-
-	nonce, err := client.GetNonceAt(ctx, wallet.GetAddress(), nil)
-	if err != nil {
-		return err
-	}
-	wallet.SetNonce(nonce)
-
-	balance, err := client.GetBalanceAt(ctx, wallet.GetAddress())
-	if err != nil {
-		return err
-	}
-	wallet.SetBalance(balance)
-
-	return nil
+	return wallet.UpdateWallet(ctx, client, true)
 }
 
 // SetClientGroups sets multiple client group names for the client, replacing all existing groups.

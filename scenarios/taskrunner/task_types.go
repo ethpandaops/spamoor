@@ -11,9 +11,11 @@ import (
 
 // TaskExecutionContext contains context information for task execution
 type TaskExecutionContext struct {
-	BaseFee float64         // Max fee per gas in gwei
-	TipFee  float64         // Max tip per gas in gwei
-	TxPool  *spamoor.TxPool // For fee calculation
+	BaseFee    float64         // Max fee per gas in gwei
+	TipFee     float64         // Max tip per gas in gwei
+	BaseFeeWei string          // Max fee per gas in wei (overrides BaseFee for L2 sub-gwei fees)
+	TipFeeWei  string          // Max tip per gas in wei (overrides TipFee for L2 sub-gwei fees)
+	TxPool     *spamoor.TxPool // For fee calculation
 }
 
 // Task represents a single executable task in the TaskRunner scenario

@@ -19,7 +19,6 @@ type IndexPageSpammer struct {
 	Description string    `json:"description"`
 	Scenario    string    `json:"scenario"`
 	Status      int       `json:"status"`
-	Config      string    `json:"config"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -55,7 +54,6 @@ func (fh *FrontendHandler) getIndexPageData() (*IndexPage, error) {
 			Description: s.GetDescription(),
 			Scenario:    s.GetScenario(),
 			Status:      s.GetStatus(),
-			Config:      s.GetConfig(),
 			CreatedAt:   time.Unix(s.GetCreatedAt(), 0),
 		}
 	}

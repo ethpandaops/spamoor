@@ -49,9 +49,14 @@ type AuditLogResponse struct {
 // @Param page_size query int false "Page size (default: 50, max: 1000)"
 // @Success 200 {object} AuditLogResponse "Success"
 // @Failure 400 {string} string "Invalid parameters"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/audit-logs [get]
 func (ah *APIHandler) GetAuditLogs(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	// Parse query parameters
 	query := r.URL.Query()
 
@@ -150,10 +155,15 @@ func (ah *APIHandler) GetAuditLogs(w http.ResponseWriter, r *http.Request) {
 // @Param id path int true "Audit log ID"
 // @Success 200 {object} AuditLogEntry "Success"
 // @Failure 400 {string} string "Invalid audit log ID"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 404 {string} string "Audit log not found"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/audit-logs/{id} [get]
 func (ah *APIHandler) GetAuditLog(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	vars := mux.Vars(r)
 	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
@@ -205,9 +215,14 @@ type AuditLogStatsResponse struct {
 // @Produce json
 // @Param days query int false "Number of days to include in stats (default: 30)"
 // @Success 200 {object} AuditLogStatsResponse "Success"
+// @Failure 401 {string} string "Unauthorized"
 // @Failure 500 {string} string "Server Error"
 // @Router /api/audit-logs/stats [get]
 func (ah *APIHandler) GetAuditLogStats(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	// Parse days parameter
 	days := 30
 	if daysStr := r.URL.Query().Get("days"); daysStr != "" {

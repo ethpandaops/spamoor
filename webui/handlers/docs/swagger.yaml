@@ -224,7 +224,22 @@ definitions:
         description: Human-readable wallet name
         type: string
     type: object
-  api.ScenarioEntries:
+  api.ScenarioCategory:
+    properties:
+      children:
+        items:
+          $ref: '#/definitions/api.ScenarioCategory'
+        type: array
+      description:
+        type: string
+      name:
+        type: string
+      scenarios:
+        items:
+          $ref: '#/definitions/api.ScenarioEntry'
+        type: array
+    type: object
+  api.ScenarioEntry:
     properties:
       description:
         type: string
@@ -563,6 +578,10 @@ paths:
           description: Invalid parameters
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "500":
           description: Server Error
           schema:
@@ -589,6 +608,10 @@ paths:
             $ref: '#/definitions/api.AuditLogEntry'
         "400":
           description: Invalid audit log ID
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
           schema:
             type: string
         "404":
@@ -619,6 +642,10 @@ paths:
           description: Success
           schema:
             $ref: '#/definitions/api.AuditLogStatsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "500":
           description: Server Error
           schema:
@@ -649,6 +676,10 @@ paths:
           description: Success
         "400":
           description: Invalid client index
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
           schema:
             type: string
         "404":
@@ -684,6 +715,10 @@ paths:
           description: Invalid client index
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "404":
           description: Client not found
           schema:
@@ -716,6 +751,10 @@ paths:
           description: Invalid client index
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "404":
           description: Client not found
           schema:
@@ -746,6 +785,10 @@ paths:
           description: Success
         "400":
           description: Invalid client index or type
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
           schema:
             type: string
         "404":
@@ -782,6 +825,10 @@ paths:
           description: Success
           schema:
             $ref: '#/definitions/api.GraphsDashboardResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "500":
           description: Server Error
           schema:
@@ -809,6 +856,10 @@ paths:
           description: Invalid spammer ID
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "404":
           description: Spammer not found
           schema:
@@ -828,6 +879,10 @@ paths:
       responses:
         "200":
           description: SSE stream
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
           schema:
             type: string
       summary: Stream real-time graphs updates
@@ -887,6 +942,10 @@ paths:
           description: Invalid request
           schema:
             $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "500":
           description: Server Error
           schema:
@@ -896,7 +955,7 @@ paths:
       - Wallet
   /api/scenarios:
     get:
-      description: Returns a list of all scenarios
+      description: Returns a list of all scenarios organized by category
       operationId: getScenarios
       produces:
       - application/json
@@ -905,7 +964,7 @@ paths:
           description: Success
           schema:
             items:
-              $ref: '#/definitions/api.ScenarioEntries'
+              $ref: '#/definitions/api.ScenarioCategory'
             type: array
         "400":
           description: Failure
@@ -970,6 +1029,10 @@ paths:
           description: Invalid request
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "500":
           description: Server Error
           schema:
@@ -1012,6 +1075,10 @@ paths:
           description: Invalid spammer ID
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "404":
           description: Spammer not found
           schema:
@@ -1043,6 +1110,10 @@ paths:
           description: Invalid spammer ID
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "404":
           description: Spammer not found
           schema:
@@ -1072,6 +1143,10 @@ paths:
           description: Success
         "400":
           description: Invalid request
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
           schema:
             type: string
         "404":
@@ -1108,6 +1183,10 @@ paths:
           description: Invalid spammer ID
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "404":
           description: Spammer not found
           schema:
@@ -1140,6 +1219,10 @@ paths:
           description: Invalid spammer ID
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "404":
           description: Spammer not found
           schema:
@@ -1166,6 +1249,10 @@ paths:
           description: Success
         "400":
           description: Invalid spammer ID
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
           schema:
             type: string
         "404":
@@ -1196,6 +1283,10 @@ paths:
           description: Invalid spammer ID
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "404":
           description: Spammer not found
           schema:
@@ -1222,6 +1313,10 @@ paths:
           description: Success
         "400":
           description: Invalid spammer ID
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
           schema:
             type: string
         "404":
@@ -1274,6 +1369,10 @@ paths:
           description: Invalid request
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "500":
           description: Server Error
           schema:
@@ -1303,6 +1402,10 @@ paths:
             $ref: '#/definitions/daemon.ImportResult'
         "400":
           description: Invalid request
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
           schema:
             type: string
         "500":

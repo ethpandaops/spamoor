@@ -57,6 +57,8 @@ type ScenarioOptions struct {
 	MaxWallets           uint64               `yaml:"max_wallets" json:"max_wallets"`
 	BaseFee              float64              `yaml:"base_fee" json:"base_fee"`
 	TipFee               float64              `yaml:"tip_fee" json:"tip_fee"`
+	BaseFeeWei           string               `yaml:"base_fee_wei" json:"base_fee_wei"`
+	TipFeeWei            string               `yaml:"tip_fee_wei" json:"tip_fee_wei"`
 	Throughput           uint64               `yaml:"throughput" json:"throughput"`
 	PredeployedAddresses PredeployedAddresses `yaml:"predeployed" json:"predeployed"`
 }
@@ -77,6 +79,8 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	MaxWallets:       50,
 	BaseFee:          20,
 	TipFee:           2,
+	BaseFeeWei:       "",
+	TipFeeWei:        "",
 	Throughput:       0, // 0 = auto-calculate based on block gas limit
 	PredeployedAddresses: PredeployedAddresses{
 		Initcode:  make(map[string]common.Address),
@@ -104,6 +108,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of wallets to use for parallel execution")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Base fee per gas in gwei")
 	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Tip fee per gas in gwei")
+	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
+	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
 	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", ScenarioDefaultOptions.Throughput, "Max deployments per slot (0=auto based on block gas limit)")
 	return nil
 }
@@ -326,7 +332,8 @@ func (s *Scenario) deployInitcode(ctx context.Context, sizeKB float64) (*Initcod
 	// Build deployment bytecode that returns the initcode as contract code
 	deploymentBytecode := buildInitcodeDeployer(initcodeBytecode)
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
@@ -388,7 +395,8 @@ func (s *Scenario) deployFactory(ctx context.Context, sizeKB float64, initcodeIn
 
 	s.logger.Debugf("built factory bytecode for %.1fKB: %d bytes", sizeKB, len(factoryBytecode))
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
@@ -532,7 +540,8 @@ func (s *Scenario) sendFactoryDeployTx(ctx context.Context, params *scenario.Pro
 		return err
 	}
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return err
 	}

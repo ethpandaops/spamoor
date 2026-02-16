@@ -89,6 +89,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "500": {
                         "description": "Server Error",
                         "schema": {
@@ -122,6 +128,12 @@ const docTemplate = `{
                         "description": "Success",
                         "schema": {
                             "$ref": "#/definitions/api.AuditLogStatsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
                         }
                     },
                     "500": {
@@ -162,6 +174,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid audit log ID",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -220,6 +238,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "404": {
                         "description": "Client not found",
                         "schema": {
@@ -264,6 +288,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid client index",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -316,6 +346,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "404": {
                         "description": "Client not found",
                         "schema": {
@@ -360,6 +396,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid client index or type",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -414,6 +456,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/api.GraphsDashboardResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "500": {
                         "description": "Server Error",
                         "schema": {
@@ -455,6 +503,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
@@ -483,6 +537,12 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "SSE stream",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -572,6 +632,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/api.ErrorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "500": {
                         "description": "Server Error",
                         "schema": {
@@ -583,7 +649,7 @@ const docTemplate = `{
         },
         "/api/scenarios": {
             "get": {
-                "description": "Returns a list of all scenarios",
+                "description": "Returns a list of all scenarios organized by category",
                 "produces": [
                     "application/json"
                 ],
@@ -598,7 +664,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/api.ScenarioEntries"
+                                "$ref": "#/definitions/api.ScenarioCategory"
                             }
                         }
                     },
@@ -697,6 +763,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "500": {
                         "description": "Server Error",
                         "schema": {
@@ -766,6 +838,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
@@ -812,6 +890,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
@@ -848,6 +932,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid spammer ID",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -903,6 +993,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
@@ -951,6 +1047,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
@@ -989,6 +1091,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid spammer ID",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -1035,6 +1143,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "404": {
                         "description": "Spammer not found",
                         "schema": {
@@ -1073,6 +1187,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid spammer ID",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -1153,6 +1273,12 @@ const docTemplate = `{
                             "type": "string"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     "500": {
                         "description": "Server Error",
                         "schema": {
@@ -1196,6 +1322,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -1567,7 +1699,30 @@ const docTemplate = `{
                 }
             }
         },
-        "api.ScenarioEntries": {
+        "api.ScenarioCategory": {
+            "type": "object",
+            "properties": {
+                "children": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ScenarioCategory"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "scenarios": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ScenarioEntry"
+                    }
+                }
+            }
+        },
+        "api.ScenarioEntry": {
             "type": "object",
             "properties": {
                 "description": {

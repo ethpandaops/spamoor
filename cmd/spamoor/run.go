@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -37,7 +38,7 @@ func RunCommand(args []string) {
 	flags.StringVar(&cliArgs.rpchostsFile, "rpchost-file", "", "File with a list of RPC hosts to send transactions to.")
 	flags.StringVarP(&cliArgs.privkey, "privkey", "p", "", "The private key of the wallet to send funds from.")
 	flags.IntSliceVarP(&selectedSpammers, "spammers", "s", []int{}, "Indexes of spammers to run (0-based). If not specified, runs all spammers.")
-	flags.Uint64Var(&cliArgs.secondsPerSlot, "seconds-per-slot", 12, "Seconds per slot for rate limiting (used for throughput calculation).")
+	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 
 	flags.Parse(args)
 
@@ -63,8 +64,8 @@ func RunCommand(args []string) {
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor run command")
 
-	// Set global seconds per slot
-	scenario.GlobalSecondsPerSlot = cliArgs.secondsPerSlot
+	// Set global slot duration for rate limiting
+	scenario.GlobalSlotDuration = cliArgs.slotDuration
 
 	// Create context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -101,7 +102,14 @@ func RunCommand(args []string) {
 
 	clientPool := spamoor.NewClientPool(ctx, logger.WithField("module", "clientpool"))
 
-	err := clientPool.InitClients(rpcHosts)
+	clientOptions := []*spamoor.ClientOptions{}
+	for _, rpcHost := range rpcHosts {
+		clientOptions = append(clientOptions, &spamoor.ClientOptions{
+			RpcHost: rpcHost,
+		})
+	}
+
+	err := clientPool.InitClients(clientOptions)
 	if err != nil {
 		panic(fmt.Errorf("failed to init clients: %v", err))
 	}
@@ -110,13 +118,6 @@ func RunCommand(args []string) {
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to prepare clients")
 	}
-
-	// Initialize root wallet
-	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, logger)
-	if err != nil {
-		logger.WithError(err).Fatal("Failed to init root wallet")
-	}
-	defer rootWallet.Shutdown()
 
 	// Load and parse YAML file using scenario config logic
 	spammerConfigs, err := configs.ResolveConfigImports(yamlFile, "", make(map[string]bool))
@@ -160,21 +161,20 @@ func RunCommand(args []string) {
 
 	logger.Infof("Preparing to run %d spammer(s)", len(configsToRun))
 
-	// Create wallet pools slice for txpool
-	walletPools := []*spamoor.WalletPool{}
-	walletPoolMutex := &sync.RWMutex{}
-
 	// Initialize transaction pool
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
 		Context:    ctx,
 		Logger:     logger.WithField("module", "txpool"),
 		ClientPool: clientPool,
-		GetActiveWalletPools: func() []*spamoor.WalletPool {
-			walletPoolMutex.RLock()
-			defer walletPoolMutex.RUnlock()
-			return walletPools
-		},
+		ChainId:    clientPool.GetChainId(),
 	})
+
+	// Initialize root wallet
+	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, txpool, logger)
+	if err != nil {
+		logger.WithError(err).Fatal("Failed to init root wallet")
+	}
+	defer rootWallet.Shutdown()
 
 	// Create and initialize spammers
 	spammers := make([]*RunSpammer, len(configsToRun))
@@ -184,11 +184,6 @@ func RunCommand(args []string) {
 			logger.WithError(err).Fatalf("Failed to create spammer %d (%s)", i, config.Name)
 		}
 		spammers[i] = spammer
-
-		// Add wallet pool to the slice
-		walletPoolMutex.Lock()
-		walletPools = append(walletPools, spammer.walletPool)
-		walletPoolMutex.Unlock()
 	}
 
 	// Prepare all wallet pools

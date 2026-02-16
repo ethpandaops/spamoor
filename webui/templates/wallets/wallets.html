@@ -32,7 +32,7 @@
           <td>{{ subUI64 .RootWallet.PendingNonce .RootWallet.ConfirmedNonce }}</td>
           <td>
             <span class="badge bg-primary">Root Wallet</span>
-            <button class="btn btn-sm btn-success ms-2" id="send-funds-btn" title="Send Funds">
+            <button class="btn btn-sm btn-success ms-2 d-none" id="send-funds-btn" title="Send Funds" data-auth-required>
               <i class="fas fa-paper-plane"></i> Send
             </button>
           </td>
@@ -632,7 +632,7 @@ function handleSendFunds(modal) {
     data.maxTip = maxTip;
   }
   
-  fetch('/api/root-wallet/send-transaction', {
+  spamoor.authFetch('/api/root-wallet/send-transaction', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
