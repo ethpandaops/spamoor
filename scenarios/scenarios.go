@@ -14,6 +14,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/calltx"
 	deploydestruct "github.com/ethpandaops/spamoor/scenarios/deploy-destruct"
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
+	"github.com/ethpandaops/spamoor/scenarios/eip2780tx"
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
 	"github.com/ethpandaops/spamoor/scenarios/erc1155tx"
 	"github.com/ethpandaops/spamoor/scenarios/erc20tx"
@@ -46,6 +47,7 @@ var scenarioDescriptorTree = []*scenario.Category{
 			&blobs.ScenarioDescriptor,
 			&blobreplacements.ScenarioDescriptor,
 			&deploydestruct.ScenarioDescriptor,
+			&eip2780tx.ScenarioDescriptor,
 			&eoatx.ScenarioDescriptor,
 			&erc20tx.ScenarioDescriptor,
 			&erc721tx.ScenarioDescriptor,
