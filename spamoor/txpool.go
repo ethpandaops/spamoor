@@ -1062,12 +1062,16 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 		for i := 0; i < clientCount; i++ {
 			client := options.Client
 			if client == nil || i > 0 {
-				var clientOpts []ClientSelectionOption
-				if options.ClientGroup != "" {
-					clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
+				if len(options.ClientList) > 0 {
+					client = options.ClientList[(i+options.ClientsStartOffset)%len(options.ClientList)]
+				} else {
+					var clientOpts []ClientSelectionOption
+					if options.ClientGroup != "" {
+						clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
+					}
+					clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, i+options.ClientsStartOffset))
+					client = pool.options.ClientPool.GetClient(clientOpts...)
 				}
-				clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, i+options.ClientsStartOffset))
-				client = pool.options.ClientPool.GetClient(clientOpts...)
 			}
 			if client == nil {
 				continue
@@ -1623,6 +1627,9 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 	}
 
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
+	if len(options.ClientList) > 0 {
+		clientCount = len(options.ClientList)
+	}
 	if clientCount > 5 {
 		clientCount = 5
 	}
@@ -1632,12 +1639,18 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 			break
 		}
 
-		var clientOpts []ClientSelectionOption
-		if options.ClientGroup != "" {
-			clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
+		var client *Client
+		if len(options.ClientList) > 0 {
+			client = options.ClientList[(j+options.ClientsStartOffset)%len(options.ClientList)]
+		} else {
+			var clientOpts []ClientSelectionOption
+			if options.ClientGroup != "" {
+				clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
+			}
+			clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, j+options.ClientsStartOffset+1))
+			client = pool.options.ClientPool.GetClient(clientOpts...)
 		}
-		clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, j+options.ClientsStartOffset+1))
-		client := pool.options.ClientPool.GetClient(clientOpts...)
+
 		if client == nil {
 			break
 		}
