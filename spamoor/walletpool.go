@@ -851,9 +851,25 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		totalFundingAmount = totalFundingAmount.Add(totalFundingAmount, req.Amount)
 	}
 
-	feeCap, _, err := client.GetSuggestedFee(pool.ctx)
+	feeCap, tipCap, err := client.GetSuggestedFee(pool.ctx)
 	if err != nil {
 		return err
+	}
+
+	// Apply fee capping once for all funding transactions
+	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
+		feeCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		feeCap = feeCap.Add(feeCap, big.NewInt(2000000000)) // +2 gwei
+	}
+	if tipCap.Cmp(big.NewInt(100000000000)) > 0 {
+		tipCap = big.NewInt(100000000000) // 100 gwei
+	} else {
+		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
+	}
+	// Ensure tipCap never exceeds feeCap (EIP-1559 requirement)
+	if tipCap.Cmp(feeCap) > 0 {
+		tipCap = new(big.Int).Set(feeCap)
 	}
 
 	reqTxCount := len(fundingReqs)
@@ -891,7 +907,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		if batcher != nil {
 			for txIdx := 0; txIdx < reqTxCount; txIdx += BatcherTxLimit {
 				batch := fundingReqs[txIdx:min(txIdx+BatcherTxLimit, reqTxCount)]
-				tx, err := pool.buildWalletFundingBatchTx(batch, client, batcher)
+				tx, err := pool.buildWalletFundingBatchTx(batch, batcher, feeCap, tipCap)
 				if err != nil {
 					return err
 				}
@@ -900,7 +916,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 			}
 		} else {
 			for _, req := range fundingReqs {
-				tx, err := pool.buildWalletFundingTx(req.Wallet, client, req.Amount)
+				tx, err := pool.buildWalletFundingTx(req.Wallet, req.Amount, feeCap, tipCap)
 				if err != nil {
 					return err
 				}
@@ -910,7 +926,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 
 		receipts, err := pool.txpool.SendTransactionBatch(pool.ctx, pool.rootWallet.wallet, txList, &BatchOptions{
 			SendTransactionOptions: SendTransactionOptions{
-				Client: client,
+				Rebroadcast: true,
 			},
 			MaxRetries:   3,
 			PendingLimit: 200,
@@ -939,33 +955,8 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 }
 
 // buildWalletFundingTx creates a transaction to fund a single wallet with the specified amount.
-// It gets suggested fees from the client and builds a dynamic fee transaction.
-func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client, refillAmount *uint256.Int) (*types.Transaction, error) {
-	if client == nil {
-		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
-		if client == nil {
-			return nil, fmt.Errorf("no client available")
-		}
-	}
-	feeCap, tipCap, err := client.GetSuggestedFee(pool.ctx)
-	if err != nil {
-		return nil, err
-	}
-	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
-		feeCap = big.NewInt(100000000000) // 100 gwei
-	} else {
-		feeCap = feeCap.Add(feeCap, big.NewInt(2000000000)) // +2 gwei
-	}
-	if tipCap.Cmp(big.NewInt(100000000000)) > 0 {
-		tipCap = big.NewInt(100000000000) // 100 gwei
-	} else {
-		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
-	}
-	// Ensure tipCap never exceeds feeCap (EIP-1559 requirement)
-	if tipCap.Cmp(feeCap) > 0 {
-		tipCap = new(big.Int).Set(feeCap)
-	}
-
+// It uses the provided fee caps to build a dynamic fee transaction.
+func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, refillAmount *uint256.Int, feeCap *big.Int, tipCap *big.Int) (*types.Transaction, error) {
 	toAddr := childWallet.GetAddress()
 	refillTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
@@ -987,32 +978,7 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client
 // buildWalletFundingBatchTx creates a transaction to fund multiple wallets using the batcher contract.
 // It calculates the total amount needed, encodes the funding requests as calldata,
 // and builds a transaction to the batcher contract with appropriate gas limits.
-func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, client *Client, batcher *TxBatcher) (*types.Transaction, error) {
-	if client == nil {
-		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
-		if client == nil {
-			return nil, fmt.Errorf("no client available")
-		}
-	}
-	feeCap, tipCap, err := client.GetSuggestedFee(pool.ctx)
-	if err != nil {
-		return nil, err
-	}
-	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
-		feeCap = big.NewInt(100000000000) // 100 gwei
-	} else {
-		feeCap = feeCap.Add(feeCap, big.NewInt(2000000000)) // +2 gwei
-	}
-	if tipCap.Cmp(big.NewInt(100000000000)) > 0 {
-		tipCap = big.NewInt(100000000000) // 100 gwei
-	} else {
-		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
-	}
-	// Ensure tipCap never exceeds feeCap (EIP-1559 requirement)
-	if tipCap.Cmp(feeCap) > 0 {
-		tipCap = new(big.Int).Set(feeCap)
-	}
-
+func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, batcher *TxBatcher, feeCap *big.Int, tipCap *big.Int) (*types.Transaction, error) {
 	totalAmount := uint256.NewInt(0)
 	for _, req := range requests {
 		totalAmount = totalAmount.Add(totalAmount, req.Amount)
