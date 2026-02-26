@@ -622,6 +622,10 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 		childWallet = pool.txpool.RegisterWallet(childWallet, pool.ctx)
 	}
 
+	if childWallet == nil {
+		return nil, nil, fmt.Errorf("wallet registration failed (context cancelled)")
+	}
+
 	err = client.UpdateWallet(pool.ctx, childWallet)
 	if err != nil {
 		return nil, nil, err
