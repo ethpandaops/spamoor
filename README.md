@@ -321,13 +321,14 @@ Comprehensive guide for implementing custom transaction scenarios. Covers:
 - Contract interaction patterns
 - Testing and debugging scenarios
 
-### 🔌 [Dynamic Scenario Guide](./docs/dynamic-scenarios.md)
-Guide for creating and loading scenarios at runtime without recompiling. Covers:
-- Writing dynamic scenarios with Yaegi interpreter
-- Available packages and symbols
-- Auto-loading and hot-reload features
-- Validation and troubleshooting
-- See [example implementation](./examples/dynamic-scenarios/simple_transfer.go)
+### 🔌 [Plugin System Guide](./docs/plugin-system.md)
+Guide for developing, distributing, and managing plugins. Covers:
+- Plugin development and scenario implementation
+- Building and distributing plugin archives
+- CLI and daemon mode usage
+- REST API for runtime plugin management
+- Architecture and Yaegi interpreter limitations
+- See [example plugin](./plugins/_example-plugin/)
 
 ## ✨ Key Features
 
