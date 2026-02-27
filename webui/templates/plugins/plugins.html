@@ -1,0 +1,433 @@
+{{ define "page" }}
+  <div class="container mt-2">
+    <!-- Auth required message (shown when not authenticated) -->
+    <div id="auth-required-message" class="alert alert-warning d-none">
+      <i class="fas fa-lock me-2"></i>
+      <strong>Authentication Required</strong>
+      <p class="mb-0">Please log in to view and manage plugins.</p>
+    </div>
+
+    <!-- Plugins content (shown when authenticated) -->
+    <div id="plugins-content" class="d-none">
+      <div class="card mt-2">
+        <div class="card-body px-0 py-3">
+          <div class="d-flex justify-content-between align-items-center px-3 mb-2">
+            <h2 class="mb-0">Plugins</h2>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#registerPluginModal">
+              <i class="fas fa-plus"></i> Register Plugin
+            </button>
+          </div>
+          <div id="loading-spinner" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="mt-2">Loading plugins...</div>
+          </div>
+          <div class="table-responsive px-0 py-1 d-none" id="plugins-table-container">
+            <table class="table table-nobr" id="pluginsTable">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Scenarios</th>
+                  <th>Running</th>
+                  <th>Version</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="plugins-table-body">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- Register Plugin Modal -->
+<div class="modal fade" id="registerPluginModal" tabindex="-1" aria-labelledby="registerPluginModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="registerPluginModalLabel">Register Plugin</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-tabs" id="pluginSourceTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="url-tab" data-bs-toggle="tab" data-bs-target="#url-content" type="button" role="tab" aria-controls="url-content" aria-selected="true">URL</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload-content" type="button" role="tab" aria-controls="upload-content" aria-selected="false">Upload</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="local-tab" data-bs-toggle="tab" data-bs-target="#local-content" type="button" role="tab" aria-controls="local-content" aria-selected="false">Local Path</button>
+          </li>
+        </ul>
+        <div class="tab-content pt-3" id="pluginSourceTabContent">
+          <div class="tab-pane fade show active" id="url-content" role="tabpanel" aria-labelledby="url-tab">
+            <div class="mb-3">
+              <label for="pluginUrl" class="form-label">Plugin URL</label>
+              <input type="url" class="form-control" id="pluginUrl" placeholder="https://example.com/plugin.tar.gz">
+              <div class="form-text">URL to a tar.gz archive containing the plugin</div>
+            </div>
+          </div>
+          <div class="tab-pane fade" id="upload-content" role="tabpanel" aria-labelledby="upload-tab">
+            <div class="mb-3">
+              <label for="pluginFile" class="form-label">Plugin Archive</label>
+              <input type="file" class="form-control" id="pluginFile" accept=".tar,.tar.gz,.tgz">
+              <div class="form-text">Upload a tar or tar.gz archive containing the plugin</div>
+            </div>
+          </div>
+          <div class="tab-pane fade" id="local-content" role="tabpanel" aria-labelledby="local-tab">
+            <div class="mb-3">
+              <label for="pluginPath" class="form-label">Local Path</label>
+              <input type="text" class="form-control" id="pluginPath" placeholder="/path/to/plugin/directory">
+              <div class="form-text">Path to a local directory containing the plugin source</div>
+            </div>
+          </div>
+        </div>
+        <div id="registerPluginError" class="alert alert-danger d-none" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="registerPluginBtn" onclick="registerPlugin()">Register</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deletePluginModal" tabindex="-1" aria-labelledby="deletePluginModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="deletePluginModalLabel">Delete Plugin</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to delete plugin <strong id="deletePluginName"></strong>?</p>
+        <div id="deletePluginWarning" class="alert alert-warning d-none">
+          This plugin has running spammer(s). You must stop them before deleting the plugin.
+        </div>
+        <div id="deletePluginError" class="alert alert-danger d-none" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="deletePlugin()">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{{ end }}
+
+{{ define "js" }}
+<script>
+  var pluginToDelete = null;
+
+  document.addEventListener('DOMContentLoaded', function() {
+    /* Check auth state and show appropriate content */
+    if (window.spamoor && window.spamoor.authState) {
+      updatePluginsVisibility(window.spamoor.authState.isAuthenticated);
+    }
+
+    /* Listen for auth state changes */
+    window.addEventListener('authStateChanged', function(e) {
+      updatePluginsVisibility(e.detail.isAuthenticated);
+    });
+  });
+
+  function updatePluginsVisibility(isAuthenticated) {
+    var authMessage = document.getElementById('auth-required-message');
+    var pluginsContent = document.getElementById('plugins-content');
+
+    if (isAuthenticated) {
+      authMessage.classList.add('d-none');
+      pluginsContent.classList.remove('d-none');
+      loadPlugins();
+    } else {
+      authMessage.classList.remove('d-none');
+      pluginsContent.classList.add('d-none');
+    }
+  }
+
+  function loadPlugins() {
+    var spinner = document.getElementById('loading-spinner');
+    var tableContainer = document.getElementById('plugins-table-container');
+
+    spinner.classList.remove('d-none');
+    tableContainer.classList.add('d-none');
+
+    spamoor.authFetch('/api/plugins')
+      .then(function(response) {
+        if (!response.ok) throw new Error('Failed to load plugins');
+        return response.json();
+      })
+      .then(function(plugins) {
+        renderPlugins(plugins);
+        spinner.classList.add('d-none');
+        tableContainer.classList.remove('d-none');
+      })
+      .catch(function(error) {
+        console.error('Failed to load plugins:', error);
+        spinner.classList.add('d-none');
+        tableContainer.classList.remove('d-none');
+        document.getElementById('plugins-table-body').innerHTML =
+          '<tr><td colspan="7" class="text-center text-danger py-4">Failed to load plugins</td></tr>';
+      });
+  }
+
+  function renderPlugins(plugins) {
+    var tbody = document.getElementById('plugins-table-body');
+    tbody.innerHTML = '';
+
+    if (!plugins || plugins.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">' +
+        'No plugins registered. Click "Register Plugin" to add one.</td></tr>';
+      return;
+    }
+
+    plugins.forEach(function(plugin) {
+      var row = document.createElement('tr');
+      row.setAttribute('data-plugin-name', plugin.name);
+      if (plugin.deprecated) row.style.opacity = '0.6';
+
+      var nameHtml = '<strong>' + escapeHtml(plugin.name) + '</strong>';
+      if (plugin.deprecated) nameHtml += ' <span class="badge bg-warning text-dark ms-1">Deprecated</span>';
+      if (plugin.metadata_name) nameHtml += '<br><small class="text-muted">' + escapeHtml(plugin.metadata_name) + '</small>';
+
+      var sourceHtml;
+      if (plugin.deprecated) {
+        sourceHtml = '<span class="text-muted">-</span>';
+      } else {
+        sourceHtml = '<span class="badge bg-secondary">' + escapeHtml(plugin.source_type) + '</span>' +
+          '<br><small class="text-muted text-truncate d-block" style="max-width: 200px;" title="' +
+          escapeHtml(plugin.source_path) + '">' + escapeHtml(plugin.source_path) + '</small>';
+      }
+
+      var statusHtml;
+      if (plugin.deprecated) {
+        statusHtml = '<span class="badge bg-warning text-dark">Deprecated</span>';
+      } else if (plugin.load_error) {
+        statusHtml = '<span class="badge bg-danger" data-bs-toggle="tooltip" data-bs-placement="top" title="' +
+          escapeHtml(plugin.load_error) + '">Error</span>';
+      } else if (plugin.is_loaded) {
+        statusHtml = '<span class="badge bg-success">Loaded</span>';
+      } else {
+        statusHtml = '<span class="badge bg-warning">Not Loaded</span>';
+      }
+
+      var scenariosHtml = '';
+      if (plugin.scenarios && plugin.scenarios.length > 0) {
+        plugin.scenarios.forEach(function(s) {
+          scenariosHtml += '<span class="badge bg-info me-1">' + escapeHtml(s) + '</span>';
+        });
+      } else {
+        scenariosHtml = '<span class="text-muted">-</span>';
+      }
+
+      var runningHtml;
+      if (plugin.running_count > 0) {
+        runningHtml = '<span class="badge bg-primary">' + plugin.running_count + '</span>';
+      } else {
+        runningHtml = '<span class="text-muted">0</span>';
+      }
+
+      var versionHtml = '';
+      if (plugin.metadata_git_version) {
+        versionHtml = '<small>' + escapeHtml(plugin.metadata_git_version) + '</small>';
+      } else {
+        versionHtml = '<span class="text-muted">-</span>';
+      }
+      if (plugin.metadata_build_time) {
+        versionHtml += '<br><small class="text-muted">' + escapeHtml(plugin.metadata_build_time) + '</small>';
+      }
+
+      var actionsHtml;
+      if (plugin.deprecated) {
+        actionsHtml = '<span class="text-muted">-</span>';
+      } else {
+        actionsHtml = '<div class="btn-group" role="group">';
+        if (plugin.source_type === 'url' || plugin.source_type === 'local') {
+          actionsHtml += '<button type="button" class="btn btn-sm btn-primary" onclick="reloadPlugin(\'' +
+            escapeHtml(plugin.name) + '\')" title="Reload from source" data-bs-toggle="tooltip" data-bs-placement="top">' +
+            '<i class="fas fa-sync-alt"></i></button>';
+        }
+        actionsHtml += '<button type="button" class="btn btn-sm btn-danger" onclick="confirmDeletePlugin(\'' +
+          escapeHtml(plugin.name) + '\', ' + (plugin.running_count || 0) + ')" title="Delete" data-bs-toggle="tooltip" data-bs-placement="top">' +
+          '<i class="fas fa-trash"></i></button>';
+        actionsHtml += '</div>';
+      }
+
+      row.innerHTML = '<td>' + nameHtml + '</td>' +
+        '<td>' + sourceHtml + '</td>' +
+        '<td>' + statusHtml + '</td>' +
+        '<td>' + scenariosHtml + '</td>' +
+        '<td>' + runningHtml + '</td>' +
+        '<td>' + versionHtml + '</td>' +
+        '<td>' + actionsHtml + '</td>';
+
+      tbody.appendChild(row);
+    });
+
+    /* Initialize tooltips for dynamically rendered content */
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function(tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+  }
+
+  function escapeHtml(text) {
+    if (!text) return '';
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function registerPlugin() {
+    var errorEl = document.getElementById('registerPluginError');
+    var btnEl = document.getElementById('registerPluginBtn');
+    errorEl.classList.add('d-none');
+    btnEl.disabled = true;
+    btnEl.textContent = 'Registering...';
+
+    var activeTab = document.querySelector('#pluginSourceTabs .nav-link.active').id;
+    var formData = new FormData();
+
+    if (activeTab === 'url-tab') {
+      var url = document.getElementById('pluginUrl').value.trim();
+      if (!url) {
+        showRegisterError('URL is required');
+        return;
+      }
+      formData.append('type', 'url');
+      formData.append('path', url);
+    } else if (activeTab === 'upload-tab') {
+      var file = document.getElementById('pluginFile').files[0];
+      if (!file) {
+        showRegisterError('Please select a file');
+        return;
+      }
+      formData.append('type', 'upload');
+      formData.append('file', file);
+    } else if (activeTab === 'local-tab') {
+      var path = document.getElementById('pluginPath').value.trim();
+      if (!path) {
+        showRegisterError('Path is required');
+        return;
+      }
+      formData.append('type', 'local');
+      formData.append('path', path);
+    }
+
+    spamoor.authFetch('/api/plugins', {
+      method: 'POST',
+      body: formData
+    })
+    .then(function(response) {
+      if (!response.ok) {
+        return response.text().then(function(text) { throw new Error(text) });
+      }
+      return response.json();
+    })
+    .then(function(data) {
+      /* Close modal and reload plugins */
+      bootstrap.Modal.getInstance(document.getElementById('registerPluginModal')).hide();
+      loadPlugins();
+    })
+    .catch(function(error) {
+      showRegisterError(error.message);
+    });
+  }
+
+  function showRegisterError(message) {
+    var errorEl = document.getElementById('registerPluginError');
+    var btnEl = document.getElementById('registerPluginBtn');
+    errorEl.textContent = message;
+    errorEl.classList.remove('d-none');
+    btnEl.disabled = false;
+    btnEl.textContent = 'Register';
+  }
+
+  function confirmDeletePlugin(name, runningCount) {
+    pluginToDelete = name;
+    document.getElementById('deletePluginName').textContent = name;
+    document.getElementById('deletePluginError').classList.add('d-none');
+
+    var warningEl = document.getElementById('deletePluginWarning');
+    var confirmBtn = document.getElementById('confirmDeleteBtn');
+
+    if (runningCount > 0) {
+      warningEl.classList.remove('d-none');
+      confirmBtn.disabled = true;
+    } else {
+      warningEl.classList.add('d-none');
+      confirmBtn.disabled = false;
+    }
+
+    new bootstrap.Modal(document.getElementById('deletePluginModal')).show();
+  }
+
+  function deletePlugin() {
+    if (!pluginToDelete) return;
+
+    var errorEl = document.getElementById('deletePluginError');
+    var confirmBtn = document.getElementById('confirmDeleteBtn');
+    errorEl.classList.add('d-none');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Deleting...';
+
+    spamoor.authFetch('/api/plugins/' + encodeURIComponent(pluginToDelete), {
+      method: 'DELETE'
+    })
+    .then(function(response) {
+      if (!response.ok) {
+        return response.text().then(function(text) { throw new Error(text) });
+      }
+      /* Close modal and reload plugins */
+      bootstrap.Modal.getInstance(document.getElementById('deletePluginModal')).hide();
+      loadPlugins();
+    })
+    .catch(function(error) {
+      errorEl.textContent = error.message;
+      errorEl.classList.remove('d-none');
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Delete';
+    });
+  }
+
+  function reloadPlugin(name) {
+    if (!confirm('Reload plugin "' + name + '" from its source? This will load the latest version.')) {
+      return;
+    }
+
+    spamoor.authFetch('/api/plugins/' + encodeURIComponent(name) + '/reload', {
+      method: 'POST'
+    })
+    .then(function(response) {
+      if (!response.ok) {
+        return response.text().then(function(text) { throw new Error(text) });
+      }
+      loadPlugins();
+    })
+    .catch(function(error) {
+      alert('Failed to reload plugin: ' + error.message);
+    });
+  }
+
+  /* Reset modal forms on close */
+  document.getElementById('registerPluginModal').addEventListener('hidden.bs.modal', function() {
+    document.getElementById('pluginUrl').value = '';
+    document.getElementById('pluginFile').value = '';
+    document.getElementById('pluginPath').value = '';
+    document.getElementById('registerPluginError').classList.add('d-none');
+    document.getElementById('registerPluginBtn').disabled = false;
+    document.getElementById('registerPluginBtn').textContent = 'Register';
+  });
+</script>
+{{ end }}
+
+{{ define "css" }}
+{{ end }}

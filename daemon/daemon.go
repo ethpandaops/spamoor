@@ -13,6 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/ethpandaops/spamoor/daemon/db"
+	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"gopkg.in/yaml.v3"
 )
@@ -44,6 +45,12 @@ type Daemon struct {
 
 	// Audit logger for tracking actions
 	auditLogger *AuditLogger
+
+	// Plugin loader for managing plugin lifecycle
+	pluginLoader *plugin.PluginLoader
+
+	// Plugin persistence for database storage
+	pluginPersistence *PluginPersistence
 
 	// Startup delay configuration
 	startupDelay time.Duration
@@ -334,6 +341,43 @@ func (d *Daemon) GetDatabase() *db.Database {
 	return d.db
 }
 
+// SetPluginLoader sets the plugin loader for the daemon.
+func (d *Daemon) SetPluginLoader(loader *plugin.PluginLoader) {
+	d.pluginLoader = loader
+}
+
+// GetPluginLoader returns the plugin loader.
+func (d *Daemon) GetPluginLoader() *plugin.PluginLoader {
+	return d.pluginLoader
+}
+
+// SetPluginPersistence sets the plugin persistence for the daemon.
+func (d *Daemon) SetPluginPersistence(persistence *PluginPersistence) {
+	d.pluginPersistence = persistence
+}
+
+// GetPluginPersistence returns the plugin persistence.
+func (d *Daemon) GetPluginPersistence() *PluginPersistence {
+	return d.pluginPersistence
+}
+
+// NotifyPluginDereference is called when a spammer releases its reference to a plugin.
+// It checks if the plugin can be cleaned up (no more scenarios registered AND no running spammers).
+func (d *Daemon) NotifyPluginDereference(p *plugin.LoadedPlugin) {
+	if p == nil || d.pluginLoader == nil {
+		return
+	}
+
+	// Check if plugin can be cleaned up
+	if p.CanCleanup() && !p.IsCleanedUp() {
+		d.logger.Infof("plugin %s ready for cleanup", p.Descriptor.Name)
+
+		if err := d.pluginLoader.CleanupPlugin(p); err != nil {
+			d.logger.Warnf("failed to cleanup plugin %s: %v", p.Descriptor.Name, err)
+		}
+	}
+}
+
 // TrackTransactionSent records a successful transaction send for metrics
 func (d *Daemon) TrackTransactionSent(spammerID int64) {
 	if d.metricsCollector == nil {
@@ -468,6 +512,12 @@ func (d *Daemon) Shutdown() {
 	if d.txPoolMetricsCollector != nil {
 		d.txPoolMetricsCollector.Shutdown()
 		d.logger.Info("TxPool metrics collector shutdown")
+	}
+
+	// Shutdown plugin loader and cleanup all plugin temp directories
+	if d.pluginLoader != nil {
+		d.pluginLoader.Shutdown()
+		d.logger.Info("plugin loader shutdown")
 	}
 
 	// Close database connection

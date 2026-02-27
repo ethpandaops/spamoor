@@ -14,7 +14,9 @@ import (
 
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/daemon/db"
+	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenario"
+	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/ethpandaops/spamoor/webui"
@@ -35,12 +37,14 @@ type CliArgs struct {
 	withoutBatcher    bool
 	disableTxMetrics  bool
 	disableAuditLogs  bool
+	disablePluginAPI  bool
 	slotDuration      time.Duration
 	auditUserHeader   string
 	authTokenKey      string
 	disableLocalToken bool
 	enableAuth        bool
 	startupDelay      uint64
+	plugins           []string
 }
 
 func main() {
@@ -60,12 +64,14 @@ func main() {
 	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
 	flags.BoolVar(&cliArgs.disableTxMetrics, "disable-tx-metrics", false, "Disable transaction metrics collection and graphs page (keeps Prometheus metrics)")
 	flags.BoolVar(&cliArgs.disableAuditLogs, "disable-audit-logs", false, "Disable audit logs")
+	flags.BoolVar(&cliArgs.disablePluginAPI, "disable-plugin-api", false, "Disable plugin management API (register, delete, reload). Plugins can still be loaded via --plugin on startup.")
 	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 	flags.StringVar(&cliArgs.auditUserHeader, "audit-user-header", "Cf-Access-Authenticated-User-Email", "HTTP header containing the authenticated user email for audit logs")
 	flags.StringVar(&cliArgs.authTokenKey, "auth-token-key", "", "The key to use for the auth token")
 	flags.BoolVar(&cliArgs.enableAuth, "enable-auth", false, "Enable authentication for protected endpoints")
 	flags.BoolVar(&cliArgs.disableLocalToken, "disable-local-token", false, "Disable local token generation via the /auth/token endpoint (require external token)")
 	flags.Uint64Var(&cliArgs.startupDelay, "startup-delay", 30, "Delay in seconds before starting spammers on daemon startup (to allow cancellation)")
+	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files or local directories to load (can be specified multiple times)")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -87,6 +93,12 @@ func main() {
 
 	// Set global slot duration for rate limiting
 	scenario.GlobalSlotDuration = cliArgs.slotDuration
+
+	// Initialize registries and plugin loader
+	pluginRegistry, scenarioRegistry := scenarios.InitRegistries()
+	pluginLoader := plugin.NewPluginLoader(logger, pluginRegistry, scenarioRegistry)
+
+	// CLI plugins will be loaded after database is initialized
 
 	// start client pool
 	rpcHosts := []string{}
@@ -153,6 +165,40 @@ func main() {
 	auditLogger := daemon.NewAuditLogger(spamoorDaemon, cliArgs.auditUserHeader, "user")
 	spamoorDaemon.SetAuditLogger(auditLogger)
 
+	// Set plugin loader and create plugin persistence
+	spamoorDaemon.SetPluginLoader(pluginLoader)
+	pluginPersistence := daemon.NewPluginPersistence(logger.WithField("module", "plugin-persistence"), database, pluginLoader)
+	spamoorDaemon.SetPluginPersistence(pluginPersistence)
+
+	// Restore plugins from database first
+	restoredCount, err := pluginPersistence.RestorePlugins()
+	if err != nil {
+		logger.Warnf("failed to restore plugins from database: %v", err)
+	} else if restoredCount > 0 {
+		logger.Infof("restored %d plugins from database", restoredCount)
+	}
+
+	// Load CLI-specified plugins and persist them
+	for _, pluginPath := range cliArgs.plugins {
+		var loaded *plugin.LoadedPlugin
+		var loadErr error
+
+		// Detect source type and load accordingly
+		if isURL(pluginPath) {
+			loaded, loadErr = pluginPersistence.RegisterPluginFromURL(pluginPath)
+		} else if isDirectory(pluginPath) {
+			loaded, loadErr = pluginPersistence.RegisterPluginFromLocal(pluginPath)
+		} else {
+			loaded, loadErr = pluginPersistence.RegisterPluginFromFile(pluginPath)
+		}
+
+		if loadErr != nil {
+			logger.WithError(loadErr).Fatalf("failed to load plugin: %s", pluginPath)
+		}
+
+		logger.Infof("loaded CLI plugin: %s with %d scenarios", loaded.Descriptor.Name, len(loaded.Descriptor.GetAllScenarios()))
+	}
+
 	// start frontend
 	authTokenKey := cliArgs.authTokenKey
 	if authTokenKey == "" {
@@ -171,6 +217,7 @@ func main() {
 		Minify:           true,
 		DisableTxMetrics: cliArgs.disableTxMetrics,
 		DisableAuditLogs: cliArgs.disableAuditLogs,
+		DisablePluginAPI: cliArgs.disablePluginAPI,
 
 		AuthUserHeader:    cliArgs.auditUserHeader,
 		AuthTokenKey:      authTokenKey,
@@ -224,4 +271,19 @@ func main() {
 
 	// Shutdown components
 	spamoorDaemon.Shutdown()
+}
+
+// isURL checks if the given path is a URL.
+func isURL(path string) bool {
+	return len(path) > 7 && (path[:7] == "http://" || path[:8] == "https://")
+}
+
+// isDirectory checks if the given path is an existing directory.
+func isDirectory(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	return info.IsDir()
 }
