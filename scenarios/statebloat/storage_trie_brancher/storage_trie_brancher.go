@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net/http"
 	"os"
@@ -42,6 +43,8 @@ type ScenarioOptions struct {
 	StorageDepth   uint64  `yaml:"storage_depth"`
 	AccountDepth   uint64  `yaml:"account_depth"`
 	MaxWallets     uint64  `yaml:"max_wallets"`
+	MaxPending     uint64  `yaml:"max_pending"`
+	FillingRatio   float64 `yaml:"filling_ratio"`
 	SkipContracts  bool    `yaml:"skip_contracts"`
 	SkipFunding    bool    `yaml:"skip_funding"`
 	DataFile       string  `yaml:"data_file"`
@@ -99,6 +102,8 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	StorageDepth:   9,
 	AccountDepth:   3,
 	MaxWallets:     50,
+	MaxPending:     0,
+	FillingRatio:   0,
 	SkipContracts:  false,
 	SkipFunding:    false,
 	DataFile:       "",
@@ -132,6 +137,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.StorageDepth, "storage-depth", ScenarioDefaultOptions.StorageDepth, "Storage trie depth (9 or 10)")
 	flags.Uint64Var(&s.options.AccountDepth, "account-depth", ScenarioDefaultOptions.AccountDepth, "Account trie depth (3, 4, or 5)")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of wallets to use for parallel execution")
+	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions (0 = use filling-ratio or default)")
+	flags.Float64Var(&s.options.FillingRatio, "filling-ratio", ScenarioDefaultOptions.FillingRatio, "Target block gas utilization ratio (0.0-1.0, 0 = no limit)")
 	flags.BoolVar(&s.options.SkipContracts, "skip-contracts", ScenarioDefaultOptions.SkipContracts, "Skip contract deployment (only fund EOAs)")
 	flags.BoolVar(&s.options.SkipFunding, "skip-funding", ScenarioDefaultOptions.SkipFunding, "Skip EOA funding (only deploy contracts)")
 	flags.StringVar(&s.options.DataFile, "data-file", ScenarioDefaultOptions.DataFile, "Path or URL to CREATE2 data JSON file (required)")
@@ -171,6 +178,11 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
 	} else {
 		s.walletPool.SetWalletCount(50) // Default fallback
+	}
+
+	// Validate filling ratio
+	if s.options.FillingRatio < 0 || s.options.FillingRatio > 1 {
+		return fmt.Errorf("filling_ratio must be between 0.0 and 1.0, got %f", s.options.FillingRatio)
 	}
 
 	// Validate required parameters
@@ -441,6 +453,59 @@ func (s *Scenario) deployNicksFactory(ctx context.Context) error {
 	return nil
 }
 
+// getBlockGasLimit queries the latest block to get the current gas limit.
+func (s *Scenario) getBlockGasLimit(ctx context.Context) (uint64, error) {
+	client := s.walletPool.GetClient(spamoor.WithClientGroup(s.options.ClientGroup))
+	if client == nil {
+		return 0, scenario.ErrNoClients
+	}
+
+	header, err := client.GetEthClient().HeaderByNumber(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get latest block header: %w", err)
+	}
+
+	return header.GasLimit, nil
+}
+
+// computeMaxPending calculates the max pending transactions for a phase.
+// Priority: explicit max_pending > filling_ratio-derived > fallback default.
+func (s *Scenario) computeMaxPending(ctx context.Context, gasPerTx uint64, fallback uint64) uint64 {
+	// Explicit max_pending always wins
+	if s.options.MaxPending > 0 {
+		return s.options.MaxPending
+	}
+
+	// If filling_ratio is set, derive from block gas limit
+	if s.options.FillingRatio > 0 {
+		blockGasLimit, err := s.getBlockGasLimit(ctx)
+		if err != nil {
+			s.logger.Warnf("failed to query block gas limit for filling_ratio, using fallback: %v", err)
+			return fallback
+		}
+
+		txsPerBlock := uint64(math.Floor(float64(blockGasLimit) * s.options.FillingRatio / float64(gasPerTx)))
+		if txsPerBlock == 0 {
+			txsPerBlock = 1
+		}
+
+		// Use 2x txs-per-block as max pending to keep the pipeline full
+		maxPending := txsPerBlock * 2
+
+		s.logger.WithFields(logrus.Fields{
+			"block_gas_limit": blockGasLimit,
+			"filling_ratio":   s.options.FillingRatio,
+			"gas_per_tx":      gasPerTx,
+			"txs_per_block":   txsPerBlock,
+			"max_pending":     maxPending,
+		}).Info("computed max_pending from filling_ratio")
+
+		return maxPending
+	}
+
+	return fallback
+}
+
 func (s *Scenario) Run(ctx context.Context) error {
 	// Phase 1: Fund auxiliary accounts
 	if !s.options.SkipFunding {
@@ -457,11 +522,13 @@ func (s *Scenario) Run(ctx context.Context) error {
 		totalAuxAccounts := uint64(len(auxAccounts))
 		s.logger.Infof("Total unique auxiliary accounts to fund: %d", totalAuxAccounts)
 
+		fundingMaxPending := s.computeMaxPending(ctx, FundGasLimit, 100)
+
 		// Run funding scenario - deploy all as fast as possible
 		err := scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
 			TotalCount:                  totalAuxAccounts,
-			Throughput:                  0,   // No throughput limit - send as fast as possible
-			MaxPending:                  100, // Reasonable pending limit
+			Throughput:                  0, // No throughput limit - send as fast as possible
+			MaxPending:                  fundingMaxPending,
 			ThroughputIncrementInterval: 0,
 			Timeout:                     0,
 			WalletPool:                  s.walletPool,
@@ -489,10 +556,12 @@ func (s *Scenario) Run(ctx context.Context) error {
 		s.currentIndex = 0
 		s.logger.Info("Phase 3: Deploying contracts via Nick's factory")
 
+		deployMaxPending := s.computeMaxPending(ctx, DeployGasLimit, 50)
+
 		err := scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
 			TotalCount:                  s.options.TotalContracts,
-			Throughput:                  0,  // No throughput limit - deploy as fast as possible
-			MaxPending:                  50, // Lower limit for deployments due to higher gas usage
+			Throughput:                  0, // No throughput limit - deploy as fast as possible
+			MaxPending:                  deployMaxPending,
 			ThroughputIncrementInterval: 0,
 			Timeout:                     0,
 			WalletPool:                  s.walletPool,
