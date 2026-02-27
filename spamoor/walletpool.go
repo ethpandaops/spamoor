@@ -628,12 +628,12 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 	}
 
 	// Set up low balance notification
-	if pool.runFundings {
+	if pool.runFundings && refillBalance != nil {
 		childWallet.setLowBalanceNotification(pool.lowBalanceNotifyChan, refillBalance.ToBig())
 	}
 
 	var fundingReq *FundingRequest
-	if pool.runFundings && childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
+	if pool.runFundings && refillBalance != nil && childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
 		currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 		fundingReq = &FundingRequest{
 			Wallet: childWallet,
@@ -777,7 +777,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 				return
 			}
 
-			if childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
+			if refillBalance != nil && childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
 				currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 				reqsMutex.Lock()
 				fundingReqs = append(fundingReqs, &FundingRequest{
@@ -807,7 +807,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 				walletErr = err
 				return
 			}
-			if childWallet.GetBalance().Cmp(pool.config.RefillBalance.ToBig()) < 0 {
+			if pool.config.RefillBalance != nil && childWallet.GetBalance().Cmp(pool.config.RefillBalance.ToBig()) < 0 {
 				currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 				reqsMutex.Lock()
 				fundingReqs = append(fundingReqs, &FundingRequest{
@@ -1128,7 +1128,7 @@ func (pool *WalletPool) CheckChildWalletBalance(childWallet *Wallet) error {
 		}
 	}
 
-	if childWallet.GetBalance().Cmp(refillBalance.ToBig()) >= 0 {
+	if refillBalance == nil || childWallet.GetBalance().Cmp(refillBalance.ToBig()) >= 0 {
 		return nil
 	}
 

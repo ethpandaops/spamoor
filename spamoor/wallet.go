@@ -197,6 +197,9 @@ func (wallet *Wallet) IncrementSubmittedTxCount() {
 func (wallet *Wallet) GetBalance() *big.Int {
 	wallet.balanceMutex.RLock()
 	defer wallet.balanceMutex.RUnlock()
+	if wallet.balance == nil {
+		return new(big.Int)
+	}
 	return wallet.balance
 }
 
