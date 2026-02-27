@@ -343,7 +343,7 @@ Guide for creating and loading scenarios at runtime without recompiling. Covers:
 ## 🏗️ Development
 
 ### Prerequisites
-- Go 1.24+
+- Go 1.25+
 - CGO enabled (required for SQLite and cryptographic operations)
 - Build tags: `with_blob_v1,ckzg` for blob transaction support
 
