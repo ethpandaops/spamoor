@@ -47,7 +47,6 @@ devnet-clean:
 
 plugins:
 	@echo "Building plugin archives..."
-	@mkdir -p bin/plugins
 	@for dir in plugins/*/; do \
 		if [ -d "$$dir" ]; then \
 			plugin_name=$$(basename "$$dir"); \
