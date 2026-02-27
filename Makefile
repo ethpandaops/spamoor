@@ -59,4 +59,4 @@ plugins:
 			rm "plugins/$$plugin_name/plugin.yaml"; \
 		fi \
 	done
-	@echo "Plugins built in bin/plugins/"
+	@echo "Plugins built in plugins/"
