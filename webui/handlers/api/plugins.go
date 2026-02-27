@@ -52,6 +52,10 @@ type RegisterPluginResponse struct {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/plugins [get]
 func (ah *APIHandler) GetPlugins(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	persistence := ah.daemon.GetPluginPersistence()
 	if persistence == nil {
 		http.Error(w, "Plugin persistence not available", http.StatusServiceUnavailable)
@@ -88,13 +92,17 @@ func (ah *APIHandler) GetPlugins(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/plugins [post]
 func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	persistence := ah.daemon.GetPluginPersistence()
 	if persistence == nil {
 		http.Error(w, "Plugin persistence not available", http.StatusServiceUnavailable)
 		return
 	}
 
-	userEmail := ah.getPluginUserEmail(r)
+	userEmail := ah.getUserEmail(r)
 
 	// Check content type for multipart
 	contentType := r.Header.Get("Content-Type")
@@ -239,6 +247,10 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/plugins/{name} [delete]
 func (ah *APIHandler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	persistence := ah.daemon.GetPluginPersistence()
 	if persistence == nil {
 		http.Error(w, "Plugin persistence not available", http.StatusServiceUnavailable)
@@ -253,7 +265,7 @@ func (ah *APIHandler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userEmail := ah.getPluginUserEmail(r)
+	userEmail := ah.getUserEmail(r)
 
 	err := persistence.DeletePlugin(name)
 	if err != nil {
@@ -285,6 +297,10 @@ func (ah *APIHandler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/plugins/{name}/reload [post]
 func (ah *APIHandler) ReloadPlugin(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	persistence := ah.daemon.GetPluginPersistence()
 	if persistence == nil {
 		http.Error(w, "Plugin persistence not available", http.StatusServiceUnavailable)
@@ -299,7 +315,7 @@ func (ah *APIHandler) ReloadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userEmail := ah.getPluginUserEmail(r)
+	userEmail := ah.getUserEmail(r)
 
 	loaded, err := persistence.ReloadPlugin(name)
 	if err != nil {
@@ -336,6 +352,10 @@ func (ah *APIHandler) ReloadPlugin(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/plugins/{name} [get]
 func (ah *APIHandler) GetPlugin(w http.ResponseWriter, r *http.Request) {
+	if !ah.checkAuth(w, r) {
+		return
+	}
+
 	persistence := ah.daemon.GetPluginPersistence()
 	if persistence == nil {
 		http.Error(w, "Plugin persistence not available", http.StatusServiceUnavailable)
@@ -360,16 +380,6 @@ func (ah *APIHandler) GetPlugin(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entry)
-}
-
-// getPluginUserEmail extracts the user email from the request for audit logging.
-func (ah *APIHandler) getPluginUserEmail(r *http.Request) string {
-	userEmail := "user"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
-
-	return userEmail
 }
 
 // auditPluginAction logs a plugin action to the audit log.

@@ -1,109 +1,45 @@
 {{ define "page" }}
   <div class="container mt-2">
-    <div class="card mt-2">
-      <div class="card-body px-0 py-3">
-        <div class="d-flex justify-content-between align-items-center px-3 mb-2">
-          <h2 class="mb-0">Plugins</h2>
-          <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#registerPluginModal">
-            <i class="fas fa-plus"></i> Register Plugin
-          </button>
-        </div>
-        <div class="table-responsive px-0 py-1">
-          <table class="table table-nobr" id="pluginsTable">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Source</th>
-                <th>Status</th>
-                <th>Scenarios</th>
-                <th>Running</th>
-                <th>Version</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {{ if eq (len .Plugins) 0 }}
-              <tr>
-                <td colspan="7" class="text-center text-muted py-4">
-                  No plugins registered. Click "Register Plugin" to add one.
-                </td>
-              </tr>
-              {{ else }}
-              {{ range .Plugins }}
-              <tr data-plugin-name="{{ .Name }}"{{ if .Deprecated }} style="opacity: 0.6;"{{ end }}>
-                <td>
-                  <strong>{{ .Name }}</strong>
-                  {{ if .Deprecated }}
-                  <span class="badge bg-warning text-dark ms-1">Deprecated</span>
-                  {{ end }}
-                  {{ if .MetadataName }}
-                  <br><small class="text-muted">{{ .MetadataName }}</small>
-                  {{ end }}
-                </td>
-                <td>
-                  {{ if .Deprecated }}
-                  <span class="text-muted">-</span>
-                  {{ else }}
-                  <span class="badge bg-secondary">{{ .SourceType }}</span>
-                  <br><small class="text-muted text-truncate d-block" style="max-width: 200px;" title="{{ .SourcePath }}">{{ .SourcePath }}</small>
-                  {{ end }}
-                </td>
-                <td>
-                  {{ if .Deprecated }}
-                  <span class="badge bg-warning text-dark">Deprecated</span>
-                  {{ else if .LoadError }}
-                  <span class="badge bg-danger" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ .LoadError }}">Error</span>
-                  {{ else if .IsLoaded }}
-                  <span class="badge bg-success">Loaded</span>
-                  {{ else }}
-                  <span class="badge bg-warning">Not Loaded</span>
-                  {{ end }}
-                </td>
-                <td>
-                  {{ range .Scenarios }}
-                  <span class="badge bg-info me-1">{{ . }}</span>
-                  {{ else }}
-                  <span class="text-muted">-</span>
-                  {{ end }}
-                </td>
-                <td>
-                  {{ if gt .RunningCount 0 }}
-                  <span class="badge bg-primary">{{ .RunningCount }}</span>
-                  {{ else }}
-                  <span class="text-muted">0</span>
-                  {{ end }}
-                </td>
-                <td>
-                  {{ if .MetadataGitVersion }}
-                  <small>{{ .MetadataGitVersion }}</small>
-                  {{ else }}
-                  <span class="text-muted">-</span>
-                  {{ end }}
-                  {{ if .MetadataBuildTime }}
-                  <br><small class="text-muted">{{ .MetadataBuildTime }}</small>
-                  {{ end }}
-                </td>
-                <td>
-                  {{ if .Deprecated }}
-                  <span class="text-muted">-</span>
-                  {{ else }}
-                  <div class="btn-group" role="group">
-                    {{ if or (eq .SourceType "url") (eq .SourceType "local") }}
-                    <button type="button" class="btn btn-sm btn-primary" onclick="reloadPlugin('{{ .Name }}')" title="Reload from source" data-bs-toggle="tooltip" data-bs-placement="top">
-                      <i class="fas fa-sync-alt"></i>
-                    </button>
-                    {{ end }}
-                    <button type="button" class="btn btn-sm btn-danger" onclick="confirmDeletePlugin('{{ .Name }}', {{ .RunningCount }})" title="Delete" data-bs-toggle="tooltip" data-bs-placement="top">
-                      <i class="fas fa-trash"></i>
-                    </button>
-                  </div>
-                  {{ end }}
-                </td>
-              </tr>
-              {{ end }}
-              {{ end }}
-            </tbody>
-          </table>
+    <!-- Auth required message (shown when not authenticated) -->
+    <div id="auth-required-message" class="alert alert-warning d-none">
+      <i class="fas fa-lock me-2"></i>
+      <strong>Authentication Required</strong>
+      <p class="mb-0">Please log in to view and manage plugins.</p>
+    </div>
+
+    <!-- Plugins content (shown when authenticated) -->
+    <div id="plugins-content" class="d-none">
+      <div class="card mt-2">
+        <div class="card-body px-0 py-3">
+          <div class="d-flex justify-content-between align-items-center px-3 mb-2">
+            <h2 class="mb-0">Plugins</h2>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#registerPluginModal">
+              <i class="fas fa-plus"></i> Register Plugin
+            </button>
+          </div>
+          <div id="loading-spinner" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="mt-2">Loading plugins...</div>
+          </div>
+          <div class="table-responsive px-0 py-1 d-none" id="plugins-table-container">
+            <table class="table table-nobr" id="pluginsTable">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Scenarios</th>
+                  <th>Running</th>
+                  <th>Version</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="plugins-table-body">
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -191,13 +127,164 @@
 <script>
   var pluginToDelete = null;
 
-  /* Initialize tooltips */
   document.addEventListener('DOMContentLoaded', function() {
-    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-    tooltipTriggerList.map(function (tooltipTriggerEl) {
-      return new bootstrap.Tooltip(tooltipTriggerEl);
+    /* Check auth state and show appropriate content */
+    if (window.spamoor && window.spamoor.authState) {
+      updatePluginsVisibility(window.spamoor.authState.isAuthenticated);
+    }
+
+    /* Listen for auth state changes */
+    window.addEventListener('authStateChanged', function(e) {
+      updatePluginsVisibility(e.detail.isAuthenticated);
     });
   });
+
+  function updatePluginsVisibility(isAuthenticated) {
+    var authMessage = document.getElementById('auth-required-message');
+    var pluginsContent = document.getElementById('plugins-content');
+
+    if (isAuthenticated) {
+      authMessage.classList.add('d-none');
+      pluginsContent.classList.remove('d-none');
+      loadPlugins();
+    } else {
+      authMessage.classList.remove('d-none');
+      pluginsContent.classList.add('d-none');
+    }
+  }
+
+  function loadPlugins() {
+    var spinner = document.getElementById('loading-spinner');
+    var tableContainer = document.getElementById('plugins-table-container');
+
+    spinner.classList.remove('d-none');
+    tableContainer.classList.add('d-none');
+
+    spamoor.authFetch('/api/plugins')
+      .then(function(response) {
+        if (!response.ok) throw new Error('Failed to load plugins');
+        return response.json();
+      })
+      .then(function(plugins) {
+        renderPlugins(plugins);
+        spinner.classList.add('d-none');
+        tableContainer.classList.remove('d-none');
+      })
+      .catch(function(error) {
+        console.error('Failed to load plugins:', error);
+        spinner.classList.add('d-none');
+        tableContainer.classList.remove('d-none');
+        document.getElementById('plugins-table-body').innerHTML =
+          '<tr><td colspan="7" class="text-center text-danger py-4">Failed to load plugins</td></tr>';
+      });
+  }
+
+  function renderPlugins(plugins) {
+    var tbody = document.getElementById('plugins-table-body');
+    tbody.innerHTML = '';
+
+    if (!plugins || plugins.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">' +
+        'No plugins registered. Click "Register Plugin" to add one.</td></tr>';
+      return;
+    }
+
+    plugins.forEach(function(plugin) {
+      var row = document.createElement('tr');
+      row.setAttribute('data-plugin-name', plugin.name);
+      if (plugin.deprecated) row.style.opacity = '0.6';
+
+      var nameHtml = '<strong>' + escapeHtml(plugin.name) + '</strong>';
+      if (plugin.deprecated) nameHtml += ' <span class="badge bg-warning text-dark ms-1">Deprecated</span>';
+      if (plugin.metadata_name) nameHtml += '<br><small class="text-muted">' + escapeHtml(plugin.metadata_name) + '</small>';
+
+      var sourceHtml;
+      if (plugin.deprecated) {
+        sourceHtml = '<span class="text-muted">-</span>';
+      } else {
+        sourceHtml = '<span class="badge bg-secondary">' + escapeHtml(plugin.source_type) + '</span>' +
+          '<br><small class="text-muted text-truncate d-block" style="max-width: 200px;" title="' +
+          escapeHtml(plugin.source_path) + '">' + escapeHtml(plugin.source_path) + '</small>';
+      }
+
+      var statusHtml;
+      if (plugin.deprecated) {
+        statusHtml = '<span class="badge bg-warning text-dark">Deprecated</span>';
+      } else if (plugin.load_error) {
+        statusHtml = '<span class="badge bg-danger" data-bs-toggle="tooltip" data-bs-placement="top" title="' +
+          escapeHtml(plugin.load_error) + '">Error</span>';
+      } else if (plugin.is_loaded) {
+        statusHtml = '<span class="badge bg-success">Loaded</span>';
+      } else {
+        statusHtml = '<span class="badge bg-warning">Not Loaded</span>';
+      }
+
+      var scenariosHtml = '';
+      if (plugin.scenarios && plugin.scenarios.length > 0) {
+        plugin.scenarios.forEach(function(s) {
+          scenariosHtml += '<span class="badge bg-info me-1">' + escapeHtml(s) + '</span>';
+        });
+      } else {
+        scenariosHtml = '<span class="text-muted">-</span>';
+      }
+
+      var runningHtml;
+      if (plugin.running_count > 0) {
+        runningHtml = '<span class="badge bg-primary">' + plugin.running_count + '</span>';
+      } else {
+        runningHtml = '<span class="text-muted">0</span>';
+      }
+
+      var versionHtml = '';
+      if (plugin.metadata_git_version) {
+        versionHtml = '<small>' + escapeHtml(plugin.metadata_git_version) + '</small>';
+      } else {
+        versionHtml = '<span class="text-muted">-</span>';
+      }
+      if (plugin.metadata_build_time) {
+        versionHtml += '<br><small class="text-muted">' + escapeHtml(plugin.metadata_build_time) + '</small>';
+      }
+
+      var actionsHtml;
+      if (plugin.deprecated) {
+        actionsHtml = '<span class="text-muted">-</span>';
+      } else {
+        actionsHtml = '<div class="btn-group" role="group">';
+        if (plugin.source_type === 'url' || plugin.source_type === 'local') {
+          actionsHtml += '<button type="button" class="btn btn-sm btn-primary" onclick="reloadPlugin(\'' +
+            escapeHtml(plugin.name) + '\')" title="Reload from source" data-bs-toggle="tooltip" data-bs-placement="top">' +
+            '<i class="fas fa-sync-alt"></i></button>';
+        }
+        actionsHtml += '<button type="button" class="btn btn-sm btn-danger" onclick="confirmDeletePlugin(\'' +
+          escapeHtml(plugin.name) + '\', ' + (plugin.running_count || 0) + ')" title="Delete" data-bs-toggle="tooltip" data-bs-placement="top">' +
+          '<i class="fas fa-trash"></i></button>';
+        actionsHtml += '</div>';
+      }
+
+      row.innerHTML = '<td>' + nameHtml + '</td>' +
+        '<td>' + sourceHtml + '</td>' +
+        '<td>' + statusHtml + '</td>' +
+        '<td>' + scenariosHtml + '</td>' +
+        '<td>' + runningHtml + '</td>' +
+        '<td>' + versionHtml + '</td>' +
+        '<td>' + actionsHtml + '</td>';
+
+      tbody.appendChild(row);
+    });
+
+    /* Initialize tooltips for dynamically rendered content */
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function(tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+  }
+
+  function escapeHtml(text) {
+    if (!text) return '';
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 
   function registerPlugin() {
     var errorEl = document.getElementById('registerPluginError');
@@ -235,7 +322,7 @@
       formData.append('path', path);
     }
 
-    fetch('/api/plugins', {
+    spamoor.authFetch('/api/plugins', {
       method: 'POST',
       body: formData
     })
@@ -246,9 +333,9 @@
       return response.json();
     })
     .then(function(data) {
-      /* Close modal and reload page */
+      /* Close modal and reload plugins */
       bootstrap.Modal.getInstance(document.getElementById('registerPluginModal')).hide();
-      location.reload();
+      loadPlugins();
     })
     .catch(function(error) {
       showRegisterError(error.message);
@@ -292,16 +379,16 @@
     confirmBtn.disabled = true;
     confirmBtn.textContent = 'Deleting...';
 
-    fetch('/api/plugins/' + encodeURIComponent(pluginToDelete), {
+    spamoor.authFetch('/api/plugins/' + encodeURIComponent(pluginToDelete), {
       method: 'DELETE'
     })
     .then(function(response) {
       if (!response.ok) {
         return response.text().then(function(text) { throw new Error(text) });
       }
-      /* Close modal and reload page */
+      /* Close modal and reload plugins */
       bootstrap.Modal.getInstance(document.getElementById('deletePluginModal')).hide();
-      location.reload();
+      loadPlugins();
     })
     .catch(function(error) {
       errorEl.textContent = error.message;
@@ -316,14 +403,14 @@
       return;
     }
 
-    fetch('/api/plugins/' + encodeURIComponent(name) + '/reload', {
+    spamoor.authFetch('/api/plugins/' + encodeURIComponent(name) + '/reload', {
       method: 'POST'
     })
     .then(function(response) {
       if (!response.ok) {
         return response.text().then(function(text) { throw new Error(text) });
       }
-      location.reload();
+      loadPlugins();
     })
     .catch(function(error) {
       alert('Failed to reload plugin: ' + error.message);
