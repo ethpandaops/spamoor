@@ -56,7 +56,9 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	router.HandleFunc("/", frontendHandler.Index).Methods("GET")
 	router.HandleFunc("/clients", frontendHandler.Clients).Methods("GET")
 	router.HandleFunc("/wallets", frontendHandler.Wallets).Methods("GET")
-	router.HandleFunc("/plugins", frontendHandler.Plugins).Methods("GET")
+	if !config.DisablePluginAPI {
+		router.HandleFunc("/plugins", frontendHandler.Plugins).Methods("GET")
+	}
 	if !config.DisableAuditLogs {
 		router.HandleFunc("/audit", frontendHandler.Audit).Methods("GET")
 	}
@@ -100,11 +102,13 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiRouter.HandleFunc("/root-wallet/send-transaction", apiHandler.SendTransaction).Methods("POST")
 
 	// Plugin routes
-	apiRouter.HandleFunc("/plugins", apiHandler.GetPlugins).Methods("GET")
-	apiRouter.HandleFunc("/plugins", apiHandler.RegisterPlugin).Methods("POST")
-	apiRouter.HandleFunc("/plugins/{name}", apiHandler.GetPlugin).Methods("GET")
-	apiRouter.HandleFunc("/plugins/{name}", apiHandler.DeletePlugin).Methods("DELETE")
-	apiRouter.HandleFunc("/plugins/{name}/reload", apiHandler.ReloadPlugin).Methods("POST")
+	if !config.DisablePluginAPI {
+		apiRouter.HandleFunc("/plugins", apiHandler.GetPlugins).Methods("GET")
+		apiRouter.HandleFunc("/plugins", apiHandler.RegisterPlugin).Methods("POST")
+		apiRouter.HandleFunc("/plugins/{name}", apiHandler.GetPlugin).Methods("GET")
+		apiRouter.HandleFunc("/plugins/{name}", apiHandler.DeletePlugin).Methods("DELETE")
+		apiRouter.HandleFunc("/plugins/{name}/reload", apiHandler.ReloadPlugin).Methods("POST")
+	}
 
 	// Graphs routes (only if tx metrics are enabled)
 	if !config.DisableTxMetrics {

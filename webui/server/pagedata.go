@@ -32,6 +32,7 @@ type PageData struct {
 	DebugTemplates    []string
 	DisableTxMetrics  bool
 	DisableAuditLogs  bool
+	DisablePluginAPI  bool
 	DisableLocalToken bool
 	DisableAuth       bool
 }
@@ -87,6 +88,7 @@ func InitPageData(r *http.Request, active, path, title string, mainTemplates []s
 		Debug:             frontendConfig.Debug,
 		DisableTxMetrics:  frontendConfig.DisableTxMetrics,
 		DisableAuditLogs:  frontendConfig.DisableAuditLogs,
+		DisablePluginAPI:  frontendConfig.DisablePluginAPI,
 		DisableLocalToken: frontendConfig.DisableLocalToken,
 		DisableAuth:       frontendConfig.DisableAuth,
 	}
