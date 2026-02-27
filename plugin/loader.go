@@ -530,6 +530,20 @@ func (l *PluginLoader) GetScenarioRegistry() *scenario.Registry {
 	return l.scenarioRegistry
 }
 
+// filteredStdlibSymbols returns stdlib symbols with the reflect package removed.
+// This prevents plugin code from using reflect to access unexported fields
+// or extract private keys from closures.
+func filteredStdlibSymbols() interp.Exports {
+	filtered := make(interp.Exports, len(stdlib.Symbols))
+	for pkg, syms := range stdlib.Symbols {
+		if pkg == "reflect/reflect" {
+			continue
+		}
+		filtered[pkg] = syms
+	}
+	return filtered
+}
+
 // newInterpreter creates a new Yaegi interpreter with filesystem support.
 func (l *PluginLoader) newInterpreter(filesys fs.FS) *interp.Interpreter {
 	i := interp.New(interp.Options{
@@ -537,8 +551,9 @@ func (l *PluginLoader) newInterpreter(filesys fs.FS) *interp.Interpreter {
 		SourcecodeFilesystem: filesys,
 	})
 
-	// Load standard library symbols
-	if err := i.Use(stdlib.Symbols); err != nil {
+	// Load standard library symbols (with reflect package filtered out
+	// to prevent plugins from accessing unexported fields via reflection)
+	if err := i.Use(filteredStdlibSymbols()); err != nil {
 		l.logger.Warnf("failed to load stdlib symbols: %v", err)
 	}
 

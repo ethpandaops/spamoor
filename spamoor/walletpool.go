@@ -333,7 +333,7 @@ func (pool *WalletPool) GetVeryWellKnownWalletAddress(name string) common.Addres
 	copy(idxBytes, name)
 	// VeryWellKnown wallets don't use the seed, so we skip adding it
 
-	parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
+	parentKey := crypto.FromECDSA(pool.rootWallet.wallet.privkey)
 	childKey := sha256.Sum256(append(parentKey, idxBytes...))
 
 	// Derive private key and then address
@@ -549,7 +549,7 @@ func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *Client, seed
 			seedBytes := []byte(seed)
 			idxBytes = append(idxBytes, seedBytes...)
 		}
-		parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
+		parentKey := crypto.FromECDSA(pool.rootWallet.wallet.privkey)
 		childKey := sha256.Sum256(append(parentKey, idxBytes...))
 		walletPrivkey = fmt.Sprintf("%x", childKey)
 	}
@@ -570,7 +570,7 @@ func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, cl
 			seedBytes := []byte(seed)
 			idxBytes = append(idxBytes, seedBytes...)
 		}
-		parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
+		parentKey := crypto.FromECDSA(pool.rootWallet.wallet.privkey)
 		childKey := sha256.Sum256(append(parentKey, idxBytes...))
 		walletPrivkey = fmt.Sprintf("%x", childKey)
 	}
