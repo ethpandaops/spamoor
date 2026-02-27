@@ -22,6 +22,7 @@ require (
 	github.com/swaggo/http-swagger v1.3.4
 	github.com/swaggo/swag v1.16.6
 	github.com/tdewolff/minify v2.3.6+incompatible
+	github.com/traefik/yaegi v0.16.2-0.20260209085605-fcb76d1ece0c
 	github.com/urfave/negroni v1.0.0
 	golang.org/x/time v0.14.0
 	gopkg.in/yaml.v3 v3.0.1
