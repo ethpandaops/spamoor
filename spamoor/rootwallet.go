@@ -41,6 +41,7 @@ func InitRootWallet(ctx context.Context, privkey string, clientPool *ClientPool,
 		return nil, err
 	}
 	rootWallet := NewWallet(privateKey, address)
+	rootWallet.setProtected(true)
 	rootWallet = txpool.RegisterWallet(rootWallet, ctx)
 
 	clients := clientPool.GetAllClients()
