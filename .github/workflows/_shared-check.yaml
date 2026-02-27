@@ -2,6 +2,12 @@
 name: Reusable check workflow
 on:
   workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to checkout (defaults to event's default ref)"
+        type: string
+        required: false
+        default: ''
 
 # shared check jobs
 jobs:
@@ -10,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        ref: ${{ inputs.ref }}
 
     # setup global dependencies
     - name: Set up go
@@ -29,7 +37,10 @@ jobs:
     - name: Install staticcheck
       run: go install honnef.co/go/tools/cmd/staticcheck@latest
     - name: Run staticcheck
-      run: staticcheck ./...
+      run: |
+        # Get all packages except plugin/symbols (generated code)
+        packages=$(go list ./... | grep -v '/plugin/symbols$')
+        staticcheck $packages
 
 
     #- name: Run golangci-lint
@@ -56,6 +67,36 @@ jobs:
 
         # Optional: if set to true then the action don't cache or restore ~/.cache/go-build.
         # skip-build-cache: true
+
+    - name: Verify generated symbols are up to date
+      run: |
+        make generate-symbols
+        if [ -n "$(git status --porcelain plugin/symbols/)" ]; then
+          echo "Error: Generated symbol files are out of date!"
+          echo "Please run 'make generate-symbols' and commit the changes."
+          echo ""
+          echo "Changed files:"
+          git status --porcelain plugin/symbols/
+          echo ""
+          echo "Diff:"
+          git diff plugin/symbols/
+          exit 1
+        fi
+
+    - name: Verify swagger docs are up to date
+      run: |
+        make docs
+        if [ -n "$(git status --porcelain webui/handlers/docs/)" ]; then
+          echo "Error: Swagger docs are out of date!"
+          echo "Please run 'make docs' and commit the changes."
+          echo ""
+          echo "Changed files:"
+          git status --porcelain webui/handlers/docs/
+          echo ""
+          echo "Diff:"
+          git diff webui/handlers/docs/
+          exit 1
+        fi
 
     - name: Run tests
       run: go test -race -vet=off ./...

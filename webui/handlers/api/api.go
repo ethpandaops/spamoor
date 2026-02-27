@@ -62,6 +62,7 @@ type VersionResponse struct {
 type ScenarioEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Plugin      string `json:"plugin,omitempty"` // Plugin name if from a plugin, empty for native scenarios
 }
 
 // ScenarioCategory represents a category of scenarios in the API response.
@@ -210,14 +211,34 @@ func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
 }
 
 // convertCategory recursively converts a scenario.Category to a ScenarioCategory.
+// It looks up each scenario in the registry to get the plugin name and sorts scenarios alphabetically.
 func convertCategory(category *scenario.Category) *ScenarioCategory {
 	scenarioEntries := make([]*ScenarioEntry, len(category.Descriptors))
 	for j, descriptor := range category.Descriptors {
-		scenarioEntries[j] = &ScenarioEntry{
+		entry := &ScenarioEntry{
 			Name:        descriptor.Name,
 			Description: descriptor.Description,
 		}
+
+		// Look up the scenario in the registry to get the plugin name
+		registryEntry := scenarios.GetScenarioEntry(descriptor.Name)
+		if registryEntry != nil && registryEntry.Plugin != nil {
+			entry.Plugin = registryEntry.Plugin.GetName()
+		}
+
+		scenarioEntries[j] = entry
 	}
+
+	// Sort scenarios alphabetically by name
+	slices.SortFunc(scenarioEntries, func(a, b *ScenarioEntry) int {
+		if a.Name < b.Name {
+			return -1
+		}
+		if a.Name > b.Name {
+			return 1
+		}
+		return 0
+	})
 
 	var children []*ScenarioCategory
 	if len(category.Children) > 0 {

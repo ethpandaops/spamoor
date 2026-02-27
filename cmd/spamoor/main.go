@@ -12,6 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
+	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -32,13 +33,17 @@ type CliArgs struct {
 	refillInterval   uint64
 	slotDuration     time.Duration
 	fundingGasLimit  uint64
+	plugins          []string
 }
 
 func main() {
-	// Check if "run" subcommand is used
-	if len(os.Args) >= 2 && os.Args[1] == "run" {
-		RunCommand(os.Args[2:])
-		return
+	// Check for subcommands
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "run":
+			RunCommand(os.Args[2:])
+			return
+		}
 	}
 
 	cliArgs := CliArgs{}
@@ -57,6 +62,7 @@ func main() {
 	flags.Uint64Var(&cliArgs.refillInterval, "refill-interval", 300, "Interval for child wallet rbalance check and refilling if needed (in sec).")
 	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 	flags.Uint64Var(&cliArgs.fundingGasLimit, "funding-gas-limit", 21000, "Gas limit for wallet funding transactions (use 100000+ for L2s).")
+	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files to load (can be specified multiple times).")
 
 	flags.Parse(os.Args)
 
@@ -70,6 +76,38 @@ func main() {
 		"version":   utils.GetBuildVersion(),
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor")
+
+	// Initialize registries
+	pluginRegistry, scenarioRegistry := scenarios.InitRegistries()
+
+	// Load plugins if specified
+	if len(cliArgs.plugins) > 0 {
+		pluginLoader := plugin.NewPluginLoader(logger, pluginRegistry, scenarioRegistry)
+
+		for _, pluginPath := range cliArgs.plugins {
+			var loaded *plugin.LoadedPlugin
+			var err error
+
+			// Detect source type and load accordingly
+			if isURL(pluginPath) {
+				loaded, err = pluginLoader.LoadFromURL(pluginPath)
+			} else if isDirectory(pluginPath) {
+				loaded, err = pluginLoader.LoadFromLocalPath(pluginPath)
+			} else {
+				loaded, err = pluginLoader.LoadFromFile(pluginPath)
+			}
+
+			if err != nil {
+				logger.WithError(err).Fatalf("failed to load plugin: %s", pluginPath)
+			}
+
+			// Register plugin scenarios
+			err = pluginLoader.RegisterPluginScenarios(loaded)
+			if err != nil {
+				logger.WithError(err).Fatalf("failed to register plugin scenarios: %s", pluginPath)
+			}
+		}
+	}
 
 	// load scenario
 	invalidScenario := false

@@ -25,6 +25,8 @@ func main() {
 	}
 
 	rootCmd.AddCommand(NewConvertEESTCmd(logger))
+	rootCmd.AddCommand(NewValidatePluginCmd(logger))
+	rootCmd.AddCommand(NewWalletKeyCmd(logger))
 
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Verbose output")
 	rootCmd.PersistentFlags().Bool("trace", false, "Trace output")

@@ -1,0 +1,57 @@
+
+name: Dependabot Auto-fix
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  update-symbols:
+    name: "Update generated files"
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    outputs:
+      symbols_updated: ${{ steps.commit.outputs.symbols_updated }}
+    steps:
+    - name: Checkout PR branch
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        ref: ${{ github.event.pull_request.head.ref }}
+
+    - name: Set up Go
+      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+      with:
+        go-version: 1.25.x
+
+    - name: Regenerate Yaegi symbols
+      run: make generate-symbols
+
+    - name: Commit and push updated symbols
+      id: commit
+      run: |
+        if [ -n "$(git status --porcelain plugin/symbols/)" ]; then
+          echo "Generated symbols are out of date, committing updates..."
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugin/symbols/
+          git commit -m "chore: update generated Yaegi symbols"
+          git push
+          echo "symbols_updated=true" >> $GITHUB_OUTPUT
+        else
+          echo "Generated symbols are already up to date."
+          echo "symbols_updated=false" >> $GITHUB_OUTPUT
+        fi
+
+  check-source:
+    name: "Run code checks"
+    needs: [update-symbols]
+    if: github.actor == 'dependabot[bot]' && needs.update-symbols.outputs.symbols_updated == 'true'
+    uses: ./.github/workflows/_shared-check.yaml
+    with:
+      ref: ${{ github.event.pull_request.head.ref }}
