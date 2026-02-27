@@ -36,6 +36,7 @@ func init() {
 		"HexToAddress":                  reflect.ValueOf(common.HexToAddress),
 		"HexToHash":                     reflect.ValueOf(common.HexToHash),
 		"IsHexAddress":                  reflect.ValueOf(common.IsHexAddress),
+		"IsHexHash":                     reflect.ValueOf(common.IsHexHash),
 		"IsNonEmptyDir":                 reflect.ValueOf(common.IsNonEmptyDir),
 		"LeftPadBytes":                  reflect.ValueOf(common.LeftPadBytes),
 		"LoadJSON":                      reflect.ValueOf(common.LoadJSON),
