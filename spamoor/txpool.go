@@ -21,6 +21,35 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// knownHeaderFields lists the JSON field names that go-ethereum's
+// types.Header can unmarshal. When a client returns extra fields with
+// incompatible encoding (e.g. a new field as a plain integer instead of
+// a hex string), they cause unmarshaling to fail. On failure we strip
+// unknown fields and retry rather than rejecting the whole block.
+var knownHeaderFields = map[string]struct{}{
+	"parentHash":            {},
+	"sha3Uncles":            {},
+	"miner":                 {},
+	"stateRoot":             {},
+	"transactionsRoot":      {},
+	"receiptsRoot":          {},
+	"logsBloom":             {},
+	"difficulty":            {},
+	"number":                {},
+	"gasLimit":              {},
+	"gasUsed":               {},
+	"timestamp":             {},
+	"extraData":             {},
+	"mixHash":               {},
+	"nonce":                 {},
+	"baseFeePerGas":         {},
+	"withdrawalsRoot":       {},
+	"blobGasUsed":           {},
+	"excessBlobGas":         {},
+	"parentBeaconBlockRoot": {},
+	"requestsHash":          {},
+}
+
 // BlockInfo represents information about a processed block including
 // hash, parent hash, gas limit, and timestamp for chain reorganization detection.
 type BlockInfo struct {
@@ -594,43 +623,6 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 	return highestBlockNumber, highestBlockNumberClients
 }
 
-// fixBlockHeaderEncoding fixes up block header JSON fields that some devnet clients
-// encode differently than go-ethereum expects. Specifically, some clients send
-// numeric header fields (like slotNumber) as plain integers instead of hex strings.
-func fixBlockHeaderEncoding(raw json.RawMessage) json.RawMessage {
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return raw
-	}
-
-	changed := false
-	for _, field := range []string{"slotNumber"} {
-		val, ok := obj[field]
-		if !ok || len(val) == 0 {
-			continue
-		}
-		// If the value is not a JSON string (doesn't start with '"'),
-		// it's a plain number that needs to be converted to hex.
-		if val[0] != '"' {
-			var num uint64
-			if err := json.Unmarshal(val, &num); err == nil {
-				obj[field] = json.RawMessage(fmt.Sprintf(`"0x%x"`, num))
-				changed = true
-			}
-		}
-	}
-
-	if !changed {
-		return raw
-	}
-
-	fixed, err := json.Marshal(obj)
-	if err != nil {
-		return raw
-	}
-	return fixed
-}
-
 // getBlockBody retrieves a block body from the specified client.
 // It uses a 5-second timeout and returns the block if successful, nil otherwise.
 // Builder clients are not supported as they don't provide eth_getBlockByNumber.
@@ -657,14 +649,30 @@ func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumbe
 	}
 
 	// Decode header and transactions.
-	// Some devnet clients serialize slotNumber as a plain integer instead of
-	// the hex-encoded string that go-ethereum's hexutil.Uint64 expects.
-	// Fix up the encoding before unmarshaling into types.Header.
-	raw = fixBlockHeaderEncoding(raw)
-
 	var head *types.Header
 	if err := json.Unmarshal(raw, &head); err != nil {
-		return nil, nil
+		// Some devnet clients encode newer header fields (e.g. slotNumber)
+		// as plain integers instead of hex strings, which causes
+		// go-ethereum's strict hexutil.Uint64 unmarshaling to fail.
+		// Fall back to unmarshaling only the fields we recognize.
+		var rawFields map[string]json.RawMessage
+		if jerr := json.Unmarshal(raw, &rawFields); jerr != nil {
+			return nil, nil
+		}
+		// Remove fields that go-ethereum doesn't know how to parse
+		// or that have incompatible encoding from devnet clients.
+		for key := range rawFields {
+			if _, known := knownHeaderFields[key]; !known {
+				delete(rawFields, key)
+			}
+		}
+		cleaned, jerr := json.Marshal(rawFields)
+		if jerr != nil {
+			return nil, nil
+		}
+		if err := json.Unmarshal(cleaned, &head); err != nil {
+			return nil, nil
+		}
 	}
 	// When the block is not found, the API returns JSON null.
 	if head == nil {
