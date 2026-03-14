@@ -21,8 +21,8 @@ type DeterministicRNG struct {
 	counter uint64
 }
 
-// parseHexSeed parses a hex string seed, supporting 0x prefix
-func parseHexSeed(seed string) ([]byte, error) {
+// ParseHexSeed parses a hex string seed, supporting 0x prefix
+func ParseHexSeed(seed string) ([]byte, error) {
 	// Remove 0x prefix if present
 	seed = strings.TrimPrefix(seed, "0x")
 
@@ -41,7 +41,7 @@ func NewDeterministicRNGWithSeed(txID uint64, baseSeed string) *DeterministicRNG
 	// If custom seed provided, use it; otherwise use a fixed fallback
 	if baseSeed != "" {
 		// Expect hex seed, decode it
-		seedBytes, err := parseHexSeed(baseSeed)
+		seedBytes, err := ParseHexSeed(baseSeed)
 		if err != nil {
 			// Fallback to seed as bytes if not valid hex
 			h.Write([]byte(baseSeed))
@@ -156,11 +156,11 @@ type OpcodeGenerator struct {
 // initializeOpcodes sets up the opcode definitions with sanitization
 func (g *OpcodeGenerator) initializeOpcodes() {
 	// Start with base opcode definitions from opcodes.go
-	opcodes := getBaseOpcodeDefinitions()
+	opcodes := GetBaseOpcodeDefinitions()
 
 	// Add DUP1-DUP16 and SWAP1-SWAP16 from opcodes.go
-	opcodes = append(opcodes, getDupOpcodeDefinitions()...)
-	opcodes = append(opcodes, getSwapOpcodeDefinitions()...)
+	opcodes = append(opcodes, GetDupOpcodeDefinitions()...)
+	opcodes = append(opcodes, GetSwapOpcodeDefinitions()...)
 
 	// Add generator-specific opcodes that need generator reference
 	generatorOpcodes := []*OpcodeInfo{
@@ -926,7 +926,7 @@ func (g *OpcodeGenerator) pushSeedAndTxID() {
 	seedBytes := make([]byte, 32)
 	if g.baseSeed != "" {
 		// Parse hex seed and use exact bytes
-		if parsedSeed, err := parseHexSeed(g.baseSeed); err == nil {
+		if parsedSeed, err := ParseHexSeed(g.baseSeed); err == nil {
 			// If seed is longer than 32 bytes, take first 32
 			if len(parsedSeed) >= 32 {
 				copy(seedBytes, parsedSeed[:32])
