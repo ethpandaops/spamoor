@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"math/rand"
 	"slices"
 	"strings"
 	"sync"
@@ -20,6 +21,9 @@ import (
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/sirupsen/logrus"
 )
+
+// feeWindowSize is the number of recent blocks tracked for dynamic fee headroom calculation.
+const feeWindowSize = 10
 
 // BlockInfo represents information about a processed block including
 // hash, parent hash, gas limit, and timestamp for chain reorganization detection.
@@ -111,6 +115,16 @@ type TxPool struct {
 	currentGasLimit uint64
 	currentBaseFee  *big.Int
 	blockStatsMutex sync.RWMutex
+
+	// Recent block tracking for dynamic fee calculation.
+	// Sliding window of gas usage and baseFee to adjust feeCap:
+	// - Gas fill ratio controls headroom (how much above baseFee)
+	// - Average baseFee creates lag that self-corrects rising baseFee
+	recentGasUsed  [feeWindowSize]uint64
+	recentGasLimit [feeWindowSize]uint64
+	recentBaseFees [feeWindowSize]*big.Int
+	recentGasIdx   int
+	recentGasLen   int
 
 	// Block update subscriptions
 	subscriptionsMutex sync.RWMutex
@@ -438,10 +452,17 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 		GasLimit:   blockWithHash.Block.GasLimit(),
 	}
 
-	// Update current gas limit
+	// Update current gas limit and recent block gas tracking
 	pool.blockStatsMutex.Lock()
 	pool.currentGasLimit = blockWithHash.Block.GasLimit()
 	pool.currentBaseFee = blockWithHash.Block.BaseFee()
+	pool.recentGasUsed[pool.recentGasIdx] = blockWithHash.Block.GasUsed()
+	pool.recentGasLimit[pool.recentGasIdx] = blockWithHash.Block.GasLimit()
+	pool.recentBaseFees[pool.recentGasIdx] = blockWithHash.Block.BaseFee() // returns new *big.Int
+	pool.recentGasIdx = (pool.recentGasIdx + 1) % feeWindowSize
+	if pool.recentGasLen < feeWindowSize {
+		pool.recentGasLen++
+	}
 	pool.blockStatsMutex.Unlock()
 
 	// Clean up old blocks
@@ -1495,6 +1516,38 @@ func (pool *TxPool) GetCurrentBaseFee() *big.Int {
 	return pool.currentBaseFee
 }
 
+// GetRecentBlockGasTotals returns the sum of gas used and gas limits
+// over the recent block window. Must not hold blockStatsMutex.
+func (pool *TxPool) GetRecentBlockGasTotals() (totalGasUsed, totalGasLimit uint64) {
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
+	for i := range pool.recentGasLen {
+		totalGasUsed += pool.recentGasUsed[i]
+		totalGasLimit += pool.recentGasLimit[i]
+	}
+	return
+}
+
+// getWindowAvgBaseFee returns the average baseFee over the recent block window.
+// When baseFee is rising, the average lags behind the current baseFee, creating
+// natural backpressure that lets baseFee recover. Must not hold blockStatsMutex.
+func (pool *TxPool) getWindowAvgBaseFee() *big.Int {
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
+	count := 0
+	sum := new(big.Int)
+	for i := range pool.recentGasLen {
+		if pool.recentBaseFees[i] != nil && pool.recentBaseFees[i].Sign() > 0 {
+			sum.Add(sum, pool.recentBaseFees[i])
+			count++
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	return sum.Div(sum, big.NewInt(int64(count)))
+}
+
 // GetCurrentGasLimitWithInit returns the current gas limit, initializing it from RPC if needed.
 // This is a convenience method that combines GetCurrentGasLimit and InitializeGasLimit.
 func (pool *TxPool) GetCurrentGasLimitWithInit() (uint64, error) {
@@ -1554,39 +1607,93 @@ func (pool *TxPool) initBlockStats() error {
 }
 
 // GetSuggestedFees returns the suggested fees for a transaction.
-// If baseFeeWei and tipFeeWei are provided (non-nil), they are used directly.
-// If not provided (nil), the fees are fetched from the client.
+// baseFeeWei acts as a maximum feeCap cap (0 or nil = no cap).
+// tipFeeWei overrides the network-suggested tip (0 or nil = use network tip).
+// The dynamic fee mechanism always runs: it computes feeCap from the current
+// baseFee with adaptive headroom and normal distribution spread, then caps
+// at baseFeeWei if provided.
 func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int) (feeCap *big.Int, tipCap *big.Int, err error) {
-	if baseFeeWei != nil && baseFeeWei.Sign() > 0 {
-		feeCap = new(big.Int).Set(baseFeeWei)
-	}
 	if tipFeeWei != nil && tipFeeWei.Sign() > 0 {
 		tipCap = new(big.Int).Set(tipFeeWei)
 	}
 
-	if feeCap == nil || tipCap == nil {
+	if tipCap == nil {
 		_, networkTipCap, fetchErr := client.GetSuggestedFee(pool.options.Context)
 		if fetchErr != nil {
 			return nil, nil, fetchErr
 		}
-		if tipCap == nil {
-			tipCap = networkTipCap
+		tipCap = networkTipCap
+	}
+
+	// Dynamic fee calculation: always compute feeCap from current chain state.
+	// eth_gasPrice returns baseFee + tipCap, which provides zero headroom for
+	// baseFee increases. After a full block, baseFee rises 12.5% and ALL pending
+	// tx become underpriced, causing alternating full/empty blocks.
+	//
+	// Dynamic headroom based on recent block fill over a sliding window:
+	//   headroom = baseFee * (totalGasLimit - totalGasUsed) / (4 * totalGasLimit)
+	//
+	// This scales linearly with how underfull recent blocks are:
+	//   50% avg fill (target) → baseFee/8  headroom (1 block of max EIP-1559 change)
+	//   100% avg fill         → clamped to baseFee/16 minimum (prevents oscillation)
+	//   0% avg fill           → baseFee/4  headroom (2 blocks of max change)
+	currentBaseFee := pool.GetCurrentBaseFee()
+	if currentBaseFee != nil && currentBaseFee.Sign() > 0 {
+		totalGasUsed, totalGasLimit := pool.GetRecentBlockGasTotals()
+
+		var headroom *big.Int
+		if totalGasLimit > 0 && totalGasUsed <= totalGasLimit {
+			headroom = new(big.Int).Set(currentBaseFee)
+			headroom.Mul(headroom, new(big.Int).SetUint64(totalGasLimit-totalGasUsed))
+			headroom.Div(headroom, new(big.Int).SetUint64(4*totalGasLimit))
+		} else {
+			headroom = new(big.Int).Div(new(big.Int).Set(currentBaseFee), big.NewInt(8))
 		}
-		if feeCap == nil {
-			// eth_gasPrice returns baseFee + tipCap, which provides zero headroom
-			// for baseFee increases. After a full block, baseFee rises 12.5% and
-			// ALL pending tx become underpriced, causing alternating full/empty blocks.
-			// Use baseFee*2 + tipCap (the EIP-1559 recommended approach) to ensure
-			// transactions remain valid through baseFee fluctuations.
-			currentBaseFee := pool.GetCurrentBaseFee()
-			if currentBaseFee != nil && currentBaseFee.Sign() > 0 {
-				feeCap = new(big.Int).Mul(currentBaseFee, big.NewInt(2))
-				feeCap.Add(feeCap, tipCap)
-			} else {
-				// Fallback: no tracked baseFee yet, use network suggestion
-				feeCap, _, _ = client.GetSuggestedFee(pool.options.Context)
-			}
+
+		// Clamp to [baseFee/16, baseFee/4]
+		minH := new(big.Int).Div(new(big.Int).Set(currentBaseFee), big.NewInt(16))
+		maxH := new(big.Int).Div(new(big.Int).Set(currentBaseFee), big.NewInt(4))
+		if headroom.Cmp(minH) < 0 {
+			headroom = minH
 		}
+		if headroom.Cmp(maxH) > 0 {
+			headroom = maxH
+		}
+
+		// Normal distribution centered on the AVERAGE baseFee from the window.
+		// When baseFee is rising, the average lags behind current, shifting more
+		// tx below currentBaseFee → rejected by EL → nonce gaps → wallet stalls →
+		// reduced throughput → baseFee recovers. Self-correcting feedback loop.
+		// sigma = headroom / 1.28 → ~10% canary tx at steady state.
+		avgBaseFee := pool.getWindowAvgBaseFee()
+		if avgBaseFee == nil {
+			avgBaseFee = currentBaseFee
+		}
+
+		sigma := new(big.Int).Mul(headroom, big.NewInt(25))
+		sigma.Div(sigma, big.NewInt(32)) // ≈ headroom / 1.28
+
+		sample := rand.NormFloat64()
+		scaledSample := int64(math.Round(sample * 10000))
+		offset := new(big.Int).Mul(sigma, big.NewInt(scaledSample))
+		offset.Div(offset, big.NewInt(10000))
+
+		feeCap = new(big.Int).Add(avgBaseFee, headroom)
+		feeCap.Add(feeCap, offset)
+		if feeCap.Sign() <= 0 {
+			feeCap.SetInt64(1)
+		}
+	} else if feeCap == nil {
+		// Fallback: no tracked baseFee yet, use network suggestion
+		feeCap, _, _ = client.GetSuggestedFee(pool.options.Context)
+	}
+
+	// Apply baseFeeWei as a maximum cap if provided.
+	// Scenario defaults (e.g., 20 gwei) act as a safety ceiling — the dynamic
+	// mechanism runs freely below it, and the cap only triggers if baseFee
+	// rises unexpectedly high.
+	if feeCap != nil && baseFeeWei != nil && baseFeeWei.Sign() > 0 && feeCap.Cmp(baseFeeWei) > 0 {
+		feeCap.Set(baseFeeWei)
 	}
 
 	return feeCap, tipCap, nil
