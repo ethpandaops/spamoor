@@ -1,11 +1,9 @@
 module github.com/ethpandaops/spamoor
 
-go 1.25.0
-
-toolchain go1.25.1
+go 1.25.7
 
 require (
-	github.com/consensys/gnark-crypto v0.19.2
+	github.com/consensys/gnark-crypto v0.20.0
 	github.com/ethereum/go-ethereum v1.17.1
 	github.com/fjl/geas v0.3.0
 	github.com/glebarez/go-sqlite v1.22.0
@@ -34,7 +32,7 @@ require (
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20251001021608-1fe7b43fc4d6 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.20.0 // indirect
+	github.com/bits-and-blooms/bitset v1.24.4 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/crate-crypto/go-eth-kzg v1.4.0 // indirect
 	github.com/deckarep/golang-set/v2 v2.6.0 // indirect
