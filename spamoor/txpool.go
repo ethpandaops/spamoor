@@ -1057,19 +1057,29 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 			submitCount = 3
 		}
 
+		// Derive start offset for redundant client selection.
+		// When ClientsStartOffset is 0 (the default, never explicitly set by any scenario),
+		// use the tx hash to distribute redundant submissions uniformly across all clients
+		// instead of always targeting clients at index 1 and 2.
+		startOffset := options.ClientsStartOffset
+		if startOffset == 0 && tx != nil {
+			h := tx.Hash()
+			startOffset = int(h[0]) | (int(h[1]) << 8)
+		}
+
 		success := false
 		clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 		for i := 0; i < clientCount; i++ {
 			client := options.Client
 			if client == nil || i > 0 {
 				if len(options.ClientList) > 0 {
-					client = options.ClientList[(i+options.ClientsStartOffset)%len(options.ClientList)]
+					client = options.ClientList[(i+startOffset)%len(options.ClientList)]
 				} else {
 					var clientOpts []ClientSelectionOption
 					if options.ClientGroup != "" {
 						clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
 					}
-					clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, i+options.ClientsStartOffset))
+					clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, i+startOffset))
 					client = pool.options.ClientPool.GetClient(clientOpts...)
 				}
 			}
@@ -1555,15 +1565,27 @@ func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFee
 	}
 
 	if feeCap == nil || tipCap == nil {
-		networkFeeCap, networkTipCap, fetchErr := client.GetSuggestedFee(pool.options.Context)
+		_, networkTipCap, fetchErr := client.GetSuggestedFee(pool.options.Context)
 		if fetchErr != nil {
 			return nil, nil, fetchErr
 		}
-		if feeCap == nil {
-			feeCap = networkFeeCap
-		}
 		if tipCap == nil {
 			tipCap = networkTipCap
+		}
+		if feeCap == nil {
+			// eth_gasPrice returns baseFee + tipCap, which provides zero headroom
+			// for baseFee increases. After a full block, baseFee rises 12.5% and
+			// ALL pending tx become underpriced, causing alternating full/empty blocks.
+			// Use baseFee*2 + tipCap (the EIP-1559 recommended approach) to ensure
+			// transactions remain valid through baseFee fluctuations.
+			currentBaseFee := pool.GetCurrentBaseFee()
+			if currentBaseFee != nil && currentBaseFee.Sign() > 0 {
+				feeCap = new(big.Int).Mul(currentBaseFee, big.NewInt(2))
+				feeCap.Add(feeCap, tipCap)
+			} else {
+				// Fallback: no tracked baseFee yet, use network suggestion
+				feeCap, _, _ = client.GetSuggestedFee(pool.options.Context)
+			}
 		}
 	}
 
@@ -1634,6 +1656,14 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 		clientCount = 5
 	}
 
+	// Use tx hash for offset to distribute rebroadcasts across all clients,
+	// matching the fix in submitTransaction.
+	startOffset := options.ClientsStartOffset
+	if startOffset == 0 {
+		h := tx.Hash()
+		startOffset = int(h[0]) | (int(h[1]) << 8)
+	}
+
 	for j := 0; j < clientCount; j++ {
 		if ctx.Err() != nil {
 			break
@@ -1641,13 +1671,13 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 
 		var client *Client
 		if len(options.ClientList) > 0 {
-			client = options.ClientList[(j+options.ClientsStartOffset)%len(options.ClientList)]
+			client = options.ClientList[(j+startOffset)%len(options.ClientList)]
 		} else {
 			var clientOpts []ClientSelectionOption
 			if options.ClientGroup != "" {
 				clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
 			}
-			clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, j+options.ClientsStartOffset+1))
+			clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, j+startOffset+1))
 			client = pool.options.ClientPool.GetClient(clientOpts...)
 		}
 
