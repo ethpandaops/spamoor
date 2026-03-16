@@ -716,12 +716,14 @@ document.querySelectorAll('#spammerTabs button[data-bs-toggle="tab"]').forEach(t
         primaryButton.textContent = 'Create';
         primaryButton.onclick = () => submitNewSpammer();
         primaryButton.className = 'btn btn-primary';
+        primaryButton.disabled = !document.querySelector('#newSpammerForm [name="scenario"]').value;
         break;
       case '#import-pane':
         primaryButton.style.display = 'block';
         primaryButton.textContent = 'Import';
         primaryButton.onclick = () => performImport();
         primaryButton.className = 'btn btn-primary';
+        primaryButton.disabled = false;
         break;
       case '#library-pane':
         primaryButton.style.display = 'block';
@@ -730,6 +732,7 @@ document.querySelectorAll('#spammerTabs button[data-bs-toggle="tab"]').forEach(t
           document.querySelector('#spammerTabs button[data-bs-target="#create-pane"]').click();
         };
         primaryButton.className = 'btn btn-outline-primary';
+        primaryButton.disabled = false;
         break;
     }
     

@@ -1,0 +1,146 @@
+# Name: Block history logger (EIP-2935 & EIP-4788)
+# Description: Logs the last 10 block hashes and beacon block roots each slot
+# Tags: eip-2935, eip-4788, block-history, beacon-roots
+- scenario: geastx
+  name: 'Block history logger'
+  description: "Deploys a contract that reads the last 10 block hashes (EIP-2935) and beacon block roots (EIP-4788) and emits them as logs, called once per slot"
+  config:
+    total_count: 0
+    throughput: 10
+    max_pending: 1
+    max_wallets: 1
+    rebroadcast: 120
+    base_fee: 20
+    tip_fee: 2
+    gas_limit: 1000000
+    deploy_gas_limit: 1000000
+    amount: 0
+    seed: geastx-block-history
+    refill_amount: 5000000000000000000
+    refill_balance: 1000000000000000000
+    refill_interval: 600
+    log_txs: true
+    geas_file: ""
+    client_group: ""
+    deploy_client_group: ""
+    timeout: ""
+    geas_code: |
+      ;; Log last 10 block hashes (EIP-2935) and beacon block roots (EIP-4788)
+      ;;
+      ;; Emits LOG2 events:
+      ;;   topic0=1: block hash log, topic1=block_number, data=block_hash (32 bytes)
+      ;;   topic0=2: beacon root log, topic1=timestamp, data=beacon_root (32 bytes)
+
+      ;; === Block Hashes (EIP-2935: 0x0000F90827F1C53a10cb7A02335B175320002935) ===
+      ;; Loop i = 1..10: read block hash for (block.number - i)
+      PUSH1 1
+
+      .loop_bh:
+        JUMPDEST
+        DUP1
+        PUSH1 11
+        EQ
+        push @.done_bh
+        JUMPI
+
+        ;; mem[0..31] = block.number - i
+        NUMBER
+        DUP2
+        SWAP1
+        SUB
+        PUSH0
+        MSTORE
+
+        ;; staticcall(gas, 0x...2935, argOffset=0, argSize=32, retOffset=32, retSize=32)
+        PUSH1 32
+        PUSH1 32
+        PUSH1 32
+        PUSH0
+        PUSH20 0x0000F90827F1C53a10cb7A02335B175320002935
+        GAS
+        STATICCALL
+
+        ;; if success, emit log
+        push @.log_bh
+        JUMPI
+        push @.next_bh
+        JUMP
+
+      .log_bh:
+        JUMPDEST
+        ;; LOG2(offset=32, size=32, topic0=1, topic1=block_number from mem[0])
+        PUSH0
+        MLOAD
+        PUSH1 1
+        PUSH1 32
+        PUSH1 32
+        LOG2
+
+      .next_bh:
+        JUMPDEST
+        PUSH1 1
+        ADD
+        push @.loop_bh
+        JUMP
+
+      .done_bh:
+        JUMPDEST
+        POP
+
+      ;; === Beacon Block Roots (EIP-4788: 0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02) ===
+      ;; Loop i = 1..10: read beacon root for (timestamp - 12*i)
+      PUSH1 1
+
+      .loop_br:
+        JUMPDEST
+        DUP1
+        PUSH1 11
+        EQ
+        push @.done_br
+        JUMPI
+
+        ;; mem[0..31] = timestamp - 12*i
+        DUP1
+        PUSH1 12
+        MUL
+        TIMESTAMP
+        SUB
+        PUSH0
+        MSTORE
+
+        ;; staticcall(gas, 0x...ac02, argOffset=0, argSize=32, retOffset=32, retSize=32)
+        PUSH1 32
+        PUSH1 32
+        PUSH1 32
+        PUSH0
+        PUSH20 0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02
+        GAS
+        STATICCALL
+
+        ;; if success, emit log
+        push @.log_br
+        JUMPI
+        push @.next_br
+        JUMP
+
+      .log_br:
+        JUMPDEST
+        ;; LOG2(offset=32, size=32, topic0=2, topic1=timestamp from mem[0])
+        PUSH0
+        MLOAD
+        PUSH1 2
+        PUSH1 32
+        PUSH1 32
+        LOG2
+
+      .next_br:
+        JUMPDEST
+        PUSH1 1
+        ADD
+        push @.loop_br
+        JUMP
+
+      .done_br:
+        JUMPDEST
+        POP
+        STOP
