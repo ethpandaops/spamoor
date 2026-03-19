@@ -279,7 +279,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 	}
 
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, client, err
 	}
@@ -332,7 +332,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	}
 
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, nil, client, wallet, err
 	}

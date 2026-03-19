@@ -410,7 +410,7 @@ func (s *Scenario) executeTestCase(
 
 	// Get suggested fees
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		result.err = fmt.Errorf("failed to get suggested fees: %w", err)
 		return result

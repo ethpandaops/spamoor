@@ -146,7 +146,6 @@ type TxPoolOptions struct {
 	ReorgDepth          int // Number of blocks to keep in memory for reorg tracking
 	ChainId             *big.Int
 	ExternalBlockSource *ExternalBlockSource
-	FeeStrategy         string // Fee calculation strategy: "" (legacy) or "adaptive" (dynamic headroom with normal distribution)
 }
 
 type ExternalBlockSource struct {
@@ -1614,8 +1613,12 @@ func (pool *TxPool) initBlockStats() error {
 // With FeeStrategy "adaptive", the dynamic fee mechanism computes feeCap from
 // the current baseFee with adaptive headroom and normal distribution spread,
 // using baseFeeWei as a maximum cap instead.
-func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int) (feeCap *big.Int, tipCap *big.Int, err error) {
-	if pool.options.FeeStrategy == "adaptive" {
+func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int, feeStrategy ...string) (feeCap *big.Int, tipCap *big.Int, err error) {
+	strategy := ""
+	if len(feeStrategy) > 0 {
+		strategy = feeStrategy[0]
+	}
+	if strategy == "adaptive" {
 		return pool.getSuggestedFeesAdaptive(client, baseFeeWei, tipFeeWei)
 	}
 

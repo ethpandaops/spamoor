@@ -41,7 +41,6 @@ func RunCommand(args []string) {
 	flags.IntSliceVarP(&selectedSpammers, "spammers", "s", []int{}, "Indexes of spammers to run (0-based). If not specified, runs all spammers.")
 	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files to load (can be specified multiple times).")
-	flags.StringVar(&cliArgs.feeStrategy, "fee-strategy", "", "Fee calculation strategy: 'adaptive' for dynamic headroom with normal distribution (default: use network-suggested fees).")
 
 	flags.Parse(args)
 
@@ -198,11 +197,10 @@ func RunCommand(args []string) {
 
 	// Initialize transaction pool
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
-		Context:     ctx,
-		Logger:      logger.WithField("module", "txpool"),
-		ClientPool:  clientPool,
-		ChainId:     clientPool.GetChainId(),
-		FeeStrategy: cliArgs.feeStrategy,
+		Context:    ctx,
+		Logger:     logger.WithField("module", "txpool"),
+		ClientPool: clientPool,
+		ChainId:    clientPool.GetChainId(),
 	})
 
 	// Initialize root wallet

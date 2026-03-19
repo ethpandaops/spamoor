@@ -407,7 +407,7 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, error) {
     )
 
     baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
-    feeCap, tipCap, _ := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+    feeCap, tipCap, _ := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 
     deploymentTx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
         GasFeeCap: uint256.MustFromBig(feeCap),

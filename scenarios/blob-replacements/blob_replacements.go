@@ -258,7 +258,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64, wallet *spamoor
 	}
 
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, nil, client, wallet, 0, err
 	}

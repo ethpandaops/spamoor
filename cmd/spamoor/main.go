@@ -196,11 +196,10 @@ func main() {
 
 	// prepare txpool
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
-		Context:     ctx,
-		Logger:      logger.WithField("module", "txpool"),
-		ClientPool:  clientPool,
-		ChainId:     clientPool.GetChainId(),
-		FeeStrategy: cliArgs.feeStrategy,
+		Context:    ctx,
+		Logger:     logger.WithField("module", "txpool"),
+		ClientPool: clientPool,
+		ChainId:    clientPool.GetChainId(),
 	})
 
 	// init root wallet
@@ -242,6 +241,7 @@ func main() {
 	walletPool.SetRefillInterval(cliArgs.refillInterval)
 	walletPool.SetWalletSeed(cliArgs.seed)
 	walletPool.SetFundingGasLimit(cliArgs.fundingGasLimit)
+	walletPool.SetFeeStrategy(cliArgs.feeStrategy)
 
 	// init scenario
 	err = newScenario.Init(&scenario.Options{

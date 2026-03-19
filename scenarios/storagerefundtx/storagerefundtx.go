@@ -318,7 +318,7 @@ func (s *Scenario) sendDeploymentTx(
 		s.options.BaseFeeWei, s.options.TipFeeWei,
 	)
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(
+	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(
 		client, baseFeeWei, tipFeeWei,
 	)
 	if err != nil {
@@ -400,7 +400,7 @@ func (s *Scenario) sendTx(
 		s.options.BaseFeeWei, s.options.TipFeeWei,
 	)
 
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(
+	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(
 		client, baseFeeWei, tipFeeWei,
 	)
 	if err != nil {
