@@ -1426,7 +1426,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
     client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
     
     // Get suggested fees and build transaction - see Transaction Building section
-    feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+    feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
     // ... transaction building logic ...
     
     // Submit transaction - see Transaction Submission section for detailed options
@@ -1530,7 +1530,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
     client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
     
     // 3. Build transaction
-    feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+    feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
     if err != nil {
         onComplete() // Call onComplete on early failure
         return nil, err
@@ -1849,7 +1849,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
     client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
     
     // Get suggested fees and build transaction - see Transaction Building section
-    feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+    feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
     // ... transaction building logic ...
     
     // Submit transaction - see Transaction Submission section for detailed options
@@ -1889,7 +1889,7 @@ func (s *Scenario) deployContract(ctx context.Context) (common.Address, error) {
     bytecode := common.Hex2Bytes("608060405234801561001057600080fd5b50...")
     
     // Build deployment transaction
-    feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(
+    feeCap, tipCap, err := s.walletPool.GetSuggestedFees(
         client, s.options.BaseFee, s.options.TipFee)
     if err != nil {
         return common.Address{}, err
@@ -1936,7 +1936,7 @@ func (s *Scenario) deployContracts(redeploy bool) (*DeploymentInfo, error) {
     client := s.walletPool.GetClient(spamoor.SelectClientByIndex, 0, s.options.ClientGroup)
     deployerWallet := s.walletPool.GetWellKnownWallet("deployer")
     
-    feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+    feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
     if err != nil {
         return nil, fmt.Errorf("could not get tx fee: %w", err)
     }
@@ -2245,7 +2245,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
     client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
     
     // Fee calculation and transaction building (see Transaction Building section)
-    feeCap, tipCap, _ := s.walletPool.GetTxPool().GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
+    feeCap, tipCap, _ := s.walletPool.GetSuggestedFees(client, s.options.BaseFee, s.options.TipFee)
     
     txData := &txbuilder.TxMetadata{
         GasTipCap: uint256.NewInt(tipCap),

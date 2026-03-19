@@ -202,7 +202,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 	}
 
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(u.options.BaseFee, u.options.TipFee, u.options.BaseFeeWei, u.options.TipFeeWei)
-	feeCap, tipCap, err := u.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+	feeCap, tipCap, err := u.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return fmt.Errorf("could not get tx fee: %v", err)
 	}

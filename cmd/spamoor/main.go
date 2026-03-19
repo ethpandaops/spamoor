@@ -34,6 +34,7 @@ type CliArgs struct {
 	slotDuration     time.Duration
 	fundingGasLimit  uint64
 	plugins          []string
+	feeStrategy      string
 }
 
 func main() {
@@ -63,6 +64,7 @@ func main() {
 	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
 	flags.Uint64Var(&cliArgs.fundingGasLimit, "funding-gas-limit", 21000, "Gas limit for wallet funding transactions (use 100000+ for L2s).")
 	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files to load (can be specified multiple times).")
+	flags.StringVar(&cliArgs.feeStrategy, "fee-strategy", "", "Fee calculation strategy: 'adaptive' for dynamic headroom with normal distribution (default: use network-suggested fees).")
 
 	flags.Parse(os.Args)
 
@@ -239,6 +241,7 @@ func main() {
 	walletPool.SetRefillInterval(cliArgs.refillInterval)
 	walletPool.SetWalletSeed(cliArgs.seed)
 	walletPool.SetFundingGasLimit(cliArgs.fundingGasLimit)
+	walletPool.SetFeeStrategy(cliArgs.feeStrategy)
 
 	// init scenario
 	err = newScenario.Init(&scenario.Options{

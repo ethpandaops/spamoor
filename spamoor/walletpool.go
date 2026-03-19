@@ -45,6 +45,7 @@ type WalletPoolConfig struct {
 	RefillInterval  uint64       `yaml:"refill_interval"`
 	WalletSeed      string       `yaml:"seed"`
 	FundingGasLimit uint64       `yaml:"funding_gas_limit"`
+	FeeStrategy     string       `yaml:"fee_strategy,omitempty"` // Fee calculation strategy: "" (legacy) or "adaptive"
 }
 
 // WellKnownWalletConfig defines configuration for a named wallet with custom funding settings.
@@ -141,6 +142,16 @@ func (pool *WalletPool) GetContext() context.Context {
 // GetTxPool returns the transaction pool used by this wallet pool.
 func (pool *WalletPool) GetTxPool() *TxPool {
 	return pool.txpool
+}
+
+// GetSuggestedFees returns suggested fees using this pool's configured fee strategy.
+func (pool *WalletPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int) (feeCap *big.Int, tipCap *big.Int, err error) {
+	return pool.txpool.GetSuggestedFees(client, baseFeeWei, tipFeeWei, pool.config.FeeStrategy)
+}
+
+// SetFeeStrategy sets the fee calculation strategy for this wallet pool.
+func (pool *WalletPool) SetFeeStrategy(strategy string) {
+	pool.config.FeeStrategy = strategy
 }
 
 // GetClientPool returns the client pool used for blockchain interactions.
