@@ -45,6 +45,7 @@ type CliArgs struct {
 	enableAuth        bool
 	startupDelay      uint64
 	plugins           []string
+	feeStrategy       string
 }
 
 func main() {
@@ -72,6 +73,7 @@ func main() {
 	flags.BoolVar(&cliArgs.disableLocalToken, "disable-local-token", false, "Disable local token generation via the /auth/token endpoint (require external token)")
 	flags.Uint64Var(&cliArgs.startupDelay, "startup-delay", 30, "Delay in seconds before starting spammers on daemon startup (to allow cancellation)")
 	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files or local directories to load (can be specified multiple times)")
+	flags.StringVar(&cliArgs.feeStrategy, "fee-strategy", "", "Fee calculation strategy: 'adaptive' for dynamic headroom with normal distribution (default: use network-suggested fees).")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -146,10 +148,11 @@ func main() {
 	var spamoorDaemon *daemon.Daemon
 
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
-		Context:    ctx,
-		Logger:     logger.WithField("module", "txpool"),
-		ClientPool: clientPool,
-		ChainId:    clientPool.GetChainId(),
+		Context:     ctx,
+		Logger:      logger.WithField("module", "txpool"),
+		ClientPool:  clientPool,
+		ChainId:     clientPool.GetChainId(),
+		FeeStrategy: cliArgs.feeStrategy,
 	})
 
 	// init daemon

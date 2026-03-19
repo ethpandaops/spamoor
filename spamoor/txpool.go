@@ -146,6 +146,7 @@ type TxPoolOptions struct {
 	ReorgDepth          int // Number of blocks to keep in memory for reorg tracking
 	ChainId             *big.Int
 	ExternalBlockSource *ExternalBlockSource
+	FeeStrategy         string // Fee calculation strategy: "" (legacy) or "adaptive" (dynamic headroom with normal distribution)
 }
 
 type ExternalBlockSource struct {
@@ -1607,12 +1608,45 @@ func (pool *TxPool) initBlockStats() error {
 }
 
 // GetSuggestedFees returns the suggested fees for a transaction.
-// baseFeeWei acts as a maximum feeCap cap (0 or nil = no cap).
-// tipFeeWei overrides the network-suggested tip (0 or nil = use network tip).
-// The dynamic fee mechanism always runs: it computes feeCap from the current
-// baseFee with adaptive headroom and normal distribution spread, then caps
-// at baseFeeWei if provided.
+// If baseFeeWei and tipFeeWei are provided (non-nil), they are used directly.
+// If not provided (nil), the fees are fetched from the client.
+//
+// With FeeStrategy "adaptive", the dynamic fee mechanism computes feeCap from
+// the current baseFee with adaptive headroom and normal distribution spread,
+// using baseFeeWei as a maximum cap instead.
 func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int) (feeCap *big.Int, tipCap *big.Int, err error) {
+	if pool.options.FeeStrategy == "adaptive" {
+		return pool.getSuggestedFeesAdaptive(client, baseFeeWei, tipFeeWei)
+	}
+
+	// Legacy strategy: use provided fees or fetch from network.
+	if baseFeeWei != nil && baseFeeWei.Sign() > 0 {
+		feeCap = new(big.Int).Set(baseFeeWei)
+	}
+	if tipFeeWei != nil && tipFeeWei.Sign() > 0 {
+		tipCap = new(big.Int).Set(tipFeeWei)
+	}
+
+	if feeCap == nil || tipCap == nil {
+		networkFeeCap, networkTipCap, fetchErr := client.GetSuggestedFee(pool.options.Context)
+		if fetchErr != nil {
+			return nil, nil, fetchErr
+		}
+		if feeCap == nil {
+			feeCap = networkFeeCap
+		}
+		if tipCap == nil {
+			tipCap = networkTipCap
+		}
+	}
+
+	return feeCap, tipCap, nil
+}
+
+// getSuggestedFeesAdaptive computes fees using dynamic headroom with normal
+// distribution spread. baseFeeWei acts as a maximum feeCap cap (0 or nil = no cap).
+// tipFeeWei overrides the network-suggested tip (0 or nil = use network tip).
+func (pool *TxPool) getSuggestedFeesAdaptive(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int) (feeCap *big.Int, tipCap *big.Int, err error) {
 	if tipFeeWei != nil && tipFeeWei.Sign() > 0 {
 		tipCap = new(big.Int).Set(tipFeeWei)
 	}
@@ -1625,7 +1659,7 @@ func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFee
 		tipCap = networkTipCap
 	}
 
-	// Dynamic fee calculation: always compute feeCap from current chain state.
+	// Dynamic fee calculation: compute feeCap from current chain state.
 	// eth_gasPrice returns baseFee + tipCap, which provides zero headroom for
 	// baseFee increases. After a full block, baseFee rises 12.5% and ALL pending
 	// tx become underpriced, causing alternating full/empty blocks.
@@ -1680,6 +1714,11 @@ func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFee
 
 		feeCap = new(big.Int).Add(avgBaseFee, headroom)
 		feeCap.Add(feeCap, offset)
+
+		// Ensure feeCap >= tipCap (EIP-1559 requirement: maxFeePerGas >= maxPriorityFeePerGas)
+		if tipCap != nil && feeCap.Cmp(tipCap) < 0 {
+			feeCap.Set(tipCap)
+		}
 		if feeCap.Sign() <= 0 {
 			feeCap.SetInt64(1)
 		}
