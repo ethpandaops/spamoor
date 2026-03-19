@@ -1655,6 +1655,9 @@ func (pool *TxPool) getSuggestedFeesAdaptive(client *Client, baseFeeWei *big.Int
 	}
 
 	if tipCap == nil {
+		if client == nil {
+			return nil, nil, fmt.Errorf("client required for adaptive fee strategy when tipFee not provided")
+		}
 		_, networkTipCap, fetchErr := client.GetSuggestedFee(pool.options.Context)
 		if fetchErr != nil {
 			return nil, nil, fetchErr
@@ -1727,6 +1730,9 @@ func (pool *TxPool) getSuggestedFeesAdaptive(client *Client, baseFeeWei *big.Int
 		}
 	} else if feeCap == nil {
 		// Fallback: no tracked baseFee yet, use network suggestion
+		if client == nil {
+			return nil, nil, fmt.Errorf("client required for adaptive fee strategy when baseFee not yet tracked")
+		}
 		feeCap, _, _ = client.GetSuggestedFee(pool.options.Context)
 	}
 
