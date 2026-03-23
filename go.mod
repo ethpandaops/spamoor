@@ -3,7 +3,7 @@ module github.com/ethpandaops/spamoor
 go 1.25.7
 
 require (
-	github.com/consensys/gnark-crypto v0.20.0
+	github.com/consensys/gnark-crypto v0.20.1
 	github.com/ethereum/go-ethereum v1.17.1
 	github.com/fjl/geas v0.3.0
 	github.com/glebarez/go-sqlite v1.22.0
