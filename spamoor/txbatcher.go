@@ -97,15 +97,15 @@ exit2:
 
 const (
 	// BatcherTxLimit is the maximum number of transactions that can be batched in a single call.
-	// Reduced from 450 to 100 to keep total gas under per-tx gas caps (typically 30M).
+	// Reduced from 450 to 50 to keep total gas under RPC gas caps (geth default: 16M).
 	// Each CALL to a new account costs GAS_NEW_ACCOUNT (112 * cost_per_state_byte) in state gas.
-	BatcherTxLimit = 100
+	BatcherTxLimit = 50
 	// BatcherBaseGas is the base gas cost for executing a batcher transaction.
 	BatcherBaseGas = 100000
 	// BatcherGasPerTx is the additional gas cost per transaction in the batch.
 	// Increased from 35000 to 200000 to cover EIP-8037 state gas for new account creation
 	// (GAS_NEW_ACCOUNT = 112 * 1174 = 131488 state gas, plus CALL overhead).
-	// Total for 100 txs: 100000 + 200000*100 = 20.1M (under 30M tx gas cap).
+	// Total for 50 txs: 100000 + 200000*50 = 10.1M (under 16M geth RPC gas cap).
 	BatcherGasPerTx = 200000
 )
 
