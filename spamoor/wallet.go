@@ -728,7 +728,7 @@ func (wallet *Wallet) BuildFillerTx(nonce uint64, gasTipCap, gasFeeCap *big.Int)
 		Nonce:     nonce,
 		GasTipCap: gasTipCap,
 		GasFeeCap: gasFeeCap,
-		Gas:       21000, // Minimum gas for simple transfer
+		Gas:       200000, // EIP-8037: needs headroom above 21000 for state gas accounting
 		To:        &wallet.address,
 		Value:     big.NewInt(0),
 		Data:      nil,

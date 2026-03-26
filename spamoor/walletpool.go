@@ -267,10 +267,12 @@ func (pool *WalletPool) SetFundingGasLimit(gasLimit uint64) {
 	pool.config.FundingGasLimit = gasLimit
 }
 
-// GetFundingGasLimit returns the gas limit for funding transactions, defaulting to 21000.
+// GetFundingGasLimit returns the gas limit for funding transactions, defaulting to 200000.
+// The higher default accommodates EIP-8037 state creation gas for new accounts
+// (GAS_NEW_ACCOUNT = 112 * cost_per_state_byte spills into regular gas).
 func (pool *WalletPool) GetFundingGasLimit() uint64 {
 	if pool.config.FundingGasLimit == 0 {
-		return 21000
+		return 200000
 	}
 	return pool.config.FundingGasLimit
 }
@@ -882,7 +884,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(BatcherBaseGas+BatcherGasPerTx*uint64(reqTxCount))))
 		}
 	} else {
-		feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(reqTxCount*21000)))
+		feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(uint64(reqTxCount)*pool.GetFundingGasLimit())))
 	}
 
 	totalFundingAmount = totalFundingAmount.Add(totalFundingAmount, uint256.MustFromBig(feeAmount))
