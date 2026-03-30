@@ -275,6 +275,27 @@ func (pool *WalletPool) GetFundingGasLimit() uint64 {
 	return pool.config.FundingGasLimit
 }
 
+// getBatcherGasPerTx returns the gas to allocate per transaction in a batcher call.
+// If funding_gas_limit is configured, it uses that value (it represents the gas needed
+// per account creation). Otherwise falls back to BatcherDefaultGasPerTx.
+func (pool *WalletPool) getBatcherGasPerTx() uint64 {
+	if pool.config.FundingGasLimit > BatcherDefaultGasPerTx {
+		return pool.config.FundingGasLimit
+	}
+	return BatcherDefaultGasPerTx
+}
+
+// getBatcherTxLimit returns the maximum number of transactions per batcher call,
+// computed to keep total gas under the RPC gas cap.
+func (pool *WalletPool) getBatcherTxLimit() int {
+	gasPerTx := pool.getBatcherGasPerTx()
+	limit := (BatcherRPCGasCap - BatcherBaseGas) / gasPerTx
+	if limit < 1 {
+		limit = 1
+	}
+	return int(limit)
+}
+
 // SetTransactionTracker sets the optional callback to track transaction results for metrics.
 func (pool *WalletPool) SetTransactionTracker(tracker func(err error)) {
 	pool.transactionTracker = tracker
@@ -870,19 +891,21 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 	reqTxCount := len(fundingReqs)
 	batchTxCount := reqTxCount
 	feeAmount := big.NewInt(0).Set(feeCap)
+	gasPerTx := pool.getBatcherGasPerTx()
+	batchLimit := pool.getBatcherTxLimit()
 	batcher := pool.rootWallet.GetTxBatcher()
 	if batcher != nil {
-		batchTxCount = len(fundingReqs) / BatcherTxLimit
-		if len(fundingReqs)%BatcherTxLimit != 0 {
+		batchTxCount = len(fundingReqs) / batchLimit
+		if len(fundingReqs)%batchLimit != 0 {
 			batchTxCount++
 		}
 		if batchTxCount > 1 {
-			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64((BatcherBaseGas+BatcherGasPerTx*BatcherTxLimit)*batchTxCount)))
+			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64((BatcherBaseGas+gasPerTx*uint64(batchLimit))*uint64(batchTxCount))))
 		} else {
-			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(BatcherBaseGas+BatcherGasPerTx*uint64(reqTxCount))))
+			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(BatcherBaseGas+gasPerTx*uint64(reqTxCount))))
 		}
 	} else {
-		feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(reqTxCount*21000)))
+		feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(uint64(reqTxCount)*pool.GetFundingGasLimit())))
 	}
 
 	totalFundingAmount = totalFundingAmount.Add(totalFundingAmount, uint256.MustFromBig(feeAmount))
@@ -900,8 +923,8 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		txList := make([]*types.Transaction, 0, batchTxCount)
 		batchTxMap := map[common.Hash][]*FundingRequest{}
 		if batcher != nil {
-			for txIdx := 0; txIdx < reqTxCount; txIdx += BatcherTxLimit {
-				batch := fundingReqs[txIdx:min(txIdx+BatcherTxLimit, reqTxCount)]
+			for txIdx := 0; txIdx < reqTxCount; txIdx += batchLimit {
+				batch := fundingReqs[txIdx:min(txIdx+batchLimit, reqTxCount)]
 				tx, err := pool.buildWalletFundingBatchTx(batch, client, batcher)
 				if err != nil {
 					return err
@@ -1038,7 +1061,7 @@ func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, cl
 	refillTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       BatcherBaseGas + BatcherGasPerTx*uint64(len(requests)),
+		Gas:       BatcherBaseGas + pool.getBatcherGasPerTx()*uint64(len(requests)),
 		To:        &toAddr,
 		Value:     totalAmount,
 		Data:      batchData,
