@@ -50,6 +50,8 @@ func init() {
 		"ErrTxTypeNotSupported":   reflect.ValueOf(&types.ErrTxTypeNotSupported).Elem(),
 		"ErrUint256Overflow":      reflect.ValueOf(&types.ErrUint256Overflow).Elem(),
 		"ErrUnexpectedProtection": reflect.ValueOf(&types.ErrUnexpectedProtection).Elem(),
+		"EthBurnLog":              reflect.ValueOf(types.EthBurnLog),
+		"EthTransferLog":          reflect.ValueOf(types.EthTransferLog),
 		"FullAccount":             reflect.ValueOf(types.FullAccount),
 		"FullAccountRLP":          reflect.ValueOf(types.FullAccountRLP),
 		"HashDifference":          reflect.ValueOf(types.HashDifference),
