@@ -96,12 +96,16 @@ exit2:
 `
 
 const (
-	// BatcherTxLimit is the maximum number of transactions that can be batched in a single call.
-	BatcherTxLimit = 450
 	// BatcherBaseGas is the base gas cost for executing a batcher transaction.
 	BatcherBaseGas = 50000
-	// BatcherGasPerTx is the additional gas cost per transaction in the batch.
-	BatcherGasPerTx = 35000
+	// BatcherDefaultGasPerTx is the default additional gas cost per transaction in the batch.
+	// This is used when funding_gas_limit is not configured (i.e. remains at 0 or default 21000).
+	// For chains with higher per-account creation costs (e.g. EIP-8037), configure
+	// funding_gas_limit to a higher value and the batcher will use it automatically.
+	BatcherDefaultGasPerTx = 35000
+	// BatcherRPCGasCap is the maximum gas allowed per RPC call (geth default: 16M).
+	// Batch size is computed to keep total gas under this cap.
+	BatcherRPCGasCap = 16_000_000
 )
 
 // TxBatcher manages the deployment and operation of a smart contract that batches
