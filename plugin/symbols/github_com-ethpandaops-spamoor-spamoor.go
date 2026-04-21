@@ -12,6 +12,8 @@ import (
 func init() {
 	Symbols["github.com/ethpandaops/spamoor/spamoor/spamoor"] = map[string]reflect.Value{
 		// function, constant and variable definitions
+		"AccountCreationSize":          reflect.ValueOf(constant.MakeFromLiteral("112", token.INT, 0)),
+		"AuthorizationCreationSize":    reflect.ValueOf(constant.MakeFromLiteral("23", token.INT, 0)),
 		"BatcherBaseGas":               reflect.ValueOf(constant.MakeFromLiteral("50000", token.INT, 0)),
 		"BatcherDefaultGasPerTx":       reflect.ValueOf(constant.MakeFromLiteral("35000", token.INT, 0)),
 		"BatcherRPCGasCap":             reflect.ValueOf(constant.MakeFromLiteral("16000000", token.INT, 0)),

@@ -2021,7 +2021,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "gasLimit": {
-                    "description": "Gas limit (optional, default: 21000 for simple transfers)",
+                    "description": "Gas limit (optional; 0 = auto: 21,000 pre-Amsterdam, MinIntrinsicGas or 21k+112·cpsb on Amsterdam, 100,000 for contract calls)",
                     "type": "integer"
                 },
                 "maxFee": {
