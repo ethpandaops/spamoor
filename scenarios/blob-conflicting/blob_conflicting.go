@@ -296,7 +296,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 		GasFeeCap:  uint256.MustFromBig(feeCap),
 		GasTipCap:  uint256.MustFromBig(tipCap),
 		BlobFeeCap: uint256.MustFromBig(blobFee),
-		Gas:        21000,
+		Gas:        23333,
 		To:         &toAddr,
 		Value:      uint256.NewInt(0),
 	}, blobRefs)
@@ -306,7 +306,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 	normalTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       21000,
+		Gas:       23333,
 		To:        &toAddr,
 		Value:     uint256.NewInt(0),
 	})

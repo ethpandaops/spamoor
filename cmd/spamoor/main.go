@@ -62,7 +62,7 @@ func main() {
 	flags.StringVar(&cliArgs.refillBalanceWei, "refill-balance-wei", "", "Min balance in Wei before refilling (overrides --refill-balance).")
 	flags.Uint64Var(&cliArgs.refillInterval, "refill-interval", 300, "Interval for child wallet rbalance check and refilling if needed (in sec).")
 	flags.DurationVar(&cliArgs.slotDuration, "slot-duration", 12*time.Second, "Duration of a slot/block for rate limiting (e.g., '12s', '250ms'). Use sub-second values for L2 chains.")
-	flags.Uint64Var(&cliArgs.fundingGasLimit, "funding-gas-limit", 21000, "Gas limit for wallet funding transactions (use 100000+ for L2s).")
+	flags.Uint64Var(&cliArgs.fundingGasLimit, "funding-gas-limit", 23333, "Gas limit for wallet funding transactions (use 100000+ for L2s; default clears geth's EIP-8037 110% admission margin).")
 	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files to load (can be specified multiple times).")
 	flags.StringVar(&cliArgs.feeStrategy, "fee-strategy", "", "Fee calculation strategy: 'adaptive' for dynamic headroom with normal distribution (default: use network-suggested fees).")
 

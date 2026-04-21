@@ -31,7 +31,7 @@
     base_fee: 20
     client_group: ""
     data: ""
-    gas_limit: 21000
+    gas_limit: 23333
     log_txs: false
     max_pending: 10000
     max_wallets: 5000

@@ -2165,7 +2165,7 @@ func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
 		if len(calldata) > 0 {
 			gasLimit = 100000 // Higher limit for contract calls
 		} else {
-			gasLimit = 21000 // Standard transfer
+			gasLimit = 23333 // Standard transfer (clears geth EIP-8037 110% admission margin)
 		}
 	}
 

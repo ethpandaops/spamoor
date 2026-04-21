@@ -56,7 +56,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Rebroadcast:  1,
 	BaseFee:      20,
 	TipFee:       2,
-	GasLimit:     21000,
+	GasLimit:     23333,
 	Amount:       20,
 	Data:         "",
 	To:           "",
