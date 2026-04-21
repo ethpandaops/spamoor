@@ -267,10 +267,13 @@ func (pool *WalletPool) SetFundingGasLimit(gasLimit uint64) {
 	pool.config.FundingGasLimit = gasLimit
 }
 
-// GetFundingGasLimit returns the gas limit for funding transactions, defaulting to 21000.
+// GetFundingGasLimit returns the gas limit for funding transactions, defaulting to 23333.
+// This clears geth's EIP-8037 110% intrinsic-gas admission margin
+// (ceil(21000 * 10/9) = 23333) on chains where gasCostPerStateByte != 0, and is a
+// no-op overhead on chains without the rule.
 func (pool *WalletPool) GetFundingGasLimit() uint64 {
 	if pool.config.FundingGasLimit == 0 {
-		return 21000
+		return 23333
 	}
 	return pool.config.FundingGasLimit
 }
