@@ -98,6 +98,11 @@ type WalletPool struct {
 type FundingRequest struct {
 	Wallet *Wallet
 	Amount *uint256.Int
+	// IsEmpty is true when the target wallet was observed as nonce==0 and
+	// balance==0 at request-build time. Under EIP-8037/EIP-2780 a transfer
+	// to an empty account additionally costs AccountCreationSize*cpsb state
+	// gas, so the funding path must reserve more gas for it.
+	IsEmpty bool
 }
 
 // GetDefaultWalletConfig returns default wallet pool configuration for a given scenario.
@@ -261,39 +266,105 @@ func (pool *WalletPool) SetRefillInterval(interval uint64) {
 	pool.config.RefillInterval = interval
 }
 
-// SetFundingGasLimit sets the gas limit for wallet funding transactions.
-// Use 100000+ for L2 chains like Arbitrum/Optimism.
+// SetFundingGasLimit sets an explicit per-recipient gas limit for wallet
+// funding transactions, overriding the automatic Amsterdam/EIP-8037 detection.
+// Use 100000+ for L2 chains like Arbitrum/Optimism. When set to 0 (default),
+// spamoor derives the limit from the current chain state: 21,000 pre-Amsterdam,
+// and TxGas + AccountCreationSize·cpsb for empty-target funding under EIP-8037.
 func (pool *WalletPool) SetFundingGasLimit(gasLimit uint64) {
 	pool.config.FundingGasLimit = gasLimit
 }
 
-// GetFundingGasLimit returns the gas limit for funding transactions, defaulting to 21000.
-func (pool *WalletPool) GetFundingGasLimit() uint64 {
-	if pool.config.FundingGasLimit == 0 {
-		return 21000
+// FundingGasFor returns the gas limit for a single direct EOA funding tx to a
+// target with the given emptiness. Honors an explicit SetFundingGasLimit
+// override when configured; otherwise computes from live chain state.
+//
+// Pre-Amsterdam: always 21,000 (matches historical behavior).
+// Amsterdam: 21,000 + (112·cpsb if empty) + 10% buffer, covering both the
+// EIP-2780 intrinsic state-gas charge on empty recipients and the txpool's
+// 110% intrinsic-regular check.
+func (pool *WalletPool) FundingGasFor(isEmpty bool) uint64 {
+	if pool.config.FundingGasLimit != 0 {
+		return pool.config.FundingGasLimit
 	}
-	return pool.config.FundingGasLimit
+	cpsb := pool.txpool.GetCostPerStateByte()
+	if cpsb == 0 {
+		return 21_000
+	}
+	base := uint64(21_000)
+	if isEmpty {
+		base += AccountCreationSize * cpsb
+	}
+	return base * txpoolBufferNum / txpoolBufferDenom
 }
 
-// getBatcherGasPerTx returns the gas to allocate per transaction in a batcher call.
-// If funding_gas_limit is configured, it uses that value (it represents the gas needed
-// per account creation). Otherwise falls back to BatcherDefaultGasPerTx.
-func (pool *WalletPool) getBatcherGasPerTx() uint64 {
+// GetFundingGasLimit returns the gas limit for a worst-case (empty target)
+// direct funding transaction. Preserved for backwards compatibility with
+// callers that need a single conservative number.
+func (pool *WalletPool) GetFundingGasLimit() uint64 {
+	return pool.FundingGasFor(true)
+}
+
+// batcherGasFor returns the per-recipient gas contribution for a single
+// funding request inside the batcher contract. Honors an explicit
+// SetFundingGasLimit override when it exceeds BatcherDefaultGasPerTx;
+// otherwise computes from live chain state.
+func (pool *WalletPool) batcherGasFor(req *FundingRequest) uint64 {
 	if pool.config.FundingGasLimit > BatcherDefaultGasPerTx {
 		return pool.config.FundingGasLimit
 	}
-	return BatcherDefaultGasPerTx
+	cpsb := pool.txpool.GetCostPerStateByte()
+	if cpsb == 0 {
+		return BatcherDefaultGasPerTx
+	}
+	base := uint64(callRegularGas)
+	if req.IsEmpty {
+		base += AccountCreationSize * cpsb
+	}
+	return base * txpoolBufferNum / txpoolBufferDenom
 }
 
-// getBatcherTxLimit returns the maximum number of transactions per batcher call,
-// computed to keep total gas under the RPC gas cap.
-func (pool *WalletPool) getBatcherTxLimit() int {
-	gasPerTx := pool.getBatcherGasPerTx()
-	limit := (BatcherRPCGasCap - BatcherBaseGas) / gasPerTx
-	if limit < 1 {
-		limit = 1
+// batcherBaseGas returns the per-batch overhead (tx intrinsic + batcher
+// dispatch). On Amsterdam the baseline must also cover the 110% txpool buffer
+// on the 21,000 regular intrinsic, so we bump from 50k to 65k.
+func (pool *WalletPool) batcherBaseGas() uint64 {
+	if !pool.txpool.IsAmsterdam() {
+		return BatcherBaseGas
 	}
-	return int(limit)
+	return 65_000
+}
+
+// packFundingBatches greedily groups funding requests into batcher calls so
+// that each batch stays under BatcherRPCGasCap. It also returns the total gas
+// across all batches, used by the caller to reserve fee on the root wallet.
+// With mixed empty/non-empty recipients this replaces the former fixed-size
+// chunking, since per-recipient gas varies by a factor of ~10 on Amsterdam.
+func (pool *WalletPool) packFundingBatches(reqs []*FundingRequest) ([][]*FundingRequest, uint64) {
+	if len(reqs) == 0 {
+		return nil, 0
+	}
+	baseGas := pool.batcherBaseGas()
+	batches := make([][]*FundingRequest, 0, 1)
+	var totalGas uint64
+	curStart := 0
+	curGas := baseGas
+	for i, r := range reqs {
+		reqGas := pool.batcherGasFor(r)
+		// Flush the current batch if adding this request would exceed the cap,
+		// but only if it already contains at least one request. Otherwise the
+		// request goes in alone and we accept whatever over-cap gas it brings
+		// (preserves the old "at least one recipient per tx" guarantee).
+		if i > curStart && curGas+reqGas > BatcherRPCGasCap {
+			batches = append(batches, reqs[curStart:i])
+			totalGas += curGas
+			curStart = i
+			curGas = baseGas
+		}
+		curGas += reqGas
+	}
+	batches = append(batches, reqs[curStart:])
+	totalGas += curGas
+	return batches, totalGas
 }
 
 // SetTransactionTracker sets the optional callback to track transaction results for metrics.
@@ -668,11 +739,21 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 	if pool.runFundings && refillBalance != nil && childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
 		currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 		fundingReq = &FundingRequest{
-			Wallet: childWallet,
-			Amount: calculateFundingAmount(currentBalance, refillAmount, refillBalance),
+			Wallet:  childWallet,
+			Amount:  calculateFundingAmount(currentBalance, refillAmount, refillBalance),
+			IsEmpty: isWalletEmpty(childWallet),
 		}
 	}
 	return childWallet, fundingReq, nil
+}
+
+// isWalletEmpty reports whether the wallet's current on-chain state qualifies
+// as "empty" per EIP-2780 / EIP-8037: nonce == 0 and balance == 0. We skip the
+// code check because spamoor wallets are always EOAs without deployed code;
+// treating a coded account as empty would only over-allocate gas, which has
+// no on-chain cost on success.
+func isWalletEmpty(w *Wallet) bool {
+	return w.GetNonce() == 0 && w.GetBalance().Sign() == 0
 }
 
 // watchWalletBalancesLoop runs continuously to monitor and refill wallet balances.
@@ -813,8 +894,9 @@ func (pool *WalletPool) resupplyChildWallets() error {
 				currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 				reqsMutex.Lock()
 				fundingReqs = append(fundingReqs, &FundingRequest{
-					Wallet: childWallet,
-					Amount: calculateFundingAmount(currentBalance, refillAmount, refillBalance),
+					Wallet:  childWallet,
+					Amount:  calculateFundingAmount(currentBalance, refillAmount, refillBalance),
+					IsEmpty: isWalletEmpty(childWallet),
 				})
 				reqsMutex.Unlock()
 			}
@@ -843,8 +925,9 @@ func (pool *WalletPool) resupplyChildWallets() error {
 				currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 				reqsMutex.Lock()
 				fundingReqs = append(fundingReqs, &FundingRequest{
-					Wallet: childWallet,
-					Amount: calculateFundingAmount(currentBalance, pool.config.RefillAmount, pool.config.RefillBalance),
+					Wallet:  childWallet,
+					Amount:  calculateFundingAmount(currentBalance, pool.config.RefillAmount, pool.config.RefillBalance),
+					IsEmpty: isWalletEmpty(childWallet),
 				})
 				reqsMutex.Unlock()
 			}
@@ -888,25 +971,27 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		return err
 	}
 
-	reqTxCount := len(fundingReqs)
-	batchTxCount := reqTxCount
-	feeAmount := big.NewInt(0).Set(feeCap)
-	gasPerTx := pool.getBatcherGasPerTx()
-	batchLimit := pool.getBatcherTxLimit()
 	batcher := pool.rootWallet.GetTxBatcher()
+	feeAmount := big.NewInt(0).Set(feeCap)
+
+	// Partition requests into batches that each fit under the RPC gas cap.
+	// batchTxCount is the number of outer transactions we'll submit, and
+	// totalGas is the sum of all their gas limits (used to reserve fees on
+	// the root wallet).
+	var batches [][]*FundingRequest
+	var totalGas uint64
 	if batcher != nil {
-		batchTxCount = len(fundingReqs) / batchLimit
-		if len(fundingReqs)%batchLimit != 0 {
-			batchTxCount++
-		}
-		if batchTxCount > 1 {
-			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64((BatcherBaseGas+gasPerTx*uint64(batchLimit))*uint64(batchTxCount))))
-		} else {
-			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(BatcherBaseGas+gasPerTx*uint64(reqTxCount))))
-		}
+		batches, totalGas = pool.packFundingBatches(fundingReqs)
 	} else {
-		feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(uint64(reqTxCount)*pool.GetFundingGasLimit())))
+		// Individual funding: one tx per request, gas sized per recipient.
+		batches = make([][]*FundingRequest, 0, len(fundingReqs))
+		for _, req := range fundingReqs {
+			batches = append(batches, []*FundingRequest{req})
+			totalGas += pool.FundingGasFor(req.IsEmpty)
+		}
 	}
+	batchTxCount := len(batches)
+	feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(totalGas)))
 
 	totalFundingAmount = totalFundingAmount.Add(totalFundingAmount, uint256.MustFromBig(feeAmount))
 
@@ -923,8 +1008,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		txList := make([]*types.Transaction, 0, batchTxCount)
 		batchTxMap := map[common.Hash][]*FundingRequest{}
 		if batcher != nil {
-			for txIdx := 0; txIdx < reqTxCount; txIdx += batchLimit {
-				batch := fundingReqs[txIdx:min(txIdx+batchLimit, reqTxCount)]
+			for _, batch := range batches {
 				tx, err := pool.buildWalletFundingBatchTx(batch, client, batcher)
 				if err != nil {
 					return err
@@ -934,7 +1018,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 			}
 		} else {
 			for _, req := range fundingReqs {
-				tx, err := pool.buildWalletFundingTx(req.Wallet, client, req.Amount)
+				tx, err := pool.buildWalletFundingTx(req, client)
 				if err != nil {
 					return err
 				}
@@ -972,9 +1056,11 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 	})
 }
 
-// buildWalletFundingTx creates a transaction to fund a single wallet with the specified amount.
-// It gets suggested fees from the client and builds a dynamic fee transaction.
-func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client, refillAmount *uint256.Int) (*types.Transaction, error) {
+// buildWalletFundingTx creates a direct-EOA transaction to fund a single
+// wallet. The per-tx gas limit is sized via FundingGasFor(req.IsEmpty), so
+// non-empty refills use the cheap 21k path while initial fundings to empty
+// targets reserve enough for the EIP-2780/EIP-8037 state gas charge.
+func (pool *WalletPool) buildWalletFundingTx(req *FundingRequest, client *Client) (*types.Transaction, error) {
 	if client == nil {
 		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
 		if client == nil {
@@ -1000,13 +1086,13 @@ func (pool *WalletPool) buildWalletFundingTx(childWallet *Wallet, client *Client
 		tipCap = new(big.Int).Set(feeCap)
 	}
 
-	toAddr := childWallet.GetAddress()
+	toAddr := req.Wallet.GetAddress()
 	refillTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       pool.GetFundingGasLimit(),
+		Gas:       pool.FundingGasFor(req.IsEmpty),
 		To:        &toAddr,
-		Value:     refillAmount,
+		Value:     req.Amount,
 	})
 	if err != nil {
 		return nil, err
@@ -1048,8 +1134,10 @@ func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, cl
 	}
 
 	totalAmount := uint256.NewInt(0)
+	gasTotal := pool.batcherBaseGas()
 	for _, req := range requests {
 		totalAmount = totalAmount.Add(totalAmount, req.Amount)
+		gasTotal += pool.batcherGasFor(req)
 	}
 
 	batchData, err := batcher.GetRequestCalldata(requests)
@@ -1061,7 +1149,7 @@ func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, cl
 	refillTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       BatcherBaseGas + pool.getBatcherGasPerTx()*uint64(len(requests)),
+		Gas:       gasTotal,
 		To:        &toAddr,
 		Value:     totalAmount,
 		Data:      batchData,

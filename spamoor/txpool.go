@@ -114,6 +114,9 @@ type TxPool struct {
 	// Current block gas limit tracking
 	currentGasLimit uint64
 	currentBaseFee  *big.Int
+	// isAmsterdam is true when the latest-observed block header contains a
+	// non-nil blockAccessListHash (EIP-7928, tied to Amsterdam / EIP-8037).
+	isAmsterdam     bool
 	blockStatsMutex sync.RWMutex
 
 	// Recent block tracking for dynamic fee calculation.
@@ -182,6 +185,15 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 
 	if options.ReorgDepth > 0 {
 		pool.reorgDepth = options.ReorgDepth
+	}
+
+	// Eager head-block load so the first wallet-funding / scenario initialization
+	// sees up-to-date gas limit, base fee, and Amsterdam activation state without
+	// having to wait for the 3-second poll cadence. Failure here is non-fatal:
+	// the same data is populated lazily on the first processBlock or on demand
+	// via GetCurrentGasLimitWithInit / GetCurrentBaseFeeWithInit.
+	if err := pool.initBlockStats(); err != nil {
+		logrus.WithError(err).Warn("initial head block load failed, falling back to lazy init")
 	}
 
 	go pool.runTxPoolLoop()
@@ -453,7 +465,13 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 
 	// Update current gas limit and recent block gas tracking
+	isAmsterdam := blockWithHash.Block.Header().BlockAccessListHash != nil
 	pool.blockStatsMutex.Lock()
+	if isAmsterdam != pool.isAmsterdam {
+		logrus.WithField("gasLimit", blockWithHash.Block.GasLimit()).
+			Infof("Amsterdam (EIP-8037) activation state changed: %v", isAmsterdam)
+		pool.isAmsterdam = isAmsterdam
+	}
 	pool.currentGasLimit = blockWithHash.Block.GasLimit()
 	pool.currentBaseFee = blockWithHash.Block.BaseFee()
 	pool.recentGasUsed[pool.recentGasIdx] = blockWithHash.Block.GasUsed()
@@ -1509,6 +1527,27 @@ func (pool *TxPool) GetCurrentGasLimit() uint64 {
 	return pool.currentGasLimit
 }
 
+// IsAmsterdam returns whether the connected chain has activated Amsterdam
+// (EIP-8037 / EIP-7928). Detected via the presence of blockAccessListHash in
+// the latest block header. Returns false before the first block is seen.
+func (pool *TxPool) IsAmsterdam() bool {
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
+	return pool.isAmsterdam
+}
+
+// GetCostPerStateByte returns the current EIP-8037 cost_per_state_byte,
+// computed from the latest observed block gas limit. Returns 0 pre-Amsterdam
+// or before the first block has been seen.
+func (pool *TxPool) GetCostPerStateByte() uint64 {
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
+	if !pool.isAmsterdam {
+		return 0
+	}
+	return computeCostPerStateByte(pool.currentGasLimit)
+}
+
 // GetCurrentBaseFee returns the current base fee of the chain.
 func (pool *TxPool) GetCurrentBaseFee() *big.Int {
 	pool.blockStatsMutex.RLock()
@@ -1601,7 +1640,9 @@ func (pool *TxPool) initBlockStats() error {
 
 	pool.currentGasLimit = latestBlock.GasLimit()
 	pool.currentBaseFee = latestBlock.BaseFee()
-	logrus.Infof("initialized block stats from latest block: %v, %v", pool.currentGasLimit, pool.currentBaseFee)
+	pool.isAmsterdam = latestBlock.Header().BlockAccessListHash != nil
+	logrus.Infof("initialized block stats from latest block: gasLimit=%v baseFee=%v amsterdam=%v",
+		pool.currentGasLimit, pool.currentBaseFee, pool.isAmsterdam)
 
 	return nil
 }
