@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/consensys/gnark-crypto v0.20.1
-	github.com/ethereum/go-ethereum v1.17.2
+	github.com/ethereum/go-ethereum v1.17.3-0.20260421080339-499762852cf2
 	github.com/fjl/geas v0.3.0
 	github.com/glebarez/go-sqlite v1.22.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
