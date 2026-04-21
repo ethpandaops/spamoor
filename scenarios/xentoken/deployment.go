@@ -37,7 +37,7 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 	}
 
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}

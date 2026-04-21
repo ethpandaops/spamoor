@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -16,6 +17,19 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/sirupsen/logrus"
 )
+
+// sharedHTTPClient is reused across all RPC clients to enable TCP connection
+// pooling. Go's default MaxIdleConnsPerHost is 2, which forces a new TCP
+// connection for nearly every request under any concurrency. This transport
+// raises the per-host pool to 100, letting high-throughput callers (like
+// transaction spammers) reuse connections instead of churning them.
+var sharedHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
 
 // ClientType represents the type of Ethereum client
 type ClientType string
@@ -156,7 +170,13 @@ func NewClient(options *ClientOptions) (*Client, error) {
 	}
 
 	ctx := context.Background()
-	rpcClient, err := rpc.DialOptions(ctx, rpchost, rpc.WithWebsocketMessageSizeLimit(0))
+
+	dialOpts := []rpc.ClientOption{rpc.WithWebsocketMessageSizeLimit(0)}
+	if strings.HasPrefix(rpchost, "http://") || strings.HasPrefix(rpchost, "https://") {
+		dialOpts = append(dialOpts, rpc.WithHTTPClient(sharedHTTPClient))
+	}
+
+	rpcClient, err := rpc.DialOptions(ctx, rpchost, dialOpts...)
 	if err != nil {
 		return nil, err
 	}

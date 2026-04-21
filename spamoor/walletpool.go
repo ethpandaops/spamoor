@@ -45,6 +45,7 @@ type WalletPoolConfig struct {
 	RefillInterval  uint64       `yaml:"refill_interval"`
 	WalletSeed      string       `yaml:"seed"`
 	FundingGasLimit uint64       `yaml:"funding_gas_limit"`
+	FeeStrategy     string       `yaml:"fee_strategy,omitempty"` // Fee calculation strategy: "" (legacy) or "adaptive"
 }
 
 // WellKnownWalletConfig defines configuration for a named wallet with custom funding settings.
@@ -141,6 +142,16 @@ func (pool *WalletPool) GetContext() context.Context {
 // GetTxPool returns the transaction pool used by this wallet pool.
 func (pool *WalletPool) GetTxPool() *TxPool {
 	return pool.txpool
+}
+
+// GetSuggestedFees returns suggested fees using this pool's configured fee strategy.
+func (pool *WalletPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int) (feeCap *big.Int, tipCap *big.Int, err error) {
+	return pool.txpool.GetSuggestedFees(client, baseFeeWei, tipFeeWei, pool.config.FeeStrategy)
+}
+
+// SetFeeStrategy sets the fee calculation strategy for this wallet pool.
+func (pool *WalletPool) SetFeeStrategy(strategy string) {
+	pool.config.FeeStrategy = strategy
 }
 
 // GetClientPool returns the client pool used for blockchain interactions.
@@ -264,6 +275,27 @@ func (pool *WalletPool) GetFundingGasLimit() uint64 {
 	return pool.config.FundingGasLimit
 }
 
+// getBatcherGasPerTx returns the gas to allocate per transaction in a batcher call.
+// If funding_gas_limit is configured, it uses that value (it represents the gas needed
+// per account creation). Otherwise falls back to BatcherDefaultGasPerTx.
+func (pool *WalletPool) getBatcherGasPerTx() uint64 {
+	if pool.config.FundingGasLimit > BatcherDefaultGasPerTx {
+		return pool.config.FundingGasLimit
+	}
+	return BatcherDefaultGasPerTx
+}
+
+// getBatcherTxLimit returns the maximum number of transactions per batcher call,
+// computed to keep total gas under the RPC gas cap.
+func (pool *WalletPool) getBatcherTxLimit() int {
+	gasPerTx := pool.getBatcherGasPerTx()
+	limit := (BatcherRPCGasCap - BatcherBaseGas) / gasPerTx
+	if limit < 1 {
+		limit = 1
+	}
+	return int(limit)
+}
+
 // SetTransactionTracker sets the optional callback to track transaction results for metrics.
 func (pool *WalletPool) SetTransactionTracker(tracker func(err error)) {
 	pool.transactionTracker = tracker
@@ -333,7 +365,7 @@ func (pool *WalletPool) GetVeryWellKnownWalletAddress(name string) common.Addres
 	copy(idxBytes, name)
 	// VeryWellKnown wallets don't use the seed, so we skip adding it
 
-	parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
+	parentKey := crypto.FromECDSA(pool.rootWallet.wallet.privkey)
 	childKey := sha256.Sum256(append(parentKey, idxBytes...))
 
 	// Derive private key and then address
@@ -549,7 +581,7 @@ func (pool *WalletPool) prepareChildWallet(childIdx uint64, client *Client, seed
 			seedBytes := []byte(seed)
 			idxBytes = append(idxBytes, seedBytes...)
 		}
-		parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
+		parentKey := crypto.FromECDSA(pool.rootWallet.wallet.privkey)
 		childKey := sha256.Sum256(append(parentKey, idxBytes...))
 		walletPrivkey = fmt.Sprintf("%x", childKey)
 	}
@@ -570,7 +602,7 @@ func (pool *WalletPool) prepareWellKnownWallet(config *WellKnownWalletConfig, cl
 			seedBytes := []byte(seed)
 			idxBytes = append(idxBytes, seedBytes...)
 		}
-		parentKey := crypto.FromECDSA(pool.rootWallet.wallet.GetPrivateKey())
+		parentKey := crypto.FromECDSA(pool.rootWallet.wallet.privkey)
 		childKey := sha256.Sum256(append(parentKey, idxBytes...))
 		walletPrivkey = fmt.Sprintf("%x", childKey)
 	}
@@ -628,12 +660,12 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 	}
 
 	// Set up low balance notification
-	if pool.runFundings {
+	if pool.runFundings && refillBalance != nil {
 		childWallet.setLowBalanceNotification(pool.lowBalanceNotifyChan, refillBalance.ToBig())
 	}
 
 	var fundingReq *FundingRequest
-	if pool.runFundings && childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
+	if pool.runFundings && refillBalance != nil && childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
 		currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 		fundingReq = &FundingRequest{
 			Wallet: childWallet,
@@ -777,7 +809,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 				return
 			}
 
-			if childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
+			if refillBalance != nil && childWallet.GetBalance().Cmp(refillBalance.ToBig()) < 0 {
 				currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 				reqsMutex.Lock()
 				fundingReqs = append(fundingReqs, &FundingRequest{
@@ -807,7 +839,7 @@ func (pool *WalletPool) resupplyChildWallets() error {
 				walletErr = err
 				return
 			}
-			if childWallet.GetBalance().Cmp(pool.config.RefillBalance.ToBig()) < 0 {
+			if pool.config.RefillBalance != nil && childWallet.GetBalance().Cmp(pool.config.RefillBalance.ToBig()) < 0 {
 				currentBalance := uint256.MustFromBig(childWallet.GetBalance())
 				reqsMutex.Lock()
 				fundingReqs = append(fundingReqs, &FundingRequest{
@@ -859,19 +891,21 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 	reqTxCount := len(fundingReqs)
 	batchTxCount := reqTxCount
 	feeAmount := big.NewInt(0).Set(feeCap)
+	gasPerTx := pool.getBatcherGasPerTx()
+	batchLimit := pool.getBatcherTxLimit()
 	batcher := pool.rootWallet.GetTxBatcher()
 	if batcher != nil {
-		batchTxCount = len(fundingReqs) / BatcherTxLimit
-		if len(fundingReqs)%BatcherTxLimit != 0 {
+		batchTxCount = len(fundingReqs) / batchLimit
+		if len(fundingReqs)%batchLimit != 0 {
 			batchTxCount++
 		}
 		if batchTxCount > 1 {
-			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64((BatcherBaseGas+BatcherGasPerTx*BatcherTxLimit)*batchTxCount)))
+			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64((BatcherBaseGas+gasPerTx*uint64(batchLimit))*uint64(batchTxCount))))
 		} else {
-			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(BatcherBaseGas+BatcherGasPerTx*uint64(reqTxCount))))
+			feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(BatcherBaseGas+gasPerTx*uint64(reqTxCount))))
 		}
 	} else {
-		feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(reqTxCount*21000)))
+		feeAmount = big.NewInt(0).Mul(feeAmount, big.NewInt(int64(uint64(reqTxCount)*pool.GetFundingGasLimit())))
 	}
 
 	totalFundingAmount = totalFundingAmount.Add(totalFundingAmount, uint256.MustFromBig(feeAmount))
@@ -889,8 +923,8 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		txList := make([]*types.Transaction, 0, batchTxCount)
 		batchTxMap := map[common.Hash][]*FundingRequest{}
 		if batcher != nil {
-			for txIdx := 0; txIdx < reqTxCount; txIdx += BatcherTxLimit {
-				batch := fundingReqs[txIdx:min(txIdx+BatcherTxLimit, reqTxCount)]
+			for txIdx := 0; txIdx < reqTxCount; txIdx += batchLimit {
+				batch := fundingReqs[txIdx:min(txIdx+batchLimit, reqTxCount)]
 				tx, err := pool.buildWalletFundingBatchTx(batch, client, batcher)
 				if err != nil {
 					return err
@@ -1027,7 +1061,7 @@ func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, cl
 	refillTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       BatcherBaseGas + BatcherGasPerTx*uint64(len(requests)),
+		Gas:       BatcherBaseGas + pool.getBatcherGasPerTx()*uint64(len(requests)),
 		To:        &toAddr,
 		Value:     totalAmount,
 		Data:      batchData,
@@ -1128,7 +1162,7 @@ func (pool *WalletPool) CheckChildWalletBalance(childWallet *Wallet) error {
 		}
 	}
 
-	if childWallet.GetBalance().Cmp(refillBalance.ToBig()) >= 0 {
+	if refillBalance == nil || childWallet.GetBalance().Cmp(refillBalance.ToBig()) >= 0 {
 		return nil
 	}
 

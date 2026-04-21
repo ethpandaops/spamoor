@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"math/rand"
 	"slices"
 	"strings"
 	"sync"
@@ -20,6 +21,9 @@ import (
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/sirupsen/logrus"
 )
+
+// feeWindowSize is the number of recent blocks tracked for dynamic fee headroom calculation.
+const feeWindowSize = 10
 
 // BlockInfo represents information about a processed block including
 // hash, parent hash, gas limit, and timestamp for chain reorganization detection.
@@ -111,6 +115,16 @@ type TxPool struct {
 	currentGasLimit uint64
 	currentBaseFee  *big.Int
 	blockStatsMutex sync.RWMutex
+
+	// Recent block tracking for dynamic fee calculation.
+	// Sliding window of gas usage and baseFee to adjust feeCap:
+	// - Gas fill ratio controls headroom (how much above baseFee)
+	// - Average baseFee creates lag that self-corrects rising baseFee
+	recentGasUsed  [feeWindowSize]uint64
+	recentGasLimit [feeWindowSize]uint64
+	recentBaseFees [feeWindowSize]*big.Int
+	recentGasIdx   int
+	recentGasLen   int
 
 	// Block update subscriptions
 	subscriptionsMutex sync.RWMutex
@@ -225,8 +239,8 @@ func (pool *TxPool) RegisterWalletPool(walletPool *WalletPool) {
 
 // GetRegisteredWallet returns a wallet by address.
 func (pool *TxPool) GetRegisteredWallet(address common.Address) *Wallet {
-	pool.walletsMutex.RLock()
-	defer pool.walletsMutex.RUnlock()
+	pool.walletsMutex.Lock()
+	defer pool.walletsMutex.Unlock()
 
 	registration, found := pool.wallets[address]
 	if found {
@@ -438,10 +452,17 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 		GasLimit:   blockWithHash.Block.GasLimit(),
 	}
 
-	// Update current gas limit
+	// Update current gas limit and recent block gas tracking
 	pool.blockStatsMutex.Lock()
 	pool.currentGasLimit = blockWithHash.Block.GasLimit()
 	pool.currentBaseFee = blockWithHash.Block.BaseFee()
+	pool.recentGasUsed[pool.recentGasIdx] = blockWithHash.Block.GasUsed()
+	pool.recentGasLimit[pool.recentGasIdx] = blockWithHash.Block.GasLimit()
+	pool.recentBaseFees[pool.recentGasIdx] = blockWithHash.Block.BaseFee() // returns new *big.Int
+	pool.recentGasIdx = (pool.recentGasIdx + 1) % feeWindowSize
+	if pool.recentGasLen < feeWindowSize {
+		pool.recentGasLen++
+	}
 	pool.blockStatsMutex.Unlock()
 
 	// Clean up old blocks
@@ -1057,17 +1078,31 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 			submitCount = 3
 		}
 
+		// Derive start offset for redundant client selection.
+		// When ClientsStartOffset is 0 (the default, never explicitly set by any scenario),
+		// use the tx hash to distribute redundant submissions uniformly across all clients
+		// instead of always targeting clients at index 1 and 2.
+		startOffset := options.ClientsStartOffset
+		if startOffset == 0 && tx != nil {
+			h := tx.Hash()
+			startOffset = int(h[0]) | (int(h[1]) << 8)
+		}
+
 		success := false
 		clientCount := len(pool.options.ClientPool.GetAllGoodClients())
 		for i := 0; i < clientCount; i++ {
 			client := options.Client
 			if client == nil || i > 0 {
-				var clientOpts []ClientSelectionOption
-				if options.ClientGroup != "" {
-					clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
+				if len(options.ClientList) > 0 {
+					client = options.ClientList[(i+startOffset)%len(options.ClientList)]
+				} else {
+					var clientOpts []ClientSelectionOption
+					if options.ClientGroup != "" {
+						clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
+					}
+					clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, i+startOffset))
+					client = pool.options.ClientPool.GetClient(clientOpts...)
 				}
-				clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, i+options.ClientsStartOffset))
-				client = pool.options.ClientPool.GetClient(clientOpts...)
 			}
 			if client == nil {
 				continue
@@ -1481,6 +1516,38 @@ func (pool *TxPool) GetCurrentBaseFee() *big.Int {
 	return pool.currentBaseFee
 }
 
+// GetRecentBlockGasTotals returns the sum of gas used and gas limits
+// over the recent block window. Must not hold blockStatsMutex.
+func (pool *TxPool) GetRecentBlockGasTotals() (totalGasUsed, totalGasLimit uint64) {
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
+	for i := range pool.recentGasLen {
+		totalGasUsed += pool.recentGasUsed[i]
+		totalGasLimit += pool.recentGasLimit[i]
+	}
+	return
+}
+
+// getWindowAvgBaseFee returns the average baseFee over the recent block window.
+// When baseFee is rising, the average lags behind the current baseFee, creating
+// natural backpressure that lets baseFee recover. Must not hold blockStatsMutex.
+func (pool *TxPool) getWindowAvgBaseFee() *big.Int {
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
+	count := 0
+	sum := new(big.Int)
+	for i := range pool.recentGasLen {
+		if pool.recentBaseFees[i] != nil && pool.recentBaseFees[i].Sign() > 0 {
+			sum.Add(sum, pool.recentBaseFees[i])
+			count++
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	return sum.Div(sum, big.NewInt(int64(count)))
+}
+
 // GetCurrentGasLimitWithInit returns the current gas limit, initializing it from RPC if needed.
 // This is a convenience method that combines GetCurrentGasLimit and InitializeGasLimit.
 func (pool *TxPool) GetCurrentGasLimitWithInit() (uint64, error) {
@@ -1542,7 +1609,20 @@ func (pool *TxPool) initBlockStats() error {
 // GetSuggestedFees returns the suggested fees for a transaction.
 // If baseFeeWei and tipFeeWei are provided (non-nil), they are used directly.
 // If not provided (nil), the fees are fetched from the client.
-func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int) (feeCap *big.Int, tipCap *big.Int, err error) {
+//
+// With FeeStrategy "adaptive", the dynamic fee mechanism computes feeCap from
+// the current baseFee with adaptive headroom and normal distribution spread,
+// using baseFeeWei as a maximum cap instead.
+func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int, feeStrategy ...string) (feeCap *big.Int, tipCap *big.Int, err error) {
+	strategy := ""
+	if len(feeStrategy) > 0 {
+		strategy = feeStrategy[0]
+	}
+	if strategy == "adaptive" {
+		return pool.getSuggestedFeesAdaptive(client, baseFeeWei, tipFeeWei)
+	}
+
+	// Legacy strategy: use provided fees or fetch from network.
 	if baseFeeWei != nil && baseFeeWei.Sign() > 0 {
 		feeCap = new(big.Int).Set(baseFeeWei)
 	}
@@ -1561,6 +1641,107 @@ func (pool *TxPool) GetSuggestedFees(client *Client, baseFeeWei *big.Int, tipFee
 		if tipCap == nil {
 			tipCap = networkTipCap
 		}
+	}
+
+	return feeCap, tipCap, nil
+}
+
+// getSuggestedFeesAdaptive computes fees using dynamic headroom with normal
+// distribution spread. baseFeeWei acts as a maximum feeCap cap (0 or nil = no cap).
+// tipFeeWei overrides the network-suggested tip (0 or nil = use network tip).
+func (pool *TxPool) getSuggestedFeesAdaptive(client *Client, baseFeeWei *big.Int, tipFeeWei *big.Int) (feeCap *big.Int, tipCap *big.Int, err error) {
+	if tipFeeWei != nil && tipFeeWei.Sign() > 0 {
+		tipCap = new(big.Int).Set(tipFeeWei)
+	}
+
+	if tipCap == nil {
+		if client == nil {
+			return nil, nil, fmt.Errorf("client required for adaptive fee strategy when tipFee not provided")
+		}
+		_, networkTipCap, fetchErr := client.GetSuggestedFee(pool.options.Context)
+		if fetchErr != nil {
+			return nil, nil, fetchErr
+		}
+		tipCap = networkTipCap
+	}
+
+	// Dynamic fee calculation: compute feeCap from current chain state.
+	// eth_gasPrice returns baseFee + tipCap, which provides zero headroom for
+	// baseFee increases. After a full block, baseFee rises 12.5% and ALL pending
+	// tx become underpriced, causing alternating full/empty blocks.
+	//
+	// Dynamic headroom based on recent block fill over a sliding window:
+	//   headroom = baseFee * (totalGasLimit - totalGasUsed) / (4 * totalGasLimit)
+	//
+	// This scales linearly with how underfull recent blocks are:
+	//   50% avg fill (target) → baseFee/8  headroom (1 block of max EIP-1559 change)
+	//   100% avg fill         → clamped to baseFee/16 minimum (prevents oscillation)
+	//   0% avg fill           → baseFee/4  headroom (2 blocks of max change)
+	currentBaseFee := pool.GetCurrentBaseFee()
+	if currentBaseFee != nil && currentBaseFee.Sign() > 0 {
+		totalGasUsed, totalGasLimit := pool.GetRecentBlockGasTotals()
+
+		var headroom *big.Int
+		if totalGasLimit > 0 && totalGasUsed <= totalGasLimit {
+			headroom = new(big.Int).Set(currentBaseFee)
+			headroom.Mul(headroom, new(big.Int).SetUint64(totalGasLimit-totalGasUsed))
+			headroom.Div(headroom, new(big.Int).SetUint64(4*totalGasLimit))
+		} else {
+			headroom = new(big.Int).Div(new(big.Int).Set(currentBaseFee), big.NewInt(8))
+		}
+
+		// Clamp to [baseFee/16, baseFee/4]
+		minH := new(big.Int).Div(new(big.Int).Set(currentBaseFee), big.NewInt(16))
+		maxH := new(big.Int).Div(new(big.Int).Set(currentBaseFee), big.NewInt(4))
+		if headroom.Cmp(minH) < 0 {
+			headroom = minH
+		}
+		if headroom.Cmp(maxH) > 0 {
+			headroom = maxH
+		}
+
+		// Normal distribution centered on the AVERAGE baseFee from the window.
+		// When baseFee is rising, the average lags behind current, shifting more
+		// tx below currentBaseFee → rejected by EL → nonce gaps → wallet stalls →
+		// reduced throughput → baseFee recovers. Self-correcting feedback loop.
+		// sigma = headroom / 1.28 → ~10% canary tx at steady state.
+		avgBaseFee := pool.getWindowAvgBaseFee()
+		if avgBaseFee == nil {
+			avgBaseFee = currentBaseFee
+		}
+
+		sigma := new(big.Int).Mul(headroom, big.NewInt(25))
+		sigma.Div(sigma, big.NewInt(32)) // ≈ headroom / 1.28
+
+		sample := rand.NormFloat64()
+		scaledSample := int64(math.Round(sample * 10000))
+		offset := new(big.Int).Mul(sigma, big.NewInt(scaledSample))
+		offset.Div(offset, big.NewInt(10000))
+
+		feeCap = new(big.Int).Add(avgBaseFee, headroom)
+		feeCap.Add(feeCap, offset)
+
+		// Ensure feeCap >= tipCap (EIP-1559 requirement: maxFeePerGas >= maxPriorityFeePerGas)
+		if tipCap != nil && feeCap.Cmp(tipCap) < 0 {
+			feeCap.Set(tipCap)
+		}
+		if feeCap.Sign() <= 0 {
+			feeCap.SetInt64(1)
+		}
+	} else if feeCap == nil {
+		// Fallback: no tracked baseFee yet, use network suggestion
+		if client == nil {
+			return nil, nil, fmt.Errorf("client required for adaptive fee strategy when baseFee not yet tracked")
+		}
+		feeCap, _, _ = client.GetSuggestedFee(pool.options.Context)
+	}
+
+	// Apply baseFeeWei as a maximum cap if provided.
+	// Scenario defaults (e.g., 20 gwei) act as a safety ceiling — the dynamic
+	// mechanism runs freely below it, and the cap only triggers if baseFee
+	// rises unexpectedly high.
+	if feeCap != nil && baseFeeWei != nil && baseFeeWei.Sign() > 0 && feeCap.Cmp(baseFeeWei) > 0 {
+		feeCap.Set(baseFeeWei)
 	}
 
 	return feeCap, tipCap, nil
@@ -1623,8 +1804,19 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 	}
 
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
+	if len(options.ClientList) > 0 {
+		clientCount = len(options.ClientList)
+	}
 	if clientCount > 5 {
 		clientCount = 5
+	}
+
+	// Use tx hash for offset to distribute rebroadcasts across all clients,
+	// matching the fix in submitTransaction.
+	startOffset := options.ClientsStartOffset
+	if startOffset == 0 {
+		h := tx.Hash()
+		startOffset = int(h[0]) | (int(h[1]) << 8)
 	}
 
 	for j := 0; j < clientCount; j++ {
@@ -1632,12 +1824,18 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 			break
 		}
 
-		var clientOpts []ClientSelectionOption
-		if options.ClientGroup != "" {
-			clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
+		var client *Client
+		if len(options.ClientList) > 0 {
+			client = options.ClientList[(j+startOffset)%len(options.ClientList)]
+		} else {
+			var clientOpts []ClientSelectionOption
+			if options.ClientGroup != "" {
+				clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
+			}
+			clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, j+startOffset+1))
+			client = pool.options.ClientPool.GetClient(clientOpts...)
 		}
-		clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, j+options.ClientsStartOffset+1))
-		client := pool.options.ClientPool.GetClient(clientOpts...)
+
 		if client == nil {
 			break
 		}

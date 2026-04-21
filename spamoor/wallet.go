@@ -38,6 +38,7 @@ type Wallet struct {
 	confirmedTxCount uint64
 	skippedNonces    []uint64
 	balance          *big.Int
+	protected        bool // When true, GetPrivateKey() returns nil to prevent key extraction
 
 	txNonceChans     map[uint64]*nonceStatus
 	txNonceMutex     sync.Mutex
@@ -145,9 +146,19 @@ func (wallet *Wallet) SetAddress(address common.Address) {
 }
 
 // GetPrivateKey returns the wallet's private key.
+// Returns nil if the wallet is protected (e.g. the root wallet).
 // Handle with care to avoid exposing sensitive data.
 func (wallet *Wallet) GetPrivateKey() *ecdsa.PrivateKey {
+	if wallet.protected {
+		return nil
+	}
 	return wallet.privkey
+}
+
+// setProtected sets the wallet's protection flag.
+// When protected, GetPrivateKey() returns nil to prevent key extraction.
+func (wallet *Wallet) setProtected(protected bool) {
+	wallet.protected = protected
 }
 
 // GetChainId returns the chain ID this wallet is configured for.
@@ -186,6 +197,9 @@ func (wallet *Wallet) IncrementSubmittedTxCount() {
 func (wallet *Wallet) GetBalance() *big.Int {
 	wallet.balanceMutex.RLock()
 	defer wallet.balanceMutex.RUnlock()
+	if wallet.balance == nil {
+		return new(big.Int)
+	}
 	return wallet.balance
 }
 

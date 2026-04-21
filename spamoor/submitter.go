@@ -32,6 +32,8 @@ type SendTransactionOptions struct {
 	Client *Client
 	// ClientGroup to prefer when selecting clients
 	ClientGroup string
+	// ClientList to use for sending (optional, uses pool selection if nil)
+	ClientList []*Client
 	// ClientsStartOffset for client selection
 	ClientsStartOffset int
 	// SubmitCount is the number of times to submit the transaction in the first attempt (default 3)

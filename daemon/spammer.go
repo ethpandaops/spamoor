@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/daemon/logscope"
+	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -45,6 +46,7 @@ type Spammer struct {
 	scenarioCancel context.CancelFunc
 	running        bool
 	runningChan    chan struct{}
+	plugin         *plugin.LoadedPlugin // nil for native scenarios
 }
 
 // SpammerConfig defines the wallet configuration for a spammer instance.
@@ -251,21 +253,46 @@ func (s *Spammer) runScenario() {
 		s.running = false
 		s.scenarioCancel()
 		s.scenarioCancel = nil
+
+		// Release plugin reference and trigger cleanup check if needed
+		if s.plugin != nil {
+			s.plugin.RemoveRunning()
+			s.daemon.NotifyPluginDereference(s.plugin)
+			s.plugin = nil
+		}
 	}()
 
-	scenarioDescriptor := scenarios.GetScenario(s.dbEntity.Scenario)
-	if scenarioDescriptor == nil {
+	scenarioEntry := scenarios.GetScenarioEntry(s.dbEntity.Scenario)
+	if scenarioEntry == nil {
 		s.logger.Errorf("scenario %s not found", s.dbEntity.Scenario)
 		return
+	}
+
+	scenarioDescriptor := scenarioEntry.Descriptor
+
+	// Track plugin usage for reference counting
+	if scenarioEntry.Plugin != nil {
+		scenarioEntry.Plugin.AddRunning()
+		if loadedPlugin, ok := scenarioEntry.Plugin.(*plugin.LoadedPlugin); ok {
+			s.plugin = loadedPlugin
+		}
 	}
 
 	s.walletPool = spamoor.NewWalletPool(s.scenarioCtx, s.logger, s.daemon.rootWallet, s.daemon.clientPool, s.daemon.txpool)
 	s.walletPool.SetSpammerID(uint64(s.dbEntity.ID))
 	s.walletPool.SetTransactionTracker(s.TrackTransactionResult)
+
+	// Determine plugin path for scenario options
+	pluginPath := ""
+	if s.plugin != nil {
+		pluginPath = s.plugin.PluginPath
+	}
+
 	options := &scenario.Options{
 		WalletPool: s.walletPool,
 		Config:     s.dbEntity.Config,
 		GlobalCfg:  s.daemon.GetGlobalCfg(),
+		PluginPath: pluginPath,
 	}
 	scenario := scenarioDescriptor.NewScenario(s.logger)
 

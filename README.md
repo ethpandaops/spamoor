@@ -321,6 +321,15 @@ Comprehensive guide for implementing custom transaction scenarios. Covers:
 - Contract interaction patterns
 - Testing and debugging scenarios
 
+### 🔌 [Plugin System Guide](./docs/plugin-system.md)
+Guide for developing, distributing, and managing plugins. Covers:
+- Plugin development and scenario implementation
+- Building and distributing plugin archives
+- CLI and daemon mode usage
+- REST API for runtime plugin management
+- Architecture and Yaegi interpreter limitations
+- See [example plugin](./plugins/_example-plugin/)
+
 ## ✨ Key Features
 
 - **🎯 14+ Transaction Scenarios**: From basic EOA transfers to complex DeFi interactions
@@ -335,7 +344,7 @@ Comprehensive guide for implementing custom transaction scenarios. Covers:
 ## 🏗️ Development
 
 ### Prerequisites
-- Go 1.24+
+- Go 1.25+
 - CGO enabled (required for SQLite and cryptographic operations)
 - Build tags: `with_blob_v1,ckzg` for blob transaction support
 

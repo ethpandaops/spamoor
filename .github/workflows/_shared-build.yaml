@@ -52,9 +52,9 @@ jobs:
 
     # setup global dependencies
     - name: Set up go
-      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: 1.24.x
+        go-version: 1.25.x
     
     # setup project dependencies
     - name: Get dependencies
@@ -70,7 +70,7 @@ jobs:
 
     # upload artifacts
     - name: "Upload artifact: spamoor_linux_amd64"
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         path: ./bin/*
         name: spamoor_linux_amd64
@@ -85,9 +85,9 @@ jobs:
 
     # setup global dependencies
     - name: Set up go
-      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: 1.24.x
+        go-version: 1.25.x
 
     # setup project dependencies
     - name: Get dependencies
@@ -103,7 +103,7 @@ jobs:
 
     # upload artifacts
     - name: "Upload artifact: spamoor_linux_arm64"
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         path: ./bin/*
         name: spamoor_linux_arm64
@@ -118,9 +118,9 @@ jobs:
 
     # setup global dependencies
     - name: Set up go
-      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: 1.24.x
+        go-version: 1.25.x
 
     # setup project dependencies
     - name: Get dependencies
@@ -136,7 +136,7 @@ jobs:
 
     # upload artifacts
     - name: "Upload artifact: spamoor_windows_amd64"
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         path: ./bin/*
         name: spamoor_windows_amd64
@@ -151,9 +151,9 @@ jobs:
 
     # setup global dependencies
     - name: Set up go
-      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: 1.24.x
+        go-version: 1.25.x
 
     # setup project dependencies
     - name: Get dependencies
@@ -169,7 +169,7 @@ jobs:
 
     # upload artifacts
     - name: "Upload artifact: spamoor_darwin_amd64"
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         path: ./bin/*
         name: spamoor_darwin_amd64
@@ -184,9 +184,9 @@ jobs:
 
     # setup global dependencies
     - name: Set up go
-      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: 1.24.x
+        go-version: 1.25.x
 
     # setup project dependencies
     - name: Get dependencies
@@ -202,7 +202,7 @@ jobs:
 
     # upload artifacts
     - name: "Upload artifact: spamoor_darwin_arm64"
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         path: ./bin/*
         name: spamoor_darwin_arm64
@@ -223,16 +223,16 @@ jobs:
 
     # prepare docker
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
     - name: Login to Docker Hub
-      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     # download build artifacts
     - name: Download build artifacts
-      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: spamoor_linux_amd64
         path: ./bin
@@ -270,16 +270,16 @@ jobs:
 
     # prepare docker
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
     - name: Login to Docker Hub
-      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     # download build artifacts
     - name: Download build artifacts
-      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: spamoor_linux_arm64
         path: ./bin
@@ -317,9 +317,9 @@ jobs:
 
     # prepare docker
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
     - name: Login to Docker Hub
-      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -327,12 +327,9 @@ jobs:
     # build multiarch image
     - name: Build multiarch docker manifest
       run: |
-        docker manifest create ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }} \
-        --amend ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-amd64 \
-        --amend ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-arm64
-    - name: Push multiarch docker manifest
-      run: |
-        docker manifest push ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}
+        docker buildx imagetools create -t ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }} \
+        ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-amd64 \
+        ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-arm64
 
   build_extra_image:
     name: Build additional docker manifests
@@ -352,9 +349,9 @@ jobs:
 
     # prepare docker
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
     - name: Login to Docker Hub
-      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -362,18 +359,12 @@ jobs:
     # build multiarch image
     - name: "Build additional docker manifest: ${{ matrix.tag }}"
       run: |
-        docker manifest create ${{ inputs.docker_repository }}:${{ matrix.tag }}-amd64 \
-        --amend ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-amd64
+        docker buildx imagetools create -t ${{ inputs.docker_repository }}:${{ matrix.tag }}-amd64 \
+        ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-amd64
 
-        docker manifest create ${{ inputs.docker_repository }}:${{ matrix.tag }}-arm64 \
-        --amend ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-arm64
+        docker buildx imagetools create -t ${{ inputs.docker_repository }}:${{ matrix.tag }}-arm64 \
+        ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-arm64
 
-        docker manifest create ${{ inputs.docker_repository }}:${{ matrix.tag }} \
-        --amend ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-amd64 \
-        --amend ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-arm64
-
-    - name: "Push additional docker manifest: ${{ matrix.tag }}"
-      run: |
-        docker manifest push ${{ inputs.docker_repository }}:${{ matrix.tag }}-amd64
-        docker manifest push ${{ inputs.docker_repository }}:${{ matrix.tag }}-arm64
-        docker manifest push ${{ inputs.docker_repository }}:${{ matrix.tag }}
+        docker buildx imagetools create -t ${{ inputs.docker_repository }}:${{ matrix.tag }} \
+        ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-amd64 \
+        ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-arm64

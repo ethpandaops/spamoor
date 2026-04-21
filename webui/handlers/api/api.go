@@ -62,6 +62,7 @@ type VersionResponse struct {
 type ScenarioEntry struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Plugin      string `json:"plugin,omitempty"` // Plugin name if from a plugin, empty for native scenarios
 }
 
 // ScenarioCategory represents a category of scenarios in the API response.
@@ -210,14 +211,34 @@ func (ah *APIHandler) GetScenarios(w http.ResponseWriter, r *http.Request) {
 }
 
 // convertCategory recursively converts a scenario.Category to a ScenarioCategory.
+// It looks up each scenario in the registry to get the plugin name and sorts scenarios alphabetically.
 func convertCategory(category *scenario.Category) *ScenarioCategory {
 	scenarioEntries := make([]*ScenarioEntry, len(category.Descriptors))
 	for j, descriptor := range category.Descriptors {
-		scenarioEntries[j] = &ScenarioEntry{
+		entry := &ScenarioEntry{
 			Name:        descriptor.Name,
 			Description: descriptor.Description,
 		}
+
+		// Look up the scenario in the registry to get the plugin name
+		registryEntry := scenarios.GetScenarioEntry(descriptor.Name)
+		if registryEntry != nil && registryEntry.Plugin != nil {
+			entry.Plugin = registryEntry.Plugin.GetName()
+		}
+
+		scenarioEntries[j] = entry
 	}
+
+	// Sort scenarios alphabetically by name
+	slices.SortFunc(scenarioEntries, func(a, b *ScenarioEntry) int {
+		if a.Name < b.Name {
+			return -1
+		}
+		if a.Name > b.Name {
+			return 1
+		}
+		return 0
+	})
 
 	var children []*ScenarioCategory
 	if len(category.Children) > 0 {
@@ -291,6 +312,7 @@ func (ah *APIHandler) GetScenarioConfig(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintf(w, "refill_amount: 5000000000000000000 # refill 5 ETH when\n")
 	fmt.Fprintf(w, "refill_balance: 1000000000000000000 # balance drops below 1 ETH\n")
 	fmt.Fprintf(w, "refill_interval: 600 # check every 10 minutes\n")
+	fmt.Fprintf(w, "# fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution\n")
 	fmt.Fprintf(w, "\n")
 	fmt.Fprintf(w, "# scenario: %s\n", scenarioName)
 	fmt.Fprintf(w, "%s\n", string(configYaml))
@@ -363,11 +385,7 @@ func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	spammer, err := ah.daemon.NewSpammer(req.Scenario, req.Config, req.Name, req.Description, req.StartImmediately, userEmail, false)
 	if err != nil {
@@ -403,11 +421,7 @@ func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	err = ah.daemon.StartSpammer(id, userEmail)
 	if err != nil {
@@ -461,11 +475,7 @@ func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	err = ah.daemon.UpdateSpammer(id, req.Name, req.Description, req.Config, userEmail)
 	if err != nil {
@@ -500,11 +510,7 @@ func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	err = ah.daemon.PauseSpammer(id, userEmail)
 	if err != nil {
@@ -539,11 +545,7 @@ func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	err = ah.daemon.DeleteSpammer(id, userEmail)
 	if err != nil {
@@ -578,11 +580,7 @@ func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	err = ah.daemon.ReclaimSpammer(id, userEmail)
 	if err != nil {
@@ -1120,11 +1118,7 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	// Update client config with new groups as tags
 	tagsStr := strings.Join(groups, ",")
@@ -1185,11 +1179,7 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 
 	client.SetEnabled(req.Enabled)
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	// Update client config with new enabled state
 	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, existingConfig.Tags, existingConfig.ClientType, req.Enabled, userEmail)
@@ -1249,11 +1239,7 @@ func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
 
 	client.SetNameOverride(req.NameOverride)
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	// Update client config with new name override
 	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), req.NameOverride, existingConfig.Tags, existingConfig.ClientType, existingConfig.Enabled, userEmail)
@@ -1319,11 +1305,7 @@ func (ah *APIHandler) UpdateClientType(w http.ResponseWriter, r *http.Request) {
 
 	client.SetClientTypeOverride(req.ClientType)
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	// Update client config with new type
 	err = ah.daemon.UpdateClientConfig(client.GetRPCHost(), existingConfig.Name, existingConfig.Tags, req.ClientType, existingConfig.Enabled, userEmail)
@@ -1426,11 +1408,7 @@ func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	result, err := ah.daemon.ImportSpammers(req.Input, userEmail)
 	if err != nil {
@@ -2191,11 +2169,7 @@ func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Get user email for audit logging
-	userEmail := "api"
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		userEmail = auditLogger.GetUserFromRequest(r.Header)
-	}
+	userEmail := ah.getUserEmail(r)
 
 	// Build and send transaction
 	wallet := rootWallet.GetWallet()

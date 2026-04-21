@@ -503,7 +503,7 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 
 		// Build transfer transaction
 		baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
-		feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+		feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 		if err != nil {
 			return fmt.Errorf("failed to get suggested fees: %w", err)
 		}
@@ -571,7 +571,7 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 	}
 
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
@@ -618,7 +618,7 @@ func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, sta
 	}
 
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
-	feeCap, tipCap, err := s.walletPool.GetTxPool().GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}

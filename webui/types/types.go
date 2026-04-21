@@ -9,6 +9,7 @@ type FrontendConfig struct {
 	Minify           bool
 	DisableTxMetrics bool
 	DisableAuditLogs bool
+	DisablePluginAPI bool
 
 	AuthUserHeader    string
 	AuthTokenKey      string

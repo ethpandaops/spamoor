@@ -46,6 +46,11 @@ const (
 
 	// Root wallet actions
 	AuditActionRootWalletSend AuditActionType = "root_wallet_send"
+
+	// Plugin actions
+	AuditActionPluginRegister AuditActionType = "plugin_register"
+	AuditActionPluginDelete   AuditActionType = "plugin_delete"
+	AuditActionPluginReload   AuditActionType = "plugin_reload"
 )
 
 // AuditEntityType defines the types of entities that can be logged
@@ -56,6 +61,7 @@ const (
 	AuditEntityClient     AuditEntityType = "client"
 	AuditEntitySystem     AuditEntityType = "system"
 	AuditEntityRootWallet AuditEntityType = "root_wallet"
+	AuditEntityPlugin     AuditEntityType = "plugin"
 )
 
 // AuditMetadata represents additional metadata for an audit log entry

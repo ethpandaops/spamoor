@@ -53,6 +53,13 @@
                 <span class="nav-text">Clients</span>
               </a>
             </li>
+            {{ if not .DisablePluginAPI }}
+            <li class="nav-item px-2 d-none" data-auth-required>
+              <a class="nav-link" href="/plugins">
+                <span class="nav-text">Plugins</span>
+              </a>
+            </li>
+            {{ end }}
             {{ if not .DisableTxMetrics }}
             <li class="nav-item px-2">
               <a class="nav-link" href="/graphs">

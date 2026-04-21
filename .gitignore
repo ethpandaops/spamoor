@@ -3,6 +3,8 @@
 .hack/devnet/generated-**
 .hack/devnet/custom-**
 ai_plans/
+plugins/**/plugin.yaml
+plugins/*.tar.gz
 tmp-*
 bin
 spamoor.db*

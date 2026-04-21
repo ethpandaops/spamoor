@@ -39,7 +39,7 @@ Comprehensive documentation is available in the `docs/` directory for different 
 - **Flexible Configuration**: YAML files and command-line flags
 
 ## Build Requirements
-- Go 1.24+
+- Go 1.25+
 - CGO enabled (for SQLite and cryptographic operations)
 - Build tags: `with_blob_v1,ckzg` for blob transaction support
 
