@@ -1548,6 +1548,18 @@ func (pool *TxPool) GetCostPerStateByte() uint64 {
 	return computeCostPerStateByte(pool.currentGasLimit)
 }
 
+// MinIntrinsicGas returns the smallest tx.Gas value the current chain's
+// txpool will accept for a basic value transfer that triggers no state
+// creation (non-empty recipient, zero or non-zero value, no calldata).
+// Pre-Amsterdam this is the historic 21,000; on Amsterdam chains it is the
+// 10/9 floor the EIP-8037 txpool validator enforces.
+func (pool *TxPool) MinIntrinsicGas() uint64 {
+	if !pool.IsAmsterdam() {
+		return 21_000
+	}
+	return 21_000 * txpoolBufferNum / txpoolBufferDenom
+}
+
 // GetCurrentBaseFee returns the current base fee of the chain.
 func (pool *TxPool) GetCurrentBaseFee() *big.Int {
 	pool.blockStatsMutex.RLock()
@@ -1916,7 +1928,7 @@ func (pool *TxPool) fillNonceGaps(ctx context.Context, wallet *Wallet, gaps []ui
 		}
 
 		// Build and sign the filler transaction
-		fillerTx, err := wallet.BuildFillerTx(nonce, gasTipCap, gasFeeCap)
+		fillerTx, err := wallet.BuildFillerTx(nonce, gasTipCap, gasFeeCap, pool.MinIntrinsicGas())
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
 				"wallet": wallet.GetAddress().Hex(),

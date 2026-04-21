@@ -56,7 +56,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Rebroadcast:  1,
 	BaseFee:      20,
 	TipFee:       2,
-	GasLimit:     21000,
+	GasLimit:     0,
 	Amount:       20,
 	Data:         "",
 	To:           "",
@@ -251,6 +251,11 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	}
 
 	var toAddr common.Address
+	// targetIsEmpty is a conservative hint: true only when we know the
+	// recipient has never been touched (random fresh addresses). Any known
+	// spamoor wallet or user-supplied --to address is treated as non-empty to
+	// avoid paying the EIP-2780 state-gas charge on every send.
+	targetIsEmpty := false
 	if s.options.To != "" {
 		toAddr = common.HexToAddress(s.options.To)
 	} else {
@@ -259,11 +264,17 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 			addrBytes := make([]byte, 20)
 			rand.Read(addrBytes)
 			toAddr = common.Address(addrBytes)
+			targetIsEmpty = true
 		}
 
 		if s.options.SelfTxOnly {
 			toAddr = wallet.GetAddress()
 		}
+	}
+
+	gasLimit := s.options.GasLimit
+	if gasLimit == 0 {
+		gasLimit = s.walletPool.FundingGasFor(targetIsEmpty)
 	}
 
 	txCallData := []byte{}
@@ -280,7 +291,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.GasLimit,
+		Gas:       gasLimit,
 		To:        &toAddr,
 		Value:     amount,
 		Data:      txCallData,

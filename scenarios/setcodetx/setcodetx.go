@@ -157,6 +157,21 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		s.logger.Warnf("Gas limit %d exceeds %d and will most likely be dropped by the execution layer client", s.options.GasLimit, utils.MaxGasLimitPerTx)
 	}
 
+	// On Amsterdam/EIP-8037 each authorization costs 7,500 regular gas plus
+	// (AuthorizationCreationSize + AccountCreationSize)·cpsb state gas. At
+	// cpsb=1174 and 10 authorizations the worst-case intrinsic alone reaches
+	// ~1.73M gas — well above the legacy 200,000 default. Auto-bump rather
+	// than fail on the node if the configured limit won't fit max_authorizations.
+	if cpsb := s.walletPool.GetTxPool().GetCostPerStateByte(); cpsb > 0 && s.options.MaxAuthorizations > 0 {
+		perAuth := uint64(7_500) + (spamoor.AuthorizationCreationSize+spamoor.AccountCreationSize)*cpsb
+		needed := (uint64(21_000) + s.options.MaxAuthorizations*perAuth) * 11 / 10
+		if s.options.GasLimit < needed {
+			s.logger.Warnf("bumping gas limit from %d to %d to cover %d EIP-8037 authorizations (cpsb=%d)",
+				s.options.GasLimit, needed, s.options.MaxAuthorizations, cpsb)
+			s.options.GasLimit = needed
+		}
+	}
+
 	s.delegatorSeed = make([]byte, 32)
 	rand.Read(s.delegatorSeed)
 
