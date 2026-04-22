@@ -42,7 +42,7 @@ max_wallets: 400
 rebroadcast: 120
 base_fee: 20
 tip_fee: 2
-gas_limit: 21000
+gas_limit: 0
 amount: 20
 data: ""
 to: ""

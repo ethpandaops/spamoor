@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"math/bits"
 	"math/rand"
 	"slices"
 	"strings"
@@ -21,6 +22,60 @@ import (
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/sirupsen/logrus"
 )
+
+// EIP-8037 (Amsterdam) chain parameters and txpool validator rules.
+// Values mirror github.com/ethereum/go-ethereum/params on the glamsterdam
+// devnet; duplicated here so spamoor's gas estimation doesn't depend on the
+// typed gas APIs in core/vm (which still churn between devnets).
+const (
+	// targetStateGrowthPerYear targets 100 GiB annual state growth per EIP-8037.
+	targetStateGrowthPerYear = 100 * 1024 * 1024 * 1024
+	// cpsbSignificantBits caps the precision of cost_per_state_byte quantization.
+	cpsbSignificantBits = 5
+	// cpsbOffset is an additive bias applied before quantization (EIP-8037).
+	cpsbOffset = 9578
+	// cpsbFloor is the minimum cpsb value spamoor will use. It matches the
+	// value that go-ethereum's glamsterdam-devnet-0 hardcodes in
+	// core/evm.go (CostPerStateByte returns 1174 with the dynamic formula
+	// commented out per the devnet-3 TODO). The dynamic formula yields 662
+	// at 60M gas limit and 1174 at 100M, so on smaller chains the floor is
+	// what keeps spamoor's gas estimates in sync with what the node actually
+	// charges. Once geth activates the dynamic formula, natural cpsb at
+	// 100M+ gas limits equals or exceeds this floor, making the clamp a
+	// no-op.
+	cpsbFloor = 1174
+
+	// txpoolBufferNum/Denom mirrors the 10/9 (≈111.1%) buffer the Amsterdam
+	// txpool enforces on the regular-gas intrinsic (see
+	// core/txpool/validation.go: `tx.Gas() < (intrGas.RegularGas*10)/9`).
+	// We apply the same factor so tx.Gas == (base*10)/9 exactly meets the
+	// pool's `<` check and passes.
+	txpoolBufferNum   = 10
+	txpoolBufferDenom = 9
+)
+
+// computeCostPerStateByte implements the EIP-8037 cost_per_state_byte formula.
+// Returns 0 when gasLimit is 0 (unknown / pre-Amsterdam). Results are deterministic.
+func computeCostPerStateByte(gasLimit uint64) uint64 {
+	if gasLimit == 0 {
+		return 0
+	}
+	// raw = ceil((gasLimit * 2_628_000) / (2 * TARGET_STATE_GROWTH_PER_YEAR))
+	num := gasLimit*2_628_000 + (2*targetStateGrowthPerYear - 1)
+	raw := num / (2 * targetStateGrowthPerYear)
+
+	shifted := raw + cpsbOffset
+	shift := max(bits.Len64(shifted)-cpsbSignificantBits, 0)
+	quantized := (shifted >> shift) << shift
+	var formula uint64 = 1
+	if quantized > cpsbOffset {
+		formula = quantized - cpsbOffset
+	}
+	// Clamp to the current hardcoded value in geth so spamoor's gas budgets
+	// match the node's charging on devnets that haven't yet enabled the
+	// dynamic formula. See cpsbFloor for background.
+	return max(formula, cpsbFloor)
+}
 
 // feeWindowSize is the number of recent blocks tracked for dynamic fee headroom calculation.
 const feeWindowSize = 10
@@ -114,6 +169,9 @@ type TxPool struct {
 	// Current block gas limit tracking
 	currentGasLimit uint64
 	currentBaseFee  *big.Int
+	// isAmsterdam is true when the latest-observed block header contains a
+	// non-nil blockAccessListHash (EIP-7928, tied to Amsterdam / EIP-8037).
+	isAmsterdam     bool
 	blockStatsMutex sync.RWMutex
 
 	// Recent block tracking for dynamic fee calculation.
@@ -182,6 +240,15 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 
 	if options.ReorgDepth > 0 {
 		pool.reorgDepth = options.ReorgDepth
+	}
+
+	// Eager head-block load so the first wallet-funding / scenario initialization
+	// sees up-to-date gas limit, base fee, and Amsterdam activation state without
+	// having to wait for the 3-second poll cadence. Failure here is non-fatal:
+	// the same data is populated lazily on the first processBlock or on demand
+	// via GetCurrentGasLimitWithInit / GetCurrentBaseFeeWithInit.
+	if err := pool.initBlockStats(); err != nil {
+		logrus.WithError(err).Warn("initial head block load failed, falling back to lazy init")
 	}
 
 	go pool.runTxPoolLoop()
@@ -453,7 +520,13 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 
 	// Update current gas limit and recent block gas tracking
+	isAmsterdam := blockWithHash.Block.Header().BlockAccessListHash != nil
 	pool.blockStatsMutex.Lock()
+	if isAmsterdam != pool.isAmsterdam {
+		logrus.WithField("gasLimit", blockWithHash.Block.GasLimit()).
+			Infof("Amsterdam (EIP-8037) activation state changed: %v", isAmsterdam)
+		pool.isAmsterdam = isAmsterdam
+	}
 	pool.currentGasLimit = blockWithHash.Block.GasLimit()
 	pool.currentBaseFee = blockWithHash.Block.BaseFee()
 	pool.recentGasUsed[pool.recentGasIdx] = blockWithHash.Block.GasUsed()
@@ -1509,6 +1582,39 @@ func (pool *TxPool) GetCurrentGasLimit() uint64 {
 	return pool.currentGasLimit
 }
 
+// IsAmsterdam returns whether the connected chain has activated Amsterdam
+// (EIP-8037 / EIP-7928). Detected via the presence of blockAccessListHash in
+// the latest block header. Returns false before the first block is seen.
+func (pool *TxPool) IsAmsterdam() bool {
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
+	return pool.isAmsterdam
+}
+
+// GetCostPerStateByte returns the current EIP-8037 cost_per_state_byte,
+// computed from the latest observed block gas limit. Returns 0 pre-Amsterdam
+// or before the first block has been seen.
+func (pool *TxPool) GetCostPerStateByte() uint64 {
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
+	if !pool.isAmsterdam {
+		return 0
+	}
+	return computeCostPerStateByte(pool.currentGasLimit)
+}
+
+// MinIntrinsicGas returns the smallest tx.Gas value the current chain's
+// txpool will accept for a basic value transfer that triggers no state
+// creation (non-empty recipient, zero or non-zero value, no calldata).
+// Pre-Amsterdam this is the historic 21,000; on Amsterdam chains it is the
+// 10/9 floor the EIP-8037 txpool validator enforces.
+func (pool *TxPool) MinIntrinsicGas() uint64 {
+	if !pool.IsAmsterdam() {
+		return 21_000
+	}
+	return 21_000 * txpoolBufferNum / txpoolBufferDenom
+}
+
 // GetCurrentBaseFee returns the current base fee of the chain.
 func (pool *TxPool) GetCurrentBaseFee() *big.Int {
 	pool.blockStatsMutex.RLock()
@@ -1601,7 +1707,9 @@ func (pool *TxPool) initBlockStats() error {
 
 	pool.currentGasLimit = latestBlock.GasLimit()
 	pool.currentBaseFee = latestBlock.BaseFee()
-	logrus.Infof("initialized block stats from latest block: %v, %v", pool.currentGasLimit, pool.currentBaseFee)
+	pool.isAmsterdam = latestBlock.Header().BlockAccessListHash != nil
+	logrus.Infof("initialized block stats from latest block: gasLimit=%v baseFee=%v amsterdam=%v",
+		pool.currentGasLimit, pool.currentBaseFee, pool.isAmsterdam)
 
 	return nil
 }
@@ -1875,7 +1983,7 @@ func (pool *TxPool) fillNonceGaps(ctx context.Context, wallet *Wallet, gaps []ui
 		}
 
 		// Build and sign the filler transaction
-		fillerTx, err := wallet.BuildFillerTx(nonce, gasTipCap, gasFeeCap)
+		fillerTx, err := wallet.BuildFillerTx(nonce, gasTipCap, gasFeeCap, pool.MinIntrinsicGas())
 		if err != nil {
 			logrus.WithFields(logrus.Fields{
 				"wallet": wallet.GetAddress().Hex(),

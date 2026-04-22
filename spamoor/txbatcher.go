@@ -96,16 +96,27 @@ exit2:
 `
 
 const (
-	// BatcherBaseGas is the base gas cost for executing a batcher transaction.
+	// BatcherBaseGas is the pre-Amsterdam base gas cost for a batcher transaction
+	// (tx intrinsic + batcher dispatch overhead). WalletPool.batcherBaseGas uses
+	// this value on non-Amsterdam chains and a higher value on Amsterdam to
+	// cover the EIP-8037 txpool 110% intrinsic-regular buffer.
 	BatcherBaseGas = 50000
-	// BatcherDefaultGasPerTx is the default additional gas cost per transaction in the batch.
-	// This is used when funding_gas_limit is not configured (i.e. remains at 0 or default 21000).
-	// For chains with higher per-account creation costs (e.g. EIP-8037), configure
-	// funding_gas_limit to a higher value and the batcher will use it automatically.
+	// BatcherDefaultGasPerTx is the pre-Amsterdam default gas cost per recipient
+	// in the batch. Used when funding_gas_limit is not configured. On Amsterdam,
+	// WalletPool.batcherGasFor computes per-recipient cost dynamically (split by
+	// target emptiness + current cpsb) and this constant is the fallback only
+	// when txpool.GetCostPerStateByte() returns 0.
 	BatcherDefaultGasPerTx = 35000
 	// BatcherRPCGasCap is the maximum gas allowed per RPC call (geth default: 16M).
-	// Batch size is computed to keep total gas under this cap.
+	// Batch boundaries are computed to keep total gas under this cap; see
+	// WalletPool.packFundingBatches.
 	BatcherRPCGasCap = 16_000_000
+
+	// callRegularGas is a generous estimate of the regular-gas cost a CALL
+	// with value incurs inside the batcher contract: CallGasEIP150 (700) +
+	// ColdAccountAccess (2600) + CallValueTransfer (9000) + loop opcodes +
+	// slack. Used by WalletPool.batcherGasFor.
+	callRegularGas = 12_500
 )
 
 // TxBatcher manages the deployment and operation of a smart contract that batches

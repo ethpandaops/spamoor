@@ -145,8 +145,8 @@
 
           <div class="mb-3">
             <label for="gasLimit" class="form-label">Gas Limit</label>
-            <input type="number" class="form-control" id="gasLimit" placeholder="21000">
-            <div class="form-text">Leave empty for automatic estimation (21000 for transfers, 100000 for contract calls)</div>
+            <input type="number" class="form-control" id="gasLimit" placeholder="auto">
+            <div class="form-text">Leave empty for automatic sizing (chain-aware: pre-Amsterdam uses 21,000 for transfers / 100,000 for contract calls; Amsterdam/EIP-8037 uses the pool's intrinsic-regular floor plus state-gas budget for possibly-empty recipients)</div>
           </div>
 
           <div class="row mb-3">

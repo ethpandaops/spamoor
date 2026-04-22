@@ -1333,7 +1333,7 @@ type SendTransactionRequest struct {
 	Value    string `json:"value"`              // Amount in specified unit (required)
 	Unit     string `json:"unit"`               // Unit: "eth", "gwei", or "wei" (required)
 	Data     string `json:"data,omitempty"`     // Hex encoded calldata (optional, default: "0x")
-	GasLimit uint64 `json:"gasLimit,omitempty"` // Gas limit (optional, default: 21000 for simple transfers)
+	GasLimit uint64 `json:"gasLimit,omitempty"` // Gas limit (optional; 0 = auto: 21,000 pre-Amsterdam, MinIntrinsicGas or 21k+112·cpsb on Amsterdam, 100,000 for contract calls)
 	MaxFee   string `json:"maxFee,omitempty"`   // Max fee per gas in gwei (optional)
 	MaxTip   string `json:"maxTip,omitempty"`   // Max priority fee per gas in gwei (optional)
 }
@@ -2159,16 +2159,6 @@ func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Set default gas limit if not provided
-	gasLimit := req.GasLimit
-	if gasLimit == 0 {
-		if len(calldata) > 0 {
-			gasLimit = 100000 // Higher limit for contract calls
-		} else {
-			gasLimit = 21000 // Standard transfer
-		}
-	}
-
 	userEmail := ah.getUserEmail(r)
 
 	// Build and send transaction
@@ -2181,6 +2171,43 @@ func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
 	if client == nil {
 		sendError(w, "no available client", http.StatusInternalServerError)
 		return
+	}
+
+	// Set default gas limit if not provided. On Amsterdam (EIP-8037) chains
+	// a bare value transfer must clear the txpool's 10/9 intrinsic-regular
+	// buffer (raw 21k is rejected), and a transfer to a fresh account
+	// additionally incurs ~112·cpsb state gas. We probe the target's
+	// nonce+balance to decide which applies and pick a tighter value when we
+	// can. Contract calls (calldata present) keep the historic 100k minimum
+	// floored to MinIntrinsicGas on Amsterdam.
+	gasLimit := req.GasLimit
+	if gasLimit == 0 {
+		txpool := ah.daemon.GetTxPool()
+		switch {
+		case len(calldata) > 0:
+			gasLimit = 100000
+			if txpool != nil {
+				if minGas := txpool.MinIntrinsicGas(); gasLimit < minGas {
+					gasLimit = minGas
+				}
+			}
+		case txpool != nil && txpool.IsAmsterdam():
+			isEmpty := true
+			// Probe target state. Any RPC failure falls back to the
+			// conservative empty-target budget so the submission still works.
+			if nonce, err := client.GetNonceAt(ctx, toAddr, nil); err == nil && nonce > 0 {
+				isEmpty = false
+			} else if bal, err := client.GetBalanceAt(ctx, toAddr); err == nil && bal.Sign() > 0 {
+				isEmpty = false
+			}
+			base := uint64(21_000)
+			if isEmpty {
+				base += spamoor.AccountCreationSize * txpool.GetCostPerStateByte()
+			}
+			gasLimit = base * 10 / 9
+		default:
+			gasLimit = 21000
+		}
 	}
 
 	// Get suggested gas prices
