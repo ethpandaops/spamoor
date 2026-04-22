@@ -111,6 +111,12 @@ const (
 	// Batch boundaries are computed to keep total gas under this cap; see
 	// WalletPool.packFundingBatches.
 	BatcherRPCGasCap = 16_000_000
+
+	// callRegularGas is a generous estimate of the regular-gas cost a CALL
+	// with value incurs inside the batcher contract: CallGasEIP150 (700) +
+	// ColdAccountAccess (2600) + CallValueTransfer (9000) + loop opcodes +
+	// slack. Used by WalletPool.batcherGasFor.
+	callRegularGas = 12_500
 )
 
 // TxBatcher manages the deployment and operation of a smart contract that batches

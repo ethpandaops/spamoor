@@ -93,6 +93,18 @@ type WalletPool struct {
 	fundingLoopDone chan struct{}
 }
 
+// EIP-8037 spec constants reused by FundingGasFor / batcherGasFor here and by
+// scenarios that need to size per-authorization / per-account state gas
+// (e.g. scenarios/setcodetx).
+const (
+	// AccountCreationSize is the EIP-8037 charge unit count for creating a
+	// new account. State gas = AccountCreationSize * cpsb.
+	AccountCreationSize = 112
+	// AuthorizationCreationSize is the EIP-8037 charge unit count applied to
+	// each EIP-7702 SetCode authorization that creates a delegator account.
+	AuthorizationCreationSize = 23
+)
+
 // FundingRequest represents a request to fund a wallet with a specific amount.
 // Used internally for batch funding operations.
 type FundingRequest struct {
