@@ -295,11 +295,19 @@ func (pool *WalletPool) SetFundingGasLimit(gasLimit uint64) {
 // Amsterdam: 21,000 + (112·cpsb if empty) + 10% buffer, covering both the
 // EIP-2780 intrinsic state-gas charge on empty recipients and the txpool's
 // 110% intrinsic-regular check.
+//
+// Startup race: on a chain where Amsterdam is active at genesis, IsAmsterdam
+// is false until the first block is observed. If funding runs before that,
+// cpsb is 0 and we'd fall back to pre-Amsterdam sizing — producing txs whose
+// gas limit is far below the node's actual intrinsic charge. We instead use
+// cpsbFloor (the hardcoded devnet value) whenever we haven't yet observed a
+// head block, so worst-case on a truly pre-Amsterdam chain we simply
+// over-reserve gas until the first block confirms pre-Amsterdam state.
 func (pool *WalletPool) FundingGasFor(isEmpty bool) uint64 {
 	if pool.config.FundingGasLimit != 0 {
 		return pool.config.FundingGasLimit
 	}
-	cpsb := pool.txpool.GetCostPerStateByte()
+	cpsb := pool.effectiveCpsb()
 	if cpsb == 0 {
 		return 21_000
 	}
@@ -320,12 +328,13 @@ func (pool *WalletPool) GetFundingGasLimit() uint64 {
 // batcherGasFor returns the per-recipient gas contribution for a single
 // funding request inside the batcher contract. Honors an explicit
 // SetFundingGasLimit override when it exceeds BatcherDefaultGasPerTx;
-// otherwise computes from live chain state.
+// otherwise computes from live chain state. See FundingGasFor for the
+// startup-race handling via effectiveCpsb.
 func (pool *WalletPool) batcherGasFor(req *FundingRequest) uint64 {
 	if pool.config.FundingGasLimit > BatcherDefaultGasPerTx {
 		return pool.config.FundingGasLimit
 	}
-	cpsb := pool.txpool.GetCostPerStateByte()
+	cpsb := pool.effectiveCpsb()
 	if cpsb == 0 {
 		return BatcherDefaultGasPerTx
 	}
@@ -338,12 +347,29 @@ func (pool *WalletPool) batcherGasFor(req *FundingRequest) uint64 {
 
 // batcherBaseGas returns the per-batch overhead (tx intrinsic + batcher
 // dispatch). On Amsterdam the baseline must also cover the 110% txpool buffer
-// on the 21,000 regular intrinsic, so we bump from 50k to 65k.
+// on the 21,000 regular intrinsic, so we bump from 50k to 65k. If the head
+// block hasn't been observed yet, we conservatively assume Amsterdam to avoid
+// under-reserving on genesis-Amsterdam chains (see FundingGasFor).
 func (pool *WalletPool) batcherBaseGas() uint64 {
-	if !pool.txpool.IsAmsterdam() {
-		return BatcherBaseGas
+	if pool.txpool.IsAmsterdam() || !pool.txpool.HasObservedHead() {
+		return 65_000
 	}
-	return 65_000
+	return BatcherBaseGas
+}
+
+// effectiveCpsb returns the cost-per-state-byte to use when sizing funding
+// transactions. It returns the live value when Amsterdam activation is known,
+// falls back to cpsbFloor when the head block has not been observed yet (to
+// guard the genesis-Amsterdam startup race), and returns 0 only when the
+// chain is confirmed pre-Amsterdam.
+func (pool *WalletPool) effectiveCpsb() uint64 {
+	if cpsb := pool.txpool.GetCostPerStateByte(); cpsb != 0 {
+		return cpsb
+	}
+	if !pool.txpool.HasObservedHead() {
+		return cpsbFloor
+	}
+	return 0
 }
 
 // packFundingBatches greedily groups funding requests into batcher calls so
