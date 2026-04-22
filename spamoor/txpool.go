@@ -1591,6 +1591,18 @@ func (pool *TxPool) IsAmsterdam() bool {
 	return pool.isAmsterdam
 }
 
+// HasObservedHead reports whether the pool has loaded or processed at least
+// one head block (via initBlockStats or processBlock). Callers that need to
+// distinguish "chain state not yet known" from "chain is confirmed
+// pre-Amsterdam" should gate on this in addition to IsAmsterdam. Returns
+// false during the startup window when initBlockStats failed (e.g. no client
+// available yet) and no block has been processed.
+func (pool *TxPool) HasObservedHead() bool {
+	pool.blockStatsMutex.RLock()
+	defer pool.blockStatsMutex.RUnlock()
+	return pool.currentGasLimit > 0
+}
+
 // GetCostPerStateByte returns the current EIP-8037 cost_per_state_byte,
 // computed from the latest observed block gas limit. Returns 0 pre-Amsterdam
 // or before the first block has been seen.
