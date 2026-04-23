@@ -325,10 +325,9 @@ func (s *Scenario) sendDeploymentTx(
 		return nil, client, err
 	}
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       4000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		_, deployTx, _, deployErr := contract.DeployStorageRefund(

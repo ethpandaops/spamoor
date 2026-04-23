@@ -273,6 +273,8 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 		BaseFeeWei: s.options.BaseFeeWei,
 		TipFeeWei:  s.options.TipFeeWei,
 		TxPool:     s.walletPool.GetTxPool(),
+		WalletPool: s.walletPool,
+		Client:     client,
 	}
 
 	// Handle transaction processing based on await-txs mode

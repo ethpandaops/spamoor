@@ -75,7 +75,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Rebroadcast:       1,
 	BaseFee:           20,
 	TipFee:            2,
-	DeployGasLimit:    4000000,
+	DeployGasLimit:    0,
 	GasLimit:          1000000,
 	Amount:            0,
 	RandomAmount:      false,
@@ -407,10 +407,14 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, contractCode []byte) (*
 		deployData = append(deployData, common.FromHex(s.options.ContractArgs)...)
 	}
 
+	deployGas := s.options.DeployGasLimit
+	if deployGas == 0 {
+		deployGas = s.walletPool.EstimateDeployGas(ctx, client, wallet.GetAddress(), uint256.NewInt(0), deployData)
+	}
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.DeployGasLimit,
+		Gas:       deployGas,
 		To:        nil,
 		Value:     uint256.NewInt(0),
 		Data:      deployData,

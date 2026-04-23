@@ -260,28 +260,24 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
-	// Determine gas limit: use block gas limit if GasLimit is 0
+	deployData := s.bytecodes[int(txIdx)%len(s.bytecodes)]
+
+	// Determine gas limit. If the operator supplied a non-zero override, use it
+	// directly. Otherwise run eth_estimateGas via the wallet pool — under
+	// EIP-8037 the intrinsic + deposit + execution cost varies with initcode
+	// size and cpsb, so the block gas limit is a poor proxy.
 	gasLimit := s.options.GasLimit
 	if gasLimit == 0 {
-		var err error
-		gasLimit, err = s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
-		if err != nil {
-			s.logger.Warnf("tx %6d: failed to fetch current gas limit: %v, using fallback", txIdx+1, err)
-			gasLimit = utils.MaxGasLimitPerTx
-		} else if gasLimit == 0 {
-			// Final fallback to a reasonable default if no block gas limit is available
-			gasLimit = utils.MaxGasLimitPerTx
-			s.logger.Warnf("tx %6d: no gas limit available, using fallback %v", txIdx+1, gasLimit)
-		} else {
-			s.logger.Debugf("tx %6d: using block gas limit %v", txIdx+1, gasLimit)
-		}
+		gasLimit = s.walletPool.EstimateDeployGas(ctx, client, wallet.GetAddress(), uint256.NewInt(0), deployData)
+	}
+	if gasLimit > utils.MaxGasLimitPerTx {
+		gasLimit = utils.MaxGasLimitPerTx
 	}
 
-	deployData := s.bytecodes[int(txIdx)%len(s.bytecodes)]
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.GasLimit,
+		Gas:       gasLimit,
 		To:        nil,
 		Value:     uint256.NewInt(0),
 		Data:      deployData,

@@ -338,10 +338,14 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 
 	deployData = append(initcode, deployData...)
 
+	deployGas := s.options.DeployGasLimit
+	if deployGas == 0 {
+		deployGas = s.walletPool.EstimateDeployGas(ctx, client, wallet.GetAddress(), uint256.NewInt(0), deployData)
+	}
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.DeployGasLimit,
+		Gas:       deployGas,
 		To:        nil,
 		Value:     uint256.NewInt(0),
 		Data:      deployData,

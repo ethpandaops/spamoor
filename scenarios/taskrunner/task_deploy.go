@@ -110,18 +110,27 @@ func (t *DeployTask) BuildTransaction(ctx context.Context, wallet *spamoor.Walle
 		return nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
 
+	// Convert amount from gwei to wei
+	amount := uint256.NewInt(t.Amount)
+	amount = amount.Mul(amount, uint256.NewInt(1000000000))
+
+	// Auto-estimate deploy gas when the task doesn't specify a limit. Under
+	// EIP-8037, state-creation costs make static guesses unreliable; a single
+	// eth_estimateGas round-trip per deploy is cheap and accurate.
+	deployGas := t.GasLimit
+	if deployGas == 0 && execCtx.WalletPool != nil {
+		deployGas = execCtx.WalletPool.EstimateDeployGas(ctx, execCtx.Client, wallet.GetAddress(), amount, deployData)
+	}
+
 	// Create transaction data
 	txData := &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       t.GasLimit,
+		Gas:       deployGas,
 		To:        nil, // nil for contract deployment
 		Data:      deployData,
+		Value:     amount,
 	}
-	// Convert amount from gwei to wei
-	amount := uint256.NewInt(t.Amount)
-	amount = amount.Mul(amount, uint256.NewInt(1000000000))
-	txData.Value = amount
 
 	// Build dynamic fee transaction
 	dynFeeTx, err := txbuilder.DynFeeTx(txData)

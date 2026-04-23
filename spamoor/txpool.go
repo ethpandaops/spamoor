@@ -1603,6 +1603,22 @@ func (pool *TxPool) HasObservedHead() bool {
 	return pool.currentGasLimit > 0
 }
 
+// EffectiveCpsb returns the cost-per-state-byte to use when sizing txs for
+// safety. It returns the live value when Amsterdam activation is confirmed,
+// falls back to cpsbFloor when the head block has not been observed yet
+// (guard against genesis-Amsterdam startup races), and returns 0 only when
+// the chain is confirmed pre-Amsterdam. Safe for gas-sizing paths that need
+// to over-allocate rather than risk OOG on tx inclusion.
+func (pool *TxPool) EffectiveCpsb() uint64 {
+	if cpsb := pool.GetCostPerStateByte(); cpsb != 0 {
+		return cpsb
+	}
+	if !pool.HasObservedHead() {
+		return cpsbFloor
+	}
+	return 0
+}
+
 // GetCostPerStateByte returns the current EIP-8037 cost_per_state_byte,
 // computed from the latest observed block gas limit. Returns 0 pre-Amsterdam
 // or before the first block has been seen.
