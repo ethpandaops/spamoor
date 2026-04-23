@@ -60,7 +60,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Rebroadcast:       1,
 	BaseFee:           20,
 	TipFee:            2,
-	GasLimit:          2000000,
+	GasLimit:          4000000,
 	FactoryAddress:    "",
 	InitCode:          "",
 	StartSalt:         0,
@@ -300,7 +300,7 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 	tx, err := factoryWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       2000000,
+		Gas:       4000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		_, deployTx, _, err := contract.DeployCREATE2Factory(transactOpts, client.GetEthClient())

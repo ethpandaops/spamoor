@@ -138,7 +138,7 @@ Deploys a contract and optionally registers it in the contract registry.
     contract_file: "./contracts/erc20.bin"                       # File path or URL (http/https)
     
     contract_args: "0x000000000000000000000000000000000000000000000000000000000000001e"  # Constructor args
-    gas_limit: 2000000    # Gas limit for deployment
+    gas_limit: 4000000    # Gas limit for deployment
     amount: 1000          # ETH to send in gwei (optional)
 ```
 

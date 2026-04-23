@@ -75,7 +75,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Rebroadcast:       1,
 	BaseFee:           20,
 	TipFee:            2,
-	DeployGasLimit:    2000000,
+	DeployGasLimit:    4000000,
 	GasLimit:          1000000,
 	Amount:            0,
 	RandomAmount:      false,

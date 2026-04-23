@@ -363,7 +363,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       2000000,
+		Gas:       4000000,
 		To:        nil,
 		Value:     uint256.NewInt(0),
 		Data:      workerCodeBytes,

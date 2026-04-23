@@ -13,7 +13,7 @@ This scenario deploys a CREATE2 factory contract and then uses it to deploy mult
 - `throughput`: Number of deployment transactions per slot
 - `max_pending`: Maximum pending transactions
 - `max_wallets`: Maximum child wallets to use
-- `gas_limit`: Gas limit for transactions (default: 2000000)
+- `gas_limit`: Gas limit for transactions (default: 4000000)
 
 ### Factory Options
 - `factory_address`: Address of existing CREATE2 factory (optional)
@@ -30,7 +30,7 @@ This scenario deploys a CREATE2 factory contract and then uses it to deploy mult
     seed: factory-deploy-001
     total_count: 1000
     throughput: 50
-    gas_limit: 2000000
+    gas_limit: 4000000
     well_known_factory: true
     init_code: "0x608060405234801561001057600080fd5b50......" # Large contract bytecode
     start_salt: 0

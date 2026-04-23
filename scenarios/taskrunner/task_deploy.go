@@ -33,7 +33,7 @@ func NewDeployTask(name string, data map[string]interface{}) (Task, error) {
 			Type: "deploy",
 			Name: name,
 		},
-		GasLimit: 2000000, // Default gas limit
+		GasLimit: 4000000, // Default gas limit
 	}
 
 	// Parse configuration fields
