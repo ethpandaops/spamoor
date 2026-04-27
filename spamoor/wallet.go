@@ -520,25 +520,26 @@ func (wallet *Wallet) BuildBoundTxWithEstimate(
 		isAmsterdam bool
 		cpsb        uint64
 		blockLimit  uint64
+		maxTxGas    uint64
 		logger      logrus.FieldLogger
 	)
 	if txpool != nil {
 		isAmsterdam = txpool.IsAmsterdam()
 		cpsb = txpool.GetCostPerStateByte()
 		blockLimit = txpool.GetCurrentGasLimit()
+		maxTxGas = txpool.MaxTxGas()
 	} else {
 		// No pool context — use the safe-upper-bound defaults.
 		isAmsterdam = true
 		cpsb = cpsbFloor
+		maxTxGas = utils.MaxGasLimitPerTx
 	}
-	refinedGas := estimateTxGas(ctx, client, wallet.GetAddress(), tx.To(), tx.Value(), tx.Data(), isAmsterdam, cpsb, logger)
+	refinedGas := estimateTxGas(ctx, client, wallet.GetAddress(), tx.To(), tx.Value(), tx.Data(), isAmsterdam, cpsb, maxTxGas, logger)
 
-	// Clamp at min(blockGasLimit, MaxTxGas). The EIP-7825 cap at 16,777,216
-	// is enforced by the txpool unconditionally on Osaka+ chains (see
-	// core/txpool/validation.go:96). estimateTxGas already applies this
-	// clamp; we re-apply here in case blockGasLimit is smaller (edge case
-	// on very low-gas-limit test chains).
-	cap := uint64(utils.MaxGasLimitPerTx)
+	// Clamp at min(blockLimit, maxTxGas). estimateTxGas already applies the
+	// per-tx cap; this re-clamp guards the rare case where blockLimit is
+	// smaller than the cap (very low-gas-limit test chains).
+	cap := maxTxGas
 	if blockLimit > 0 && blockLimit < cap {
 		cap = blockLimit
 	}

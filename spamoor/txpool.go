@@ -1609,6 +1609,24 @@ func (pool *TxPool) GetCostPerStateByte() uint64 {
 	return computeCostPerStateByte(pool.currentGasLimit)
 }
 
+// MaxTxGas returns the effective per-tx gas cap for the connected chain.
+// On Amsterdam chains, EIP-8037 constrains only regular_gas (formerly
+// "compute gas") to EIP-7825's TX_MAX_GAS_LIMIT (16,777,216); total tx.gas
+// may grow up to the block gas limit when state_gas dominates (e.g. large
+// contract deployments). Pre-Amsterdam the cap is utils.MaxGasLimitPerTx,
+// clamped to the block limit on chains whose block limit is below 16.7M.
+func (pool *TxPool) MaxTxGas() uint64 {
+	blockLimit := pool.GetCurrentGasLimit()
+	if pool.IsAmsterdam() {
+		return blockLimit
+	}
+	cap := uint64(utils.MaxGasLimitPerTx)
+	if blockLimit > 0 && blockLimit < cap {
+		cap = blockLimit
+	}
+	return cap
+}
+
 // MinIntrinsicGas returns the smallest tx.Gas value the current chain's
 // txpool will accept for a basic value transfer that triggers no state
 // creation (non-empty recipient, zero or non-zero value, no calldata).

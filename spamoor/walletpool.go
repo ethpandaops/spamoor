@@ -395,7 +395,7 @@ func (pool *WalletPool) EstimateDeployGas(ctx context.Context, client *Client, f
 	if value != nil {
 		val = value.ToBig()
 	}
-	return estimateTxGas(ctx, client, from, nil, val, data, pool.txpool.IsAmsterdam(), pool.txpool.GetCostPerStateByte(), pool.logger)
+	return estimateTxGas(ctx, client, from, nil, val, data, pool.txpool.IsAmsterdam(), pool.txpool.GetCostPerStateByte(), pool.txpool.MaxTxGas(), pool.logger)
 }
 
 // fallbackDeployGas returns a safe upper-bound gas limit for a contract
@@ -440,14 +440,19 @@ func fallbackDeployGas(initcodeLen int, isAmsterdam bool, cpsb uint64) uint64 {
 // call txs; the formula fallback only applies a deploy-style over-estimate
 // when to == nil since per-call costs are highly contract-specific.
 //
+// maxTxGas is the effective per-tx gas cap for the chain (computed by the
+// caller via TxPool.MaxTxGas, or set to utils.MaxGasLimitPerTx when no
+// txpool context is available). Under EIP-8037 with the reservoir validator
+// active, this can exceed 16.7M and approach the block gas limit so large
+// contract deployments (Uniswap factory etc.) are not rejected.
+//
 // Package-level so both WalletPool (with live Amsterdam/cpsb state) and
 // Wallet (with conservative defaults) can share the estimation logic.
 // logger may be nil.
-func estimateTxGas(ctx context.Context, client *Client, from common.Address, to *common.Address, value *big.Int, data []byte, isAmsterdam bool, cpsb uint64, logger logrus.FieldLogger) uint64 {
-	// EIP-7825 caps tx.Gas at 2^24 on any Osaka+ chain. The txpool enforces
-	// this unconditionally regardless of Amsterdam; see
-	// core/txpool/validation.go:96 in go-ethereum glamsterdam-devnet-0.
-	const maxTxGas = utils.MaxGasLimitPerTx
+func estimateTxGas(ctx context.Context, client *Client, from common.Address, to *common.Address, value *big.Int, data []byte, isAmsterdam bool, cpsb uint64, maxTxGas uint64, logger logrus.FieldLogger) uint64 {
+	if maxTxGas == 0 {
+		maxTxGas = utils.MaxGasLimitPerTx
+	}
 
 	clamp := func(gas uint64) uint64 {
 		if gas > maxTxGas {
@@ -464,14 +469,14 @@ func estimateTxGas(ctx context.Context, client *Client, from common.Address, to 
 			Data:  data,
 		})
 		if err == nil && gas > 0 {
-			// If the raw estimate already exceeds the EIP-7825 cap, no buffer
+			// If the raw estimate already exceeds the effective cap, no buffer
 			// will make the tx includable — warn loudly so the operator knows
 			// the contract/call is fundamentally too big rather than silently
 			// shipping a tx that will be rejected.
 			if gas > maxTxGas {
 				if logger != nil {
-					logger.WithFields(logrus.Fields{"estimate": gas, "cap": uint64(maxTxGas), "data_bytes": len(data), "to": to}).
-						Warnf("tx gas estimate exceeds EIP-7825 per-tx cap; contract is too large to deploy in a single tx under current chain params")
+					logger.WithFields(logrus.Fields{"estimate": gas, "cap": maxTxGas, "data_bytes": len(data), "to": to}).
+						Warnf("tx gas estimate exceeds per-tx cap; contract is too large to deploy in a single tx under current chain params")
 				}
 				return maxTxGas
 			}
