@@ -283,10 +283,14 @@ func (s *Scenario) deployFuzzedContract(ctx context.Context, txIdx uint64) (scen
 		return nil, nil, client, wallet, err
 	}
 
+	deployGas := s.options.GasLimit
+	if deployGas == 0 {
+		deployGas = s.walletPool.EstimateDeployGas(ctx, client, wallet.GetAddress(), value, fuzzedBytecode)
+	}
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.GasLimit,
+		Gas:       deployGas,
 		To:        nil, // Contract creation
 		Value:     value,
 		Data:      fuzzedBytecode,

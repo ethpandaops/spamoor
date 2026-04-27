@@ -237,6 +237,16 @@ func main() {
 		panic(fmt.Errorf("failed to prepare clients: %v", err))
 	}
 
+	// load chain state (gas limit, base fee, Amsterdam activation) before any
+	// scenario starts, so scenarios always observe real values instead of
+	// uninitialized defaults.
+	initStatsCtx, cancelInitStats := context.WithTimeout(ctx, 30*time.Second)
+	err = txpool.InitializeBlockStats(initStatsCtx)
+	cancelInitStats()
+	if err != nil {
+		panic(fmt.Errorf("failed to initialize block stats: %v", err))
+	}
+
 	// init root wallet
 	rootWallet, err := spamoor.InitRootWallet(ctx, cliArgs.privkey, clientPool, txpool, logger)
 	if err != nil {

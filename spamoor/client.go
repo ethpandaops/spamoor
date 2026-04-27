@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -377,6 +378,19 @@ func (client *Client) GetBalanceAt(ctx context.Context, wallet common.Address) (
 	balance, err := client.client.BalanceAt(ctx, wallet, nil)
 	client.incrementRequestStats(false, err != nil)
 	return balance, err
+}
+
+// EstimateGas runs eth_estimateGas against the chain for the provided call
+// message and returns the suggested gas limit. Used by deploy paths that need
+// an accurate pre-send estimate under EIP-8037 where static guesses tend to
+// under-allocate.
+func (client *Client) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
+	ctx, cancel := client.getContext(ctx)
+	defer cancel()
+
+	gas, err := client.client.EstimateGas(ctx, call)
+	client.incrementRequestStats(false, err != nil)
+	return gas, err
 }
 
 // GetSuggestedFee returns suggested gas price and tip cap for transactions.

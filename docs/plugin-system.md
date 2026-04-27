@@ -412,7 +412,7 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, error) {
     deploymentTx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
         GasFeeCap: uint256.MustFromBig(feeCap),
         GasTipCap: uint256.MustFromBig(tipCap),
-        Gas:       2000000,
+        Gas:       4000000,
         Value:     uint256.NewInt(0),
     }, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
         _, deployTx, _, err := contract.DeployMyContract(transactOpts, client.GetEthClient())

@@ -60,7 +60,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Rebroadcast:       1,
 	BaseFee:           20,
 	TipFee:            2,
-	GasLimit:          2000000,
+	GasLimit:          4000000,
 	FactoryAddress:    "",
 	InitCode:          "",
 	StartSalt:         0,
@@ -297,10 +297,9 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		return common.Address{}, err
 	}
 
-	tx, err := factoryWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	tx, err := factoryWallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       2000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		_, deployTx, _, err := contract.DeployCREATE2Factory(transactOpts, client.GetEthClient())
@@ -365,12 +364,15 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		salt[31-i] = byte(saltValue >> (8 * i))
 	}
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	txMeta := &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
 		Gas:       s.options.GasLimit,
 		Value:     uint256.NewInt(0),
-	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+	}
+	// Zero gas triggers the auto-estimation path (handles EIP-8037 state costs
+	// for CREATE2-via-factory, which a fixed multiplier can't reliably cover).
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), txMeta, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return factory.Deploy(transactOpts, salt, s.initCodeBytes)
 	})
 	if err != nil {
