@@ -358,18 +358,29 @@ func (pool *WalletPool) batcherBaseGas() uint64 {
 }
 
 // effectiveCpsb returns the cost-per-state-byte to use when sizing funding
-// transactions. It returns the live value when Amsterdam activation is known,
-// falls back to cpsbFloor when the head block has not been observed yet (to
-// guard the genesis-Amsterdam startup race), and returns 0 only when the
-// chain is confirmed pre-Amsterdam.
+// transactions. It returns the live value when Amsterdam activation is known
+// from a streamed post-Amsterdam block; otherwise falls back to cpsbFloor.
+//
+// The previous "head observed AND head is pre-Amsterdam → return 0" path was
+// racy at the fork boundary: observing a pre-Amsterdam head at time T does
+// not prove the chain is pre-Amsterdam at time T+ε. Amsterdam can activate
+// between blocks, and the pre-existing latest-observed-block snapshot stays
+// stale until processBlock receives the first post-Amsterdam block via the
+// external block subscription. During that window (empirically 5–35s of
+// CL→EL→spamoor lag) funding txs were sized at 21,000 gas while ELs already
+// enforced post-EIP-8037 admission (e.g. geth's 110% intrinsic-regular
+// buffer rejects 21,000 with "minimum needed 23,333").
+//
+// EIP-8037 fixes cost_per_state_byte at cpsbFloor (=1174), so the only cost
+// of unifying the uncertain branches is over-reserving on a chain that turns
+// out to be pre-Amsterdam — already documented as acceptable for the
+// no-head startup case. Callers that genuinely need pre-Amsterdam sizing
+// can pin via SetFundingGasLimit.
 func (pool *WalletPool) effectiveCpsb() uint64 {
 	if cpsb := pool.txpool.GetCostPerStateByte(); cpsb != 0 {
 		return cpsb
 	}
-	if !pool.txpool.HasObservedHead() {
-		return cpsbFloor
-	}
-	return 0
+	return cpsbFloor
 }
 
 // packFundingBatches greedily groups funding requests into batcher calls so
