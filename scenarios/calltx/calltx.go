@@ -468,18 +468,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	// Determine gas limit: use block gas limit if GasLimit is 0
 	gasLimit := s.options.GasLimit
 	if gasLimit == 0 {
-		var err error
-		gasLimit, err = s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
-		if err != nil {
-			s.logger.Warnf("tx %6d: failed to fetch current gas limit: %v, using fallback", txIdx+1, err)
-			gasLimit = utils.MaxGasLimitPerTx
-		} else if gasLimit == 0 {
-			// Final fallback to a reasonable default if no block gas limit is available
-			gasLimit = utils.MaxGasLimitPerTx
-			s.logger.Warnf("tx %6d: no gas limit available, using fallback %v", txIdx+1, gasLimit)
-		} else {
-			s.logger.Debugf("tx %6d: using block gas limit %v", txIdx+1, gasLimit)
-		}
+		gasLimit = s.walletPool.GetTxPool().GetCurrentGasLimit()
+		s.logger.Debugf("tx %6d: using block gas limit %v", txIdx+1, gasLimit)
 	}
 
 	amount := uint256.NewInt(s.options.Amount)

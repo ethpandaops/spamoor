@@ -194,10 +194,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	// Distribute tokens to wallets for parallel execution
 	// Calculate how many wallets we might need based on gas limits
-	blockGasLimit, err := s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
-	if err != nil {
-		return fmt.Errorf("failed to get current gas limit: %w", err)
-	}
+	blockGasLimit := s.walletPool.GetTxPool().GetCurrentGasLimit()
 	totalTargetGas := uint64(float64(blockGasLimit) * s.options.TargetGasRatio)
 	maxSplits := (totalTargetGas + utils.MaxGasLimitPerTx - 1) / utils.MaxGasLimitPerTx // ceiling division
 	walletsNeeded := int(maxSplits) + 1                                                 // +1 for deployer wallet
@@ -241,10 +238,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	// Query network gas limit (reuse existing if already fetched)
 	if blockGasLimit == 0 {
-		blockGasLimit, err = s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
-		if err != nil {
-			return fmt.Errorf("failed to get current gas limit: %w", err)
-		}
+		blockGasLimit = s.walletPool.GetTxPool().GetCurrentGasLimit()
 	}
 
 	// Calculate target addresses needed (each address = 2 storage slots = 64 bytes)

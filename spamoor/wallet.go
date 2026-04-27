@@ -523,11 +523,8 @@ func (wallet *Wallet) BuildBoundTxWithEstimate(
 		logger      logrus.FieldLogger
 	)
 	if txpool != nil {
-		// Conservative on startup: IsAmsterdam() returns false until the first
-		// head block is observed, but EffectiveCpsb() falls back to cpsbFloor
-		// during that window so sizing stays safe on genesis-Amsterdam chains.
-		isAmsterdam = txpool.IsAmsterdam() || !txpool.HasObservedHead()
-		cpsb = txpool.EffectiveCpsb()
+		isAmsterdam = txpool.IsAmsterdam()
+		cpsb = txpool.GetCostPerStateByte()
 		blockLimit = txpool.GetCurrentGasLimit()
 	} else {
 		// No pool context — use the safe-upper-bound defaults.
