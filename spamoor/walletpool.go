@@ -282,8 +282,9 @@ func (pool *WalletPool) SetRefillInterval(interval uint64) {
 // SetFundingGasLimit sets an explicit per-recipient gas limit for wallet
 // funding transactions, overriding the automatic Amsterdam/EIP-8037 detection.
 // Use 100000+ for L2 chains like Arbitrum/Optimism. When set to 0 (default),
-// spamoor derives the limit from the current chain state: 21,000 pre-Amsterdam,
-// and TxGas + AccountCreationSize·cpsb for empty-target funding under EIP-8037.
+// spamoor derives the limit from the current chain state: TxPool.MinIntrinsicGas
+// (21,000 today; reduced once EIP-2780 ships), plus AccountCreationSize·cpsb
+// for empty-target funding under EIP-8037.
 func (pool *WalletPool) SetFundingGasLimit(gasLimit uint64) {
 	pool.config.FundingGasLimit = gasLimit
 }
@@ -293,23 +294,22 @@ func (pool *WalletPool) SetFundingGasLimit(gasLimit uint64) {
 // override when configured; otherwise computes from live chain state, which
 // is guaranteed populated by InitializeBlockStats during startup.
 //
-// Pre-Amsterdam: always 21,000 (matches historical behavior).
-// Amsterdam: 21,000 + (112·cpsb if empty) + 10% buffer, covering both the
-// EIP-2780 intrinsic state-gas charge on empty recipients and the txpool's
-// 110% intrinsic-regular check.
+// Base: TxPool.MinIntrinsicGas (21,000 today; will follow EIP-2780 reduction).
+// Empty recipient on Amsterdam: + AccountCreationSize·cpsb (EIP-8037 state
+// gas for new account creation). EIP-2780 will eventually replace the
+// cpsb-based surcharge with a flat GAS_NEW_ACCOUNT (25,000) charge — handled
+// at the same call site once the EL ships 2780.
 func (pool *WalletPool) FundingGasFor(isEmpty bool) uint64 {
 	if pool.config.FundingGasLimit != 0 {
 		return pool.config.FundingGasLimit
 	}
-	cpsb := pool.txpool.GetCostPerStateByte()
-	if cpsb == 0 {
-		return 21_000
-	}
-	base := uint64(21_000)
+	base := pool.txpool.MinIntrinsicGas()
 	if isEmpty {
-		base += AccountCreationSize * cpsb
+		if cpsb := pool.txpool.GetCostPerStateByte(); cpsb > 0 {
+			base += AccountCreationSize * cpsb
+		}
 	}
-	return base * txpoolBufferNum / txpoolBufferDenom
+	return base
 }
 
 // GetFundingGasLimit returns the gas limit for a worst-case (empty target)
@@ -335,16 +335,13 @@ func (pool *WalletPool) batcherGasFor(req *FundingRequest) uint64 {
 	if req.IsEmpty {
 		base += AccountCreationSize * cpsb
 	}
-	return base * txpoolBufferNum / txpoolBufferDenom
+	return base
 }
 
 // batcherBaseGas returns the per-batch overhead (tx intrinsic + batcher
-// dispatch). On Amsterdam the baseline must also cover the 110% txpool buffer
-// on the 21,000 regular intrinsic, so we bump from 50k to 65k.
+// dispatch). Currently a flat constant; kept as a method so EIP-2780's
+// reduced base intrinsic can be folded in here once activated.
 func (pool *WalletPool) batcherBaseGas() uint64 {
-	if pool.txpool.IsAmsterdam() {
-		return 65_000
-	}
 	return BatcherBaseGas
 }
 
@@ -419,8 +416,6 @@ func fallbackDeployGas(initcodeLen int, isAmsterdam bool, cpsb uint64) uint64 {
 		out += AccountCreationSize * cpsb
 		// Per-byte state gas for code deposit (upper bound: deployed == initcode).
 		out += n * cpsb
-		// Txpool 10/9 buffer so the outer tx clears the pool's intrinsic floor.
-		out = out * txpoolBufferNum / txpoolBufferDenom
 	} else {
 		// Pre-Amsterdam intrinsic for contract creation (53k includes CreateGas 32k).
 		out += 50_000

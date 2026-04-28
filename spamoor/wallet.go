@@ -820,9 +820,8 @@ func (wallet *Wallet) GetNonceGaps() []uint64 {
 
 // BuildFillerTx creates a simple self-transfer transaction to fill a nonce gap.
 // The transaction sends 0 value to the wallet's own address.
-// Callers pass the target gas value; on Amsterdam chains the txpool rejects
-// raw 21,000 because of the 10/9 intrinsic buffer, so pool-level callers
-// must use TxPool.MinIntrinsicGas instead of hardcoding a value.
+// Callers pass the target gas value; pool-level callers should use
+// TxPool.MinIntrinsicGas so they automatically follow EIP-2780 once it ships.
 func (wallet *Wallet) BuildFillerTx(nonce uint64, gasTipCap, gasFeeCap *big.Int, gas uint64) (*types.Transaction, error) {
 	txData := &types.DynamicFeeTx{
 		ChainID:   wallet.chainid,

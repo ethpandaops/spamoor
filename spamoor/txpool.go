@@ -44,14 +44,6 @@ const (
 	// 100M+ gas limits equals or exceeds this floor, making the clamp a
 	// no-op.
 	cpsbFloor = 1174
-
-	// txpoolBufferNum/Denom mirrors the 10/9 (≈111.1%) buffer the Amsterdam
-	// txpool enforces on the regular-gas intrinsic (see
-	// core/txpool/validation.go: `tx.Gas() < (intrGas.RegularGas*10)/9`).
-	// We apply the same factor so tx.Gas == (base*10)/9 exactly meets the
-	// pool's `<` check and passes.
-	txpoolBufferNum   = 10
-	txpoolBufferDenom = 9
 )
 
 // computeCostPerStateByte implements the EIP-8037 cost_per_state_byte formula.
@@ -1627,16 +1619,20 @@ func (pool *TxPool) MaxTxGas() uint64 {
 	return cap
 }
 
-// MinIntrinsicGas returns the smallest tx.Gas value the current chain's
-// txpool will accept for a basic value transfer that triggers no state
-// creation (non-empty recipient, zero or non-zero value, no calldata).
-// Pre-Amsterdam this is the historic 21,000; on Amsterdam chains it is the
-// 10/9 floor the EIP-8037 txpool validator enforces.
+// MinIntrinsicGas returns the base intrinsic gas cost for a simple ETH
+// transfer to an existing recipient (no calldata, no account creation).
+// This is the minimum tx.Gas value any transaction must set, and the value
+// our filler / funding paths use as the per-tx baseline.
+//
+// Currently always returns 21,000. Geth removed the prior +10% txpool
+// intrinsic buffer, so the raw base cost is what the validator enforces.
+//
+// EIP-2780 (Reduce intrinsic transaction gas) will lower this base cost
+// once activated (4,500 base + accessory charges that vary by tx shape;
+// ~7,756 for a value transfer to an existing account). Centralized here
+// so consumers update through a single method when EL clients ship 2780.
 func (pool *TxPool) MinIntrinsicGas() uint64 {
-	if !pool.IsAmsterdam() {
-		return 21_000
-	}
-	return 21_000 * txpoolBufferNum / txpoolBufferDenom
+	return 21_000
 }
 
 // GetCurrentBaseFee returns the current base fee of the chain.

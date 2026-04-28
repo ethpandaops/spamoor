@@ -230,6 +230,13 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	pairFundingAmount := uint256.NewInt(0)
 	var pairSalt [32]byte
 
+	// Track which post-deploy Rely calls still need to be made, mirroring the
+	// `redeploy || deployerNonce <= contractNonce` resume guard used for the
+	// creation txs above. The Rely txs are built later (Phase 2) so that
+	// eth_estimateGas runs against the real on-chain Dai code.
+	pendingRelyOwner := make([]bool, u.options.DaiPairs)
+	pendingRelyLP := make([]bool, u.options.DaiPairs)
+
 	for i := uint64(0); i < u.options.DaiPairs; i++ {
 		pairInfo := &PairDeploymentInfo{}
 
@@ -259,36 +266,11 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			return nil, fmt.Errorf("could not create instance of Dai: %w", err)
 		}
 
-		// make owner wallet a minter for the Dai
-		if redeploy || deployerNonce <= contractNonce {
-			tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-				GasFeeCap: uint256.MustFromBig(feeCap),
-				GasTipCap: uint256.MustFromBig(tipCap),
-				Value:     uint256.NewInt(0),
-			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return pairInfo.Dai.Rely(transactOpts, u.walletPool.GetRootWallet().GetWallet().GetAddress())
-			})
-			if err != nil {
-				return nil, fmt.Errorf("could not make owner wallet a minter for the Dai: %w", err)
-			}
-			deploymentTxs = append(deploymentTxs, tx)
-		}
+		// Reserve nonce slots for the two Rely calls; record which ones are
+		// still pending so Phase 2 only rebuilds the missing ones on resume.
+		pendingRelyOwner[i] = redeploy || deployerNonce <= contractNonce
 		contractNonce++
-
-		// make liquidity provider a minter for the Dai
-		if redeploy || deployerNonce <= contractNonce {
-			tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-				GasFeeCap: uint256.MustFromBig(feeCap),
-				GasTipCap: uint256.MustFromBig(tipCap),
-				Value:     uint256.NewInt(0),
-			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return pairInfo.Dai.Rely(transactOpts, deploymentInfo.LiquidityProviderAddr)
-			})
-			if err != nil {
-				return nil, fmt.Errorf("could not make liquidity provider a minter for the Dai: %w", err)
-			}
-			deploymentTxs = append(deploymentTxs, tx)
-		}
+		pendingRelyLP[i] = redeploy || deployerNonce <= contractNonce
 		contractNonce++
 
 		// get pair on factory A
@@ -341,6 +323,61 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			return nil, fmt.Errorf("could not send deployment txs: %w", err)
 		}
 		u.logger.Infof("contract deployment complete. (%v/%v)", len(deploymentTxs), len(deploymentTxs))
+	}
+
+	// Phase 2: post-deployment setup calls. Built only after the deployment
+	// batch has been mined so eth_estimateGas dispatches into the real
+	// contract code instead of treating the target as an EOA.
+	setupTxs := []*types.Transaction{}
+	for i, pairInfo := range deploymentInfo.Pairs {
+		// make owner wallet a minter for the Dai
+		if pendingRelyOwner[i] {
+			tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Value:     uint256.NewInt(0),
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return pairInfo.Dai.Rely(transactOpts, u.walletPool.GetRootWallet().GetWallet().GetAddress())
+			})
+			if err != nil {
+				return nil, fmt.Errorf("could not make owner wallet a minter for the Dai: %w", err)
+			}
+			setupTxs = append(setupTxs, tx)
+		}
+
+		// make liquidity provider a minter for the Dai
+		if pendingRelyLP[i] {
+			tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Value:     uint256.NewInt(0),
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return pairInfo.Dai.Rely(transactOpts, deploymentInfo.LiquidityProviderAddr)
+			})
+			if err != nil {
+				return nil, fmt.Errorf("could not make liquidity provider a minter for the Dai: %w", err)
+			}
+			setupTxs = append(setupTxs, tx)
+		}
+	}
+
+	if len(setupTxs) > 0 {
+		_, err := u.walletPool.GetTxPool().SendTransactionBatch(u.ctx, deployerWallet, setupTxs, &spamoor.BatchOptions{
+			SendTransactionOptions: spamoor.SendTransactionOptions{
+				Client:      client,
+				ClientGroup: u.options.ClientGroup,
+			},
+			MaxRetries:   3,
+			PendingLimit: 10,
+			LogFn: func(confirmedCount int, totalCount int) {
+				u.logger.Infof("running post-deployment setup... (%v/%v)", confirmedCount, totalCount)
+			},
+			LogInterval: 10,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("could not send post-deployment setup txs: %w", err)
+		}
+		u.logger.Infof("post-deployment setup complete. (%v/%v)", len(setupTxs), len(setupTxs))
 	}
 
 	// provide liquidity to the pairs
