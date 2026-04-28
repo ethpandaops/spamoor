@@ -268,10 +268,9 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 		return nil, client, err
 	}
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       2000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		_, deployTx, _, err := contract.DeployTestToken1155(transactOpts, client.GetEthClient())
@@ -380,7 +379,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       200000,
+		Gas:       300000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		if len(indexes) == 1 {

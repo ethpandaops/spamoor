@@ -140,8 +140,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		RefillBalance: uint256.NewInt(2000000000000000000), // 2 ETH
 	})
 
-	if s.options.GasLimit > utils.MaxGasLimitPerTx {
-		s.logger.Warnf("Gas limit %d exceeds %d and will most likely be dropped by the execution layer client", s.options.GasLimit, utils.MaxGasLimitPerTx)
+	if maxTx := s.walletPool.GetTxPool().MaxTxGas(); s.options.GasLimit > maxTx {
+		s.logger.Warnf("Gas limit %d exceeds per-tx cap %d and will most likely be dropped by the execution layer client", s.options.GasLimit, maxTx)
 	}
 
 	return nil

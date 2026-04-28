@@ -72,10 +72,9 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	// deploy WETH9
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       600000,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			_, deployTx, _, err := contract.DeployWETH9(transactOpts, client.GetEthClient())
@@ -99,10 +98,9 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	// deploy two uniswap factories
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       3100000,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			_, deployTx, _, err := contract.DeployUniswapV2Factory(transactOpts, client.GetEthClient(), ownerWallet.GetAddress())
@@ -125,10 +123,9 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	}
 
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       3100000,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			_, deployTx, _, err := contract.DeployUniswapV2Factory(transactOpts, client.GetEthClient(), ownerWallet.GetAddress())
@@ -152,10 +149,9 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	// deploy two uniswap routers
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       5000000,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			_, deployTx, _, err := contract.DeployUniswapV2Router02(transactOpts, client.GetEthClient(), deploymentInfo.UniswapFactoryAAddr, deploymentInfo.Weth9Addr)
@@ -178,10 +174,9 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	}
 
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       5000000,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			_, deployTx, _, err := contract.DeployUniswapV2Router02(transactOpts, client.GetEthClient(), deploymentInfo.UniswapFactoryBAddr, deploymentInfo.Weth9Addr)
@@ -205,10 +200,9 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	// deploy pair liquidity provider
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       800000,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			_, deployTx, _, err := contract.DeployPairLiquidityProvider(transactOpts, client.GetEthClient(), ownerWallet.GetAddress(), u.walletPool.GetRootWallet().GetWallet().GetAddress(), deploymentInfo.UniswapRouterAAddr, deploymentInfo.UniswapRouterBAddr, deploymentInfo.Weth9Addr)
@@ -236,15 +230,21 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	pairFundingAmount := uint256.NewInt(0)
 	var pairSalt [32]byte
 
+	// Track which post-deploy Rely calls still need to be made, mirroring the
+	// `redeploy || deployerNonce <= contractNonce` resume guard used for the
+	// creation txs above. The Rely txs are built later (Phase 2) so that
+	// eth_estimateGas runs against the real on-chain Dai code.
+	pendingRelyOwner := make([]bool, u.options.DaiPairs)
+	pendingRelyLP := make([]bool, u.options.DaiPairs)
+
 	for i := uint64(0); i < u.options.DaiPairs; i++ {
 		pairInfo := &PairDeploymentInfo{}
 
 		// deploy Dai
 		if redeploy || deployerNonce <= contractNonce {
-			tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+			tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
-				Gas:       2000000,
 				Value:     uint256.NewInt(0),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 				_, deployTx, _, err := contract.DeployDai(transactOpts, client.GetEthClient(), deployerWallet.GetChainId())
@@ -266,38 +266,11 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			return nil, fmt.Errorf("could not create instance of Dai: %w", err)
 		}
 
-		// make owner wallet a minter for the Dai
-		if redeploy || deployerNonce <= contractNonce {
-			tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
-				GasFeeCap: uint256.MustFromBig(feeCap),
-				GasTipCap: uint256.MustFromBig(tipCap),
-				Gas:       200000,
-				Value:     uint256.NewInt(0),
-			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return pairInfo.Dai.Rely(transactOpts, u.walletPool.GetRootWallet().GetWallet().GetAddress())
-			})
-			if err != nil {
-				return nil, fmt.Errorf("could not make owner wallet a minter for the Dai: %w", err)
-			}
-			deploymentTxs = append(deploymentTxs, tx)
-		}
+		// Reserve nonce slots for the two Rely calls; record which ones are
+		// still pending so Phase 2 only rebuilds the missing ones on resume.
+		pendingRelyOwner[i] = redeploy || deployerNonce <= contractNonce
 		contractNonce++
-
-		// make liquidity provider a minter for the Dai
-		if redeploy || deployerNonce <= contractNonce {
-			tx, err := deployerWallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
-				GasFeeCap: uint256.MustFromBig(feeCap),
-				GasTipCap: uint256.MustFromBig(tipCap),
-				Gas:       200000,
-				Value:     uint256.NewInt(0),
-			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return pairInfo.Dai.Rely(transactOpts, deploymentInfo.LiquidityProviderAddr)
-			})
-			if err != nil {
-				return nil, fmt.Errorf("could not make liquidity provider a minter for the Dai: %w", err)
-			}
-			deploymentTxs = append(deploymentTxs, tx)
-		}
+		pendingRelyLP[i] = redeploy || deployerNonce <= contractNonce
 		contractNonce++
 
 		// get pair on factory A
@@ -352,6 +325,61 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 		u.logger.Infof("contract deployment complete. (%v/%v)", len(deploymentTxs), len(deploymentTxs))
 	}
 
+	// Phase 2: post-deployment setup calls. Built only after the deployment
+	// batch has been mined so eth_estimateGas dispatches into the real
+	// contract code instead of treating the target as an EOA.
+	setupTxs := []*types.Transaction{}
+	for i, pairInfo := range deploymentInfo.Pairs {
+		// make owner wallet a minter for the Dai
+		if pendingRelyOwner[i] {
+			tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Value:     uint256.NewInt(0),
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return pairInfo.Dai.Rely(transactOpts, u.walletPool.GetRootWallet().GetWallet().GetAddress())
+			})
+			if err != nil {
+				return nil, fmt.Errorf("could not make owner wallet a minter for the Dai: %w", err)
+			}
+			setupTxs = append(setupTxs, tx)
+		}
+
+		// make liquidity provider a minter for the Dai
+		if pendingRelyLP[i] {
+			tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Value:     uint256.NewInt(0),
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return pairInfo.Dai.Rely(transactOpts, deploymentInfo.LiquidityProviderAddr)
+			})
+			if err != nil {
+				return nil, fmt.Errorf("could not make liquidity provider a minter for the Dai: %w", err)
+			}
+			setupTxs = append(setupTxs, tx)
+		}
+	}
+
+	if len(setupTxs) > 0 {
+		_, err := u.walletPool.GetTxPool().SendTransactionBatch(u.ctx, deployerWallet, setupTxs, &spamoor.BatchOptions{
+			SendTransactionOptions: spamoor.SendTransactionOptions{
+				Client:      client,
+				ClientGroup: u.options.ClientGroup,
+			},
+			MaxRetries:   3,
+			PendingLimit: 10,
+			LogFn: func(confirmedCount int, totalCount int) {
+				u.logger.Infof("running post-deployment setup... (%v/%v)", confirmedCount, totalCount)
+			},
+			LogInterval: 10,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("could not send post-deployment setup txs: %w", err)
+		}
+		u.logger.Infof("post-deployment setup complete. (%v/%v)", len(setupTxs), len(setupTxs))
+	}
+
 	// provide liquidity to the pairs
 	rootWallet := u.walletPool.GetRootWallet()
 	err = rootWallet.WithWalletLock(u.ctx, len(deploymentInfo.Pairs), pairFundingAmount, u.walletPool.GetClientPool(), func(reason string) {
@@ -361,10 +389,9 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 		daiLiquidity := new(big.Int).Mul(u.options.EthLiquidityPerPair.ToBig(), big.NewInt(int64(u.options.DaiLiquidityFactor)))
 
 		for _, pairInfo := range deploymentInfo.Pairs {
-			tx, err := rootWallet.GetWallet().BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+			tx, err := rootWallet.GetWallet().BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
-				Gas:       6000000,
 				Value:     u.options.EthLiquidityPerPair,
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 				return deploymentInfo.LiquidityProvider.ProvidePairLiquidity(transactOpts, pairInfo.DaiAddr, daiLiquidity)

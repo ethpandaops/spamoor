@@ -194,10 +194,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	// Distribute tokens to wallets for parallel execution
 	// Calculate how many wallets we might need based on gas limits
-	blockGasLimit, err := s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
-	if err != nil {
-		return fmt.Errorf("failed to get current gas limit: %w", err)
-	}
+	blockGasLimit := s.walletPool.GetTxPool().GetCurrentGasLimit()
 	totalTargetGas := uint64(float64(blockGasLimit) * s.options.TargetGasRatio)
 	maxSplits := (totalTargetGas + utils.MaxGasLimitPerTx - 1) / utils.MaxGasLimitPerTx // ceiling division
 	walletsNeeded := int(maxSplits) + 1                                                 // +1 for deployer wallet
@@ -241,10 +238,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	// Query network gas limit (reuse existing if already fetched)
 	if blockGasLimit == 0 {
-		blockGasLimit, err = s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
-		if err != nil {
-			return fmt.Errorf("failed to get current gas limit: %w", err)
-		}
+		blockGasLimit = s.walletPool.GetTxPool().GetCurrentGasLimit()
 	}
 
 	// Calculate target addresses needed (each address = 2 storage slots = 64 bytes)
@@ -576,10 +570,9 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 		return nil, nil, fmt.Errorf("failed to get suggested fees: %w", err)
 	}
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       2000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		_, deployTx, _, err := contract.DeployERC20Bloater(transactOpts, client.GetEthClient(), initialSupply)

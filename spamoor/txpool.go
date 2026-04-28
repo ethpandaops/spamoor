@@ -44,14 +44,6 @@ const (
 	// 100M+ gas limits equals or exceeds this floor, making the clamp a
 	// no-op.
 	cpsbFloor = 1174
-
-	// txpoolBufferNum/Denom mirrors the 10/9 (≈111.1%) buffer the Amsterdam
-	// txpool enforces on the regular-gas intrinsic (see
-	// core/txpool/validation.go: `tx.Gas() < (intrGas.RegularGas*10)/9`).
-	// We apply the same factor so tx.Gas == (base*10)/9 exactly meets the
-	// pool's `<` check and passes.
-	txpoolBufferNum   = 10
-	txpoolBufferDenom = 9
 )
 
 // computeCostPerStateByte implements the EIP-8037 cost_per_state_byte formula.
@@ -242,14 +234,9 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 		pool.reorgDepth = options.ReorgDepth
 	}
 
-	// Eager head-block load so the first wallet-funding / scenario initialization
-	// sees up-to-date gas limit, base fee, and Amsterdam activation state without
-	// having to wait for the 3-second poll cadence. Failure here is non-fatal:
-	// the same data is populated lazily on the first processBlock or on demand
-	// via GetCurrentGasLimitWithInit / GetCurrentBaseFeeWithInit.
-	if err := pool.initBlockStats(); err != nil {
-		logrus.WithError(err).Warn("initial head block load failed, falling back to lazy init")
-	}
+	// Block stats (gas limit, base fee, Amsterdam activation) are loaded by the
+	// caller via InitializeBlockStats before any scenario starts. Construction
+	// itself does not perform RPC calls.
 
 	go pool.runTxPoolLoop()
 	go pool.processStaleTransactionsLoop()
@@ -1591,12 +1578,10 @@ func (pool *TxPool) IsAmsterdam() bool {
 	return pool.isAmsterdam
 }
 
-// HasObservedHead reports whether the pool has loaded or processed at least
-// one head block (via initBlockStats or processBlock). Callers that need to
-// distinguish "chain state not yet known" from "chain is confirmed
-// pre-Amsterdam" should gate on this in addition to IsAmsterdam. Returns
-// false during the startup window when initBlockStats failed (e.g. no client
-// available yet) and no block has been processed.
+// HasObservedHead reports whether the pool has loaded chain state via
+// InitializeBlockStats or processBlock. With the current startup sequence this
+// always returns true once scenarios are running; the method is retained for
+// plugin ABI compatibility.
 func (pool *TxPool) HasObservedHead() bool {
 	pool.blockStatsMutex.RLock()
 	defer pool.blockStatsMutex.RUnlock()
@@ -1604,8 +1589,9 @@ func (pool *TxPool) HasObservedHead() bool {
 }
 
 // GetCostPerStateByte returns the current EIP-8037 cost_per_state_byte,
-// computed from the latest observed block gas limit. Returns 0 pre-Amsterdam
-// or before the first block has been seen.
+// computed from the latest observed block gas limit. Returns 0 pre-Amsterdam.
+// Block stats are populated by InitializeBlockStats during startup, so callers
+// can rely on this returning live chain state once scenarios are running.
 func (pool *TxPool) GetCostPerStateByte() uint64 {
 	pool.blockStatsMutex.RLock()
 	defer pool.blockStatsMutex.RUnlock()
@@ -1615,16 +1601,38 @@ func (pool *TxPool) GetCostPerStateByte() uint64 {
 	return computeCostPerStateByte(pool.currentGasLimit)
 }
 
-// MinIntrinsicGas returns the smallest tx.Gas value the current chain's
-// txpool will accept for a basic value transfer that triggers no state
-// creation (non-empty recipient, zero or non-zero value, no calldata).
-// Pre-Amsterdam this is the historic 21,000; on Amsterdam chains it is the
-// 10/9 floor the EIP-8037 txpool validator enforces.
-func (pool *TxPool) MinIntrinsicGas() uint64 {
-	if !pool.IsAmsterdam() {
-		return 21_000
+// MaxTxGas returns the effective per-tx gas cap for the connected chain.
+// On Amsterdam chains, EIP-8037 constrains only regular_gas (formerly
+// "compute gas") to EIP-7825's TX_MAX_GAS_LIMIT (16,777,216); total tx.gas
+// may grow up to the block gas limit when state_gas dominates (e.g. large
+// contract deployments). Pre-Amsterdam the cap is utils.MaxGasLimitPerTx,
+// clamped to the block limit on chains whose block limit is below 16.7M.
+func (pool *TxPool) MaxTxGas() uint64 {
+	blockLimit := pool.GetCurrentGasLimit()
+	if pool.IsAmsterdam() {
+		return blockLimit
 	}
-	return 21_000 * txpoolBufferNum / txpoolBufferDenom
+	cap := uint64(utils.MaxGasLimitPerTx)
+	if blockLimit > 0 && blockLimit < cap {
+		cap = blockLimit
+	}
+	return cap
+}
+
+// MinIntrinsicGas returns the base intrinsic gas cost for a simple ETH
+// transfer to an existing recipient (no calldata, no account creation).
+// This is the minimum tx.Gas value any transaction must set, and the value
+// our filler / funding paths use as the per-tx baseline.
+//
+// Currently always returns 21,000. Geth removed the prior +10% txpool
+// intrinsic buffer, so the raw base cost is what the validator enforces.
+//
+// EIP-2780 (Reduce intrinsic transaction gas) will lower this base cost
+// once activated (4,500 base + accessory charges that vary by tx shape;
+// ~7,756 for a value transfer to an existing account). Centralized here
+// so consumers update through a single method when EL clients ship 2780.
+func (pool *TxPool) MinIntrinsicGas() uint64 {
+	return 21_000
 }
 
 // GetCurrentBaseFee returns the current base fee of the chain.
@@ -1666,12 +1674,16 @@ func (pool *TxPool) getWindowAvgBaseFee() *big.Int {
 	return sum.Div(sum, big.NewInt(int64(count)))
 }
 
-// GetCurrentGasLimitWithInit returns the current gas limit, initializing it from RPC if needed.
-// This is a convenience method that combines GetCurrentGasLimit and InitializeGasLimit.
+// GetCurrentGasLimitWithInit returns the current gas limit. With the current
+// startup sequence (InitializeBlockStats runs before scenarios start) the
+// state is always populated, but the lazy-init fallback is retained for
+// plugin ABI compatibility.
 func (pool *TxPool) GetCurrentGasLimitWithInit() (uint64, error) {
 	gasLimit := pool.GetCurrentGasLimit()
 	if gasLimit == 0 {
-		if err := pool.initBlockStats(); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := pool.tryInitBlockStats(ctx); err != nil {
 			return 0, err
 		}
 		gasLimit = pool.GetCurrentGasLimit()
@@ -1679,11 +1691,16 @@ func (pool *TxPool) GetCurrentGasLimitWithInit() (uint64, error) {
 	return gasLimit, nil
 }
 
-// GetCurrentBaseFeeWithInit returns the current base fee, initializing it from RPC if needed.
+// GetCurrentBaseFeeWithInit returns the current base fee. With the current
+// startup sequence (InitializeBlockStats runs before scenarios start) the
+// state is always populated, but the lazy-init fallback is retained for
+// plugin ABI compatibility.
 func (pool *TxPool) GetCurrentBaseFeeWithInit() (*big.Int, error) {
 	baseFee := pool.GetCurrentBaseFee()
 	if baseFee == nil {
-		if err := pool.initBlockStats(); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := pool.tryInitBlockStats(ctx); err != nil {
 			return nil, err
 		}
 		baseFee = pool.GetCurrentBaseFee()
@@ -1691,28 +1708,57 @@ func (pool *TxPool) GetCurrentBaseFeeWithInit() (*big.Int, error) {
 	return baseFee, nil
 }
 
-// initBlockStats fetches the current block stats from the network if not already set.
-// This is useful during startup when the pool hasn't processed any blocks yet.
-func (pool *TxPool) initBlockStats() error {
+// InitializeBlockStats fetches the current block stats from the network and
+// must be called once during startup, after the client pool is prepared and
+// before any scenario starts using the txpool. It blocks (with backoff) until
+// either a head block is loaded or ctx is cancelled, so that downstream code
+// can rely on GetCurrentBaseFee / GetCurrentGasLimit / IsAmsterdam returning
+// real chain state. The call is idempotent: a second invocation with already
+// populated state returns immediately.
+func (pool *TxPool) InitializeBlockStats(ctx context.Context) error {
+	backoff := 100 * time.Millisecond
+	const maxBackoff = 2 * time.Second
+	for {
+		err := pool.tryInitBlockStats(ctx)
+		if err == nil {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("failed to initialize block stats: %w (last error: %v)", ctx.Err(), err)
+		case <-time.After(backoff):
+		}
+
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+}
+
+// tryInitBlockStats performs a single attempt to fetch the latest block and
+// populate the txpool's chain-state fields. Returns immediately with nil if
+// the state is already populated.
+func (pool *TxPool) tryInitBlockStats(ctx context.Context) error {
 	pool.blockStatsMutex.Lock()
 	defer pool.blockStatsMutex.Unlock()
 
-	// If we already have a gas limit, don't fetch it again
 	if pool.currentGasLimit > 0 && pool.currentBaseFee != nil {
 		return nil
 	}
 
-	// Try to get a non-builder client to fetch the latest block
 	client := pool.options.ClientPool.GetClient(WithoutBuilder())
 	if client == nil {
 		return fmt.Errorf("no non-builder client available to fetch gas limit")
 	}
 
-	// Fetch the latest block to get the gas limit
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	latestBlock, err := client.client.BlockByNumber(ctx, nil)
+	latestBlock, err := client.client.BlockByNumber(fetchCtx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to fetch latest block for gas limit: %w", err)
 	}
@@ -1974,11 +2020,7 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transa
 
 // fillNonceGaps creates and submits dummy transactions to fill nonce gaps.
 func (pool *TxPool) fillNonceGaps(ctx context.Context, wallet *Wallet, gaps []uint64, baseOptions *SendTransactionOptions) {
-	// Get current gas prices from the pool
 	baseFee := pool.GetCurrentBaseFee()
-	if baseFee == nil {
-		baseFee = big.NewInt(1e9) // fallback to 1 gwei
-	}
 
 	// Use 2x base fee for fee cap and reasonable tip
 	gasFeeCap := new(big.Int).Mul(baseFee, big.NewInt(2))

@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/utils"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 )
@@ -463,6 +464,103 @@ func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMeta
 	return tx, nil
 }
 
+// BuildBoundTxWithEstimate is a gas-estimating variant of BuildBoundTx for
+// deployment paths (and other large infrequent calls like factory deploys)
+// where static gas guesses tend to under-allocate under EIP-8037 state
+// creation costs. Flow:
+//  1. Build the tx with a large placeholder gas so abigen does not try to
+//     self-estimate.
+//  2. Run eth_estimateGas against the resulting {from, to, data, value}.
+//  3. Apply the live Amsterdam/cpsb-aware buffer to the RPC result.
+//  4. Clamp to the current block gas limit so the tx isn't doomed to be
+//     skipped for "gas limit reached" at block building time.
+//  5. Re-sign the tx with the refined gas at the same nonce.
+//
+// If txData.Gas is non-zero, the explicit value is honored and estimation is
+// skipped — matches BuildBoundTx semantics and provides an override for
+// operators. If the RPC round-trip fails, a size-based formula fallback is
+// used (conservative on the high side since deploys are rare init steps).
+//
+// Works for both contract creation (tx.To() == nil) and call txs (e.g.,
+// CREATE2 via factory). Only supports DynamicFeeTx tx types; other types
+// return the placeholder-sized tx unchanged.
+//
+// Pass the wallet pool's TxPool so Amsterdam activation state, current
+// cost-per-state-byte, and block gas limit are read from live chain state
+// instead of being hardcoded conservatively.
+func (wallet *Wallet) BuildBoundTxWithEstimate(
+	ctx context.Context,
+	client *Client,
+	txpool *TxPool,
+	txData *txbuilder.TxMetadata,
+	buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error),
+) (*types.Transaction, error) {
+	explicitGas := txData.Gas
+	// Placeholder large enough that abigen's deploy helpers don't error.
+	// On Amsterdam, EIP-7825 caps regular gas at MaxTxGas=16M; we use that.
+	placeholderGas := uint64(16_000_000)
+	if explicitGas != 0 {
+		placeholderGas = explicitGas
+	}
+	txData.Gas = placeholderGas
+
+	tx, err := wallet.BuildBoundTx(ctx, txData, buildFn)
+	txData.Gas = explicitGas // restore; don't mutate the caller's metadata
+	if err != nil {
+		return nil, err
+	}
+	if explicitGas != 0 {
+		return tx, nil
+	}
+	if tx.Type() != types.DynamicFeeTxType {
+		return tx, nil
+	}
+
+	var (
+		isAmsterdam bool
+		cpsb        uint64
+		blockLimit  uint64
+		maxTxGas    uint64
+		logger      logrus.FieldLogger
+	)
+	if txpool != nil {
+		isAmsterdam = txpool.IsAmsterdam()
+		cpsb = txpool.GetCostPerStateByte()
+		blockLimit = txpool.GetCurrentGasLimit()
+		maxTxGas = txpool.MaxTxGas()
+	} else {
+		// No pool context — use the safe-upper-bound defaults.
+		isAmsterdam = true
+		cpsb = cpsbFloor
+		maxTxGas = utils.MaxGasLimitPerTx
+	}
+	refinedGas := estimateTxGas(ctx, client, wallet.GetAddress(), tx.To(), tx.Value(), tx.Data(), isAmsterdam, cpsb, maxTxGas, logger)
+
+	// Clamp at min(blockLimit, maxTxGas). estimateTxGas already applies the
+	// per-tx cap; this re-clamp guards the rare case where blockLimit is
+	// smaller than the cap (very low-gas-limit test chains).
+	cap := maxTxGas
+	if blockLimit > 0 && blockLimit < cap {
+		cap = blockLimit
+	}
+	if refinedGas > cap {
+		refinedGas = cap
+	}
+
+	newInner := &types.DynamicFeeTx{
+		ChainID:    tx.ChainId(),
+		Nonce:      tx.Nonce(),
+		GasTipCap:  tx.GasTipCap(),
+		GasFeeCap:  tx.GasFeeCap(),
+		Gas:        refinedGas,
+		To:         tx.To(),
+		Value:      tx.Value(),
+		Data:       tx.Data(),
+		AccessList: tx.AccessList(),
+	}
+	return wallet.signTx(newInner)
+}
+
 // ReplaceDynamicFeeTx builds a replacement dynamic fee transaction with a specific nonce.
 // This is useful for replacing stuck transactions with higher gas prices.
 func (wallet *Wallet) ReplaceDynamicFeeTx(txData *types.DynamicFeeTx, nonce uint64) (*types.Transaction, error) {
@@ -722,9 +820,8 @@ func (wallet *Wallet) GetNonceGaps() []uint64 {
 
 // BuildFillerTx creates a simple self-transfer transaction to fill a nonce gap.
 // The transaction sends 0 value to the wallet's own address.
-// Callers pass the target gas value; on Amsterdam chains the txpool rejects
-// raw 21,000 because of the 10/9 intrinsic buffer, so pool-level callers
-// must use TxPool.MinIntrinsicGas instead of hardcoding a value.
+// Callers pass the target gas value; pool-level callers should use
+// TxPool.MinIntrinsicGas so they automatically follow EIP-2780 once it ships.
 func (wallet *Wallet) BuildFillerTx(nonce uint64, gasTipCap, gasFeeCap *big.Int, gas uint64) (*types.Transaction, error) {
 	txData := &types.DynamicFeeTx{
 		ChainID:   wallet.chainid,

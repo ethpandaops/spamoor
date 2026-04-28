@@ -75,7 +75,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Rebroadcast:       1,
 	BaseFee:           20,
 	TipFee:            2,
-	DeployGasLimit:    2000000,
+	DeployGasLimit:    0,
 	GasLimit:          1000000,
 	Amount:            0,
 	RandomAmount:      false,
@@ -177,11 +177,12 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if s.options.DeployGasLimit > utils.MaxGasLimitPerTx {
-		s.logger.Warnf("Deploy gas limit %d exceeds %d and will most likely be dropped by the execution layer client", s.options.DeployGasLimit, utils.MaxGasLimitPerTx)
+	maxTx := s.walletPool.GetTxPool().MaxTxGas()
+	if s.options.DeployGasLimit > maxTx {
+		s.logger.Warnf("Deploy gas limit %d exceeds per-tx cap %d and will most likely be dropped by the execution layer client", s.options.DeployGasLimit, maxTx)
 	}
-	if s.options.GasLimit > utils.MaxGasLimitPerTx {
-		s.logger.Warnf("Gas limit %d exceeds %d and will most likely be dropped by the execution layer client", s.options.GasLimit, utils.MaxGasLimitPerTx)
+	if s.options.GasLimit > maxTx {
+		s.logger.Warnf("Gas limit %d exceeds per-tx cap %d and will most likely be dropped by the execution layer client", s.options.GasLimit, maxTx)
 	}
 
 	// Validate contract source options (mutually exclusive)
@@ -407,10 +408,14 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, contractCode []byte) (*
 		deployData = append(deployData, common.FromHex(s.options.ContractArgs)...)
 	}
 
+	deployGas := s.options.DeployGasLimit
+	if deployGas == 0 {
+		deployGas = s.walletPool.EstimateDeployGas(ctx, client, wallet.GetAddress(), uint256.NewInt(0), deployData)
+	}
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.DeployGasLimit,
+		Gas:       deployGas,
 		To:        nil,
 		Value:     uint256.NewInt(0),
 		Data:      deployData,
@@ -464,18 +469,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	// Determine gas limit: use block gas limit if GasLimit is 0
 	gasLimit := s.options.GasLimit
 	if gasLimit == 0 {
-		var err error
-		gasLimit, err = s.walletPool.GetTxPool().GetCurrentGasLimitWithInit()
-		if err != nil {
-			s.logger.Warnf("tx %6d: failed to fetch current gas limit: %v, using fallback", txIdx+1, err)
-			gasLimit = utils.MaxGasLimitPerTx
-		} else if gasLimit == 0 {
-			// Final fallback to a reasonable default if no block gas limit is available
-			gasLimit = utils.MaxGasLimitPerTx
-			s.logger.Warnf("tx %6d: no gas limit available, using fallback %v", txIdx+1, gasLimit)
-		} else {
-			s.logger.Debugf("tx %6d: using block gas limit %v", txIdx+1, gasLimit)
-		}
+		gasLimit = s.walletPool.GetTxPool().GetCurrentGasLimit()
+		s.logger.Debugf("tx %6d: using block gas limit %v", txIdx+1, gasLimit)
 	}
 
 	amount := uint256.NewInt(s.options.Amount)

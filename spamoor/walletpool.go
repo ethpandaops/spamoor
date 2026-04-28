@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -281,41 +282,34 @@ func (pool *WalletPool) SetRefillInterval(interval uint64) {
 // SetFundingGasLimit sets an explicit per-recipient gas limit for wallet
 // funding transactions, overriding the automatic Amsterdam/EIP-8037 detection.
 // Use 100000+ for L2 chains like Arbitrum/Optimism. When set to 0 (default),
-// spamoor derives the limit from the current chain state: 21,000 pre-Amsterdam,
-// and TxGas + AccountCreationSize·cpsb for empty-target funding under EIP-8037.
+// spamoor derives the limit from the current chain state: TxPool.MinIntrinsicGas
+// (21,000 today; reduced once EIP-2780 ships), plus AccountCreationSize·cpsb
+// for empty-target funding under EIP-8037.
 func (pool *WalletPool) SetFundingGasLimit(gasLimit uint64) {
 	pool.config.FundingGasLimit = gasLimit
 }
 
 // FundingGasFor returns the gas limit for a single direct EOA funding tx to a
 // target with the given emptiness. Honors an explicit SetFundingGasLimit
-// override when configured; otherwise computes from live chain state.
+// override when configured; otherwise computes from live chain state, which
+// is guaranteed populated by InitializeBlockStats during startup.
 //
-// Pre-Amsterdam: always 21,000 (matches historical behavior).
-// Amsterdam: 21,000 + (112·cpsb if empty) + 10% buffer, covering both the
-// EIP-2780 intrinsic state-gas charge on empty recipients and the txpool's
-// 110% intrinsic-regular check.
-//
-// Startup race: on a chain where Amsterdam is active at genesis, IsAmsterdam
-// is false until the first block is observed. If funding runs before that,
-// cpsb is 0 and we'd fall back to pre-Amsterdam sizing — producing txs whose
-// gas limit is far below the node's actual intrinsic charge. We instead use
-// cpsbFloor (the hardcoded devnet value) whenever we haven't yet observed a
-// head block, so worst-case on a truly pre-Amsterdam chain we simply
-// over-reserve gas until the first block confirms pre-Amsterdam state.
+// Base: TxPool.MinIntrinsicGas (21,000 today; will follow EIP-2780 reduction).
+// Empty recipient on Amsterdam: + AccountCreationSize·cpsb (EIP-8037 state
+// gas for new account creation). EIP-2780 will eventually replace the
+// cpsb-based surcharge with a flat GAS_NEW_ACCOUNT (25,000) charge — handled
+// at the same call site once the EL ships 2780.
 func (pool *WalletPool) FundingGasFor(isEmpty bool) uint64 {
 	if pool.config.FundingGasLimit != 0 {
 		return pool.config.FundingGasLimit
 	}
-	cpsb := pool.effectiveCpsb()
-	if cpsb == 0 {
-		return 21_000
-	}
-	base := uint64(21_000)
+	base := pool.txpool.MinIntrinsicGas()
 	if isEmpty {
-		base += AccountCreationSize * cpsb
+		if cpsb := pool.txpool.GetCostPerStateByte(); cpsb > 0 {
+			base += AccountCreationSize * cpsb
+		}
 	}
-	return base * txpoolBufferNum / txpoolBufferDenom
+	return base
 }
 
 // GetFundingGasLimit returns the gas limit for a worst-case (empty target)
@@ -328,13 +322,12 @@ func (pool *WalletPool) GetFundingGasLimit() uint64 {
 // batcherGasFor returns the per-recipient gas contribution for a single
 // funding request inside the batcher contract. Honors an explicit
 // SetFundingGasLimit override when it exceeds BatcherDefaultGasPerTx;
-// otherwise computes from live chain state. See FundingGasFor for the
-// startup-race handling via effectiveCpsb.
+// otherwise computes from live chain state.
 func (pool *WalletPool) batcherGasFor(req *FundingRequest) uint64 {
 	if pool.config.FundingGasLimit > BatcherDefaultGasPerTx {
 		return pool.config.FundingGasLimit
 	}
-	cpsb := pool.effectiveCpsb()
+	cpsb := pool.txpool.GetCostPerStateByte()
 	if cpsb == 0 {
 		return BatcherDefaultGasPerTx
 	}
@@ -342,34 +335,14 @@ func (pool *WalletPool) batcherGasFor(req *FundingRequest) uint64 {
 	if req.IsEmpty {
 		base += AccountCreationSize * cpsb
 	}
-	return base * txpoolBufferNum / txpoolBufferDenom
+	return base
 }
 
 // batcherBaseGas returns the per-batch overhead (tx intrinsic + batcher
-// dispatch). On Amsterdam the baseline must also cover the 110% txpool buffer
-// on the 21,000 regular intrinsic, so we bump from 50k to 65k. If the head
-// block hasn't been observed yet, we conservatively assume Amsterdam to avoid
-// under-reserving on genesis-Amsterdam chains (see FundingGasFor).
+// dispatch). Currently a flat constant; kept as a method so EIP-2780's
+// reduced base intrinsic can be folded in here once activated.
 func (pool *WalletPool) batcherBaseGas() uint64 {
-	if pool.txpool.IsAmsterdam() || !pool.txpool.HasObservedHead() {
-		return 65_000
-	}
 	return BatcherBaseGas
-}
-
-// effectiveCpsb returns the cost-per-state-byte to use when sizing funding
-// transactions. It returns the live value when Amsterdam activation is known,
-// falls back to cpsbFloor when the head block has not been observed yet (to
-// guard the genesis-Amsterdam startup race), and returns 0 only when the
-// chain is confirmed pre-Amsterdam.
-func (pool *WalletPool) effectiveCpsb() uint64 {
-	if cpsb := pool.txpool.GetCostPerStateByte(); cpsb != 0 {
-		return cpsb
-	}
-	if !pool.txpool.HasObservedHead() {
-		return cpsbFloor
-	}
-	return 0
 }
 
 // packFundingBatches greedily groups funding requests into batcher calls so
@@ -403,6 +376,125 @@ func (pool *WalletPool) packFundingBatches(reqs []*FundingRequest) ([][]*Funding
 	batches = append(batches, reqs[curStart:])
 	totalGas += curGas
 	return batches, totalGas
+}
+
+// EstimateDeployGas determines the gas limit for a contract-creation transaction
+// with the given initcode (data). Primary path: eth_estimateGas via the provided
+// client. Fallback path (RPC error or nil client): a formula-based upper bound
+// sized for post-Amsterdam state-creation costs.
+//
+// Deployments are rare (typically one-time init steps), so the RPC round-trip
+// is cheap. Static guesses under EIP-8037 frequently under-allocate because
+// state-creation cost scales with both account creation (112·cpsb) and code
+// deposit (per-byte cpsb), making the fallback intentionally conservative.
+func (pool *WalletPool) EstimateDeployGas(ctx context.Context, client *Client, from common.Address, value *uint256.Int, data []byte) uint64 {
+	var val *big.Int
+	if value != nil {
+		val = value.ToBig()
+	}
+	return estimateTxGas(ctx, client, from, nil, val, data, pool.txpool.IsAmsterdam(), pool.txpool.GetCostPerStateByte(), pool.txpool.MaxTxGas(), pool.logger)
+}
+
+// fallbackDeployGas returns a safe upper-bound gas limit for a contract
+// deployment when eth_estimateGas is unavailable. Sized to cover worst-case
+// code deposit (deployed == initcode) plus a generous execution heuristic and,
+// on Amsterdam, the EIP-8037 state-gas components.
+func fallbackDeployGas(initcodeLen int, isAmsterdam bool, cpsb uint64) uint64 {
+	n := uint64(initcodeLen)
+	out := uint64(100_000)
+	// Rough per-byte budget covering initcode execution and code-deposit regular
+	// gas. 200/byte covers the pre-Amsterdam deposit cost; post-Amsterdam the
+	// deposit regular cost drops to ~0.2/byte, but we keep the margin for
+	// initcode execution which static analysis cannot predict.
+	out += n * 200
+	// ABI-encoded calldata intrinsic (conservative avg of zero/nonzero bytes).
+	out += n * 10
+	if isAmsterdam {
+		// Intrinsic: TxGas + CreateGasAmsterdam.
+		out += 30_000
+		// Intrinsic state gas for new account creation.
+		out += AccountCreationSize * cpsb
+		// Per-byte state gas for code deposit (upper bound: deployed == initcode).
+		out += n * cpsb
+	} else {
+		// Pre-Amsterdam intrinsic for contract creation (53k includes CreateGas 32k).
+		out += 50_000
+	}
+	// Cap at MaxTxGas so we never produce a tx rejected at EIP-7825's 16,777,216
+	// regular-gas limit. Real deploys that would exceed this should specify an
+	// explicit Gas value and rely on multi-tx factory patterns.
+	if out > math.MaxUint32 {
+		out = math.MaxUint32
+	}
+	return out
+}
+
+// estimateTxGas runs eth_estimateGas via the client and applies a defensive
+// buffer on top of the result. Falls back to a size-based upper bound when
+// estimation is unavailable. Handles both contract creation (to == nil) and
+// call txs; the formula fallback only applies a deploy-style over-estimate
+// when to == nil since per-call costs are highly contract-specific.
+//
+// maxTxGas is the effective per-tx gas cap for the chain (computed by the
+// caller via TxPool.MaxTxGas, or set to utils.MaxGasLimitPerTx when no
+// txpool context is available). Under EIP-8037 with the reservoir validator
+// active, this can exceed 16.7M and approach the block gas limit so large
+// contract deployments (Uniswap factory etc.) are not rejected.
+//
+// Package-level so both WalletPool (with live Amsterdam/cpsb state) and
+// Wallet (with conservative defaults) can share the estimation logic.
+// logger may be nil.
+func estimateTxGas(ctx context.Context, client *Client, from common.Address, to *common.Address, value *big.Int, data []byte, isAmsterdam bool, cpsb uint64, maxTxGas uint64, logger logrus.FieldLogger) uint64 {
+	if maxTxGas == 0 {
+		maxTxGas = utils.MaxGasLimitPerTx
+	}
+
+	clamp := func(gas uint64) uint64 {
+		if gas > maxTxGas {
+			return maxTxGas
+		}
+		return gas
+	}
+
+	if client != nil {
+		gas, err := client.EstimateGas(ctx, ethereum.CallMsg{
+			From:  from,
+			To:    to,
+			Value: value,
+			Data:  data,
+		})
+		if err == nil && gas > 0 {
+			// If the raw estimate already exceeds the effective cap, no buffer
+			// will make the tx includable — warn loudly so the operator knows
+			// the contract/call is fundamentally too big rather than silently
+			// shipping a tx that will be rejected.
+			if gas > maxTxGas {
+				if logger != nil {
+					logger.WithFields(logrus.Fields{"estimate": gas, "cap": maxTxGas, "data_bytes": len(data), "to": to}).
+						Warnf("tx gas estimate exceeds per-tx cap; contract is too large to deploy in a single tx under current chain params")
+				}
+				return maxTxGas
+			}
+			var buffered uint64
+			if isAmsterdam {
+				buffered = gas * 12 / 10
+			} else {
+				buffered = gas * 11 / 10
+			}
+			return clamp(buffered)
+		}
+		if err != nil && logger != nil {
+			logger.WithError(err).Debugf("gas estimation via RPC failed; falling back to formula (data=%d bytes, to=%v)", len(data), to)
+		}
+	}
+
+	// Fallback: for deploys we have a solid upper-bound formula; for calls
+	// we can only apply a very rough one because per-call costs are contract-
+	// specific. Return a generous cap so the tx at least goes through.
+	if to == nil {
+		return clamp(fallbackDeployGas(len(data), isAmsterdam, cpsb))
+	}
+	return clamp(1_000_000 + uint64(len(data))*200)
 }
 
 // SetTransactionTracker sets the optional callback to track transaction results for metrics.

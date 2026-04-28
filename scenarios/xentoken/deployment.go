@@ -52,10 +52,9 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 
 		// deploy XENMath
 		if redeploy || deployerNonce <= contractNonce {
-			tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+			tx, err := deployerWallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
-				Gas:       300000,
 				Value:     uint256.NewInt(0),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 				_, deployTx, _, err := contract.DeployXENMath(transactOpts, client.GetEthClient())
@@ -88,10 +87,9 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 					contract.XENCryptoBin = origStr
 				}()
 
-				return deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+				return deployerWallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 					GasFeeCap: uint256.MustFromBig(feeCap),
 					GasTipCap: uint256.MustFromBig(tipCap),
-					Gas:       3000000,
 					Value:     uint256.NewInt(0),
 				}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 					_, deployTx, _, err := contract.DeployXENCrypto(transactOpts, client.GetEthClient())
@@ -121,10 +119,9 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 
 	// deploy SybilAttacker
 	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		tx, err := deployerWallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       2000000,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			_, deployTx, _, err := contract.DeployXENSybilAttacker(transactOpts, client.GetEthClient())

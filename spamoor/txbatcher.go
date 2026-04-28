@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"sync"
 
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethpandaops/spamoor/txbuilder"
@@ -187,10 +188,27 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 		tipCap = big.NewInt(200000000000)
 	}
 
+	// Estimate the deploy gas so we stay correct under EIP-8037 where
+	// account creation + per-byte code deposit dominate the cost. Fall back
+	// to the pre-Amsterdam hard-coded 300k if the RPC path fails.
+	deployGas, estErr := client.EstimateGas(ctx, ethereum.CallMsg{
+		From:  wallet.GetAddress(),
+		To:    nil,
+		Value: new(big.Int),
+		Data:  deployData,
+	})
+	if estErr != nil || deployGas == 0 {
+		deployGas = fallbackDeployGas(len(deployData), b.txpool.IsAmsterdam(), 0)
+	} else if b.txpool.IsAmsterdam() {
+		deployGas = deployGas * 12 / 10
+	} else {
+		deployGas = deployGas * 11 / 10
+	}
+
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       300000,
+		Gas:       deployGas,
 		To:        nil,
 		Value:     uint256.NewInt(0),
 		Data:      deployData,

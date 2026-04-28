@@ -142,8 +142,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if s.options.GasLimit > utils.MaxGasLimitPerTx {
-		s.logger.Warnf("Gas limit %d exceeds %d and will most likely be dropped by the execution layer client", s.options.GasLimit, utils.MaxGasLimitPerTx)
+	if maxTx := s.walletPool.GetTxPool().MaxTxGas(); s.options.GasLimit > maxTx {
+		s.logger.Warnf("Gas limit %d exceeds per-tx cap %d and will most likely be dropped by the execution layer client", s.options.GasLimit, maxTx)
 	}
 
 	return nil
@@ -338,10 +338,14 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 
 	deployData = append(initcode, deployData...)
 
+	deployGas := s.options.DeployGasLimit
+	if deployGas == 0 {
+		deployGas = s.walletPool.EstimateDeployGas(ctx, client, wallet.GetAddress(), uint256.NewInt(0), deployData)
+	}
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.DeployGasLimit,
+		Gas:       deployGas,
 		To:        nil,
 		Value:     uint256.NewInt(0),
 		Data:      deployData,

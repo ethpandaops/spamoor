@@ -16,7 +16,6 @@ import (
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
-	"github.com/ethpandaops/spamoor/utils"
 )
 
 type ScenarioOptions struct {
@@ -144,8 +143,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("min code size cannot be larger than max code size")
 	}
 
-	if s.options.GasLimit > utils.MaxGasLimitPerTx {
-		s.logger.Warnf("Gas limit %d exceeds %d and will most likely be dropped by the execution layer client", s.options.GasLimit, utils.MaxGasLimitPerTx)
+	if maxTx := s.walletPool.GetTxPool().MaxTxGas(); s.options.GasLimit > maxTx {
+		s.logger.Warnf("Gas limit %d exceeds per-tx cap %d and will most likely be dropped by the execution layer client", s.options.GasLimit, maxTx)
 	}
 
 	// Validate hex seed format if provided
@@ -283,10 +282,14 @@ func (s *Scenario) deployFuzzedContract(ctx context.Context, txIdx uint64) (scen
 		return nil, nil, client, wallet, err
 	}
 
+	deployGas := s.options.GasLimit
+	if deployGas == 0 {
+		deployGas = s.walletPool.EstimateDeployGas(ctx, client, wallet.GetAddress(), value, fuzzedBytecode)
+	}
 	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.GasLimit,
+		Gas:       deployGas,
 		To:        nil, // Contract creation
 		Value:     value,
 		Data:      fuzzedBytecode,

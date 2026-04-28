@@ -920,7 +920,7 @@ tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
     GasTipCap: uint256.MustFromBig(tipCap),
     GasFeeCap: uint256.MustFromBig(feeCap),
-    Gas:       2000000,
+    Gas:       4000000,
     Value:     uint256.NewInt(0),
 }, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
     _, deployTx, _, err := contract.DeployContract(transactOpts, client.GetEthClient())
@@ -1954,7 +1954,7 @@ func (s *Scenario) deployContracts(redeploy bool) (*DeploymentInfo, error) {
         tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
             GasFeeCap: uint256.MustFromBig(feeCap),
             GasTipCap: uint256.MustFromBig(tipCap),
-            Gas:       2000000,
+            Gas:       4000000,
             Value:     uint256.NewInt(0),
         }, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
             _, deployTx, _, err := contract.DeployMyContract(transactOpts, client.GetEthClient(), param1)

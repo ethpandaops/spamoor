@@ -133,8 +133,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if s.options.GasLimit > utils.MaxGasLimitPerTx {
-		s.logger.Warnf("Gas limit %d exceeds %d and will most likely be dropped by the execution layer client", s.options.GasLimit, utils.MaxGasLimitPerTx)
+	if maxTx := s.walletPool.GetTxPool().MaxTxGas(); s.options.GasLimit > maxTx {
+		s.logger.Warnf("Gas limit %d exceeds per-tx cap %d and will most likely be dropped by the execution layer client", s.options.GasLimit, maxTx)
 	}
 
 	return nil
@@ -254,7 +254,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       2000000,
+		Gas:       4000000,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		_, deployTx, _, err := contract.DeployDeployTest(transactOpts, client.GetEthClient())
