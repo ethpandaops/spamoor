@@ -852,7 +852,18 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 	childWallet := pool.txpool.GetRegisteredWallet(address)
 	if childWallet == nil {
 		childWallet = NewWallet(privateKey, address)
+
 		childWallet = pool.txpool.RegisterWallet(childWallet, pool.ctx)
+		if childWallet == nil {
+			// RegisterWallet returns nil when the context is already cancelled.
+			// Surface that as an error instead of dereferencing the nil wallet
+			// in the UpdateWallet call below.
+			if ctxErr := pool.ctx.Err(); ctxErr != nil {
+				return nil, nil, fmt.Errorf("wallet registration cancelled: %w", ctxErr)
+			}
+
+			return nil, nil, fmt.Errorf("wallet registration failed for %s", address.Hex())
+		}
 	}
 
 	err = client.UpdateWallet(pool.ctx, childWallet)

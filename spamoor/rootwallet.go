@@ -42,7 +42,18 @@ func InitRootWallet(ctx context.Context, privkey string, clientPool *ClientPool,
 	}
 	rootWallet := NewWallet(privateKey, address)
 	rootWallet.setProtected(true)
+
 	rootWallet = txpool.RegisterWallet(rootWallet, ctx)
+	if rootWallet == nil {
+		// RegisterWallet returns nil when the context is already cancelled.
+		// Surface that as an error instead of dereferencing the nil wallet
+		// in subsequent UpdateWallet / GetAddress calls.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("root wallet registration cancelled: %w", ctxErr)
+		}
+
+		return nil, fmt.Errorf("root wallet registration failed for %s", address.Hex())
+	}
 
 	clients := clientPool.GetAllClients()
 	if len(clients) == 0 {
