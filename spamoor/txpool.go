@@ -506,8 +506,13 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 		GasLimit:   blockWithHash.Block.GasLimit(),
 	}
 
-	// Update current gas limit and recent block gas tracking
-	isAmsterdam := blockWithHash.Block.Header().BlockAccessListHash != nil
+	// Update current gas limit and recent block gas tracking.
+	// Check both BlockAccessListHash (geth) and SlotNumber (EIP-7843) to
+	// detect Amsterdam. Besu uses the JSON key "balHash" instead of
+	// "blockAccessListHash", so go-ethereum's unmarshaller leaves
+	// BlockAccessListHash nil even on post-Amsterdam blocks.
+	hdr := blockWithHash.Block.Header()
+	isAmsterdam := hdr.BlockAccessListHash != nil || hdr.SlotNumber != nil
 	pool.blockStatsMutex.Lock()
 	if isAmsterdam != pool.isAmsterdam {
 		logrus.WithField("gasLimit", blockWithHash.Block.GasLimit()).
@@ -1765,7 +1770,12 @@ func (pool *TxPool) tryInitBlockStats(ctx context.Context) error {
 
 	pool.currentGasLimit = latestBlock.GasLimit()
 	pool.currentBaseFee = latestBlock.BaseFee()
-	pool.isAmsterdam = latestBlock.Header().BlockAccessListHash != nil
+	// Check both BlockAccessListHash (geth) and SlotNumber (EIP-7843) to
+	// detect Amsterdam. Besu uses the JSON key "balHash" instead of
+	// "blockAccessListHash", so go-ethereum's unmarshaller leaves
+	// BlockAccessListHash nil even on post-Amsterdam blocks.
+	initHdr := latestBlock.Header()
+	pool.isAmsterdam = initHdr.BlockAccessListHash != nil || initHdr.SlotNumber != nil
 	logrus.Infof("initialized block stats from latest block: gasLimit=%v baseFee=%v amsterdam=%v",
 		pool.currentGasLimit, pool.currentBaseFee, pool.isAmsterdam)
 
