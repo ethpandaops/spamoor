@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -52,8 +53,9 @@ type Scenario struct {
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
 
-	delegatorSeed []byte
-	delegators    []*spamoor.Wallet
+	delegatorSeed    []byte
+	delegators       []*spamoor.Wallet
+	gasLimitAdjusted atomic.Bool
 }
 
 var ScenarioName = "setcodetx"
@@ -162,15 +164,11 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	// cpsb=1174 and 10 authorizations the worst-case intrinsic alone reaches
 	// ~1.73M gas — well above the legacy 200,000 default. Auto-bump rather
 	// than fail on the node if the configured limit won't fit max_authorizations.
-	if cpsb := s.walletPool.GetTxPool().GetCostPerStateByte(); cpsb > 0 && s.options.MaxAuthorizations > 0 {
-		perAuth := uint64(7_500) + (spamoor.AuthorizationCreationSize+spamoor.AccountCreationSize)*cpsb
-		needed := (uint64(21_000) + s.options.MaxAuthorizations*perAuth) * 11 / 10
-		if s.options.GasLimit < needed {
-			s.logger.Warnf("bumping gas limit from %d to %d to cover %d EIP-8037 authorizations (cpsb=%d)",
-				s.options.GasLimit, needed, s.options.MaxAuthorizations, cpsb)
-			s.options.GasLimit = needed
-		}
-	}
+	//
+	// When gloas_fork_epoch > 0, Init() runs before Amsterdam activates and
+	// cpsb is 0 here. In that case ensureGasLimitForAmsterdam() will apply the
+	// bump lazily on the first sendTx after the fork.
+	s.tryBumpGasLimitForAmsterdam()
 
 	s.delegatorSeed = make([]byte, 32)
 	rand.Read(s.delegatorSeed)
@@ -255,7 +253,37 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
+// tryBumpGasLimitForAmsterdam checks whether the EIP-8037 gas bump needs to be
+// applied and does so if cpsb is available. It is called from Init() (where
+// cpsb may still be 0 if Amsterdam hasn't activated) and again from sendTx()
+// so the bump is applied lazily once the fork goes live.
+func (s *Scenario) tryBumpGasLimitForAmsterdam() {
+	if s.gasLimitAdjusted.Load() {
+		return
+	}
+
+	cpsb := s.walletPool.GetTxPool().GetCostPerStateByte()
+	if cpsb == 0 || s.options.MaxAuthorizations == 0 {
+		return
+	}
+
+	perAuth := uint64(7_500) + (spamoor.AuthorizationCreationSize+spamoor.AccountCreationSize)*cpsb
+	needed := (uint64(21_000) + s.options.MaxAuthorizations*perAuth) * 11 / 10
+
+	if s.options.GasLimit < needed {
+		s.logger.Warnf("bumping gas limit from %d to %d to cover %d EIP-8037 authorizations (cpsb=%d)",
+			s.options.GasLimit, needed, s.options.MaxAuthorizations, cpsb)
+		s.options.GasLimit = needed
+	}
+
+	s.gasLimitAdjusted.Store(true)
+}
+
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+	// Deferred EIP-8037 gas bump: if Init() ran before Amsterdam activated,
+	// cpsb was 0 and the bump was skipped. Re-check now that blocks have
+	// progressed past the fork.
+	s.tryBumpGasLimitForAmsterdam()
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
