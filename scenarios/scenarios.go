@@ -14,6 +14,7 @@ import (
 	blobreplacements "github.com/ethpandaops/spamoor/scenarios/blob-replacements"
 	"github.com/ethpandaops/spamoor/scenarios/blobs"
 	"github.com/ethpandaops/spamoor/scenarios/calltx"
+	calltxfuzz "github.com/ethpandaops/spamoor/scenarios/calltx-fuzz"
 	deploydestruct "github.com/ethpandaops/spamoor/scenarios/deploy-destruct"
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
@@ -53,6 +54,7 @@ var nativeScenarioCategories = []*scenario.Category{
 			&erc20tx.ScenarioDescriptor,
 			&erc721tx.ScenarioDescriptor,
 			&erc1155tx.ScenarioDescriptor,
+			&calltxfuzz.ScenarioDescriptor,
 			&evmfuzz.ScenarioDescriptor,
 			&gasburnertx.ScenarioDescriptor,
 			&setcodetx.ScenarioDescriptor,
