@@ -1,34 +1,46 @@
 package auth
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	authpkg "github.com/ethpandaops/service-authenticatoor/pkg/auth"
 )
 
+// openToken is the sentinel returned in open mode. Callers only inspect
+// `token != nil && token.Valid`, so an empty *jwt.Token with Valid set is
+// enough for them to treat the request as authenticated.
+var openToken = &jwt.Token{Valid: true}
+
+// CheckAuthToken validates a bearer token (with or without the "Bearer "
+// prefix). In open mode it always returns a valid token; in remote mode
+// it delegates to the JWKS verifier and returns nil on any failure.
 func (h *Handler) CheckAuthToken(tokenStr string) *jwt.Token {
-	// Extract token from "Bearer <token>"
+	if h.verifier == nil {
+		return openToken
+	}
+
 	parts := strings.SplitN(tokenStr, " ", 2)
 	if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
 		tokenStr = parts[1]
 	}
+	if tokenStr == "" {
+		return nil
+	}
 
-	token, _ := jwt.ParseWithClaims(tokenStr, &jwt.RegisteredClaims{}, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-
-		return []byte(h.tokenKey), nil
-	})
-
-	return token
+	claims, err := h.verifier.Verify(tokenStr)
+	if err != nil {
+		return nil
+	}
+	return &jwt.Token{Valid: true, Claims: claims}
 }
 
-// GetTokenSubject extracts the subject claim from the authorization header's JWT token.
-// Returns an empty string if the token is missing, invalid, or has no subject.
+// GetTokenSubject extracts the user identity (email) from a verified
+// token. Returns "" when the token is missing/invalid or the handler is
+// in open mode (no upstream identity to extract).
 func (h *Handler) GetTokenSubject(authHeader string) string {
-	if authHeader == "" {
+	if h.verifier == nil || authHeader == "" {
 		return ""
 	}
 
@@ -37,10 +49,11 @@ func (h *Handler) GetTokenSubject(authHeader string) string {
 		return ""
 	}
 
-	claims, ok := token.Claims.(*jwt.RegisteredClaims)
-	if !ok || claims.Subject == "" {
-		return ""
+	if c, ok := token.Claims.(*authpkg.Claims); ok {
+		if c.Email != "" {
+			return c.Email
+		}
+		return c.Subject
 	}
-
-	return claims.Subject
+	return ""
 }

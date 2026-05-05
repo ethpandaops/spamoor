@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"net/http"
@@ -66,17 +67,21 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 		router.HandleFunc("/graphs", frontendHandler.Graphs).Methods("GET")
 	}
 
-	// Auth routes
-	var authHandler *auth.Handler
-	if !config.DisableAuth {
-		authHandler = auth.NewAuthHandler(config.AuthTokenKey, config.AuthUserHeader, config.DisableLocalToken)
-		router.HandleFunc("/auth/token", authHandler.GetToken).Methods("GET")
-		router.HandleFunc("/auth/login", authHandler.GetLogin).Methods("GET")
+	// Auth handler. When AuthProviderURL is empty, the handler is in open
+	// mode and every request is authorized. When set, incoming bearer
+	// tokens are verified against the remote authenticatoor's JWKS.
+	authHandler, err := auth.NewAuthHandler(context.Background(), config.AuthProviderURL)
+	if err != nil {
+		logrus.WithError(err).Fatal("failed to initialize auth handler")
+	}
+	if authHandler.IsOpen() {
+		logrus.Warn("--auth-provider-url is empty: API endpoints are unauthenticated. Configure an authenticatoor URL to require auth.")
 	}
 
 	// API routes
-	apiHandler := api.NewAPIHandler(daemon, authHandler)
+	apiHandler := api.NewAPIHandler(daemon, authHandler, config.AuthProviderURL)
 	apiRouter := router.PathPrefix("/api").Subrouter()
+	apiRouter.HandleFunc("/runtime-config", apiHandler.GetRuntimeConfig).Methods("GET")
 	apiRouter.HandleFunc("/spammers", apiHandler.GetSpammerList).Methods("GET")
 	apiRouter.HandleFunc("/scenarios", apiHandler.GetScenarios).Methods("GET")
 	apiRouter.HandleFunc("/scenarios/{name}/config", apiHandler.GetScenarioConfig).Methods("GET")

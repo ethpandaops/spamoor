@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/ethpandaops/spamoor/daemon"
@@ -8,32 +9,48 @@ import (
 )
 
 type APIHandler struct {
-	daemon      *daemon.Daemon
-	authHandler *auth.Handler
+	daemon          *daemon.Daemon
+	authHandler     *auth.Handler
+	authProviderURL string
 }
 
-func NewAPIHandler(d *daemon.Daemon, authHandler *auth.Handler) *APIHandler {
+func NewAPIHandler(d *daemon.Daemon, authHandler *auth.Handler, authProviderURL string) *APIHandler {
 	return &APIHandler{
-		daemon:      d,
-		authHandler: authHandler,
+		daemon:          d,
+		authHandler:     authHandler,
+		authProviderURL: authProviderURL,
 	}
 }
 
-// checkAuth verifies the Authorization header and returns true if authenticated.
-// If not authenticated, it writes an error response and returns false.
-// Also checks for auth query parameter for SSE connections.
+// runtimeConfigResponse is the body of GET /api/runtime-config. It tells
+// the frontend which auth provider (if any) to load.
+type runtimeConfigResponse struct {
+	AuthProviderURL string `json:"authProviderURL"`
+}
+
+// GetRuntimeConfig serves runtime configuration that the frontend reads
+// at boot to wire up the auth provider client. Public — no auth required.
+func (ah *APIHandler) GetRuntimeConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(runtimeConfigResponse{
+		AuthProviderURL: ah.authProviderURL,
+	})
+}
+
+// checkAuth verifies the Authorization header and returns true if
+// authenticated. In open mode (no auth provider configured) it always
+// returns true. On failure it writes a 401 and returns false. The "auth"
+// query parameter is honored as a fallback for SSE connections.
 func (ah *APIHandler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
-	if ah.authHandler == nil {
-		return true // No auth handler configured, allow all
+	if ah.authHandler.IsOpen() {
+		return true
 	}
 
-	// First try Authorization header
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		// Fall back to query parameter for SSE connections
-		authHeader = r.URL.Query().Get("auth")
-		if authHeader != "" {
-			authHeader = "Bearer " + authHeader
+		if q := r.URL.Query().Get("auth"); q != "" {
+			authHeader = "Bearer " + q
 		}
 	}
 
@@ -51,37 +68,32 @@ func (ah *APIHandler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// getUserEmail extracts the user identity for audit logging.
-// It first checks the JWT token subject, then falls back to the audit logger's header-based extraction.
+// getUserEmail extracts the user identity for audit logging directly from
+// the verified bearer token. In open mode there's no token to read from,
+// so it returns the default "api".
 func (ah *APIHandler) getUserEmail(r *http.Request) string {
-	// Try to get the user from the JWT token subject
-	if ah.authHandler != nil {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			authHeader = r.URL.Query().Get("auth")
-			if authHeader != "" {
-				authHeader = "Bearer " + authHeader
-			}
-		}
-
-		if subject := ah.authHandler.GetTokenSubject(authHeader); subject != "" {
-			return subject
-		}
+	if ah.authHandler.IsOpen() {
+		return "api"
 	}
 
-	// Fall back to audit logger header-based extraction
-	if auditLogger := ah.daemon.GetAuditLogger(); auditLogger != nil {
-		return auditLogger.GetUserFromRequest(r.Header)
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		if q := r.URL.Query().Get("auth"); q != "" {
+			authHeader = "Bearer " + q
+		}
 	}
-
+	if subject := ah.authHandler.GetTokenSubject(authHeader); subject != "" {
+		return subject
+	}
 	return "api"
 }
 
-// isAuthenticated checks if the request has valid authentication without returning an error.
-// Use this for endpoints that are public but need to conditionally show data.
+// isAuthenticated reports whether the request carries a valid token.
+// Used by endpoints that are public but conditionally redact fields.
+// In open mode every request is considered authenticated.
 func (ah *APIHandler) isAuthenticated(r *http.Request) bool {
-	if ah.authHandler == nil {
-		return true // No auth handler configured, consider authenticated
+	if ah.authHandler.IsOpen() {
+		return true
 	}
 
 	authHeader := r.Header.Get("Authorization")

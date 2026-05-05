@@ -1,90 +1,79 @@
+// Package auth bridges the spamoor web UI to a remote authenticatoor
+// service. When --auth-provider-url is configured, tokens are validated
+// against that service's JWKS. When it's not set, the API runs open —
+// authentication is the operator's responsibility (network policy /
+// upstream proxy).
 package auth
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/ethpandaops/service-authenticatoor/pkg/auth"
 )
 
-// Handler handles authentication requests for the assertoor web UI.
+// Handler validates incoming bearer tokens. When verifier is nil the API
+// is treated as open (no authentication required); CheckAuthToken always
+// returns a non-nil "valid" token.
 type Handler struct {
-	userHeader        string
-	tokenKey          string
-	disableLocalToken bool
+	verifier auth.Verifier // nil → open mode
 }
 
-// NewAuthHandler creates a new authentication handler.
-func NewAuthHandler(tokenKey, userHeader string, disableLocalToken bool) *Handler {
-	return &Handler{
-		userHeader:        userHeader,
-		tokenKey:          tokenKey,
-		disableLocalToken: disableLocalToken,
+// NewAuthHandler returns a Handler. When authProviderURL is empty the
+// returned handler operates in open mode (no token verification, all
+// calls allowed). When set, it bootstraps a JWKS verifier from the
+// service's OIDC discovery doc, falling back to <url>/jwks.json.
+func NewAuthHandler(ctx context.Context, authProviderURL string) (*Handler, error) {
+	authProviderURL = strings.TrimRight(authProviderURL, "/")
+	if authProviderURL == "" {
+		return &Handler{}, nil
 	}
+
+	expectedIssuer := authProviderURL
+	jwksURL := authProviderURL + "/jwks.json"
+	if disc, err := auth.FetchDiscovery(ctx, http.DefaultClient, authProviderURL); err == nil {
+		expectedIssuer = disc.Issuer
+		jwksURL = disc.JWKSURI
+	}
+
+	verifier, err := auth.NewJWKSVerifier(ctx, auth.VerifierConfig{
+		JWKSURL:          jwksURL,
+		ExpectedIssuer:   expectedIssuer,
+		ExpectedAudience: parentZone(authProviderURL),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("auth: build verifier: %w", err)
+	}
+
+	return &Handler{verifier: verifier}, nil
 }
 
-// GetToken handles the authentication request.
-func (h *Handler) GetToken(w http.ResponseWriter, r *http.Request) {
-	if h.disableLocalToken {
-		http.Error(w, "local token is disabled", http.StatusForbidden)
-		return
-	}
+// IsOpen reports whether this handler is running in open mode (no auth
+// provider configured).
+func (h *Handler) IsOpen() bool {
+	return h.verifier == nil
+}
 
-	headers := r.Header
-	authUser := "unauthenticated"
-
-	// Try exact header match first
-	if values, ok := headers[h.userHeader]; ok && len(values) > 0 {
-		authUser = values[0]
-	} else {
-		// Try case-insensitive match
-		for key, values := range headers {
-			if strings.EqualFold(key, h.userHeader) && len(values) > 0 {
-				authUser = values[0]
-				break
-			}
+// parentZone returns the parent DNS zone of a URL's host:
+// "https://auth.foo.example" → "foo.example". Used as the default
+// expected audience.
+func parentZone(rawURL string) string {
+	for _, p := range []string{"https://", "http://"} {
+		if strings.HasPrefix(rawURL, p) {
+			rawURL = rawURL[len(p):]
+			break
 		}
 	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-		Issuer:    "spamoor",
-		Subject:   authUser,
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
-	})
-
-	tokenString, err := token.SignedString([]byte(h.tokenKey))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if i := strings.IndexByte(rawURL, '/'); i >= 0 {
+		rawURL = rawURL[:i]
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	claims, ok := token.Claims.(jwt.RegisteredClaims)
-	if !ok {
-		http.Error(w, "invalid token claims", http.StatusInternalServerError)
-		return
+	if i := strings.IndexByte(rawURL, ':'); i >= 0 {
+		rawURL = rawURL[:i]
 	}
-
-	err = json.NewEncoder(w).Encode(map[string]string{
-		"token": tokenString,
-		"user":  authUser,
-		"expr":  fmt.Sprintf("%d", claims.ExpiresAt.Unix()),
-		"now":   fmt.Sprintf("%d", time.Now().Unix()),
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-
-		return
+	if i := strings.IndexByte(rawURL, '.'); i > 0 {
+		return rawURL[i+1:]
 	}
-}
-
-// GetLogin redirects to the index page.
-func (h *Handler) GetLogin(w http.ResponseWriter, r *http.Request) {
-	// redirect back to the index page
-	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+	return rawURL
 }

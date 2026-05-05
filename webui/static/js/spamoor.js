@@ -1,11 +1,14 @@
 
 (function() {
-  // Authentication state
+  // Authentication state mirrored from window.ethpandaops.authenticatoor.
+  // In open mode (no auth provider configured), authDisabled stays true
+  // and isAuthenticated is unconditionally true so all UI is unlocked.
   var authState = {
     token: null,
     user: null,
     expiresAt: null,
-    isAuthenticated: false
+    isAuthenticated: false,
+    authDisabled: false
   };
 
   window.addEventListener('DOMContentLoaded', function() {
@@ -26,119 +29,62 @@
     authState: authState,
   };
 
-  var refreshTimer = null;
+  // Returns the ethpandaops.authenticatoor client when an auth provider is
+  // configured AND its client.js has loaded. Returns null otherwise (open
+  // mode).
+  function authClient() {
+    if (!window.spamoorConfig || !window.spamoorConfig.authProviderURL) return null;
+    if (!window.ethpandaops || !window.ethpandaops.authenticatoor) return null;
+    return window.ethpandaops.authenticatoor;
+  }
 
-  // Initialize authentication
+  // Initialize authentication. In open mode, mark everything as authed
+  // and bail. In remote mode, wire the login button and run checkLogin
+  // (fragment → cache → silent iframe) in the background.
   function initAuth() {
-    /* Check if auth is disabled via server config */
-    if (window.spamoorConfig && window.spamoorConfig.authDisabled) {
-      authState.token = null;
-      authState.user = null;
-      authState.expiresAt = null;
+    var client = authClient();
+
+    if (!client) {
       authState.isAuthenticated = true;
       authState.authDisabled = true;
-      sessionStorage.removeItem('spamoor_auth');
       updateAuthUI();
       return;
     }
 
-    /* Try to load token from sessionStorage first */
-    var stored = sessionStorage.getItem('spamoor_auth');
-    if (stored) {
-      try {
-        var data = JSON.parse(stored);
-        var expiresAt = parseInt(data.expr) * 1000;
-        var timeLeft = expiresAt - Date.now();
+    authState.authDisabled = false;
+    updateAuthUI();
 
-        /* If token is still valid and has more than 10 seconds left, use it */
-        if (timeLeft > 10000) {
-          authState.token = data.token;
-          authState.user = data.user;
-          authState.expiresAt = expiresAt;
-          authState.isAuthenticated = true;
-          authState.authDisabled = false;
-          updateAuthUI();
-          scheduleTokenRefresh();
-          return;
-        }
-      } catch (e) {
-        /* Invalid stored data, clear it */
-        sessionStorage.removeItem('spamoor_auth');
-      }
-    }
-
-    /* No valid stored token, fetch from server */
-    refreshAuthToken();
-  }
-
-  // Schedule token refresh 10 seconds before expiry
-  function scheduleTokenRefresh() {
-    if (refreshTimer) {
-      clearTimeout(refreshTimer);
-      refreshTimer = null;
-    }
-
-    if (!authState.expiresAt) return;
-
-    var refreshIn = Math.max(0, authState.expiresAt - Date.now() - 10000);
-    if (refreshIn > 0) {
-      refreshTimer = setTimeout(refreshAuthToken, refreshIn);
-    } else {
-      // Already close to expiry, refresh now
-      refreshAuthToken();
-    }
-  }
-
-  // Refresh auth token from server
-  function refreshAuthToken() {
-    fetch('/auth/token')
-      .then(function(response) {
-        if (response.status === 404) {
-          // Auth is disabled, consider authenticated
-          authState.token = null;
-          authState.user = 'unauthenticated';
-          authState.expiresAt = null;
-          authState.isAuthenticated = true;
-          authState.authDisabled = true;
-          sessionStorage.removeItem('spamoor_auth');
-          updateAuthUI();
-          return null;
-        }
-        if (!response.ok) {
-          throw new Error('Not authenticated');
-        }
-        return response.json();
-      })
-      .then(function(data) {
-        if (data === null) return; // Auth disabled case
-
-        if (data.token) {
-          authState.token = data.token;
-          authState.user = data.user;
-          authState.expiresAt = parseInt(data.expr) * 1000;
-          authState.isAuthenticated = true;
-          authState.authDisabled = false;
-
-          // Store in sessionStorage
-          sessionStorage.setItem('spamoor_auth', JSON.stringify({
-            token: data.token,
-            user: data.user,
-            expr: data.expr
-          }));
-
-          updateAuthUI();
-          scheduleTokenRefresh();
-        }
-      })
-      .catch(function() {
-        authState.token = null;
-        authState.user = null;
-        authState.expiresAt = null;
-        authState.isAuthenticated = false;
-        authState.authDisabled = false;
-        sessionStorage.removeItem('spamoor_auth');
-        updateAuthUI();
+    var loginBtn = document.getElementById('loginBtn');
+    if (loginBtn) {
+      loginBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        client.login();
       });
+    }
+
+    client.checkLogin().then(function(info) {
+      if (info && info.authenticated) {
+        applyClientState(info);
+      }
+    }).catch(function() {
+      // Stay unauthenticated; user can click Login.
+    });
+
+    // Pick up subsequent state changes (token refresh, logout, etc.)
+    // without requiring a page reload.
+    if (typeof client.onStateChange === 'function') {
+      client.onStateChange(function(info) { applyClientState(info); });
+    }
+  }
+
+  // Mirror the auth client's state into our local authState.
+  function applyClientState(info) {
+    authState.token = info.token || null;
+    authState.user = info.user || info.email || null;
+    authState.expiresAt = info.exp ? info.exp * 1000 : null;
+    authState.isAuthenticated = !!info.authenticated;
+    authState.authDisabled = false;
+    updateAuthUI();
   }
 
   // Update UI based on auth state
@@ -181,28 +127,29 @@
     window.dispatchEvent(new CustomEvent('authStateChanged', { detail: authState }));
   }
 
-  // Get current auth token
+  // Get current auth token. In open mode there's no token to send;
+  // returns null and authFetch leaves the request unauthenticated.
   function getAuthToken() {
-    if (!authState.isAuthenticated || !authState.token) {
-      return null;
+    var client = authClient();
+    if (client) {
+      var t = client.getToken();
+      if (t) return t;
     }
-    if (authState.expiresAt && Date.now() > authState.expiresAt) {
-      return null;
-    }
-    return authState.token;
+    return null;
   }
 
-  /* Check if user is authenticated */
+  // Check if user is authenticated. In open mode this is always true
+  // (the backend treats every request as authorized).
   function isAuthenticated() {
-    /* When auth is disabled, always return true */
-    if (authState.authDisabled) {
-      return true;
-    }
-    return authState.isAuthenticated && authState.token &&
-           (!authState.expiresAt || Date.now() < authState.expiresAt);
+    if (authState.authDisabled) return true;
+    var client = authClient();
+    if (client) return !!client.isLoggedIn();
+    return false;
   }
 
-  // Fetch with auth token
+  // Fetch with the current bearer token attached. On 401 the auth client
+  // is asked to re-check (the client itself decides whether to silent-
+  // refresh or surface a logged-out state).
   function authFetch(url, options) {
     options = options || {};
     options.headers = options.headers || {};
@@ -214,8 +161,12 @@
 
     return fetch(url, options).then(function(response) {
       if (response.status === 401) {
-        // Token expired or invalid, try to refresh
-        refreshAuthToken();
+        var client = authClient();
+        if (client) {
+          client.checkLogin().then(function(info) {
+            if (info && info.authenticated) applyClientState(info);
+          });
+        }
       }
       return response;
     });
