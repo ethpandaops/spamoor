@@ -3,7 +3,7 @@
 # Tags: deposit, beacon, electra, performance, gas-optimization
 # Min_Version: v1.1.5
 - scenario: geastx
-  name: 'Deposit-contract: 415 top-ups per tx (1 ETH each, ~10M gas)'
+  name: 'Deposit-contract: 410 top-ups per tx (1 ETH each, ~10M gas, 200M total)'
   description: Calls the deposit contract 415 times per tx with a 1 ETH top-up to validator #0. Calldata uses a zero signature (top-ups skip BLS verification on the consensus layer). Sized to consume ~10M gas per tx.
   config:
     # Wallet settings - each tx pays 415 ETH so wallets need a hefty refill.
@@ -16,8 +16,8 @@
 
     # Scenario throughput
     total_count: 0
-    throughput: 1
-    max_pending: 3
+    throughput: 30
+    max_pending: 20
     rebroadcast: 1
 
     # Tx fees (gwei)
@@ -28,11 +28,11 @@
     # warm deposit (measured on devnet). 415 deposits ~= 9.92M gas, sized
     # to fit just under the 10M cap with ~80k headroom.
     gas_limit: 10000000
-    deploy_gas_limit: 500000
+    deploy_gas_limit: 1000000
 
     # Amount sent into the batch contract (gwei). Batch size = amount / 1 ETH,
     # so 415_000_000_000 gwei = 415 ETH = 415 deposits per tx.
-    amount: 415000000000
+    amount: 410000000000
 
     log_txs: true
     timeout: ""
@@ -99,8 +99,8 @@
       #bytes deposit_calldata: 0x22895118000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000120d9b16047215616e17c7abcab1b8df8c34dadfd8ec71a0b2e1f988b3fb832cf240000000000000000000000000000000000000000000000000000000000000030aaf6c1251e73fb600624937760fef218aace5b253bf068ed45398aeb29d821e4d2899343ddcbbe37cb3f6cf500dff26c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200048281f02e108ec495e48a25d2adb4732df75bf5750c060ff31c864c053d28d0000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 
 - scenario: geastx
-  name: 'Deposit-contract: 415 fresh deposits per tx (1 ETH each, valid BLS sig, ~10M gas)'
-  description: Calls the deposit contract 415 times per tx with a 1 ETH deposit for a fresh validator. Calldata carries a BLS-signed DepositMessage (privkey 0x111...111, withdrawal_credentials 0x02...) that the consensus layer accepts as a new pending deposit. Sized to consume ~10M gas per tx.
+  name: 'Deposit-contract: 410 fresh deposits per tx (1 ETH each, valid BLS sig, ~10M gas, 200M total)'
+  description: Calls the deposit contract 410 times per tx with a 1 ETH deposit for a fresh validator. Calldata carries a BLS-signed DepositMessage (privkey 0x111...111, withdrawal_credentials 0x02...) that the consensus layer accepts as a new pending deposit. Sized to consume ~10M gas per tx.
   config:
     seed: deposit-batch-fresh
     refill_amount: "50000000000000000000000"   # 50000 ETH
@@ -109,17 +109,17 @@
     max_wallets: 5
 
     total_count: 0
-    throughput: 1
-    max_pending: 3
+    throughput: 30
+    max_pending: 20
     rebroadcast: 1
 
     base_fee: 20
     tip_fee: 2
 
     gas_limit: 10000000
-    deploy_gas_limit: 500000
+    deploy_gas_limit: 1000000
 
-    amount: 415000000000
+    amount: 410000000000
 
     log_txs: true
     timeout: ""
