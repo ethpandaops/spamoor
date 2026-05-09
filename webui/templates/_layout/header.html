@@ -112,9 +112,9 @@
               </ul>
             </li>
 
-            {{ if and (not .DisableLocalToken) (not .DisableAuth) }}
+            {{ if .AuthProviderURL }}
             <li class="nav-item px-2" id="authNavItem">
-              <a class="nav-link d-none" href="/auth/login" id="loginBtn">
+              <a class="nav-link d-none" href="#" id="loginBtn">
                 <i class="fas fa-sign-in-alt me-1"></i>
                 <span class="nav-text">Login</span>
               </a>

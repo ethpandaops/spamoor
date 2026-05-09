@@ -11,8 +11,10 @@ type FrontendConfig struct {
 	DisableAuditLogs bool
 	DisablePluginAPI bool
 
-	AuthUserHeader    string
-	AuthTokenKey      string
-	DisableLocalToken bool
-	DisableAuth       bool
+	// AuthProviderURL is the canonical URL of a remote authenticatoor
+	// service. When empty, the API runs unauthenticated; when set, all
+	// protected endpoints require a JWT verified against the service's
+	// JWKS, and the layout template injects window.spamoorConfig +
+	// loads <url>/client.js so the frontend can drive login.
+	AuthProviderURL string
 }

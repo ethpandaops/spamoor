@@ -20,21 +20,20 @@ var LayoutTemplateFiles = []string{
 }
 
 type PageData struct {
-	Active            string
-	Meta              *Meta
-	Data              interface{}
-	Version           string
-	BuildTime         string
-	Year              int
-	Title             string
-	Lang              string
-	Debug             bool
-	DebugTemplates    []string
-	DisableTxMetrics  bool
-	DisableAuditLogs  bool
-	DisablePluginAPI  bool
-	DisableLocalToken bool
-	DisableAuth       bool
+	Active           string
+	Meta             *Meta
+	Data             interface{}
+	Version          string
+	BuildTime        string
+	Year             int
+	Title            string
+	Lang             string
+	Debug            bool
+	DebugTemplates   []string
+	DisableTxMetrics bool
+	DisableAuditLogs bool
+	DisablePluginAPI bool
+	AuthProviderURL  string
 }
 
 type Meta struct {
@@ -78,19 +77,18 @@ func InitPageData(r *http.Request, active, path, title string, mainTemplates []s
 			Path:        path,
 			Templates:   strings.Join(mainTemplates, ","),
 		},
-		Active:            active,
-		Data:              &struct{}{},
-		Version:           utils.GetBuildVersion(),
-		BuildTime:         fmt.Sprintf("%v", buildTime.Unix()),
-		Year:              time.Now().UTC().Year(),
-		Title:             frontendConfig.SiteName,
-		Lang:              "en-US",
-		Debug:             frontendConfig.Debug,
-		DisableTxMetrics:  frontendConfig.DisableTxMetrics,
-		DisableAuditLogs:  frontendConfig.DisableAuditLogs,
-		DisablePluginAPI:  frontendConfig.DisablePluginAPI,
-		DisableLocalToken: frontendConfig.DisableLocalToken,
-		DisableAuth:       frontendConfig.DisableAuth,
+		Active:           active,
+		Data:             &struct{}{},
+		Version:          utils.GetBuildVersion(),
+		BuildTime:        fmt.Sprintf("%v", buildTime.Unix()),
+		Year:             time.Now().UTC().Year(),
+		Title:            frontendConfig.SiteName,
+		Lang:             "en-US",
+		Debug:            frontendConfig.Debug,
+		DisableTxMetrics: frontendConfig.DisableTxMetrics,
+		DisableAuditLogs: frontendConfig.DisableAuditLogs,
+		DisablePluginAPI: frontendConfig.DisablePluginAPI,
+		AuthProviderURL:  frontendConfig.AuthProviderURL,
 	}
 
 	if r != nil {

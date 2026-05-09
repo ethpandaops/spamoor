@@ -40,7 +40,7 @@ devnet:
 	.hack/devnet/run.sh
 
 devnet-run: devnet docs build
-	bin/spamoor-daemon --rpchost-file .hack/devnet/generated-hosts.txt --privkey 3fd98b5187bf6526734efaa644ffbb4e3670d66f5d0268ce0323ec09124bff61 --port 8080 --db .hack/devnet/custom-spamoor.db --startup-delay 10
+	bin/spamoor-daemon --rpchost-file .hack/devnet/generated-hosts.txt --privkey 3fd98b5187bf6526734efaa644ffbb4e3670d66f5d0268ce0323ec09124bff61 --port 8083 --db .hack/devnet/custom-spamoor.db --startup-delay 10 --without-batcher
 
 devnet-clean:
 	.hack/devnet/cleanup.sh
