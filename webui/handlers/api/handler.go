@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/ethpandaops/spamoor/daemon"
@@ -9,33 +8,15 @@ import (
 )
 
 type APIHandler struct {
-	daemon          *daemon.Daemon
-	authHandler     *auth.Handler
-	authProviderURL string
+	daemon      *daemon.Daemon
+	authHandler *auth.Handler
 }
 
-func NewAPIHandler(d *daemon.Daemon, authHandler *auth.Handler, authProviderURL string) *APIHandler {
+func NewAPIHandler(d *daemon.Daemon, authHandler *auth.Handler) *APIHandler {
 	return &APIHandler{
-		daemon:          d,
-		authHandler:     authHandler,
-		authProviderURL: authProviderURL,
+		daemon:      d,
+		authHandler: authHandler,
 	}
-}
-
-// runtimeConfigResponse is the body of GET /api/runtime-config. It tells
-// the frontend which auth provider (if any) to load.
-type runtimeConfigResponse struct {
-	AuthProviderURL string `json:"authProviderURL"`
-}
-
-// GetRuntimeConfig serves runtime configuration that the frontend reads
-// at boot to wire up the auth provider client. Public — no auth required.
-func (ah *APIHandler) GetRuntimeConfig(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(runtimeConfigResponse{
-		AuthProviderURL: ah.authProviderURL,
-	})
 }
 
 // checkAuth verifies the Authorization header and returns true if

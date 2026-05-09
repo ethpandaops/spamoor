@@ -3,12 +3,16 @@
   // Authentication state mirrored from window.ethpandaops.authenticatoor.
   // In open mode (no auth provider configured), authDisabled stays true
   // and isAuthenticated is unconditionally true so all UI is unlocked.
+  // authError is set when an auth provider is configured but its
+  // client.js failed to load — the UI surfaces this as "Auth unreachable"
+  // rather than silently treating the request as open.
   var authState = {
     token: null,
     user: null,
     expiresAt: null,
     isAuthenticated: false,
-    authDisabled: false
+    authDisabled: false,
+    authError: null
   };
 
   window.addEventListener('DOMContentLoaded', function() {
@@ -29,24 +33,45 @@
     authState: authState,
   };
 
-  // Returns the ethpandaops.authenticatoor client when an auth provider is
-  // configured AND its client.js has loaded. Returns null otherwise (open
-  // mode).
+  // True when no auth provider URL is configured — the backend runs the
+  // API unauthenticated and the frontend should unlock all UI.
+  function isOpenMode() {
+    return !window.spamoorConfig || !window.spamoorConfig.authProviderURL;
+  }
+
+  // Returns the ethpandaops.authenticatoor client when an auth provider
+  // is configured AND its client.js has loaded. Returns null in open mode
+  // OR when the client failed to load — callers must distinguish those
+  // two cases via isOpenMode().
   function authClient() {
-    if (!window.spamoorConfig || !window.spamoorConfig.authProviderURL) return null;
+    if (isOpenMode()) return null;
     if (!window.ethpandaops || !window.ethpandaops.authenticatoor) return null;
     return window.ethpandaops.authenticatoor;
   }
 
   // Initialize authentication. In open mode, mark everything as authed
-  // and bail. In remote mode, wire the login button and run checkLogin
-  // (fragment → cache → silent iframe) in the background.
+  // and bail. If an auth provider is configured but client.js never
+  // exposed window.ethpandaops.authenticatoor, surface that as a visible
+  // error state and stay unauthenticated (so API calls produce real 401s
+  // rather than silent failures behind a fake-authed UI). Otherwise wire
+  // the login button and run checkLogin (fragment → cache → silent
+  // iframe) in the background.
   function initAuth() {
-    var client = authClient();
-
-    if (!client) {
+    if (isOpenMode()) {
       authState.isAuthenticated = true;
       authState.authDisabled = true;
+      updateAuthUI();
+      return;
+    }
+
+    var client = authClient();
+    if (!client) {
+      authState.isAuthenticated = false;
+      authState.authDisabled = false;
+      authState.authError = 'Auth provider unreachable';
+      console.error('spamoor: auth provider configured (' +
+        window.spamoorConfig.authProviderURL +
+        ') but client.js failed to load — API calls will return 401');
       updateAuthUI();
       return;
     }
@@ -69,12 +94,6 @@
     }).catch(function() {
       // Stay unauthenticated; user can click Login.
     });
-
-    // Pick up subsequent state changes (token refresh, logout, etc.)
-    // without requiring a page reload.
-    if (typeof client.onStateChange === 'function') {
-      client.onStateChange(function(info) { applyClientState(info); });
-    }
   }
 
   // Mirror the auth client's state into our local authState.
@@ -94,7 +113,20 @@
     var userName = document.getElementById('userName');
 
     if (loginBtn && userInfo) {
-      if (authState.isAuthenticated) {
+      if (authState.authError) {
+        // Provider configured but client.js missing — show the failure
+        // in the nav so the user understands why API calls fail.
+        loginBtn.classList.remove('d-none');
+        loginBtn.classList.add('text-danger');
+        loginBtn.setAttribute('title', authState.authError);
+        loginBtn.removeAttribute('href');
+        loginBtn.style.pointerEvents = 'none';
+        var icon = loginBtn.querySelector('i');
+        if (icon) icon.className = 'fas fa-triangle-exclamation me-1';
+        var label = loginBtn.querySelector('.nav-text');
+        if (label) label.textContent = 'Auth unreachable';
+        userInfo.classList.add('d-none');
+      } else if (authState.isAuthenticated) {
         loginBtn.classList.add('d-none');
         userInfo.classList.remove('d-none');
         if (userName) {
