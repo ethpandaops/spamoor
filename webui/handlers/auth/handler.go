@@ -14,17 +14,26 @@ import (
 	"github.com/ethpandaops/service-authenticatoor/pkg/auth"
 )
 
+// serviceName is the logical app identity passed to the verifier as
+// ExpectedService. Tokens whose "services" directive list denies this
+// name are rejected. Hardcoded — this is what we are, not something an
+// operator should pretend otherwise about.
+const serviceName = "spamoor"
+
 // Handler validates incoming bearer tokens. When verifier is nil the API
 // is treated as open (no authentication required); CheckAuthToken always
 // returns a non-nil "valid" token.
 type Handler struct {
-	verifier auth.Verifier // nil → open mode
+	verifier *auth.JWKSVerifier // nil → open mode
 }
 
 // NewAuthHandler returns a Handler. When authProviderURL is empty the
 // returned handler operates in open mode (no token verification, all
 // calls allowed). When set, it bootstraps a JWKS verifier from the
-// service's OIDC discovery doc, falling back to <url>/jwks.json.
+// service's OIDC discovery doc, falling back to <url>/jwks.json. The
+// verifier is configured to gate on this binary's serviceName via the
+// token's "services" claim, and to bind tokens to the request host via
+// the "scope" claim (set per-request in CheckAuthToken).
 func NewAuthHandler(ctx context.Context, authProviderURL string) (*Handler, error) {
 	authProviderURL = strings.TrimRight(authProviderURL, "/")
 	if authProviderURL == "" {
@@ -42,6 +51,7 @@ func NewAuthHandler(ctx context.Context, authProviderURL string) (*Handler, erro
 		JWKSURL:          jwksURL,
 		ExpectedIssuer:   expectedIssuer,
 		ExpectedAudience: parentZone(authProviderURL),
+		ExpectedService:  serviceName,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("auth: build verifier: %w", err)

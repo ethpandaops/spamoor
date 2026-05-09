@@ -40,7 +40,7 @@ func (ah *APIHandler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	token := ah.authHandler.CheckAuthToken(authHeader)
+	token := ah.authHandler.CheckAuthToken(authHeader, auth.StripPort(r.Host))
 	if token == nil || !token.Valid {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return false
@@ -63,7 +63,7 @@ func (ah *APIHandler) getUserEmail(r *http.Request) string {
 			authHeader = "Bearer " + q
 		}
 	}
-	if subject := ah.authHandler.GetTokenSubject(authHeader); subject != "" {
+	if subject := ah.authHandler.GetTokenSubject(authHeader, auth.StripPort(r.Host)); subject != "" {
 		return subject
 	}
 	return "api"
@@ -82,6 +82,6 @@ func (ah *APIHandler) isAuthenticated(r *http.Request) bool {
 		return false
 	}
 
-	token := ah.authHandler.CheckAuthToken(authHeader)
+	token := ah.authHandler.CheckAuthToken(authHeader, auth.StripPort(r.Host))
 	return token != nil && token.Valid
 }
