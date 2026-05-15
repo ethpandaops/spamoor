@@ -471,23 +471,21 @@ func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMeta
 //  1. Build the tx with a large placeholder gas so abigen does not try to
 //     self-estimate.
 //  2. Run eth_estimateGas against the resulting {from, to, data, value}.
-//  3. Apply the live Amsterdam/cpsb-aware buffer to the RPC result.
+//  3. Apply the fee-model-aware buffer (and cpsb when known) to the RPC result.
 //  4. Clamp to the current block gas limit so the tx isn't doomed to be
 //     skipped for "gas limit reached" at block building time.
 //  5. Re-sign the tx with the refined gas at the same nonce.
 //
 // If txData.Gas is non-zero, the explicit value is honored and estimation is
-// skipped — matches BuildBoundTx semantics and provides an override for
-// operators. If the RPC round-trip fails, a size-based formula fallback is
-// used (conservative on the high side since deploys are rare init steps).
+// skipped. If the RPC round-trip fails, a size-based formula fallback is used
+// (conservative on the high side since deploys are rare init steps).
 //
 // Works for both contract creation (tx.To() == nil) and call txs (e.g.,
 // CREATE2 via factory). Only supports DynamicFeeTx tx types; other types
 // return the placeholder-sized tx unchanged.
 //
-// Pass the wallet pool's TxPool so Amsterdam activation state, current
-// cost-per-state-byte, and block gas limit are read from live chain state
-// instead of being hardcoded conservatively.
+// Pass the wallet pool's TxPool so the active fee model, current
+// cost-per-state-byte, and block gas limit are used by the estimator.
 func (wallet *Wallet) BuildBoundTxWithEstimate(
 	ctx context.Context,
 	client *Client,
@@ -497,7 +495,8 @@ func (wallet *Wallet) BuildBoundTxWithEstimate(
 ) (*types.Transaction, error) {
 	explicitGas := txData.Gas
 	// Placeholder large enough that abigen's deploy helpers don't error.
-	// On Amsterdam, EIP-7825 caps regular gas at MaxTxGas=16M; we use that.
+	// Sized to EIP-7825's TX_MAX_GAS_LIMIT (2^24) so a single placeholder works
+	// regardless of fee model.
 	placeholderGas := uint64(16_000_000)
 	if explicitGas != 0 {
 		placeholderGas = explicitGas
@@ -529,9 +528,10 @@ func (wallet *Wallet) BuildBoundTxWithEstimate(
 		blockLimit = txpool.GetCurrentGasLimit()
 		maxTxGas = txpool.MaxTxGas()
 	} else {
-		// No pool context — use the safe-upper-bound defaults.
+		// No pool context — assume Amsterdam with the static cpsb so the
+		// estimate covers worst-case state-creation gas.
 		isAmsterdam = true
-		cpsb = cpsbFloor
+		cpsb = CostPerStateByte
 		maxTxGas = utils.MaxGasLimitPerTx
 	}
 	refinedGas := estimateTxGas(ctx, client, wallet.GetAddress(), tx.To(), tx.Value(), tx.Data(), isAmsterdam, cpsb, maxTxGas, logger)

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"math/bits"
 	"math/rand"
 	"slices"
 	"strings"
@@ -23,51 +22,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// EIP-8037 (Amsterdam) chain parameters and txpool validator rules.
-// Values mirror github.com/ethereum/go-ethereum/params on the glamsterdam
-// devnet; duplicated here so spamoor's gas estimation doesn't depend on the
-// typed gas APIs in core/vm (which still churn between devnets).
-const (
-	// targetStateGrowthPerYear targets 100 GiB annual state growth per EIP-8037.
-	targetStateGrowthPerYear = 100 * 1024 * 1024 * 1024
-	// cpsbSignificantBits caps the precision of cost_per_state_byte quantization.
-	cpsbSignificantBits = 5
-	// cpsbOffset is an additive bias applied before quantization (EIP-8037).
-	cpsbOffset = 9578
-	// cpsbFloor is the minimum cpsb value spamoor will use. It matches the
-	// value that go-ethereum's glamsterdam-devnet-0 hardcodes in
-	// core/evm.go (CostPerStateByte returns 1174 with the dynamic formula
-	// commented out per the devnet-3 TODO). The dynamic formula yields 662
-	// at 60M gas limit and 1174 at 100M, so on smaller chains the floor is
-	// what keeps spamoor's gas estimates in sync with what the node actually
-	// charges. Once geth activates the dynamic formula, natural cpsb at
-	// 100M+ gas limits equals or exceeds this floor, making the clamp a
-	// no-op.
-	cpsbFloor = 1174
-)
-
-// computeCostPerStateByte implements the EIP-8037 cost_per_state_byte formula.
-// Returns 0 when gasLimit is 0 (unknown / pre-Amsterdam). Results are deterministic.
-func computeCostPerStateByte(gasLimit uint64) uint64 {
-	if gasLimit == 0 {
-		return 0
-	}
-	// raw = ceil((gasLimit * 2_628_000) / (2 * TARGET_STATE_GROWTH_PER_YEAR))
-	num := gasLimit*2_628_000 + (2*targetStateGrowthPerYear - 1)
-	raw := num / (2 * targetStateGrowthPerYear)
-
-	shifted := raw + cpsbOffset
-	shift := max(bits.Len64(shifted)-cpsbSignificantBits, 0)
-	quantized := (shifted >> shift) << shift
-	var formula uint64 = 1
-	if quantized > cpsbOffset {
-		formula = quantized - cpsbOffset
-	}
-	// Clamp to the current hardcoded value in geth so spamoor's gas budgets
-	// match the node's charging on devnets that haven't yet enabled the
-	// dynamic formula. See cpsbFloor for background.
-	return max(formula, cpsbFloor)
-}
+// CostPerStateByte is the EIP-8037 cost_per_state_byte value spamoor uses
+// when the Amsterdam fee model is active. State-gas charges (account
+// creation, code deposit, authorization delegators) multiply this by the
+// per-charge size constants below.
+const CostPerStateByte uint64 = 1530
 
 // feeWindowSize is the number of recent blocks tracked for dynamic fee headroom calculation.
 const feeWindowSize = 10
@@ -161,10 +120,11 @@ type TxPool struct {
 	// Current block gas limit tracking
 	currentGasLimit uint64
 	currentBaseFee  *big.Int
-	// isAmsterdam is true when the latest-observed block header contains a
-	// non-nil blockAccessListHash (EIP-7928, tied to Amsterdam / EIP-8037).
-	isAmsterdam     bool
 	blockStatsMutex sync.RWMutex
+
+	// preAmsterdamFeeModel selects the legacy (pre-EIP-8037) gas/fee model
+	// when true. Defaults to false: the Amsterdam fee model is active.
+	preAmsterdamFeeModel bool
 
 	// Recent block tracking for dynamic fee calculation.
 	// Sliding window of gas usage and baseFee to adjust feeCap:
@@ -196,6 +156,11 @@ type TxPoolOptions struct {
 	ReorgDepth          int // Number of blocks to keep in memory for reorg tracking
 	ChainId             *big.Int
 	ExternalBlockSource *ExternalBlockSource
+	// PreAmsterdamFeeModel forces the legacy (pre-EIP-8037) gas/fee model.
+	// When false (default) spamoor uses the Amsterdam fee model, which is
+	// safe to keep on non-Amsterdam chains because its gas budgets are
+	// strictly higher than the legacy ones.
+	PreAmsterdamFeeModel bool
 }
 
 type ExternalBlockSource struct {
@@ -215,15 +180,16 @@ type ExternalBlockEvent struct {
 // transaction confirmations and reorgs.
 func NewTxPool(options *TxPoolOptions) *TxPool {
 	pool := &TxPool{
-		options:           options,
-		wallets:           make(map[common.Address]*txPoolWalletRegistration),
-		walletPools:       make(map[*WalletPool]struct{}),
-		processStaleChan:  make(chan uint64, 1),
-		blocks:            map[uint64]*BlockInfo{},
-		confirmedTxs:      map[uint64][]*TxInfo{},
-		reorgDepth:        10, // Default value
-		subscriptions:     map[uint64]*BlockSubscription{},
-		bulkSubscriptions: map[uint64]*BulkBlockSubscription{},
+		options:              options,
+		wallets:              make(map[common.Address]*txPoolWalletRegistration),
+		walletPools:          make(map[*WalletPool]struct{}),
+		processStaleChan:     make(chan uint64, 1),
+		blocks:               map[uint64]*BlockInfo{},
+		confirmedTxs:         map[uint64][]*TxInfo{},
+		reorgDepth:           10, // Default value
+		subscriptions:        map[uint64]*BlockSubscription{},
+		bulkSubscriptions:    map[uint64]*BulkBlockSubscription{},
+		preAmsterdamFeeModel: options.PreAmsterdamFeeModel,
 	}
 
 	if options.Context == nil {
@@ -234,9 +200,9 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 		pool.reorgDepth = options.ReorgDepth
 	}
 
-	// Block stats (gas limit, base fee, Amsterdam activation) are loaded by the
-	// caller via InitializeBlockStats before any scenario starts. Construction
-	// itself does not perform RPC calls.
+	// Block stats (gas limit, base fee) are loaded by the caller via
+	// InitializeBlockStats before any scenario starts. Construction itself
+	// does not perform RPC calls.
 
 	go pool.runTxPoolLoop()
 	go pool.processStaleTransactionsLoop()
@@ -507,13 +473,7 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 
 	// Update current gas limit and recent block gas tracking
-	isAmsterdam := blockWithHash.Block.Header().BlockAccessListHash != nil
 	pool.blockStatsMutex.Lock()
-	if isAmsterdam != pool.isAmsterdam {
-		logrus.WithField("gasLimit", blockWithHash.Block.GasLimit()).
-			Infof("Amsterdam (EIP-8037) activation state changed: %v", isAmsterdam)
-		pool.isAmsterdam = isAmsterdam
-	}
 	pool.currentGasLimit = blockWithHash.Block.GasLimit()
 	pool.currentBaseFee = blockWithHash.Block.BaseFee()
 	pool.recentGasUsed[pool.recentGasIdx] = blockWithHash.Block.GasUsed()
@@ -1569,13 +1529,12 @@ func (pool *TxPool) GetCurrentGasLimit() uint64 {
 	return pool.currentGasLimit
 }
 
-// IsAmsterdam returns whether the connected chain has activated Amsterdam
-// (EIP-8037 / EIP-7928). Detected via the presence of blockAccessListHash in
-// the latest block header. Returns false before the first block is seen.
+// IsAmsterdam reports whether spamoor uses the Amsterdam (EIP-8037) gas/fee
+// model. Defaults to true; set TxPoolOptions.PreAmsterdamFeeModel to true to
+// force the legacy model. The Amsterdam model is safe to keep on non-Amsterdam
+// chains because its gas budgets are strictly higher than the legacy ones.
 func (pool *TxPool) IsAmsterdam() bool {
-	pool.blockStatsMutex.RLock()
-	defer pool.blockStatsMutex.RUnlock()
-	return pool.isAmsterdam
+	return !pool.preAmsterdamFeeModel
 }
 
 // HasObservedHead reports whether the pool has loaded chain state via
@@ -1588,25 +1547,22 @@ func (pool *TxPool) HasObservedHead() bool {
 	return pool.currentGasLimit > 0
 }
 
-// GetCostPerStateByte returns the current EIP-8037 cost_per_state_byte,
-// computed from the latest observed block gas limit. Returns 0 pre-Amsterdam.
-// Block stats are populated by InitializeBlockStats during startup, so callers
-// can rely on this returning live chain state once scenarios are running.
+// GetCostPerStateByte returns the EIP-8037 cost_per_state_byte spamoor charges
+// for state-creation gas budgeting. Returns the flat CostPerStateByte constant
+// on Amsterdam (default), or 0 when the pre-Amsterdam fee model is forced.
 func (pool *TxPool) GetCostPerStateByte() uint64 {
-	pool.blockStatsMutex.RLock()
-	defer pool.blockStatsMutex.RUnlock()
-	if !pool.isAmsterdam {
+	if pool.preAmsterdamFeeModel {
 		return 0
 	}
-	return computeCostPerStateByte(pool.currentGasLimit)
+	return CostPerStateByte
 }
 
 // MaxTxGas returns the effective per-tx gas cap for the connected chain.
-// On Amsterdam chains, EIP-8037 constrains only regular_gas (formerly
-// "compute gas") to EIP-7825's TX_MAX_GAS_LIMIT (16,777,216); total tx.gas
-// may grow up to the block gas limit when state_gas dominates (e.g. large
-// contract deployments). Pre-Amsterdam the cap is utils.MaxGasLimitPerTx,
-// clamped to the block limit on chains whose block limit is below 16.7M.
+// On Amsterdam, EIP-8037 caps only the state-creation portion at EIP-7825's
+// TX_MAX_GAS_LIMIT (16,777,216) while regular (compute) gas is bounded only by
+// the block gas limit, so MaxTxGas returns the block gas limit. Pre-Amsterdam
+// the cap is utils.MaxGasLimitPerTx, clamped to the block limit on chains
+// whose block limit is below 16.7M.
 func (pool *TxPool) MaxTxGas() uint64 {
 	blockLimit := pool.GetCurrentGasLimit()
 	if pool.IsAmsterdam() {
@@ -1765,9 +1721,8 @@ func (pool *TxPool) tryInitBlockStats(ctx context.Context) error {
 
 	pool.currentGasLimit = latestBlock.GasLimit()
 	pool.currentBaseFee = latestBlock.BaseFee()
-	pool.isAmsterdam = latestBlock.Header().BlockAccessListHash != nil
-	logrus.Infof("initialized block stats from latest block: gasLimit=%v baseFee=%v amsterdam=%v",
-		pool.currentGasLimit, pool.currentBaseFee, pool.isAmsterdam)
+	logrus.Infof("initialized block stats from latest block: gasLimit=%v baseFee=%v amsterdamFeeModel=%v",
+		pool.currentGasLimit, pool.currentBaseFee, !pool.preAmsterdamFeeModel)
 
 	return nil
 }

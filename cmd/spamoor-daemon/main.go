@@ -24,27 +24,28 @@ import (
 )
 
 type CliArgs struct {
-	verbose           bool
-	trace             bool
-	debug             bool
-	rpchosts          []string
-	rpchostsFile      string
-	privkey           string
-	port              int
-	dbFile            string
-	startupSpammer    string
-	fuluActivation    uint64
-	withoutBatcher    bool
-	disableTxMetrics  bool
-	disableAuditLogs  bool
-	disablePluginAPI  bool
-	slotDuration      time.Duration
-	auditUserHeader   string
-	authTokenKey      string
-	disableLocalToken bool
-	enableAuth        bool
-	startupDelay      uint64
-	plugins           []string
+	verbose              bool
+	trace                bool
+	debug                bool
+	rpchosts             []string
+	rpchostsFile         string
+	privkey              string
+	port                 int
+	dbFile               string
+	startupSpammer       string
+	fuluActivation       uint64
+	withoutBatcher       bool
+	disableTxMetrics     bool
+	disableAuditLogs     bool
+	disablePluginAPI     bool
+	slotDuration         time.Duration
+	auditUserHeader      string
+	authTokenKey         string
+	disableLocalToken    bool
+	enableAuth           bool
+	startupDelay         uint64
+	plugins              []string
+	preAmsterdamFeeModel bool
 }
 
 func main() {
@@ -72,6 +73,7 @@ func main() {
 	flags.BoolVar(&cliArgs.disableLocalToken, "disable-local-token", false, "Disable local token generation via the /auth/token endpoint (require external token)")
 	flags.Uint64Var(&cliArgs.startupDelay, "startup-delay", 30, "Delay in seconds before starting spammers on daemon startup (to allow cancellation)")
 	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files or local directories to load (can be specified multiple times)")
+	flags.BoolVar(&cliArgs.preAmsterdamFeeModel, "pre-amsterdam-fee-model", false, "Use the legacy pre-Amsterdam (pre-EIP-8037) gas/fee model. Default is the Amsterdam fee model, which is safe on non-Amsterdam chains because its gas budgets are strictly higher.")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -146,10 +148,11 @@ func main() {
 	var spamoorDaemon *daemon.Daemon
 
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
-		Context:    ctx,
-		Logger:     logger.WithField("module", "txpool"),
-		ClientPool: clientPool,
-		ChainId:    clientPool.GetChainId(),
+		Context:              ctx,
+		Logger:               logger.WithField("module", "txpool"),
+		ClientPool:           clientPool,
+		ChainId:              clientPool.GetChainId(),
+		PreAmsterdamFeeModel: cliArgs.preAmsterdamFeeModel,
 	})
 
 	// init daemon
@@ -237,9 +240,8 @@ func main() {
 		panic(fmt.Errorf("failed to prepare clients: %v", err))
 	}
 
-	// load chain state (gas limit, base fee, Amsterdam activation) before any
-	// scenario starts, so scenarios always observe real values instead of
-	// uninitialized defaults.
+	// load chain state (gas limit, base fee) before any scenario starts, so
+	// scenarios always observe real values instead of uninitialized defaults.
 	initStatsCtx, cancelInitStats := context.WithTimeout(ctx, 30*time.Second)
 	err = txpool.InitializeBlockStats(initStatsCtx)
 	cancelInitStats()

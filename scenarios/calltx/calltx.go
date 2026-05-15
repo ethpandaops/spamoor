@@ -177,12 +177,12 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	maxTx := s.walletPool.GetTxPool().MaxTxGas()
-	if s.options.DeployGasLimit > maxTx {
-		s.logger.Warnf("Deploy gas limit %d exceeds per-tx cap %d and will most likely be dropped by the execution layer client", s.options.DeployGasLimit, maxTx)
+	blockLimit := s.walletPool.GetTxPool().GetCurrentGasLimit()
+	if blockLimit > 0 && s.options.DeployGasLimit > blockLimit {
+		s.logger.Warnf("Deploy gas limit %d exceeds block gas limit %d and will most likely be dropped by the execution layer client", s.options.DeployGasLimit, blockLimit)
 	}
-	if s.options.GasLimit > maxTx {
-		s.logger.Warnf("Gas limit %d exceeds per-tx cap %d and will most likely be dropped by the execution layer client", s.options.GasLimit, maxTx)
+	if blockLimit > 0 && s.options.GasLimit > blockLimit {
+		s.logger.Warnf("Gas limit %d exceeds block gas limit %d and will most likely be dropped by the execution layer client", s.options.GasLimit, blockLimit)
 	}
 
 	// Validate contract source options (mutually exclusive)

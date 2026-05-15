@@ -19,6 +19,7 @@ func init() {
 		"BatcherRPCGasCap":             reflect.ValueOf(constant.MakeFromLiteral("16000000", token.INT, 0)),
 		"ClientTypeBuilder":            reflect.ValueOf(spamoor.ClientTypeBuilder),
 		"ClientTypeClient":             reflect.ValueOf(spamoor.ClientTypeClient),
+		"CostPerStateByte":             reflect.ValueOf(spamoor.CostPerStateByte),
 		"GetDefaultLogFn":              reflect.ValueOf(spamoor.GetDefaultLogFn),
 		"GetDefaultWalletConfig":       reflect.ValueOf(spamoor.GetDefaultWalletConfig),
 		"InitRootWallet":               reflect.ValueOf(spamoor.InitRootWallet),
