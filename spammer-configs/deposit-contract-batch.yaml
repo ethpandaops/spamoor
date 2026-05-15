@@ -1,0 +1,181 @@
+# Name: Deposit Contract Batch Spammer
+# Description: Spams the beacon-chain deposit contract via a tiny geas batching contract that performs N deposits per tx (1 ETH each). Two flavours are provided - top-ups for an existing genesis validator (no signature needed) and full deposits for a fresh validator (with valid BLS signature). Each tx is sized to use ~10M gas to push as many deposits as possible per block.
+# Tags: deposit, beacon, electra, performance, gas-optimization
+# Min_Version: v1.1.5
+- scenario: geastx
+  name: 'Deposit-contract: 410 top-ups per tx (1 ETH each, ~10M gas, 200M total)'
+  description: Calls the deposit contract 415 times per tx with a 1 ETH top-up to validator #0. Calldata uses a zero signature (top-ups skip BLS verification on the consensus layer). Sized to consume ~10M gas per tx.
+  config:
+    # Wallet settings - each tx pays 415 ETH so wallets need a hefty refill.
+    # Wei values that overflow uint64 must be quoted so YAML keeps them as strings.
+    seed: deposit-batch-topup
+    refill_amount: "50000000000000000000000"   # 50000 ETH
+    refill_balance: "40000000000000000000000"  # refill when below 40000 ETH
+    refill_interval: 600
+    max_wallets: 5
+
+    # Scenario throughput
+    total_count: 0
+    throughput: 30
+    max_pending: 20
+    rebroadcast: 1
+
+    # Tx fees (gwei)
+    base_fee: 20
+    tip_fee: 2
+
+    # Gas budget: ~63k for the first (cold) deposit + ~24k each subsequent
+    # warm deposit (measured on devnet). 415 deposits ~= 9.92M gas, sized
+    # to fit just under the 10M cap with ~80k headroom.
+    gas_limit: 10000000
+    deploy_gas_limit: 1000000
+
+    # Amount sent into the batch contract (gwei). Batch size = amount / 1 ETH,
+    # so 415_000_000_000 gwei = 415 ETH = 415 deposits per tx.
+    amount: 410000000000
+
+    log_txs: true
+    timeout: ""
+    client_group: ""
+    deploy_client_group: ""
+
+    geas_file: ""
+    geas_code: |
+      ;;; Batch beacon-chain deposit contract spammer (top-up flavour).
+      ;;;
+      ;;; Calls the deposit contract N times with the embedded calldata,
+      ;;; sending 1 ETH on each call. N = msg.value / 1 ETH, so the batch
+      ;;; size is controlled entirely by the value sent to this contract.
+      ;;;
+      ;;; The embedded calldata is a 1 ETH top-up to validator #0
+      ;;; (pubkey aaf6c1...dff26c, withdrawal_credentials 0048281f...d28d).
+      ;;; The signature is all-zero and the deposit_data_root is the
+      ;;; SHA-256 hash-tree-root of that DepositData, which is what the
+      ;;; deposit contract verifies. The consensus layer skips BLS
+      ;;; verification for additional deposits to an existing validator.
+
+      #define DEPOSIT_ADDR  = 0x00000000219ab540356cBB839Cbe05303d7705Fa
+      #define ONE_ETH_WEI   = 0xde0b6b3a7640000
+      #define DATA_SIZE     = 420
+
+          ;; Copy the embedded deposit calldata into memory[0:DATA_SIZE].
+          push DATA_SIZE
+          push @deposit_calldata
+          push0
+          codecopy
+
+          ;; count = msg.value / 1 ETH; bail out if zero.
+          callvalue
+          push ONE_ETH_WEI
+          swap1
+          div
+          dup1
+          iszero
+          push @end
+          jumpi
+
+      loop:
+          ;; CALL(gas, addr, value, argsOff, argsSize, retOff, retSize)
+          push0
+          push0
+          push DATA_SIZE
+          push0
+          push ONE_ETH_WEI
+          push DEPOSIT_ADDR
+          gas
+          call
+          pop
+
+          push 1
+          swap1
+          sub
+          dup1
+          push @loop
+          jumpi
+
+      end:
+          stop
+
+      #bytes deposit_calldata: 0x22895118000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000120d9b16047215616e17c7abcab1b8df8c34dadfd8ec71a0b2e1f988b3fb832cf240000000000000000000000000000000000000000000000000000000000000030aaf6c1251e73fb600624937760fef218aace5b253bf068ed45398aeb29d821e4d2899343ddcbbe37cb3f6cf500dff26c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200048281f02e108ec495e48a25d2adb4732df75bf5750c060ff31c864c053d28d0000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+
+- scenario: geastx
+  name: 'Deposit-contract: 410 fresh deposits per tx (1 ETH each, valid BLS sig, ~10M gas, 200M total)'
+  description: Calls the deposit contract 410 times per tx with a 1 ETH deposit for a fresh validator. Calldata carries a BLS-signed DepositMessage (privkey 0x111...111, withdrawal_credentials 0x02...) that the consensus layer accepts as a new pending deposit. Sized to consume ~10M gas per tx.
+  config:
+    seed: deposit-batch-fresh
+    refill_amount: "50000000000000000000000"   # 50000 ETH
+    refill_balance: "40000000000000000000000"  # refill when below 40000 ETH
+    refill_interval: 600
+    max_wallets: 5
+
+    total_count: 0
+    throughput: 30
+    max_pending: 20
+    rebroadcast: 1
+
+    base_fee: 20
+    tip_fee: 2
+
+    gas_limit: 10000000
+    deploy_gas_limit: 1000000
+
+    amount: 410000000000
+
+    log_txs: true
+    timeout: ""
+    client_group: ""
+    deploy_client_group: ""
+
+    geas_file: ""
+    geas_code: |
+      ;;; Batch beacon-chain deposit contract spammer (fresh deposit flavour).
+      ;;;
+      ;;; Identical to the top-up flavour but the embedded calldata is a
+      ;;; valid 1 ETH deposit for a fresh validator. Pubkey is derived from
+      ;;; BLS privkey 0x1111..1111, withdrawal_credentials uses the 0x02
+      ;;; (compounding) prefix, signature signs the DepositMessage with the
+      ;;; devnet GENESIS_FORK_VERSION 0x10000038 and DOMAIN_DEPOSIT
+      ;;; 0x03000000. The consensus layer accepts this as a new pending
+      ;;; deposit; once balance reaches the activation threshold the
+      ;;; validator activates.
+
+      #define DEPOSIT_ADDR  = 0x00000000219ab540356cBB839Cbe05303d7705Fa
+      #define ONE_ETH_WEI   = 0xde0b6b3a7640000
+      #define DATA_SIZE     = 420
+
+          push DATA_SIZE
+          push @deposit_calldata
+          push0
+          codecopy
+
+          callvalue
+          push ONE_ETH_WEI
+          swap1
+          div
+          dup1
+          iszero
+          push @end
+          jumpi
+
+      loop:
+          push0
+          push0
+          push DATA_SIZE
+          push0
+          push ONE_ETH_WEI
+          push DEPOSIT_ADDR
+          gas
+          call
+          pop
+
+          push 1
+          swap1
+          sub
+          dup1
+          push @loop
+          jumpi
+
+      end:
+          stop
+
+      #bytes deposit_calldata: 0x22895118000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000012040fff146d3d50bcf60eb03260f193051af8c34ea8441440a46664c50b2768e0f000000000000000000000000000000000000000000000000000000000000003097248533cef0908a5ebe52c3b487471301bf6369010e6167f63dd74feddac2dfb5336a59a331d38eb0e454d6f6fcb1a4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020020000000000000000000000111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000608e444f20269f37d968b49665e0834bc20c1d56c2c1b5a72bbda0d08f66461d541409ae610fd4dcabe9ff8cc94be951b1132974c2c2f9ea04215ff9bc09b9f0472be67d77f8ca40aeaf60af7f61029470a6beed46437205ce46af8b4ca59c9097
