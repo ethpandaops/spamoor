@@ -97,16 +97,15 @@ exit2:
 `
 
 const (
-	// BatcherBaseGas is the pre-Amsterdam base gas cost for a batcher transaction
-	// (tx intrinsic + batcher dispatch overhead). WalletPool.batcherBaseGas uses
-	// this value on non-Amsterdam chains and a higher value on Amsterdam to
-	// cover the EIP-8037 txpool 110% intrinsic-regular buffer.
+	// BatcherBaseGas is the base gas overhead of a batcher transaction
+	// (tx intrinsic + batcher dispatch). Per-recipient cost is added on top by
+	// WalletPool.batcherGasFor.
 	BatcherBaseGas = 50000
-	// BatcherDefaultGasPerTx is the pre-Amsterdam default gas cost per recipient
-	// in the batch. Used when funding_gas_limit is not configured. On Amsterdam,
-	// WalletPool.batcherGasFor computes per-recipient cost dynamically (split by
-	// target emptiness + current cpsb) and this constant is the fallback only
-	// when txpool.GetCostPerStateByte() returns 0.
+	// BatcherDefaultGasPerTx is the legacy-model default per-recipient gas in
+	// the batch, used when funding_gas_limit is not configured and the
+	// pre-Amsterdam fee model is active (cpsb == 0). On Amsterdam,
+	// WalletPool.batcherGasFor computes per-recipient cost dynamically from
+	// target emptiness and the current cpsb.
 	BatcherDefaultGasPerTx = 35000
 	// BatcherRPCGasCap is the maximum gas allowed per RPC call (geth default: 16M).
 	// Batch boundaries are computed to keep total gas under this cap; see
@@ -189,8 +188,8 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 	}
 
 	// Estimate the deploy gas so we stay correct under EIP-8037 where
-	// account creation + per-byte code deposit dominate the cost. Fall back
-	// to the pre-Amsterdam hard-coded 300k if the RPC path fails.
+	// account creation + per-byte code deposit dominate the cost. Falls back
+	// to the formula upper bound if the RPC path fails.
 	deployGas, estErr := client.EstimateGas(ctx, ethereum.CallMsg{
 		From:  wallet.GetAddress(),
 		To:    nil,
