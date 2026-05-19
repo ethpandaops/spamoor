@@ -79,10 +79,6 @@ jobs:
       run: |
         cd spamoor_linux_arm64
         tar -czf ../spamoor_${{ inputs.version }}_linux_arm64.tar.gz .
-    - name: "Generate release package: spamoor_${{ inputs.version }}_darwin_amd64.tar.gz"
-      run: |
-        cd spamoor_darwin_amd64
-        tar -czf ../spamoor_${{ inputs.version }}_darwin_amd64.tar.gz .
     - name: "Generate release package: spamoor_${{ inputs.version }}_darwin_arm64.tar.gz"
       run: |
         cd spamoor_darwin_arm64
@@ -114,11 +110,9 @@ jobs:
           | [spamoor_${{ inputs.version }}_windows_amd64.zip](https://github.com/ethpandaops/spamoor/releases/download/v${{ inputs.version }}/spamoor_${{ inputs.version }}_windows_amd64.zip) | spamoor executables for windows/amd64 |
           | [spamoor_${{ inputs.version }}_linux_amd64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/v${{ inputs.version }}/spamoor_${{ inputs.version }}_linux_amd64.tar.gz) | spamoor executables for linux/amd64 |
           | [spamoor_${{ inputs.version }}_linux_arm64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/v${{ inputs.version }}/spamoor_${{ inputs.version }}_linux_arm64.tar.gz) | spamoor executables for linux/arm64 |
-          | [spamoor_${{ inputs.version }}_darwin_amd64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/v${{ inputs.version }}/spamoor_${{ inputs.version }}_darwin_amd64.tar.gz) | spamoor executable for macos/amd64 |
           | [spamoor_${{ inputs.version }}_darwin_arm64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/v${{ inputs.version }}/spamoor_${{ inputs.version }}_darwin_arm64.tar.gz) | spamoor executable for macos/arm64 |
         files: |
           spamoor_${{ inputs.version }}_windows_amd64.zip
           spamoor_${{ inputs.version }}_linux_amd64.tar.gz
           spamoor_${{ inputs.version }}_linux_arm64.tar.gz
-          spamoor_${{ inputs.version }}_darwin_amd64.tar.gz
           spamoor_${{ inputs.version }}_darwin_arm64.tar.gz
