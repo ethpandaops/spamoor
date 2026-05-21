@@ -100,7 +100,7 @@ type WalletPool struct {
 const (
 	// AccountCreationSize is the EIP-8037 charge unit count for creating a
 	// new account. State gas = AccountCreationSize * cpsb.
-	AccountCreationSize = 112
+	AccountCreationSize = 120
 	// AuthorizationCreationSize is the EIP-8037 charge unit count applied to
 	// each EIP-7702 SetCode authorization that creates a delegator account.
 	AuthorizationCreationSize = 23
