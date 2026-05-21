@@ -66,7 +66,7 @@ loop:
 	SHR               ;; [address, amount, 0, 0, 0, 0, offset]
 	
 	;; forward funds
-	PUSH 30000        ;; [30000, address, amount, 0, 0, 0, 0, offset]
+	GAS               ;; [gas, address, amount, 0, 0, 0, 0, offset]
 	CALL              ;; [success, offset]
 	POP               ;; [offset]
 
