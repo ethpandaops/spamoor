@@ -16,7 +16,6 @@ jobs:
     name: "Build Spamoor"
     uses: ./.github/workflows/_shared-build.yaml
     with:
-      ref: ${{ github.sha }}
       release: "v${{ inputs.version }}"
       docker: true
       docker_repository: "ethpandaops/spamoor"

@@ -22,7 +22,6 @@ jobs:
     needs: [check_source]
     uses: ./.github/workflows/_shared-build.yaml
     with:
-      ref: ${{ github.sha }}
       release: "snapshot"
       docker: true
       docker_repository: "ethpandaops/spamoor"

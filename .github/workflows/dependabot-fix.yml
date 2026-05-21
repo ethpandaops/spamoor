@@ -53,5 +53,3 @@ jobs:
     needs: [update-symbols]
     if: github.actor == 'dependabot[bot]' && needs.update-symbols.outputs.symbols_updated == 'true'
     uses: ./.github/workflows/_shared-check.yaml
-    with:
-      ref: ${{ github.event.pull_request.head.ref }}
