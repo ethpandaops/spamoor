@@ -130,8 +130,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if maxTx := s.walletPool.GetTxPool().MaxTxGas(); s.options.GasLimit > maxTx {
-		s.logger.Warnf("Gas limit %d exceeds per-tx cap %d and will most likely be dropped by the execution layer client", s.options.GasLimit, maxTx)
+	if blockLimit := s.walletPool.GetTxPool().GetCurrentGasLimit(); blockLimit > 0 && s.options.GasLimit > blockLimit {
+		s.logger.Warnf("Gas limit %d exceeds block gas limit %d and will most likely be dropped by the execution layer client", s.options.GasLimit, blockLimit)
 	}
 
 	s.bytecodes = [][]byte{}
