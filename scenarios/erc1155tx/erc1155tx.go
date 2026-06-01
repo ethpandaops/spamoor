@@ -376,10 +376,15 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
+	// Each minted id creates a fresh balance slot, so gas scales with the batch
+	// size. Under the Amsterdam fee schedule a single mint costs ~140k and each
+	// additional id adds ~110k; size the static limit per batch (no per-tx
+	// estimation on the spam path).
+	gasLimit := uint64(100000 + uint64(len(indexes))*120000)
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       300000,
+		Gas:       gasLimit,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		if len(indexes) == 1 {

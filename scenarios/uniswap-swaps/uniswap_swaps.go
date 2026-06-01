@@ -51,6 +51,14 @@ type Scenario struct {
 	deploymentInfo *DeploymentInfo
 }
 
+// swapGasLimit is the static gas limit used for all swap (spam) transactions.
+// Swaps deliberately avoid per-tx gas estimation to skip the extra RPC round
+// trip on the hot path. Under the Amsterdam fee schedule a swap that creates
+// fresh state (e.g. the recipient's first token balance slot, WETH wrap/unwrap)
+// costs ~410k gas; this limit keeps comfortable headroom for the heaviest swap
+// variant. Bump it if a future fee schedule raises state-creation cost again.
+const swapGasLimit = 600000
+
 var ScenarioName = "uniswap-swaps"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TotalCount:        0,
@@ -379,7 +387,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 				tx, err = wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 					GasFeeCap: uint256.MustFromBig(feeCap),
 					GasTipCap: uint256.MustFromBig(tipCap),
-					Gas:       200000,
+					Gas:       swapGasLimit,
 					Value:     uint256.NewInt(0),
 				}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 					return router.SwapExactTokensForTokens(transactOpts, wethAmount, minDaiAmount, []common.Address{s.deploymentInfo.Weth9Addr, pair.DaiAddr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
@@ -425,7 +433,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 			tx, err = wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
-				Gas:       200000,
+				Gas:       swapGasLimit,
 				Value:     uint256.MustFromBig(ethAmount),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 				return router.SwapExactETHForTokens(transactOpts, minDaiAmount, []common.Address{s.deploymentInfo.Weth9Addr, pair.DaiAddr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
@@ -466,7 +474,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 			tx, err = wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
-				Gas:       200000,
+				Gas:       swapGasLimit,
 				Value:     uint256.NewInt(0),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 				return router.SwapExactTokensForTokens(transactOpts, randomAmount, minWethAmount, []common.Address{pair.DaiAddr, s.deploymentInfo.Weth9Addr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))
@@ -503,7 +511,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 			tx, err = wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
-				Gas:       200000,
+				Gas:       swapGasLimit,
 				Value:     uint256.NewInt(0),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 				return router.SwapExactTokensForETH(transactOpts, randomAmount, minEthAmount, []common.Address{pair.DaiAddr, s.deploymentInfo.Weth9Addr}, wallet.GetAddress(), big.NewInt(time.Now().Unix()+300))

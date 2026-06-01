@@ -241,10 +241,9 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 			// Build approval transaction for router A if needed
 			if allowanceA.Cmp(maxAllowance) < 0 {
-				approveTx, err := wallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+				approveTx, err := wallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 					GasFeeCap: uint256.MustFromBig(feeCap),
 					GasTipCap: uint256.MustFromBig(tipCap),
-					Gas:       100000,
 					Value:     uint256.NewInt(0),
 				}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 					return token.Approve(transactOpts, u.deploymentInfo.UniswapRouterAAddr, maxAllowance)
@@ -260,10 +259,9 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 			// Build approval transaction for router B if needed
 			if allowanceB.Cmp(maxAllowance) < 0 {
-				approveTx, err := wallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+				approveTx, err := wallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 					GasFeeCap: uint256.MustFromBig(feeCap),
 					GasTipCap: uint256.MustFromBig(tipCap),
-					Gas:       100000,
 					Value:     uint256.NewInt(0),
 				}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 					return token.Approve(transactOpts, u.deploymentInfo.UniswapRouterBAddr, maxAllowance)
@@ -298,10 +296,9 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 		// Build approval transaction for router A if needed
 		if wethAllowanceA.Cmp(maxAllowance) < 0 {
-			approveTx, err := wallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+			approveTx, err := wallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
-				Gas:       100000,
 				Value:     uint256.NewInt(0),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 				return u.Weth.Approve(transactOpts, u.deploymentInfo.UniswapRouterAAddr, maxAllowance)
@@ -317,10 +314,9 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 		// Build approval transaction for router B if needed
 		if wethAllowanceB.Cmp(maxAllowance) < 0 {
-			approveTx, err := wallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+			approveTx, err := wallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
-				Gas:       100000,
 				Value:     uint256.NewInt(0),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 				return u.Weth.Approve(transactOpts, u.deploymentInfo.UniswapRouterBAddr, maxAllowance)
