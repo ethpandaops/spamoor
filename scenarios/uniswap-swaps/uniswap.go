@@ -112,44 +112,69 @@ func (u *Uniswap) InitializeTokenBalances() {
 	// Get all wallets
 	wallets := u.walletPool.GetAllWallets()
 
-	// Initialize balances for each wallet and token
-	for _, wallet := range wallets {
-		walletAddr := wallet.GetAddress()
+	// Read balances for each wallet in parallel across clients. Doing this
+	// serially over hundreds of wallets is hundreds of blocking RPC calls; the
+	// context-aware CallOpts also let a UI stop cancel the in-flight reads.
+	sem := make(chan struct{}, u.setupConcurrency())
+	var wg sync.WaitGroup
 
-		// Initialize the inner map for this wallet
-		u.tokenBalancesMutex.Lock()
-		u.tokenBalances[walletAddr] = make(map[common.Address]*big.Int)
-		u.tokenBalancesMutex.Unlock()
-
-		for _, pair := range u.deploymentInfo.Pairs {
-			token := u.Tokens[pair.DaiAddr]
-			if token == nil {
-				continue
+	for idx, wallet := range wallets {
+		if u.ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func(idx int, wallet *spamoor.Wallet) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-u.ctx.Done():
+				return
 			}
 
-			balance, err := token.BalanceOf(&bind.CallOpts{}, walletAddr)
-			if err != nil {
-				u.logger.Errorf("could not get token balance for %v: %v", walletAddr, err)
-				continue
+			walletAddr := wallet.GetAddress()
+			rclient := u.walletPool.GetClient(
+				spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, idx),
+				spamoor.WithClientGroup(u.options.ClientGroup),
+				spamoor.WithoutBuilder(),
+			)
+			if rclient == nil {
+				return
+			}
+			callOpts := &bind.CallOpts{Context: u.ctx}
+
+			balances := make(map[common.Address]*big.Int, len(u.deploymentInfo.Pairs)+1)
+			for _, pair := range u.deploymentInfo.Pairs {
+				if u.Tokens[pair.DaiAddr] == nil {
+					continue
+				}
+				token, err := contract.NewDai(pair.DaiAddr, rclient.GetEthClient())
+				if err != nil {
+					u.logger.Errorf("could not bind token %v: %v", pair.DaiAddr, err)
+					continue
+				}
+				balance, err := token.BalanceOf(callOpts, walletAddr)
+				if err != nil {
+					u.logger.Errorf("could not get token balance for %v: %v", walletAddr, err)
+					continue
+				}
+				balances[pair.DaiAddr] = balance
+			}
+
+			if weth, err := contract.NewWETH9(u.deploymentInfo.Weth9Addr, rclient.GetEthClient()); err != nil {
+				u.logger.Errorf("could not bind WETH9: %v", err)
+			} else if wethBalance, err := weth.BalanceOf(callOpts, walletAddr); err != nil {
+				u.logger.Errorf("could not get WETH balance for %v: %v", walletAddr, err)
+			} else {
+				balances[u.deploymentInfo.Weth9Addr] = wethBalance
 			}
 
 			u.tokenBalancesMutex.Lock()
-			u.tokenBalances[walletAddr][pair.DaiAddr] = balance
+			u.tokenBalances[walletAddr] = balances
 			u.tokenBalancesMutex.Unlock()
-		}
-
-		// Get WETH balance
-		wethBalance, err := u.Weth.BalanceOf(&bind.CallOpts{}, walletAddr)
-		if err != nil {
-			u.logger.Errorf("could not get WETH balance for %v: %v", walletAddr, err)
-			continue
-		}
-
-		// Store WETH balance in the same map
-		u.tokenBalancesMutex.Lock()
-		u.tokenBalances[walletAddr][u.deploymentInfo.Weth9Addr] = wethBalance
-		u.tokenBalancesMutex.Unlock()
+		}(idx, wallet)
 	}
+	wg.Wait()
 }
 
 // Get DAI balance from local cache
@@ -182,6 +207,20 @@ func (u *Uniswap) UpdateTokenBalance(walletAddr common.Address, tokenAddr common
 	u.tokenBalances[walletAddr][tokenAddr] = newBalance
 }
 
+// approvalGasLimit is the static gas limit for ERC20 approve txs. Under the
+// Amsterdam fee schedule a fresh allowance slot makes approve cost ~128k; this
+// keeps headroom. It is deliberately static (not estimated) so that setting
+// allowances for hundreds of wallets needs no per-tx eth_estimateGas round trip.
+const approvalGasLimit = 250000
+
+// setupConcurrency bounds the parallel per-wallet RPC fan-out used by the setup
+// phases (balance reads, allowance checks). Sized to the number of healthy
+// clients so the load spreads across nodes, capped to avoid overwhelming them.
+func (u *Uniswap) setupConcurrency() int {
+	n := len(u.walletPool.GetClientPool().GetAllGoodClients())
+	return min(max(n, 1), 50)
+}
+
 // Set unlimited allowances for all wallets to both routers
 func (u *Uniswap) SetUnlimitedAllowances() error {
 	u.logger.Infof("Setting unlimited allowances for all wallets...")
@@ -207,137 +246,123 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 		return fmt.Errorf("could not get tx fee: %v", err)
 	}
 
+	routers := []common.Address{u.deploymentInfo.UniswapRouterAAddr, u.deploymentInfo.UniswapRouterBAddr}
+
 	// Track all approval transactions
-	var approvalTxs []*types.Transaction
-	var approvalWallets []*spamoor.Wallet
+	var (
+		approvalTxs     []*types.Transaction
+		approvalWallets []*spamoor.Wallet
+		mu              sync.Mutex
+		wg              sync.WaitGroup
+	)
 
-	// For each wallet and token pair
-	for _, wallet := range wallets {
-		// Set allowances for DAI tokens
-		for _, pair := range u.deploymentInfo.Pairs {
-			token := u.Tokens[pair.DaiAddr]
-			if token == nil {
-				continue
+	// Check allowances and build approval txs in parallel across clients. For N
+	// wallets this is up to 4*N allowance reads (DAI+WETH × router A+B); doing
+	// them serially on one client blocks the scenario for minutes at large wallet
+	// counts. The context-aware CallOpts also let a UI stop actually cancel the
+	// in-flight reads.
+	sem := make(chan struct{}, u.setupConcurrency())
+
+	buildApproval := func(wallet *spamoor.Wallet, approve func(*bind.TransactOpts) (*types.Transaction, error)) {
+		// Static gas: approve is uniform, so estimating each one would just add a
+		// redundant round trip per wallet.
+		approveTx, err := wallet.BuildBoundTx(u.ctx, &txbuilder.TxMetadata{
+			GasFeeCap: uint256.MustFromBig(feeCap),
+			GasTipCap: uint256.MustFromBig(tipCap),
+			Gas:       approvalGasLimit,
+			Value:     uint256.NewInt(0),
+		}, approve)
+		if err != nil {
+			u.logger.Errorf("could not build approval tx for %v: %v", wallet.GetAddress(), err)
+			return
+		}
+		mu.Lock()
+		approvalTxs = append(approvalTxs, approveTx)
+		approvalWallets = append(approvalWallets, wallet)
+		mu.Unlock()
+	}
+
+	for idx, wallet := range wallets {
+		if u.ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func(idx int, wallet *spamoor.Wallet) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-u.ctx.Done():
+				return
 			}
 
-			// Check if allowance is already set for router A
-			allowanceA, err := token.Allowance(&bind.CallOpts{}, wallet.GetAddress(), u.deploymentInfo.UniswapRouterAAddr)
-			if err != nil {
-				u.logger.Errorf("could not check allowance for %v: %v", wallet.GetAddress(), err)
-				continue
+			rclient := u.walletPool.GetClient(
+				spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, idx),
+				spamoor.WithClientGroup(u.options.ClientGroup),
+				spamoor.WithoutBuilder(),
+			)
+			if rclient == nil {
+				rclient = client
 			}
+			callOpts := &bind.CallOpts{Context: u.ctx}
 
-			// Check if allowance is already set for router B
-			allowanceB, err := token.Allowance(&bind.CallOpts{}, wallet.GetAddress(), u.deploymentInfo.UniswapRouterBAddr)
-			if err != nil {
-				u.logger.Errorf("could not check allowance for %v: %v", wallet.GetAddress(), err)
-				continue
-			}
-
-			// Skip if allowance is already set for both routers
-			if allowanceA.Cmp(maxAllowance) >= 0 && allowanceB.Cmp(maxAllowance) >= 0 {
-				continue
-			}
-
-			// Build approval transaction for router A if needed
-			if allowanceA.Cmp(maxAllowance) < 0 {
-				approveTx, err := wallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-					GasFeeCap: uint256.MustFromBig(feeCap),
-					GasTipCap: uint256.MustFromBig(tipCap),
-					Value:     uint256.NewInt(0),
-				}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-					return token.Approve(transactOpts, u.deploymentInfo.UniswapRouterAAddr, maxAllowance)
-				})
-				if err != nil {
-					u.logger.Errorf("could not build approval tx for %v: %v", wallet.GetAddress(), err)
+			// DAI tokens
+			for _, pair := range u.deploymentInfo.Pairs {
+				if u.Tokens[pair.DaiAddr] == nil {
 					continue
 				}
-
-				approvalTxs = append(approvalTxs, approveTx)
-				approvalWallets = append(approvalWallets, wallet)
-			}
-
-			// Build approval transaction for router B if needed
-			if allowanceB.Cmp(maxAllowance) < 0 {
-				approveTx, err := wallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-					GasFeeCap: uint256.MustFromBig(feeCap),
-					GasTipCap: uint256.MustFromBig(tipCap),
-					Value:     uint256.NewInt(0),
-				}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-					return token.Approve(transactOpts, u.deploymentInfo.UniswapRouterBAddr, maxAllowance)
-				})
+				token, err := contract.NewDai(pair.DaiAddr, rclient.GetEthClient())
 				if err != nil {
-					u.logger.Errorf("could not build approval tx for %v: %v", wallet.GetAddress(), err)
+					u.logger.Errorf("could not bind token %v: %v", pair.DaiAddr, err)
 					continue
 				}
-
-				approvalTxs = append(approvalTxs, approveTx)
-				approvalWallets = append(approvalWallets, wallet)
+				for _, router := range routers {
+					allowance, err := token.Allowance(callOpts, wallet.GetAddress(), router)
+					if err != nil {
+						u.logger.Errorf("could not check allowance for %v: %v", wallet.GetAddress(), err)
+						continue
+					}
+					if allowance.Cmp(maxAllowance) >= 0 {
+						continue
+					}
+					buildApproval(wallet, func(opts *bind.TransactOpts) (*types.Transaction, error) {
+						return token.Approve(opts, router, maxAllowance)
+					})
+				}
 			}
-		}
 
-		// Set allowances for WETH
-		wethAllowanceA, err := u.Weth.Allowance(&bind.CallOpts{}, wallet.GetAddress(), u.deploymentInfo.UniswapRouterAAddr)
-		if err != nil {
-			u.logger.Errorf("could not check WETH allowance for %v: %v", wallet.GetAddress(), err)
-			continue
-		}
-
-		wethAllowanceB, err := u.Weth.Allowance(&bind.CallOpts{}, wallet.GetAddress(), u.deploymentInfo.UniswapRouterBAddr)
-		if err != nil {
-			u.logger.Errorf("could not check WETH allowance for %v: %v", wallet.GetAddress(), err)
-			continue
-		}
-
-		// Skip if allowance is already set for both routers
-		if wethAllowanceA.Cmp(maxAllowance) >= 0 && wethAllowanceB.Cmp(maxAllowance) >= 0 {
-			continue
-		}
-
-		// Build approval transaction for router A if needed
-		if wethAllowanceA.Cmp(maxAllowance) < 0 {
-			approveTx, err := wallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-				GasFeeCap: uint256.MustFromBig(feeCap),
-				GasTipCap: uint256.MustFromBig(tipCap),
-				Value:     uint256.NewInt(0),
-			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return u.Weth.Approve(transactOpts, u.deploymentInfo.UniswapRouterAAddr, maxAllowance)
-			})
+			// WETH
+			weth, err := contract.NewWETH9(u.deploymentInfo.Weth9Addr, rclient.GetEthClient())
 			if err != nil {
-				u.logger.Errorf("could not build WETH approval tx for %v: %v", wallet.GetAddress(), err)
-				continue
+				u.logger.Errorf("could not bind WETH9: %v", err)
+				return
 			}
-
-			approvalTxs = append(approvalTxs, approveTx)
-			approvalWallets = append(approvalWallets, wallet)
-		}
-
-		// Build approval transaction for router B if needed
-		if wethAllowanceB.Cmp(maxAllowance) < 0 {
-			approveTx, err := wallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-				GasFeeCap: uint256.MustFromBig(feeCap),
-				GasTipCap: uint256.MustFromBig(tipCap),
-				Value:     uint256.NewInt(0),
-			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return u.Weth.Approve(transactOpts, u.deploymentInfo.UniswapRouterBAddr, maxAllowance)
-			})
-			if err != nil {
-				u.logger.Errorf("could not build WETH approval tx for %v: %v", wallet.GetAddress(), err)
-				continue
+			for _, router := range routers {
+				allowance, err := weth.Allowance(callOpts, wallet.GetAddress(), router)
+				if err != nil {
+					u.logger.Errorf("could not check WETH allowance for %v: %v", wallet.GetAddress(), err)
+					continue
+				}
+				if allowance.Cmp(maxAllowance) >= 0 {
+					continue
+				}
+				buildApproval(wallet, func(opts *bind.TransactOpts) (*types.Transaction, error) {
+					return weth.Approve(opts, router, maxAllowance)
+				})
 			}
+		}(idx, wallet)
+	}
+	wg.Wait()
 
-			approvalTxs = append(approvalTxs, approveTx)
-			approvalWallets = append(approvalWallets, wallet)
-		}
+	if u.ctx.Err() != nil {
+		return u.ctx.Err()
 	}
 
 	// Send all approval transactions in parallel
 	if len(approvalTxs) > 0 {
 		u.logger.Infof("Sending %d approval transactions...", len(approvalTxs))
 
-		// Create a wait group to track all transactions
-		var wg sync.WaitGroup
-
+		// Reuse the wait group (back to zero after the build phase) to track sends.
 		// Send each transaction to a different client
 		for i, tx := range approvalTxs {
 			// Get a different client for each transaction
