@@ -1,6 +1,7 @@
 package uniswapswaps
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
@@ -50,6 +51,13 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	}
 
 	deployerWallet := u.walletPool.GetWellKnownWallet("deployer")
+	deployerSeed := [32]byte{}
+	copy(deployerSeed[:], deployerWallet.GetAddress().Bytes())
+
+	if redeploy {
+		copy(deployerSeed[20:], []byte(fmt.Sprintf("%x", deployerWallet.GetNonce()+1)))
+	}
+
 	ownerWallet := u.walletPool.GetWellKnownWallet("owner")
 	if deployerWallet == nil {
 		return nil, scenario.ErrNoWallet
@@ -66,159 +74,105 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 
 	deploymentTxs := []*types.Transaction{}
 	deploymentInfo := &DeploymentInfo{}
-	deployerNonce := deployerWallet.GetNonce()
-	contractNonce := uint64(0)
-	usedNonce := uint64(0)
+	deployContract := func(metadata *bind.MetaData, global bool, salt uint32, params ...interface{}) (common.Address, error) {
+		parsed, err := metadata.GetAbi()
+		if err != nil {
+			return common.Address{}, err
+		}
+		if parsed == nil {
+			return common.Address{}, fmt.Errorf("GetABI returned nil")
+		}
+
+		initCodeBytes := common.FromHex(metadata.Bin)
+
+		packed, err := parsed.Pack("", params...)
+		if err != nil {
+			return common.Address{}, err
+		}
+
+		initCodeBytes = append(initCodeBytes, packed...)
+
+		seed := [32]byte{}
+		if !global {
+			copy(seed[:], deployerSeed[:])
+		}
+		if salt != 0 {
+			binary.BigEndian.PutUint32(deployerSeed[28:], salt)
+		}
+		addr, tx, err := u.walletPool.GetDeploymentFactory().GetContractDeployment(u.ctx, initCodeBytes, deployerSeed, client, deployerWallet, feeCap, tipCap, false)
+		if err != nil {
+			return common.Address{}, err
+		}
+
+		if tx != nil {
+			deploymentTxs = append(deploymentTxs, tx)
+		}
+
+		return addr, nil
+	}
 
 	// deploy WETH9
-	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Value:     uint256.NewInt(0),
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployWETH9(transactOpts, client.GetEthClient())
-			return deployTx, err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not deploy WETH9: %w", err)
-		}
-		deploymentTxs = append(deploymentTxs, tx)
-		usedNonce = tx.Nonce()
-	} else {
-		usedNonce = contractNonce
+	deploymentInfo.Weth9Addr, err = deployContract(contract.WETH9MetaData, true, 0)
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy WETH9: %w", err)
 	}
-	contractNonce++
-
-	deploymentInfo.Weth9Addr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.Weth9, err = contract.NewWETH9(deploymentInfo.Weth9Addr, client.GetEthClient())
 	if err != nil {
 		return nil, fmt.Errorf("could not create instance of WETH9: %w", err)
 	}
 
-	// deploy two uniswap factories
-	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Value:     uint256.NewInt(0),
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployUniswapV2Factory(transactOpts, client.GetEthClient(), ownerWallet.GetAddress())
-			return deployTx, err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not deploy uniswap v2 factory A: %w", err)
-		}
-		deploymentTxs = append(deploymentTxs, tx)
-		usedNonce = tx.Nonce()
-	} else {
-		usedNonce = contractNonce
+	// deploy uniswap factory A
+	deploymentInfo.UniswapFactoryAAddr, err = deployContract(contract.UniswapV2FactoryMetaData, false, 0, ownerWallet.GetAddress())
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy uniswap v2 factory A: %w", err)
 	}
-	contractNonce++
-
-	deploymentInfo.UniswapFactoryAAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.UniswapFactoryA, err = contract.NewUniswapV2Factory(deploymentInfo.UniswapFactoryAAddr, client.GetEthClient())
 	if err != nil {
 		return nil, fmt.Errorf("could not create instance of uniswap v2 factory A: %w", err)
 	}
 
-	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Value:     uint256.NewInt(0),
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployUniswapV2Factory(transactOpts, client.GetEthClient(), ownerWallet.GetAddress())
-			return deployTx, err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not deploy uniswap v2 factory B: %w", err)
-		}
-		deploymentTxs = append(deploymentTxs, tx)
-		usedNonce = tx.Nonce()
-	} else {
-		usedNonce = contractNonce
+	// deploy uniswap factory B
+	deploymentInfo.UniswapFactoryBAddr, err = deployContract(contract.UniswapV2FactoryMetaData, false, 1, ownerWallet.GetAddress())
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy uniswap v2 factory B: %w", err)
 	}
-	contractNonce++
-
-	deploymentInfo.UniswapFactoryBAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.UniswapFactoryB, err = contract.NewUniswapV2Factory(deploymentInfo.UniswapFactoryBAddr, client.GetEthClient())
 	if err != nil {
 		return nil, fmt.Errorf("could not create instance of uniswap v2 factory B: %w", err)
 	}
 
-	// deploy two uniswap routers
-	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Value:     uint256.NewInt(0),
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployUniswapV2Router02(transactOpts, client.GetEthClient(), deploymentInfo.UniswapFactoryAAddr, deploymentInfo.Weth9Addr)
-			return deployTx, err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not deploy uniswap v2 router A: %w", err)
-		}
-		deploymentTxs = append(deploymentTxs, tx)
-		usedNonce = tx.Nonce()
-	} else {
-		usedNonce = contractNonce
+	// deploy uniswap router A
+	deploymentInfo.UniswapRouterAAddr, err = deployContract(contract.UniswapV2Router02MetaData, false, 0, deploymentInfo.UniswapFactoryAAddr, deploymentInfo.Weth9Addr)
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy uniswap v2 router A: %w", err)
 	}
-	contractNonce++
-
-	deploymentInfo.UniswapRouterAAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.UniswapRouterA, err = contract.NewUniswapV2Router02(deploymentInfo.UniswapRouterAAddr, client.GetEthClient())
 	if err != nil {
 		return nil, fmt.Errorf("could not create instance of uniswap v2 router A: %w", err)
 	}
 
-	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Value:     uint256.NewInt(0),
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployUniswapV2Router02(transactOpts, client.GetEthClient(), deploymentInfo.UniswapFactoryBAddr, deploymentInfo.Weth9Addr)
-			return deployTx, err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not deploy uniswap v2 router B: %w", err)
-		}
-		deploymentTxs = append(deploymentTxs, tx)
-		usedNonce = tx.Nonce()
-	} else {
-		usedNonce = contractNonce
+	// deploy uniswap router B
+	deploymentInfo.UniswapRouterBAddr, err = deployContract(contract.UniswapV2Router02MetaData, false, 1, deploymentInfo.UniswapFactoryBAddr, deploymentInfo.Weth9Addr)
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy uniswap v2 router B: %w", err)
 	}
-	contractNonce++
-
-	deploymentInfo.UniswapRouterBAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.UniswapRouterB, err = contract.NewUniswapV2Router02(deploymentInfo.UniswapRouterBAddr, client.GetEthClient())
 	if err != nil {
 		return nil, fmt.Errorf("could not create instance of uniswap v2 router B: %w", err)
 	}
 
 	// deploy pair liquidity provider
-	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Value:     uint256.NewInt(0),
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployPairLiquidityProvider(transactOpts, client.GetEthClient(), ownerWallet.GetAddress(), u.walletPool.GetRootWallet().GetWallet().GetAddress(), deploymentInfo.UniswapRouterAAddr, deploymentInfo.UniswapRouterBAddr, deploymentInfo.Weth9Addr)
-			return deployTx, err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not deploy pair liquidity provider: %w", err)
-		}
-		deploymentTxs = append(deploymentTxs, tx)
-		usedNonce = tx.Nonce()
-	} else {
-		usedNonce = contractNonce
+	deploymentInfo.LiquidityProviderAddr, err = deployContract(
+		contract.PairLiquidityProviderMetaData, false, 0,
+		ownerWallet.GetAddress(),
+		u.walletPool.GetRootWallet().GetWallet().GetAddress(),
+		deploymentInfo.UniswapRouterAAddr,
+		deploymentInfo.UniswapRouterBAddr,
+		deploymentInfo.Weth9Addr,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy pair liquidity provider: %w", err)
 	}
-	contractNonce++
-
-	deploymentInfo.LiquidityProviderAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	deploymentInfo.LiquidityProvider, err = contract.NewPairLiquidityProvider(deploymentInfo.LiquidityProviderAddr, client.GetEthClient())
 	if err != nil {
 		return nil, fmt.Errorf("could not create instance of pair liquidity provider: %w", err)
@@ -230,48 +184,18 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	pairFundingAmount := uint256.NewInt(0)
 	var pairSalt [32]byte
 
-	// Track which post-deploy Rely calls still need to be made, mirroring the
-	// `redeploy || deployerNonce <= contractNonce` resume guard used for the
-	// creation txs above. The Rely txs are built later (Phase 2) so that
-	// eth_estimateGas runs against the real on-chain Dai code.
-	pendingRelyOwner := make([]bool, u.options.DaiPairs)
-	pendingRelyLP := make([]bool, u.options.DaiPairs)
-
 	for i := uint64(0); i < u.options.DaiPairs; i++ {
 		pairInfo := &PairDeploymentInfo{}
 
 		// deploy Dai
-		if redeploy || deployerNonce <= contractNonce {
-			tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-				GasFeeCap: uint256.MustFromBig(feeCap),
-				GasTipCap: uint256.MustFromBig(tipCap),
-				Value:     uint256.NewInt(0),
-			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				_, deployTx, _, err := contract.DeployDai(transactOpts, client.GetEthClient(), deployerWallet.GetChainId())
-				return deployTx, err
-			})
-			if err != nil {
-				return nil, fmt.Errorf("could not deploy Dai: %w", err)
-			}
-			deploymentTxs = append(deploymentTxs, tx)
-			usedNonce = tx.Nonce()
-		} else {
-			usedNonce = contractNonce
+		pairInfo.DaiAddr, err = deployContract(contract.DaiMetaData, true, uint32(i), deployerWallet.GetChainId(), ownerWallet.GetAddress())
+		if err != nil {
+			return nil, fmt.Errorf("could not deploy Dai: %w", err)
 		}
-		contractNonce++
-
-		pairInfo.DaiAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 		pairInfo.Dai, err = contract.NewDai(pairInfo.DaiAddr, client.GetEthClient())
 		if err != nil {
 			return nil, fmt.Errorf("could not create instance of Dai: %w", err)
 		}
-
-		// Reserve nonce slots for the two Rely calls; record which ones are
-		// still pending so Phase 2 only rebuilds the missing ones on resume.
-		pendingRelyOwner[i] = redeploy || deployerNonce <= contractNonce
-		contractNonce++
-		pendingRelyLP[i] = redeploy || deployerNonce <= contractNonce
-		contractNonce++
 
 		// get pair on factory A
 		if pairInfo.DaiAddr.Big().Cmp(deploymentInfo.Weth9Addr.Big()) < 0 {
@@ -329,25 +253,16 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	// batch has been mined so eth_estimateGas dispatches into the real
 	// contract code instead of treating the target as an EOA.
 	setupTxs := []*types.Transaction{}
-	for i, pairInfo := range deploymentInfo.Pairs {
-		// make owner wallet a minter for the Dai
-		if pendingRelyOwner[i] {
-			tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-				GasFeeCap: uint256.MustFromBig(feeCap),
-				GasTipCap: uint256.MustFromBig(tipCap),
-				Value:     uint256.NewInt(0),
-			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return pairInfo.Dai.Rely(transactOpts, u.walletPool.GetRootWallet().GetWallet().GetAddress())
-			})
-			if err != nil {
-				return nil, fmt.Errorf("could not make owner wallet a minter for the Dai: %w", err)
-			}
-			setupTxs = append(setupTxs, tx)
-		}
+	callOpts := &bind.CallOpts{Context: u.ctx}
 
+	for _, pairInfo := range deploymentInfo.Pairs {
 		// make liquidity provider a minter for the Dai
-		if pendingRelyLP[i] {
-			tx, err := deployerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
+		lpIsWard, err := pairInfo.Dai.Wards(callOpts, deploymentInfo.LiquidityProviderAddr)
+		if err != nil {
+			return nil, fmt.Errorf("could not check if liquidity provider is a ward for the Dai: %w", err)
+		}
+		if lpIsWard.Cmp(big.NewInt(0)) == 0 {
+			tx, err := ownerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 				GasFeeCap: uint256.MustFromBig(feeCap),
 				GasTipCap: uint256.MustFromBig(tipCap),
 				Value:     uint256.NewInt(0),
@@ -362,7 +277,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	}
 
 	if len(setupTxs) > 0 {
-		_, err := u.walletPool.GetTxPool().SendTransactionBatch(u.ctx, deployerWallet, setupTxs, &spamoor.BatchOptions{
+		_, err := u.walletPool.GetTxPool().SendTransactionBatch(u.ctx, ownerWallet, setupTxs, &spamoor.BatchOptions{
 			SendTransactionOptions: spamoor.SendTransactionOptions{
 				Client:      client,
 				ClientGroup: u.options.ClientGroup,

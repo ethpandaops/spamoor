@@ -65,7 +65,7 @@ contract LibNote {
 
 /* import "./lib.sol"; */
 
-contract Dai is LibNote {
+contract DaiContract is LibNote {
     // --- Auth ---
     mapping (address => uint) public wards;
     function rely(address guy) external note auth { wards[guy] = 1; }
@@ -185,5 +185,12 @@ contract Dai is LibNote {
         uint wad = allowed ? uint(-1) : 0;
         allowance[holder][spender] = wad;
         emit Approval(holder, spender, wad);
+    }
+}
+
+contract Dai is DaiContract {
+    constructor(uint256 chainId_, address owner) DaiContract(chainId_) public {
+        wards[msg.sender] = 0;
+        wards[owner] = 1;
     }
 }

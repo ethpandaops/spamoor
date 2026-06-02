@@ -182,6 +182,11 @@ func (pool *WalletPool) GetRootWallet() *RootWallet {
 	return pool.rootWallet
 }
 
+// GetDeploymentFactory returns the deployment factory instance, or nil if not initialized.
+func (pool *WalletPool) GetDeploymentFactory() *DeploymentFactory {
+	return pool.rootWallet.GetDeploymentFactory()
+}
+
 // GetChainId returns the chain ID from the root wallet.
 func (pool *WalletPool) GetChainId() *big.Int {
 	return pool.rootWallet.wallet.GetChainId()
