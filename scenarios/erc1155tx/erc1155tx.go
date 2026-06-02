@@ -3,6 +3,7 @@ package erc1155tx
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"math/big"
 	"time"
@@ -41,6 +42,7 @@ type ScenarioOptions struct {
 	Timeout           string  `yaml:"timeout"`
 	ClientGroup       string  `yaml:"client_group"`
 	DeployClientGroup string  `yaml:"deploy_client_group"`
+	TokenSeed         string  `yaml:"token_seed"`
 	LogTxs            bool    `yaml:"log_txs"`
 }
 
@@ -71,6 +73,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Timeout:           "",
 	ClientGroup:       "",
 	DeployClientGroup: "",
+	TokenSeed:         "",
 	LogTxs:            false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
@@ -107,6 +110,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.StringVar(&s.options.DeployClientGroup, "deploy-client-group", ScenarioDefaultOptions.DeployClientGroup, "Client group to use for deployments")
+	flags.StringVar(&s.options.TokenSeed, "token-seed", ScenarioDefaultOptions.TokenSeed, "Seed for the token contract")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
 }
@@ -141,12 +145,6 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		}
 	}
 
-	s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
-		Name:          "deployer",
-		RefillAmount:  uint256.NewInt(1000000000000000000), // 1 ETH
-		RefillBalance: uint256.NewInt(500000000000000000),  // 0.5 ETH
-	})
-
 	if s.options.TotalCount == 0 && s.options.Throughput == 0 {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
@@ -159,16 +157,16 @@ func (s *Scenario) Run(ctx context.Context) error {
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
 	// deploy erc20 contract
-	contractReceipt, _, err := s.sendDeploymentTx(ctx)
+	contractAddr, deployBlock, err := s.sendDeploymentTx(ctx)
 	if err != nil {
 		s.logger.Errorf("could not deploy token contract: %v", err)
 		return err
 	}
-	if contractReceipt == nil {
+	if contractAddr == nil {
 		return fmt.Errorf("could not deploy token contract: %w", err)
 	}
-	s.contractAddr = contractReceipt.ContractAddress
-	s.logger.Infof("deployed token contract: %v (confirmed in block #%v)", s.contractAddr.String(), contractReceipt.BlockNumber.String())
+	s.contractAddr = *contractAddr
+	s.logger.Infof("deployed token contract: %v (confirmed in block #%v)", s.contractAddr.String(), deployBlock)
 
 	// send transactions
 	maxPending := s.options.MaxPending
@@ -239,7 +237,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamoor.Client, error) {
+func (s *Scenario) sendDeploymentTx(ctx context.Context) (*common.Address, uint64, error) {
 	deployClientGroup := s.options.DeployClientGroup
 	if deployClientGroup == "" {
 		deployClientGroup = s.options.ClientGroup
@@ -255,30 +253,31 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 	var tipCap *big.Int
 
 	if client == nil {
-		return nil, client, scenario.ErrNoClients
+		return nil, 0, scenario.ErrNoClients
 	}
 
 	if wallet == nil {
-		return nil, client, scenario.ErrNoWallet
+		return nil, 0, scenario.ErrNoWallet
 	}
 
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
 	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
-		return nil, client, err
+		return nil, 0, err
 	}
 
-	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-		GasFeeCap: uint256.MustFromBig(feeCap),
-		GasTipCap: uint256.MustFromBig(tipCap),
-		Value:     uint256.NewInt(0),
-	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		_, deployTx, _, err := contract.DeployTestToken1155(transactOpts, client.GetEthClient())
-		return deployTx, err
-	})
+	tokenSeed := [32]byte{}
+	if s.options.TokenSeed != "" {
+		tokenSeed = sha256.Sum256([]byte(s.options.TokenSeed))
+	}
 
+	initCodeBytes := common.FromHex(contract.TestToken1155MetaData.Bin)
+	addr, tx, err := s.walletPool.GetDeploymentFactory().GetContractDeployment(ctx, initCodeBytes, tokenSeed, client, wallet, feeCap, tipCap, false)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, err
+	}
+	if tx == nil {
+		return &addr, 0, nil
 	}
 
 	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
@@ -287,10 +286,10 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 		Rebroadcast: true,
 	})
 	if err != nil {
-		return nil, client, err
+		return nil, 0, err
 	}
 
-	return receipt, client, nil
+	return &addr, receipt.BlockNumber.Uint64(), nil
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {

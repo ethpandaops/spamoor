@@ -26,6 +26,7 @@ spamoor erc1155tx [flags]
 - `--timeout` - Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout
 
 ### Token Settings
+- `--token-seed` - The seed for token contract diversity
 - `--amount` - Transfer amount per transaction (default: 20)
 - `--max-index` - Maximum token index to mint (default: 0, unlimited)
 - `--batch-size` - Batch size for transactions (default: 1)
