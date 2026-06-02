@@ -361,14 +361,22 @@ func (s *Scenario) sendDeploymentTx(
 //   - Mapping keccak256 + loop overhead: ~200 gas per slot
 //
 // Plus fixed overhead for function call, state variable reads/writes.
-func gasLimitForSlots(slotsPerCall uint64) uint64 {
-	// Steady-state per-slot cost: write + clear + overhead
+func gasLimitForSlots(slotsPerCall, costPerStateByte uint64) uint64 {
+	// Steady-state per-slot execution cost: write + clear + loop overhead.
 	writeGas := uint64(22300)   // SSTORE_SET(20k) + COLD_SLOAD(2.1k) + margin
 	clearGas := uint64(5200)    // SSTORE_RESET(2.9k) + COLD_SLOAD(2.1k) + margin
 	loopOverhead := uint64(200) // keccak256, stack ops, jump per iteration
-	overhead := uint64(100000)  // function dispatch, state var access, margin
+	overhead := uint64(300000)  // function dispatch, state var access, margin
 
-	return slotsPerCall*(writeGas+clearGas+loopOverhead) + overhead
+	// Under the Amsterdam fee schedule (EIP-8037) writing a fresh slot is also
+	// charged state-creation gas (costPerStateByte per state byte). That cost is
+	// NOT refunded when the slot is cleared later in the same tx, and it
+	// dominates (~100k/slot vs ~27k execution). Account for it explicitly,
+	// otherwise the budget is ~4x too low and every Execute() call reverts.
+	// 64 = key + value bytes of the freshly created slot.
+	stateGas := costPerStateByte * 64
+
+	return slotsPerCall*(writeGas+clearGas+loopOverhead+stateGas) + overhead
 }
 
 func (s *Scenario) sendTx(
@@ -408,7 +416,13 @@ func (s *Scenario) sendTx(
 
 	gasLimit := s.options.GasLimit
 	if gasLimit == 0 {
-		gasLimit = gasLimitForSlots(s.options.SlotsPerCall)
+		// Only the Amsterdam fee model charges state-creation gas; pass 0 cpsb
+		// on the legacy model so the budget matches the pre-Amsterdam cost.
+		var cpsb uint64
+		if txpool := s.walletPool.GetTxPool(); txpool.IsAmsterdam() {
+			cpsb = txpool.GetCostPerStateByte()
+		}
+		gasLimit = gasLimitForSlots(s.options.SlotsPerCall, cpsb)
 	}
 
 	storageRefund, err := contract.NewStorageRefund(

@@ -340,8 +340,12 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       200000,
-		Value:     uint256.NewInt(0),
+		// transferMint mints an NFT and transfers it to a (possibly fresh)
+		// recipient. Under the Amsterdam fee schedule, creating the owner/balance
+		// slots pushes this to ~245k gas; keep static headroom rather than
+		// estimating per spam tx.
+		Gas:   350000,
+		Value: uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return testToken.TransferMint(transactOpts, toAddr, index.ToBig())
 	})
