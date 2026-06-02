@@ -259,6 +259,7 @@ func (f *DeploymentFactory) GetContractDeployment(ctx context.Context, initcode 
 	if submit {
 		err = f.txpool.SendTransaction(ctx, deployer, tx, &SendTransactionOptions{
 			Client:      client,
+			SubmitCount: 3,
 			Rebroadcast: true,
 		})
 		if err != nil {

@@ -189,8 +189,12 @@ contract DaiContract is LibNote {
 }
 
 contract Dai is DaiContract {
-    constructor(uint256 chainId_, address owner) DaiContract(chainId_) public {
-        wards[msg.sender] = 0;
-        wards[owner] = 1;
+    constructor(uint256 chainId_) DaiContract(chainId_) public {
+    }
+
+    function mint(address usr, uint wad) external {
+        balanceOf[usr] = add(balanceOf[usr], wad);
+        totalSupply    = add(totalSupply, wad);
+        emit Transfer(address(0), usr, wad);
     }
 }

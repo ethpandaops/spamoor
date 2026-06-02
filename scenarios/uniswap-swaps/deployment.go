@@ -188,7 +188,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 		pairInfo := &PairDeploymentInfo{}
 
 		// deploy Dai
-		pairInfo.DaiAddr, err = deployContract(contract.DaiMetaData, true, uint32(i), deployerWallet.GetChainId(), ownerWallet.GetAddress())
+		pairInfo.DaiAddr, err = deployContract(contract.DaiMetaData, true, uint32(i), deployerWallet.GetChainId())
 		if err != nil {
 			return nil, fmt.Errorf("could not deploy Dai: %w", err)
 		}
@@ -239,7 +239,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 			MaxRetries:   3,
 			PendingLimit: 10,
 			LogFn: func(confirmedCount int, totalCount int) {
-				u.logger.Infof("deploying contracts... (%v/%v)", confirmedCount, totalCount)
+				u.logger.Infof("deploying contracts v2... (%v/%v)", confirmedCount, totalCount)
 			},
 			LogInterval: 10,
 		})

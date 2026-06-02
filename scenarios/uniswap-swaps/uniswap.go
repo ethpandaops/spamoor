@@ -17,6 +17,7 @@ import (
 )
 
 type UniswapOptions struct {
+	Version             uint64
 	BaseFee             float64
 	TipFee              float64
 	BaseFeeWei          string
@@ -24,6 +25,7 @@ type UniswapOptions struct {
 	DaiPairs            uint64
 	EthLiquidityPerPair *uint256.Int
 	DaiLiquidityFactor  uint64
+	FeeTier             uint64
 	ClientGroup         string
 }
 
@@ -31,6 +33,7 @@ type Uniswap struct {
 	ctx            context.Context
 	walletPool     *spamoor.WalletPool
 	deploymentInfo *DeploymentInfo
+	v3Deployment   *V3DeploymentInfo
 	logger         *logrus.Entry
 	options        UniswapOptions
 
@@ -38,11 +41,45 @@ type Uniswap struct {
 	tokenBalances      map[common.Address]map[common.Address]*big.Int
 	tokenBalancesMutex sync.RWMutex
 
-	// contract instances
+	// v2 contract instances
 	RouterA *contract.UniswapV2Router02
 	RouterB *contract.UniswapV2Router02
 	Weth    *contract.WETH9
 	Tokens  map[common.Address]*contract.Dai
+}
+
+// tokenAddrs returns the list of DAI token addresses across all deployed pairs
+// or pools, used by the generic balance/allowance setup phases.
+func (u *Uniswap) tokenAddrs() []common.Address {
+	if u.options.Version == 3 {
+		addrs := make([]common.Address, 0, len(u.v3Deployment.Pools))
+		for _, pool := range u.v3Deployment.Pools {
+			addrs = append(addrs, pool.DaiAddr)
+		}
+		return addrs
+	}
+	addrs := make([]common.Address, 0, len(u.deploymentInfo.Pairs))
+	for _, pair := range u.deploymentInfo.Pairs {
+		addrs = append(addrs, pair.DaiAddr)
+	}
+	return addrs
+}
+
+// wethAddr returns the WETH9 address of the active deployment.
+func (u *Uniswap) wethAddr() common.Address {
+	if u.options.Version == 3 {
+		return u.v3Deployment.Weth9Addr
+	}
+	return u.deploymentInfo.Weth9Addr
+}
+
+// spenderAddrs returns the addresses child wallets must approve for token
+// transfers: both v2 routers, or the single v3 SwapRouter.
+func (u *Uniswap) spenderAddrs() []common.Address {
+	if u.options.Version == 3 {
+		return []common.Address{u.v3Deployment.RouterAAddr, u.v3Deployment.RouterBAddr}
+	}
+	return []common.Address{u.deploymentInfo.UniswapRouterAAddr, u.deploymentInfo.UniswapRouterBAddr}
 }
 
 func NewUniswap(ctx context.Context, walletPool *spamoor.WalletPool, logger *logrus.Entry, options UniswapOptions) *Uniswap {
@@ -143,14 +180,13 @@ func (u *Uniswap) InitializeTokenBalances() {
 			}
 			callOpts := &bind.CallOpts{Context: u.ctx}
 
-			balances := make(map[common.Address]*big.Int, len(u.deploymentInfo.Pairs)+1)
-			for _, pair := range u.deploymentInfo.Pairs {
-				if u.Tokens[pair.DaiAddr] == nil {
-					continue
-				}
-				token, err := contract.NewDai(pair.DaiAddr, rclient.GetEthClient())
+			tokenAddrs := u.tokenAddrs()
+			wethAddr := u.wethAddr()
+			balances := make(map[common.Address]*big.Int, len(tokenAddrs)+1)
+			for _, tokenAddr := range tokenAddrs {
+				token, err := contract.NewDai(tokenAddr, rclient.GetEthClient())
 				if err != nil {
-					u.logger.Errorf("could not bind token %v: %v", pair.DaiAddr, err)
+					u.logger.Errorf("could not bind token %v: %v", tokenAddr, err)
 					continue
 				}
 				balance, err := token.BalanceOf(callOpts, walletAddr)
@@ -158,15 +194,15 @@ func (u *Uniswap) InitializeTokenBalances() {
 					u.logger.Errorf("could not get token balance for %v: %v", walletAddr, err)
 					continue
 				}
-				balances[pair.DaiAddr] = balance
+				balances[tokenAddr] = balance
 			}
 
-			if weth, err := contract.NewWETH9(u.deploymentInfo.Weth9Addr, rclient.GetEthClient()); err != nil {
+			if weth, err := contract.NewWETH9(wethAddr, rclient.GetEthClient()); err != nil {
 				u.logger.Errorf("could not bind WETH9: %v", err)
 			} else if wethBalance, err := weth.BalanceOf(callOpts, walletAddr); err != nil {
 				u.logger.Errorf("could not get WETH balance for %v: %v", walletAddr, err)
 			} else {
-				balances[u.deploymentInfo.Weth9Addr] = wethBalance
+				balances[wethAddr] = wethBalance
 			}
 
 			u.tokenBalancesMutex.Lock()
@@ -246,7 +282,9 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 		return fmt.Errorf("could not get tx fee: %v", err)
 	}
 
-	routers := []common.Address{u.deploymentInfo.UniswapRouterAAddr, u.deploymentInfo.UniswapRouterBAddr}
+	routers := u.spenderAddrs()
+	tokenAddrs := u.tokenAddrs()
+	wethAddr := u.wethAddr()
 
 	// Track all approval transactions
 	var (
@@ -307,13 +345,10 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			callOpts := &bind.CallOpts{Context: u.ctx}
 
 			// DAI tokens
-			for _, pair := range u.deploymentInfo.Pairs {
-				if u.Tokens[pair.DaiAddr] == nil {
-					continue
-				}
-				token, err := contract.NewDai(pair.DaiAddr, rclient.GetEthClient())
+			for _, tokenAddr := range tokenAddrs {
+				token, err := contract.NewDai(tokenAddr, rclient.GetEthClient())
 				if err != nil {
-					u.logger.Errorf("could not bind token %v: %v", pair.DaiAddr, err)
+					u.logger.Errorf("could not bind token %v: %v", tokenAddr, err)
 					continue
 				}
 				for _, router := range routers {
@@ -332,7 +367,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			}
 
 			// WETH
-			weth, err := contract.NewWETH9(u.deploymentInfo.Weth9Addr, rclient.GetEthClient())
+			weth, err := contract.NewWETH9(wethAddr, rclient.GetEthClient())
 			if err != nil {
 				u.logger.Errorf("could not bind WETH9: %v", err)
 				return
