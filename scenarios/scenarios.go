@@ -19,6 +19,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
 	"github.com/ethpandaops/spamoor/scenarios/erc1155tx"
 	"github.com/ethpandaops/spamoor/scenarios/erc20tx"
+	"github.com/ethpandaops/spamoor/scenarios/erc4337"
 	"github.com/ethpandaops/spamoor/scenarios/erc721tx"
 	evmfuzz "github.com/ethpandaops/spamoor/scenarios/evm-fuzz"
 	"github.com/ethpandaops/spamoor/scenarios/factorydeploytx"
@@ -51,6 +52,7 @@ var nativeScenarioCategories = []*scenario.Category{
 			&deploydestruct.ScenarioDescriptor,
 			&eoatx.ScenarioDescriptor,
 			&erc20tx.ScenarioDescriptor,
+			&erc4337.ScenarioDescriptor,
 			&erc721tx.ScenarioDescriptor,
 			&erc1155tx.ScenarioDescriptor,
 			&evmfuzz.ScenarioDescriptor,

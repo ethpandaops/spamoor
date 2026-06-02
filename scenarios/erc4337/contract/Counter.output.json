@@ -1,0 +1,49 @@
+{
+  "contracts": {
+    "contracts/Counter.sol:Counter": {
+      "abi": [
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "name": "counts",
+          "outputs": [
+            {
+              "internalType": "uint256",
+              "name": "",
+              "type": "uint256"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "increment",
+          "outputs": [],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "total",
+          "outputs": [
+            {
+              "internalType": "uint256",
+              "name": "",
+              "type": "uint256"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        }
+      ],
+      "bin": "608060405234801561000f575f80fd5b5061014c8061001d5f395ff3fe608060405234801561000f575f80fd5b506004361061003f575f3560e01c80630568e65e146100435780632ddbd13a14610074578063d09de08a1461007c575b5f80fd5b6100626100513660046100c4565b60016020525f908152604090205481565b60405190815260200160405180910390f35b6100625f5481565b610084610086565b005b60015f8082825461009791906100f1565b9091555050335f90815260016020819052604082208054919290916100bd9084906100f1565b9091555050565b5f602082840312156100d4575f80fd5b81356001600160a01b03811681146100ea575f80fd5b9392505050565b8082018082111561011057634e487b7160e01b5f52601160045260245ffd5b9291505056fea2646970667358221220f61f6d6dee79373160da0fad99c97e0d3a88238e83cbbd8c14c6ec86ccf84b2764736f6c63430008170033"
+    }
+  },
+  "version": "0.8.23+commit.f704f362.Linux.g++"
+}
