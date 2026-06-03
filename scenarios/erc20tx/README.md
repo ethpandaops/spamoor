@@ -27,6 +27,9 @@ spamoor erctx [flags]
 - `--random-target` - Use random destination addresses
 - `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
 
+### Token Settings
+- `--token-seed` - The seed for token contract diversity
+
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
 - `--refill-amount` - ETH amount to fund each child wallet (default: 5)

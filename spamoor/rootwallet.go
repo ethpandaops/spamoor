@@ -18,6 +18,7 @@ import (
 type RootWallet struct {
 	wallet              *Wallet
 	txbatcher           *TxBatcher
+	deploymentFactory   *DeploymentFactory
 	txSemMutex          sync.Mutex
 	txSemaphore         chan struct{}
 	txSemLimit          int
@@ -88,6 +89,7 @@ func InitRootWallet(ctx context.Context, privkey string, clientPool *ClientPool,
 
 	rootWalletInstance := &RootWallet{
 		wallet:              rootWallet,
+		deploymentFactory:   newDeploymentFactory(txpool, rootWallet),
 		txSemaphore:         make(chan struct{}, 200),
 		txSemLimit:          200,
 		balanceUpdateCtx:    balanceUpdateCtx,
@@ -188,6 +190,11 @@ func (wallet *RootWallet) WithWalletLock(ctx context.Context, txCount int, fundi
 	return lockedFn()
 }
 
+// GetDeploymentFactory returns the deployment factory instance, or nil if not initialized.
+func (wallet *RootWallet) GetDeploymentFactory() *DeploymentFactory {
+	return wallet.deploymentFactory
+}
+
 // GetTxBatcher returns the transaction batcher instance, or nil if not initialized.
 func (wallet *RootWallet) GetTxBatcher() *TxBatcher {
 	return wallet.txbatcher
@@ -196,7 +203,7 @@ func (wallet *RootWallet) GetTxBatcher() *TxBatcher {
 // InitTxBatcher initializes the transaction batcher with the specified transaction pool.
 // This enables batched transaction processing for improved efficiency.
 func (wallet *RootWallet) InitTxBatcher(ctx context.Context, txpool *TxPool) {
-	wallet.txbatcher = NewTxBatcher(txpool)
+	wallet.txbatcher = newTxBatcher(txpool, wallet.deploymentFactory)
 }
 
 // balanceUpdateLoop runs in the background and updates the wallet balance every 4 blocks (~48 seconds).

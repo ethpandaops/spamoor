@@ -1,6 +1,8 @@
 # Uniswap Swaps
 
-Execute Uniswap V2 swaps with configurable parameters. This scenario allows you to test Uniswap DEX interactions by performing buy and sell transactions.
+Execute Uniswap V2 or V3 swaps with configurable parameters. This scenario allows you to test Uniswap DEX interactions by performing buy and sell transactions.
+
+The scenario self-deploys everything it needs on a fresh network: WETH9, mock DAI tokens, two factories (each with its own router) and seeded liquidity. Select the version with `--uniswap-version` (default: 2). In v3 mode each DAI gets a pool on both factories at the configured `--fee-tier`, and swaps are routed through the canonical Uniswap v3 `SwapRouter`.
 
 ## Usage
 
@@ -26,6 +28,8 @@ spamoor uniswap-swaps [flags]
 - `--rebroadcast` - Seconds to wait before rebroadcasting (default: 120)
 
 ### Swap Settings
+- `--uniswap-version` - Uniswap version to use, 2 or 3 (default: 2)
+- `--fee-tier` - Uniswap v3 fee tier in hundredths of a bip: 500, 3000 or 10000 (default: 3000)
 - `--pair-count` - Number of uniswap pairs to deploy (default: 1)
 - `--min-swap` - Minimum swap amount in wei (default: 100000000000000000)
 - `--max-swap` - Maximum swap amount in wei (default: 1000000000000000000000)
@@ -58,4 +62,9 @@ spamoor uniswap-swaps -p "<PRIVKEY>" -h http://rpc-host:8545 -c 100 --buy-ratio 
 Send 2 sell transactions per slot:
 ```bash
 spamoor uniswap-swaps -p "<PRIVKEY>" -h http://rpc-host:8545 -t 2 --buy-ratio 0
+```
+
+Send Uniswap v3 swaps at the 0.3% fee tier:
+```bash
+spamoor uniswap-swaps -p "<PRIVKEY>" -h http://rpc-host:8545 -t 2 --uniswap-version 3 --fee-tier 3000
 ``` 

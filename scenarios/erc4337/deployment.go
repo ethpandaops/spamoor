@@ -2,13 +2,13 @@ package erc4337
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 
 	"github.com/ethpandaops/spamoor/scenario"
@@ -49,118 +49,94 @@ func (s *Scenario) DeployContracts(ctx context.Context, redeploy bool) (*Deploym
 		return nil, scenario.ErrNoWallet
 	}
 
+	deployerSeed := [32]byte{}
+	copy(deployerSeed[:], deployerWallet.GetAddress().Bytes())
+
+	if redeploy {
+		copy(deployerSeed[20:], []byte(fmt.Sprintf("%x", deployerWallet.GetNonce()+1)))
+	}
+
 	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
 	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 	if err != nil {
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
 
-	deploymentTxs := make([]*types.Transaction, 0, 4)
-	info := &DeploymentInfo{}
-	deployerNonce := deployerWallet.GetNonce()
-	contractNonce := uint64(0)
-	usedNonce := uint64(0)
+	deploymentTxs := []*types.Transaction{}
+	deploymentInfo := &DeploymentInfo{}
+	deployContract := func(metadata *bind.MetaData, global bool, salt uint32, params ...interface{}) (common.Address, error) {
+		parsed, err := metadata.GetAbi()
+		if err != nil {
+			return common.Address{}, err
+		}
+		if parsed == nil {
+			return common.Address{}, fmt.Errorf("GetABI returned nil")
+		}
+
+		initCodeBytes := common.FromHex(metadata.Bin)
+
+		packed, err := parsed.Pack("", params...)
+		if err != nil {
+			return common.Address{}, err
+		}
+
+		initCodeBytes = append(initCodeBytes, packed...)
+
+		seed := [32]byte{}
+		if !global {
+			copy(seed[:], deployerSeed[:])
+		}
+		if salt != 0 {
+			binary.BigEndian.PutUint32(deployerSeed[28:], salt)
+		}
+		addr, tx, err := s.walletPool.GetDeploymentFactory().GetContractDeployment(ctx, initCodeBytes, deployerSeed, client, deployerWallet, feeCap, tipCap, false)
+		if err != nil {
+			return common.Address{}, err
+		}
+
+		if tx != nil {
+			deploymentTxs = append(deploymentTxs, tx)
+		}
+
+		return addr, nil
+	}
 
 	// deploy EntryPoint
-	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Value:     uint256.NewInt(0),
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployEntryPoint(transactOpts, client.GetEthClient())
-			return deployTx, err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not deploy EntryPoint: %w", err)
-		}
-		deploymentTxs = append(deploymentTxs, tx)
-		usedNonce = tx.Nonce()
-	} else {
-		usedNonce = contractNonce
+	deploymentInfo.EntryPointAddr, err = deployContract(contract.EntryPointMetaData, true, 0)
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy EntryPoint: %w", err)
 	}
-	contractNonce++
-
-	info.EntryPointAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
-	info.EntryPoint, err = contract.NewEntryPoint(info.EntryPointAddr, client.GetEthClient())
+	deploymentInfo.EntryPoint, err = contract.NewEntryPoint(deploymentInfo.EntryPointAddr, client.GetEthClient())
 	if err != nil {
 		return nil, fmt.Errorf("could not create instance of EntryPoint: %w", err)
 	}
 
 	// deploy SimpleAccountFactory
-	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Value:     uint256.NewInt(0),
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeploySimpleAccountFactory(transactOpts, client.GetEthClient(), info.EntryPointAddr)
-			return deployTx, err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not deploy SimpleAccountFactory: %w", err)
-		}
-		deploymentTxs = append(deploymentTxs, tx)
-		usedNonce = tx.Nonce()
-	} else {
-		usedNonce = contractNonce
+	deploymentInfo.FactoryAddr, err = deployContract(contract.SimpleAccountFactoryMetaData, true, 0, deploymentInfo.EntryPointAddr)
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy SimpleAccountFactory: %w", err)
 	}
-	contractNonce++
-
-	info.FactoryAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
-	info.Factory, err = contract.NewSimpleAccountFactory(info.FactoryAddr, client.GetEthClient())
+	deploymentInfo.Factory, err = contract.NewSimpleAccountFactory(deploymentInfo.FactoryAddr, client.GetEthClient())
 	if err != nil {
 		return nil, fmt.Errorf("could not create instance of SimpleAccountFactory: %w", err)
 	}
 
 	// deploy Paymaster
-	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Value:     uint256.NewInt(0),
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployAcceptAllPaymaster(transactOpts, client.GetEthClient(), info.EntryPointAddr)
-			return deployTx, err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not deploy Paymaster: %w", err)
-		}
-		deploymentTxs = append(deploymentTxs, tx)
-		usedNonce = tx.Nonce()
-	} else {
-		usedNonce = contractNonce
+	deploymentInfo.PaymasterAddr, err = deployContract(contract.AcceptAllPaymasterMetaData, true, 0, deploymentInfo.EntryPointAddr)
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy Paymaster: %w", err)
 	}
-	contractNonce++
-
-	info.PaymasterAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
-	info.Paymaster, err = contract.NewAcceptAllPaymaster(info.PaymasterAddr, client.GetEthClient())
+	deploymentInfo.Paymaster, err = contract.NewAcceptAllPaymaster(deploymentInfo.PaymasterAddr, client.GetEthClient())
 	if err != nil {
 		return nil, fmt.Errorf("could not create instance of Paymaster: %w", err)
 	}
 
 	// deploy Counter
-	if redeploy || deployerNonce <= contractNonce {
-		tx, err := deployerWallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-			GasFeeCap: uint256.MustFromBig(feeCap),
-			GasTipCap: uint256.MustFromBig(tipCap),
-			Value:     uint256.NewInt(0),
-		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-			_, deployTx, _, err := contract.DeployCounter(transactOpts, client.GetEthClient())
-			return deployTx, err
-		})
-		if err != nil {
-			return nil, fmt.Errorf("could not deploy Counter: %w", err)
-		}
-		deploymentTxs = append(deploymentTxs, tx)
-		usedNonce = tx.Nonce()
-	} else {
-		usedNonce = contractNonce
+	deploymentInfo.CounterAddr, err = deployContract(contract.CounterMetaData, true, 0)
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy Counter: %w", err)
 	}
-	contractNonce++
-
-	info.CounterAddr = crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
-	info.Counter, err = contract.NewCounter(info.CounterAddr, client.GetEthClient())
+	deploymentInfo.Counter, err = contract.NewCounter(deploymentInfo.CounterAddr, client.GetEthClient())
 	if err != nil {
 		return nil, fmt.Errorf("could not create instance of Counter: %w", err)
 	}
@@ -185,7 +161,7 @@ func (s *Scenario) DeployContracts(ctx context.Context, redeploy bool) (*Deploym
 		s.logger.Infof("contract deployment complete. (%v/%v)", len(deploymentTxs), len(deploymentTxs))
 	}
 
-	return info, nil
+	return deploymentInfo, nil
 }
 
 // ensurePaymasterDeposit tops up the paymaster's EntryPoint deposit to at least

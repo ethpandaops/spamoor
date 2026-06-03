@@ -1,24 +1,18 @@
-package erc1155tx
+package curveswaps
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"fmt"
 	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/scenario"
-	"github.com/ethpandaops/spamoor/scenarios/erc1155tx/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -32,17 +26,17 @@ type ScenarioOptions struct {
 	TipFee            float64 `yaml:"tip_fee"`
 	BaseFeeWei        string  `yaml:"base_fee_wei"`
 	TipFeeWei         string  `yaml:"tip_fee_wei"`
-	Amount            uint64  `yaml:"amount"`
-	MaxIndex          uint64  `yaml:"max_index"`
-	BatchSize         uint64  `yaml:"batch_size"`
-	RandomAmount      bool    `yaml:"random_amount"`
-	RandomTarget      bool    `yaml:"random_target"`
-	RandomIndex       bool    `yaml:"random_index"`
-	RandomBatchSize   bool    `yaml:"random_batch_size"`
+	PoolCount         uint64  `yaml:"pool_count"`
+	Amplification     uint64  `yaml:"amplification"`
+	Fee               uint64  `yaml:"fee"`
+	SeedAmount        string  `yaml:"seed_amount"`
+	WalletFunding     string  `yaml:"wallet_funding"`
+	MinSwapAmount     string  `yaml:"min_swap_amount"`
+	MaxSwapAmount     string  `yaml:"max_swap_amount"`
+	Slippage          uint64  `yaml:"slippage"`
 	Timeout           string  `yaml:"timeout"`
 	ClientGroup       string  `yaml:"client_group"`
 	DeployClientGroup string  `yaml:"deploy_client_group"`
-	TokenSeed         string  `yaml:"token_seed"`
 	LogTxs            bool    `yaml:"log_txs"`
 }
 
@@ -51,34 +45,42 @@ type Scenario struct {
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
 
-	contractAddr common.Address
+	curve      *Curve
+	deployment *CurveDeploymentInfo
 }
 
-var ScenarioName = "erc1155tx"
+// swapGasLimit is the static gas limit used for all swap (spam) transactions.
+// A StableSwap exchange runs the full Newton's-method get_D/get_y iterations
+// plus two ERC20 transfers; this keeps comfortable headroom for that work and
+// for fresh state creation under the Amsterdam fee schedule, while avoiding a
+// per-tx eth_estimateGas round trip on the hot path.
+const swapGasLimit = 600000
+
+var ScenarioName = "curve-swaps"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TotalCount:        0,
-	Throughput:        200,
+	Throughput:        10,
 	MaxPending:        0,
 	MaxWallets:        0,
 	Rebroadcast:       1,
 	BaseFee:           20,
 	TipFee:            2,
-	Amount:            20,
-	MaxIndex:          0,
-	BatchSize:         1,
-	RandomAmount:      false,
-	RandomTarget:      false,
-	RandomIndex:       false,
-	RandomBatchSize:   false,
+	PoolCount:         1,
+	Amplification:     200,
+	Fee:               4000000,                     // 0.04% (denominated in 1e10)
+	SeedAmount:        "1000000000000000000000000", // 1,000,000 tokens per coin
+	WalletFunding:     "10000000000000000000000",   // 10,000 tokens (coin 0) per wallet
+	MinSwapAmount:     "1000000000000000000",       // 1 token
+	MaxSwapAmount:     "1000000000000000000000",    // 1,000 tokens
+	Slippage:          100,                         // 1%
 	Timeout:           "",
 	ClientGroup:       "",
 	DeployClientGroup: "",
-	TokenSeed:         "",
 	LogTxs:            false,
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
-	Description:    "Send ERC1155 NFT transactions with different configurations",
+	Description:    "Send Curve StableSwap exchanges across self-deployed 3-coin stable pools",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }
@@ -91,26 +93,26 @@ func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 }
 
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
-	flags.Uint64VarP(&s.options.TotalCount, "count", "c", ScenarioDefaultOptions.TotalCount, "Total number of transfer transactions to send")
-	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", ScenarioDefaultOptions.Throughput, "Number of transfer transactions to send per slot")
+	flags.Uint64VarP(&s.options.TotalCount, "count", "c", ScenarioDefaultOptions.TotalCount, "Total number of swap transactions to send")
+	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", ScenarioDefaultOptions.Throughput, "Number of swap transactions to send per slot")
 	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast system")
-	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transfer transactions (in gwei)")
-	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in transfer transactions (in gwei)")
+	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in swap transactions (in gwei)")
+	flags.Float64Var(&s.options.TipFee, "tipfee", ScenarioDefaultOptions.TipFee, "Max tip per gas to use in swap transactions (in gwei)")
 	flags.StringVar(&s.options.BaseFeeWei, "basefee-wei", "", "Max fee per gas in wei (overrides --basefee for L2 sub-gwei fees)")
 	flags.StringVar(&s.options.TipFeeWei, "tipfee-wei", "", "Max tip per gas in wei (overrides --tipfee for L2 sub-gwei fees)")
-	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (for ERC1155)")
-	flags.Uint64Var(&s.options.MaxIndex, "max-index", ScenarioDefaultOptions.MaxIndex, "Maximum token index to mint (for ERC1155)")
-	flags.Uint64Var(&s.options.BatchSize, "batch-size", ScenarioDefaultOptions.BatchSize, "Batch size for transactions (for ERC1155)")
-	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
-	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
-	flags.BoolVar(&s.options.RandomIndex, "random-index", ScenarioDefaultOptions.RandomIndex, "Use random token indexes for transactions")
-	flags.BoolVar(&s.options.RandomBatchSize, "random-batch-size", ScenarioDefaultOptions.RandomBatchSize, "Use random batch sizes for transactions")
+	flags.Uint64Var(&s.options.PoolCount, "pool-count", ScenarioDefaultOptions.PoolCount, "Number of StableSwap pools to deploy")
+	flags.Uint64Var(&s.options.Amplification, "amplification", ScenarioDefaultOptions.Amplification, "StableSwap amplification coefficient (A)")
+	flags.Uint64Var(&s.options.Fee, "fee", ScenarioDefaultOptions.Fee, "StableSwap swap fee, denominated in 1e10 (e.g. 4000000 = 0.04%)")
+	flags.StringVar(&s.options.SeedAmount, "seed-amount", ScenarioDefaultOptions.SeedAmount, "Liquidity seeded per coin into each pool (in wei)")
+	flags.StringVar(&s.options.WalletFunding, "wallet-funding", ScenarioDefaultOptions.WalletFunding, "Initial coin balance minted to each wallet (in wei)")
+	flags.StringVar(&s.options.MinSwapAmount, "min-swap", ScenarioDefaultOptions.MinSwapAmount, "Minimum swap amount in wei")
+	flags.StringVar(&s.options.MaxSwapAmount, "max-swap", ScenarioDefaultOptions.MaxSwapAmount, "Maximum swap amount in wei")
+	flags.Uint64Var(&s.options.Slippage, "slippage", ScenarioDefaultOptions.Slippage, "Slippage tolerance in basis points")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.StringVar(&s.options.DeployClientGroup, "deploy-client-group", ScenarioDefaultOptions.DeployClientGroup, "Client group to use for deployments")
-	flags.StringVar(&s.options.TokenSeed, "token-seed", ScenarioDefaultOptions.TokenSeed, "Seed for the token contract")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
 }
@@ -124,6 +126,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if s.options.PoolCount == 0 {
+		return fmt.Errorf("pool-count must be at least 1")
 	}
 
 	if s.options.MaxWallets > 0 {
@@ -149,6 +155,13 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
+	// register well known wallets
+	s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
+		Name:          "deployer",
+		RefillAmount:  uint256.NewInt(2000000000000000000), // 2 ETH
+		RefillBalance: uint256.NewInt(1000000000000000000), // 1 ETH
+	})
+
 	return nil
 }
 
@@ -156,17 +169,54 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
 
-	// deploy erc20 contract
-	contractAddr, deployBlock, err := s.sendDeploymentTx(ctx)
+	seedAmount, overflow := uint256.FromBig(mustParseWei(s.options.SeedAmount))
+	if overflow || seedAmount.IsZero() {
+		return fmt.Errorf("invalid seed-amount: %s", s.options.SeedAmount)
+	}
+	walletFunding, overflow := uint256.FromBig(mustParseWei(s.options.WalletFunding))
+	if overflow || walletFunding.IsZero() {
+		return fmt.Errorf("invalid wallet-funding: %s", s.options.WalletFunding)
+	}
+
+	deployClientGroup := s.options.DeployClientGroup
+	if deployClientGroup == "" {
+		deployClientGroup = s.options.ClientGroup
+	}
+
+	s.curve = NewCurve(ctx, s.walletPool, s.logger, CurveOptions{
+		BaseFee:       s.options.BaseFee,
+		TipFee:        s.options.TipFee,
+		BaseFeeWei:    s.options.BaseFeeWei,
+		TipFeeWei:     s.options.TipFeeWei,
+		PoolCount:     s.options.PoolCount,
+		Amplification: s.options.Amplification,
+		Fee:           s.options.Fee,
+		SeedAmount:    seedAmount,
+		WalletFunding: walletFunding,
+		ClientGroup:   deployClientGroup,
+	})
+
+	deploymentInfo, err := s.curve.DeployCurvePools()
 	if err != nil {
-		s.logger.Errorf("could not deploy token contract: %v", err)
+		s.logger.Errorf("could not deploy curve pools: %v", err)
 		return err
 	}
-	if contractAddr == nil {
-		return fmt.Errorf("could not deploy token contract: %w", err)
+	if deploymentInfo == nil {
+		return fmt.Errorf("could not deploy curve pools")
 	}
-	s.contractAddr = *contractAddr
-	s.logger.Infof("deployed token contract: %v (confirmed in block #%v)", s.contractAddr.String(), deployBlock)
+	s.deployment = deploymentInfo
+
+	if err := s.curve.InitializeContracts(deploymentInfo); err != nil {
+		s.logger.Errorf("could not initialize curve contracts: %v", err)
+		return err
+	}
+
+	if err := s.curve.FundAndApproveWallets(); err != nil {
+		s.logger.Errorf("could not fund and approve wallets: %v", err)
+		return err
+	}
+
+	s.curve.InitializeTokenBalances()
 
 	// send transactions
 	maxPending := s.options.MaxPending
@@ -184,7 +234,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 	// Parse timeout
 	var timeout time.Duration
 	if s.options.Timeout != "" {
-		var err error
 		timeout, err = time.ParseDuration(s.options.Timeout)
 		if err != nil {
 			return fmt.Errorf("invalid timeout value: %v", err)
@@ -237,61 +286,6 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-func (s *Scenario) sendDeploymentTx(ctx context.Context) (*common.Address, uint64, error) {
-	deployClientGroup := s.options.DeployClientGroup
-	if deployClientGroup == "" {
-		deployClientGroup = s.options.ClientGroup
-	}
-
-	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
-		spamoor.WithClientGroup(deployClientGroup),
-	)
-	wallet := s.walletPool.GetWellKnownWallet("deployer")
-
-	var feeCap *big.Int
-	var tipCap *big.Int
-
-	if client == nil {
-		return nil, 0, scenario.ErrNoClients
-	}
-
-	if wallet == nil {
-		return nil, 0, scenario.ErrNoWallet
-	}
-
-	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
-	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	tokenSeed := [32]byte{}
-	if s.options.TokenSeed != "" {
-		tokenSeed = sha256.Sum256([]byte(s.options.TokenSeed))
-	}
-
-	initCodeBytes := common.FromHex(contract.TestToken1155MetaData.Bin)
-	addr, tx, err := s.walletPool.GetDeploymentFactory().GetContractDeployment(ctx, initCodeBytes, tokenSeed, client, wallet, feeCap, tipCap, false)
-	if err != nil {
-		return nil, 0, err
-	}
-	if tx == nil {
-		return &addr, 0, nil
-	}
-
-	receipt, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
-		Client:      client,
-		ClientGroup: deployClientGroup,
-		Rebroadcast: true,
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return &addr, receipt.BlockNumber.Uint64(), nil
-}
-
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
@@ -302,7 +296,6 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	if client == nil {
 		return nil, nil, client, wallet, scenario.ErrNoClients
 	}
-
 	if wallet == nil {
 		return nil, nil, client, wallet, scenario.ErrNoWallet
 	}
@@ -317,87 +310,18 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
-	indexes := make([]*big.Int, 0)
-	amounts := make([]*big.Int, 0)
-
-	batchSize := s.options.BatchSize
-	if s.options.RandomBatchSize && s.options.BatchSize > 0 {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(s.options.BatchSize)))
-		if err == nil {
-			batchSize = n.Uint64()
-		}
-	}
-
-	for i := uint64(0); i < batchSize; i++ {
-		var index *big.Int
-
-		batchTxIdx := (txIdx * batchSize) + i
-
-		if s.options.RandomIndex {
-			var max *big.Int
-			if s.options.MaxIndex > 0 {
-				max = big.NewInt(int64(s.options.MaxIndex))
-			} else {
-				max = new(big.Int).Lsh(big.NewInt(1), 256) // 2^256
-			}
-			n, err := rand.Int(rand.Reader, max)
-			if err == nil {
-				index = n
-			}
-		} else if s.options.MaxIndex > 0 {
-			index = big.NewInt(int64(batchTxIdx % s.options.MaxIndex))
-		} else {
-			index = big.NewInt(int64(batchTxIdx))
-		}
-
-		amount := big.NewInt(int64(s.options.Amount))
-		amount = amount.Mul(amount, big.NewInt(1000000000))
-		if s.options.RandomAmount {
-			n, err := rand.Int(rand.Reader, amount)
-			if err == nil {
-				amount = n
-			}
-		}
-
-		indexes = append(indexes, index)
-		amounts = append(amounts, amount)
-	}
-
-	toAddr := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
-	if s.options.RandomTarget {
-		addrBytes := make([]byte, 20)
-		rand.Read(addrBytes)
-		toAddr = common.Address(addrBytes)
-	}
-
-	testToken, err := contract.NewTestToken1155(s.contractAddr, client.GetEthClient())
+	tx, err := s.buildSwapTx(ctx, wallet, feeCap, tipCap)
 	if err != nil {
 		return nil, nil, client, wallet, err
 	}
 
-	// Each minted id creates a fresh balance slot, so gas scales with the batch
-	// size. Under the Amsterdam fee schedule a single mint costs ~140k and each
-	// additional id adds ~110k; size the static limit per batch (no per-tx
-	// estimation on the spam path).
-	gasLimit := uint64(100000 + uint64(len(indexes))*120000)
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
-		GasFeeCap: uint256.MustFromBig(feeCap),
-		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasLimit,
-		Value:     uint256.NewInt(0),
-	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-		if len(indexes) == 1 {
-			return testToken.TransferMint(transactOpts, toAddr, indexes[0], amounts[0])
-		} else {
-			return testToken.MintBatch(transactOpts, toAddr, indexes, amounts)
-		}
-	})
-	if err != nil {
-		return nil, nil, client, wallet, err
-	}
+	return s.submitSwapTx(ctx, txIdx, client, wallet, tx)
+}
 
+// submitSwapTx sends a built swap transaction and returns a receipt channel.
+func (s *Scenario) submitSwapTx(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, tx *types.Transaction) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	receiptChan := make(scenario.ReceiptChan, 1)
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	err := s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
@@ -425,4 +349,14 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	}
 
 	return receiptChan, tx, client, wallet, nil
+}
+
+// mustParseWei parses a base-10 wei string, returning 0 on failure so the caller
+// can surface a validation error.
+func mustParseWei(s string) *big.Int {
+	v, ok := new(big.Int).SetString(s, 10)
+	if !ok {
+		return big.NewInt(0)
+	}
+	return v
 }

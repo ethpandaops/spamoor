@@ -3,15 +3,10 @@ package spamoor
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"sync"
 
-	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	geas "github.com/fjl/geas/asm"
-	"github.com/holiman/uint256"
 )
 
 // Assembly code for the batcher contract initialization
@@ -124,6 +119,7 @@ const (
 // assembly code that efficiently forwards funds to multiple recipients.
 type TxBatcher struct {
 	txpool     *TxPool
+	factory    *DeploymentFactory
 	isDeployed bool
 	deployMtx  sync.Mutex
 	address    common.Address
@@ -131,9 +127,10 @@ type TxBatcher struct {
 
 // NewTxBatcher creates a new TxBatcher instance with the specified transaction pool.
 // The batcher must be deployed with Deploy() before it can be used.
-func NewTxBatcher(txpool *TxPool) *TxBatcher {
+func newTxBatcher(txpool *TxPool, deploymentFactory *DeploymentFactory) *TxBatcher {
 	return &TxBatcher{
-		txpool: txpool,
+		txpool:  txpool,
+		factory: deploymentFactory,
 	}
 }
 
@@ -170,66 +167,12 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 
 	deployData := append(initcode, batcherGeasCode...)
 
-	if client == nil {
-		client = b.txpool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
-		if client == nil {
-			return fmt.Errorf("no client available")
-		}
-	}
-	feeCap, tipCap, err := client.GetSuggestedFee(ctx)
-	if err != nil {
-		return err
-	}
-	if feeCap.Cmp(big.NewInt(400000000000)) < 0 {
-		feeCap = big.NewInt(400000000000)
-	}
-	if tipCap.Cmp(big.NewInt(200000000000)) < 0 {
-		tipCap = big.NewInt(200000000000)
-	}
-
-	// Estimate the deploy gas so we stay correct under EIP-8037 where
-	// account creation + per-byte code deposit dominate the cost. Falls back
-	// to the formula upper bound if the RPC path fails.
-	deployGas, estErr := client.EstimateGas(ctx, ethereum.CallMsg{
-		From:  wallet.GetAddress(),
-		To:    nil,
-		Value: new(big.Int),
-		Data:  deployData,
-	})
-	if estErr != nil || deployGas == 0 {
-		deployGas = fallbackDeployGas(len(deployData), b.txpool.IsAmsterdam(), 0)
-	} else if b.txpool.IsAmsterdam() {
-		deployGas = deployGas * 12 / 10
-	} else {
-		deployGas = deployGas * 11 / 10
-	}
-
-	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
-		GasFeeCap: uint256.MustFromBig(feeCap),
-		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       deployGas,
-		To:        nil,
-		Value:     uint256.NewInt(0),
-		Data:      deployData,
-	})
+	contractAddr, _, err := b.factory.GetContractDeployment(ctx, deployData, [32]byte{}, client, wallet, nil, nil, true)
 	if err != nil {
 		return err
 	}
 
-	tx, err := wallet.BuildDynamicFeeTx(txData)
-	if err != nil {
-		return err
-	}
-
-	err = b.txpool.SendTransaction(ctx, wallet, tx, &SendTransactionOptions{
-		Client:      client,
-		Rebroadcast: true,
-	})
-	if err != nil {
-		return err
-	}
-
-	b.address = crypto.CreateAddress(wallet.GetAddress(), tx.Nonce())
+	b.address = contractAddr
 
 	return nil
 }
