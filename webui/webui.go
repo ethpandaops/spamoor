@@ -78,6 +78,7 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	apiHandler := api.NewAPIHandler(daemon, authHandler)
 	apiRouter := router.PathPrefix("/api").Subrouter()
 	apiRouter.HandleFunc("/spammers", apiHandler.GetSpammerList).Methods("GET")
+	apiRouter.HandleFunc("/spammers/events", apiHandler.StreamSpammerEvents).Methods("GET")
 	apiRouter.HandleFunc("/scenarios", apiHandler.GetScenarios).Methods("GET")
 	apiRouter.HandleFunc("/scenarios/{name}/config", apiHandler.GetScenarioConfig).Methods("GET")
 	apiRouter.HandleFunc("/version", apiHandler.GetVersion).Methods("GET")

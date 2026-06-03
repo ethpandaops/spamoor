@@ -106,18 +106,6 @@ func (c *MemberConfig) Marshal() (string, error) {
 	return string(data), nil
 }
 
-// EffectivelyEnabled reports whether a member should run as part of the group.
-// In shared mode a weight of 0 means "don't run", so it is treated as disabled.
-func (c *MemberConfig) EffectivelyEnabled(mode string) bool {
-	if !c.Enabled {
-		return false
-	}
-	if mode == GroupModeShared && c.Weight == 0 {
-		return false
-	}
-	return true
-}
-
 // ScenarioSupportsSharedThroughput reports whether the scenario accepts a
 // throughput field and can therefore participate in a shared-throughput group.
 func ScenarioSupportsSharedThroughput(descriptor *scenario.Descriptor) bool {
@@ -134,9 +122,9 @@ func ScenarioSupportsSharedCount(descriptor *scenario.Descriptor) bool {
 
 // Apportion distributes total across the given weights using the largest-remainder
 // (Hamilton) method so the integer shares sum exactly to total. A weight of 0 yields
-// a 0 share. If all weights are 0, total is split as evenly as possible. Callers that
-// must never produce a 0 share for an active member (shared-mode throughput) should
-// pre-filter weight-0 members out of the slice.
+// a 0 share. If all weights are 0, total is split as evenly as possible. A 0 share for
+// an enabled member is harmless for throughput because ResolveMemberConfig bumps an
+// injected 0 to 1 (never "unlimited").
 func Apportion(total uint64, weights []uint64) []uint64 {
 	n := len(weights)
 	shares := make([]uint64, n)
@@ -436,7 +424,7 @@ func ResolveRunConfigs(all []SpammerConfig, lookup func(string) *scenario.Descri
 		active := make([]member, 0, len(idxs))
 		for _, idx := range idxs {
 			mc := MemberConfigFromMap(all[idx].GroupConfig)
-			if !mc.EffectivelyEnabled(gc.ThroughputMode) {
+			if !mc.Enabled {
 				continue
 			}
 			active = append(active, member{idx: idx, weight: mc.Weight, order: mc.SortOrder})

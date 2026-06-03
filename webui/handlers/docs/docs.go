@@ -1781,6 +1781,33 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/spammers/events": {
+            "get": {
+                "description": "Streams spammer lifecycle events (create/update/status/membership/reorder/\ndelete) via Server-Sent Events so dashboards can update live. The stream is\nunauthenticated and carries only safe metadata — no configs, seeds or logs.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "Spammer"
+                ],
+                "summary": "Stream spammer lifecycle events",
+                "operationId": "streamSpammerEvents",
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of spammer events",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Streaming unsupported",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/api/spammers/export": {
             "post": {
                 "description": "Exports specified spammers or all spammers to YAML format",

@@ -35,6 +35,11 @@ type Daemon struct {
 	spammerMapMtx sync.RWMutex
 	spammerWg     sync.WaitGroup
 
+	// Spammer lifecycle event broker (powers the dashboard's live SSE stream).
+	eventSubs   map[uint64]chan *SpammerEvent
+	eventSubMtx sync.RWMutex
+	eventSubID  uint64
+
 	globalCfg map[string]interface{}
 
 	// Metrics collector for Prometheus metrics
@@ -71,6 +76,7 @@ func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool 
 		db:         db,
 		spammerMap: make(map[int64]*Spammer),
 		globalCfg:  make(map[string]interface{}),
+		eventSubs:  make(map[uint64]chan *SpammerEvent),
 	}
 }
 
@@ -220,6 +226,9 @@ func (d *Daemon) DeleteSpammer(id int64, userEmail string) error {
 
 	// Remove from map
 	delete(d.spammerMap, id)
+
+	// Deletion events carry no snapshot, so emitting under the map lock is safe.
+	d.emitSpammerDeleted(id)
 	return nil
 }
 
@@ -227,48 +236,59 @@ func (d *Daemon) DeleteSpammer(id int64, userEmail string) error {
 // The configuration is validated by attempting to unmarshal it into SpammerConfig.
 // Returns an error if the spammer is not found, config is invalid, or database update fails.
 func (d *Daemon) UpdateSpammer(id int64, name string, description string, config string, userEmail string) error {
-	d.spammerMapMtx.Lock()
-	defer d.spammerMapMtx.Unlock()
+	// Perform the locked update in a closure so the lock is released before we emit the
+	// lifecycle event (event snapshots may read the spammer map under RLock).
+	spammer, err := func() (*Spammer, error) {
+		d.spammerMapMtx.Lock()
+		defer d.spammerMapMtx.Unlock()
 
-	spammer := d.spammerMap[id]
-	if spammer == nil {
-		return fmt.Errorf("spammer not found")
-	}
-
-	// Validate config
-	if err := yaml.Unmarshal([]byte(config), &SpammerConfig{}); err != nil {
-		return fmt.Errorf("invalid config: %w", err)
-	}
-
-	// Capture old values for audit logging
-	oldName := spammer.dbEntity.Name
-	oldDescription := spammer.dbEntity.Description
-	oldConfig := spammer.dbEntity.Config
-
-	// Update DB
-	spammer.dbEntity.Name = name
-	spammer.dbEntity.Description = description
-	spammer.dbEntity.Config = config
-
-	err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
-		if err := d.db.UpdateSpammer(tx, spammer.dbEntity); err != nil {
-			return err
+		spammer := d.spammerMap[id]
+		if spammer == nil {
+			return nil, fmt.Errorf("spammer not found")
 		}
 
-		// Audit log the update
-		if d.auditLogger != nil {
-			return d.auditLogger.LogSpammerUpdate(tx, userEmail, id, oldName, name, oldDescription, description, oldConfig, config)
+		// Validate config
+		if err := yaml.Unmarshal([]byte(config), &SpammerConfig{}); err != nil {
+			return nil, fmt.Errorf("invalid config: %w", err)
 		}
 
-		return nil
-	})
+		// Capture old values for audit logging
+		oldName := spammer.dbEntity.Name
+		oldDescription := spammer.dbEntity.Description
+		oldConfig := spammer.dbEntity.Config
+
+		// Update DB
+		spammer.dbEntity.Name = name
+		spammer.dbEntity.Description = description
+		spammer.dbEntity.Config = config
+
+		err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
+			if err := d.db.UpdateSpammer(tx, spammer.dbEntity); err != nil {
+				return err
+			}
+
+			// Audit log the update
+			if d.auditLogger != nil {
+				return d.auditLogger.LogSpammerUpdate(tx, userEmail, id, oldName, name, oldDescription, description, oldConfig, config)
+			}
+
+			return nil
+		})
+		if err != nil {
+			// Revert changes on error
+			spammer.dbEntity.Name = oldName
+			spammer.dbEntity.Description = oldDescription
+			spammer.dbEntity.Config = oldConfig
+			return nil, fmt.Errorf("failed to update spammer: %w", err)
+		}
+
+		return spammer, nil
+	}()
 	if err != nil {
-		// Revert changes on error
-		spammer.dbEntity.Name = oldName
-		spammer.dbEntity.Description = oldDescription
-		spammer.dbEntity.Config = oldConfig
-		return fmt.Errorf("failed to update spammer: %w", err)
+		return err
 	}
+
+	d.emitSpammerSnapshot(spammer, SpammerEventUpdated)
 
 	return nil
 }

@@ -164,6 +164,8 @@ func (d *Daemon) NewSpammer(scenarioName string, config string, name string, des
 	d.spammerMap[spammer.dbEntity.ID] = spammer
 	d.spammerMapMtx.Unlock()
 
+	d.emitSpammerSnapshot(spammer, SpammerEventCreated)
+
 	if startImmediately {
 		err = spammer.Start()
 		if err != nil {
@@ -195,6 +197,9 @@ func (s *Spammer) Start() error {
 
 	// Track spammer start for metrics
 	s.daemon.TrackSpammerStatusChange(s.dbEntity.ID, true)
+
+	// Notify the dashboard of the run-state change (and the parent group's derived status).
+	s.daemon.emitStatusChange(s)
 
 	go s.runScenario()
 
@@ -283,6 +288,10 @@ func (s *Spammer) runScenario() {
 		if err != nil {
 			s.logger.Errorf("failed to update spammer: %v", err)
 		}
+
+		// Notify the dashboard of the terminal run-state (paused/finished/failed) and the
+		// parent group's derived status.
+		s.daemon.emitStatusChange(s)
 
 		s.running = false
 		s.scenarioCancel()

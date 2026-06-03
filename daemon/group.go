@@ -101,6 +101,8 @@ func (d *Daemon) NewGroup(name string, description string, overlayConfig string,
 	d.spammerMap[group.dbEntity.ID] = group
 	d.spammerMapMtx.Unlock()
 
+	d.emitSpammerSnapshot(group, SpammerEventCreated)
+
 	return group, nil
 }
 
@@ -160,6 +162,8 @@ func (d *Daemon) UpdateGroup(id int64, name string, description string, overlayC
 		return fmt.Errorf("failed to update group: %w", err)
 	}
 
+	d.emitSpammerSnapshot(group, SpammerEventUpdated)
+
 	return nil
 }
 
@@ -199,12 +203,11 @@ func (d *Daemon) validateMembersForSharedMode(groupID int64, groupConfig *config
 	return nil
 }
 
-// startGroup starts every effectively-enabled member of the group. Members are
-// snapshotted under the read lock and started outside it to avoid holding the map
-// mutex across Start (which would block other operations).
+// startGroup starts every enabled member of the group. Members are snapshotted under
+// the read lock and started outside it to avoid holding the map mutex across Start
+// (which would block other operations). Starting individual members is independent of
+// this and never started here.
 func (s *Spammer) startGroup() error {
-	s.setGroupStatus(SpammerStatusRunning)
-
 	members := s.daemon.getStartableGroupMembers(s.dbEntity.ID)
 	var firstErr error
 	for _, m := range members {
@@ -215,6 +218,9 @@ func (s *Spammer) startGroup() error {
 			}
 		}
 	}
+
+	// Reflect the group's aggregate (derived) status on the dashboard.
+	s.daemon.emitSpammerSnapshot(s, SpammerEventStatus)
 	return firstErr
 }
 
@@ -235,20 +241,9 @@ func (s *Spammer) pauseGroup() error {
 		}
 	}
 
-	s.setGroupStatus(SpammerStatusPaused)
+	// Reflect the group's aggregate (derived) status on the dashboard.
+	s.daemon.emitSpammerSnapshot(s, SpammerEventStatus)
 	return firstErr
-}
-
-// setGroupStatus caches the group's display status into its row. The authoritative
-// status is always derived from members via computeGroupStatus.
-func (s *Spammer) setGroupStatus(status SpammerStatus) {
-	s.dbEntity.Status = int(status)
-	err := s.daemon.db.RunDBTransaction(func(tx *sqlx.Tx) error {
-		return s.daemon.db.UpdateSpammer(tx, s.dbEntity)
-	})
-	if err != nil {
-		s.logger.Errorf("failed to persist group status: %v", err)
-	}
 }
 
 // GetEffectiveStatus returns the display status for this spammer. For group rows the
@@ -333,7 +328,9 @@ func (d *Daemon) computeMemberShares(groupID int64, groupCfg *configs.GroupConfi
 		if err != nil {
 			continue
 		}
-		if !mc.EffectivelyEnabled(groupCfg.ThroughputMode) {
+		// Enabled members participate in the split; weight only sets the proportion (a
+		// weight-0 member still runs, at the resolver's min-1 throughput).
+		if !mc.Enabled {
 			continue
 		}
 		act = append(act, active{id: m.GetID(), weight: mc.Weight, order: mc.SortOrder})
@@ -422,15 +419,10 @@ func memberSortOrder(s *Spammer) int {
 }
 
 // getStartableGroupMembers returns the members that should run when the group starts:
-// those that are effectively enabled for the group's throughput mode.
+// those whose enabled flag is set. Weight does not gate participation.
 func (d *Daemon) getStartableGroupMembers(groupID int64) []*Spammer {
-	group := d.GetSpammer(groupID)
-	if group == nil {
+	if group := d.GetSpammer(groupID); group == nil {
 		return nil
-	}
-	groupCfg, err := configs.ParseGroupConfig(group.dbEntity.GroupConfig)
-	if err != nil {
-		groupCfg = &configs.GroupConfig{ThroughputMode: configs.GroupModeIndependent}
 	}
 
 	members := d.GetGroupMembers(groupID)
@@ -440,7 +432,8 @@ func (d *Daemon) getStartableGroupMembers(groupID int64) []*Spammer {
 		if err != nil {
 			continue
 		}
-		if mc.EffectivelyEnabled(groupCfg.ThroughputMode) {
+		// Group start only starts enabled members; weight does not gate participation.
+		if mc.Enabled {
 			startable = append(startable, m)
 		}
 	}
@@ -564,6 +557,8 @@ func (d *Daemon) writeMembership(spammer *Spammer, groupID int64, member *config
 		})
 	}
 
+	d.emitSpammerSnapshot(spammer, SpammerEventMembership)
+
 	return nil
 }
 
@@ -596,6 +591,8 @@ func (d *Daemon) RemoveSpammerFromGroup(spammerID int64, userEmail string) error
 		})
 	}
 
+	d.emitSpammerSnapshot(spammer, SpammerEventMembership)
+
 	return nil
 }
 
@@ -627,6 +624,8 @@ func (d *Daemon) ReorderGroupMembers(groupID int64, orderedIDs []int64, userEmai
 			"reorder": orderedIDs,
 		})
 	}
+
+	d.emitSpammerEvent(&SpammerEvent{Type: SpammerEventReorder, ID: groupID, Order: orderedIDs})
 
 	return nil
 }
@@ -672,6 +671,8 @@ func (d *Daemon) DeleteGroup(id int64, cascade bool, userEmail string) error {
 	}
 	delete(d.spammerMap, id)
 	d.spammerMapMtx.Unlock()
+
+	d.emitSpammerDeleted(id)
 
 	return nil
 }

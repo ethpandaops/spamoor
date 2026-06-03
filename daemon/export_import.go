@@ -41,18 +41,35 @@ func (d *Daemon) ExportSpammers(spammerIDs ...int64) (string, error) {
 		return "", fmt.Errorf("no spammers to export")
 	}
 
-	// Ensure the parent group of any exported member is included so the import can
-	// re-link members even when only the members were selected.
 	exportSet := make(map[int64]*Spammer, len(spammersToExport))
 	for _, s := range spammersToExport {
 		exportSet[s.GetID()] = s
 	}
+
+	// Pull in the parent group of any selected member so the import can re-link it even
+	// when only the member was selected.
 	for _, s := range spammersToExport {
 		if s.GetGroupID() != 0 {
 			if _, ok := exportSet[s.GetGroupID()]; !ok {
 				if parent := d.GetSpammer(s.GetGroupID()); parent != nil {
 					exportSet[parent.GetID()] = parent
 				}
+			}
+		}
+	}
+
+	// Pull in all members of any group in the set (selected directly, or added above as a
+	// parent) so exporting a group always carries its full membership.
+	groupsInSet := make([]*Spammer, 0, len(exportSet))
+	for _, s := range exportSet {
+		if s.IsGroup() {
+			groupsInSet = append(groupsInSet, s)
+		}
+	}
+	for _, group := range groupsInSet {
+		for _, member := range d.getGroupMembersFromMap(group.GetID()) {
+			if _, ok := exportSet[member.GetID()]; !ok {
+				exportSet[member.GetID()] = member
 			}
 		}
 	}

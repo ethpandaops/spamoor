@@ -1838,6 +1838,27 @@ paths:
       summary: Get all spammers
       tags:
       - Spammer
+  /api/spammers/events:
+    get:
+      description: |-
+        Streams spammer lifecycle events (create/update/status/membership/reorder/
+        delete) via Server-Sent Events so dashboards can update live. The stream is
+        unauthenticated and carries only safe metadata — no configs, seeds or logs.
+      operationId: streamSpammerEvents
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of spammer events
+          schema:
+            type: string
+        "500":
+          description: Streaming unsupported
+          schema:
+            type: string
+      summary: Stream spammer lifecycle events
+      tags:
+      - Spammer
   /api/spammers/export:
     post:
       consumes:

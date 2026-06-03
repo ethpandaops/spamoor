@@ -313,21 +313,41 @@ func TestParseMemberConfigDefaults(t *testing.T) {
 	}
 }
 
-func TestMemberConfigEffectivelyEnabled(t *testing.T) {
-	cases := []struct {
-		cfg  MemberConfig
-		mode string
-		want bool
-	}{
-		{MemberConfig{Weight: 1, Enabled: true}, GroupModeShared, true},
-		{MemberConfig{Weight: 0, Enabled: true}, GroupModeShared, false},
-		{MemberConfig{Weight: 0, Enabled: true}, GroupModeIndependent, true},
-		{MemberConfig{Weight: 5, Enabled: false}, GroupModeShared, false},
-	}
-	for i, c := range cases {
-		if got := c.cfg.EffectivelyEnabled(c.mode); got != c.want {
-			t.Fatalf("case %d: EffectivelyEnabled = %v, want %v", i, got, c.want)
+func TestResolveRunConfigs_WeightZeroMemberStillRuns(t *testing.T) {
+	lookup := func(name string) *scenario.Descriptor {
+		if name == "test-tp" {
+			return descThroughput()
 		}
+		return nil
+	}
+
+	all := []SpammerConfig{
+		{
+			Scenario:    scenario.GroupScenarioName,
+			Name:        "grp",
+			GroupConfig: map[string]any{"throughput_mode": "shared", "total_throughput": 100},
+		},
+		{Scenario: "test-tp", Name: "a", Group: "grp", GroupConfig: map[string]any{"weight": 100}},
+		// enabled (default) but weight 0: still runs, at the resolver's min-1 throughput.
+		{Scenario: "test-tp", Name: "z", Group: "grp", GroupConfig: map[string]any{"weight": 0}},
+	}
+
+	resolved, err := ResolveRunConfigs(all, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved) != 2 {
+		t.Fatalf("expected 2 runnable members (weight-0 still runs), got %d", len(resolved))
+	}
+	byName := map[string]uint64{}
+	for _, r := range resolved {
+		byName[r.Config.Name] = asUint64(t, parseYAML(t, r.ConfigYAML)["throughput"])
+	}
+	if byName["a"] != 100 {
+		t.Fatalf("member a throughput = %d, want 100", byName["a"])
+	}
+	if byName["z"] != 1 {
+		t.Fatalf("weight-0 member z throughput = %d, want 1 (min-1 guard)", byName["z"])
 	}
 }
 
