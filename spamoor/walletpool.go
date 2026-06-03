@@ -116,6 +116,11 @@ type FundingRequest struct {
 	// to an empty account additionally costs AccountCreationSize*cpsb state
 	// gas, so the funding path must reserve more gas for it.
 	IsEmpty bool
+	// Gas optionally overrides the per-request gas budget. It is required for
+	// contract recipients whose receive()/fallback does non-trivial work (e.g. a
+	// Safe proxy delegatecalls its singleton and emits an event), which costs far
+	// more than the plain-EOA transfer the default budget assumes. 0 = default.
+	Gas uint64
 }
 
 // GetDefaultWalletConfig returns default wallet pool configuration for a given scenario.
@@ -312,6 +317,16 @@ func (pool *WalletPool) FundingGasFor(isEmpty bool) uint64 {
 	return base
 }
 
+// fundingGasForReq returns the gas budget for a single funding request, honoring
+// an explicit per-request Gas override (used for contract recipients) and
+// otherwise falling back to the emptiness-aware default.
+func (pool *WalletPool) fundingGasForReq(req *FundingRequest) uint64 {
+	if req.Gas > 0 {
+		return req.Gas
+	}
+	return pool.FundingGasFor(req.IsEmpty)
+}
+
 // GetFundingGasLimit returns the gas limit for a worst-case (empty target)
 // direct funding transaction. Preserved for backwards compatibility with
 // callers that need a single conservative number.
@@ -324,6 +339,9 @@ func (pool *WalletPool) GetFundingGasLimit() uint64 {
 // SetFundingGasLimit override when it exceeds BatcherDefaultGasPerTx;
 // otherwise computes from live chain state.
 func (pool *WalletPool) batcherGasFor(req *FundingRequest) uint64 {
+	if req.Gas > 0 {
+		return req.Gas
+	}
 	if pool.config.FundingGasLimit > BatcherDefaultGasPerTx {
 		return pool.config.FundingGasLimit
 	}
@@ -1086,6 +1104,21 @@ func (pool *WalletPool) resupplyChildWallets() error {
 	return nil
 }
 
+// FundAddresses tops up the given funding requests using the same batcher-aware,
+// root-wallet-locked funding path used for child wallets: a single batched
+// transaction via the batcher contract when one is enabled, otherwise individual
+// transfers. The request targets may be arbitrary addresses, including contracts
+// such as Safe proxies; only the address and amount are used. Callers decide
+// which targets need funding (e.g. by checking balances against a threshold) and
+// must set FundingRequest.IsEmpty so the gas can be sized for new-account state
+// costs where applicable. It is a no-op for an empty request slice.
+func (pool *WalletPool) FundAddresses(fundingReqs []*FundingRequest) error {
+	if len(fundingReqs) == 0 {
+		return nil
+	}
+	return pool.processFundingRequests(fundingReqs)
+}
+
 // processFundingRequests handles a batch of funding requests by creating and sending transactions.
 // It can use either individual transactions or batch transactions via the batcher contract for efficiency.
 // Processes transactions in chunks to avoid overwhelming the network.
@@ -1123,7 +1156,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		batches = make([][]*FundingRequest, 0, len(fundingReqs))
 		for _, req := range fundingReqs {
 			batches = append(batches, []*FundingRequest{req})
-			totalGas += pool.FundingGasFor(req.IsEmpty)
+			totalGas += pool.fundingGasForReq(req)
 		}
 	}
 	batchTxCount := len(batches)
@@ -1226,7 +1259,7 @@ func (pool *WalletPool) buildWalletFundingTx(req *FundingRequest, client *Client
 	refillTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       pool.FundingGasFor(req.IsEmpty),
+		Gas:       pool.fundingGasForReq(req),
 		To:        &toAddr,
 		Value:     req.Amount,
 	})

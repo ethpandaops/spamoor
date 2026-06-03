@@ -12,26 +12,13 @@ cd "$SCRIPT_DIR"
 AA_VERSION="0.7.0"
 AA_BASE_URL="https://unpkg.com/@account-abstraction/contracts@${AA_VERSION}/artifacts"
 
-gen_from_artifact() {
-    local name=$1 # artifact basename, also the abigen type and output .go basename
-    local json
-
-    json=$(curl -fsSL "${AA_BASE_URL}/${name}.json")
-    echo "$json" | jq -r '.abi' >"${name}.abi"
-    echo "$json" | jq -r '.bytecode' | sed 's/^0x//' >"${name}.bin"
-
-    docker run --rm -u "$(id -u):$(id -g)" -v "$(pwd)":/workspace ethereum/client-go:alltools-latest \
-        abigen --bin=/workspace/"${name}.bin" --abi=/workspace/"${name}.abi" --pkg=contract --out=/workspace/"${name}.go" --type "${name}"
-
-    echo "$json" | jq >"${name}.output.json"
-    rm "${name}.abi" "${name}.bin"
-}
+# gen_from_artifact is provided by the shared compile-contract.sh sourced above.
 
 # Only EntryPoint needs the PackedUserOperation tuple; SimpleAccount is omitted on
 # purpose to avoid a duplicate struct definition in the shared contract package
 # (its execute() calldata is ABI-encoded directly in Go instead).
-gen_from_artifact EntryPoint
-gen_from_artifact SimpleAccountFactory
+gen_from_artifact "${AA_BASE_URL}/EntryPoint.json" EntryPoint
+gen_from_artifact "${AA_BASE_URL}/SimpleAccountFactory.json" SimpleAccountFactory
 
 # Local single-file contracts.
 compile_contract "$(pwd)" 0.8.23 "--optimize --optimize-runs 200" Paymaster AcceptAllPaymaster

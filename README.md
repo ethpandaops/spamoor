@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/github/license/ethpandaops/spamoor)](LICENSE)
 [![Docker](https://img.shields.io/docker/pulls/ethpandaops/spamoor)](https://hub.docker.com/r/ethpandaops/spamoor)
 
-Spamoor is a robust transaction spamming tool designed for stress testing, network validation, and continuous transaction testing on Ethereum testnets. With 14+ different transaction scenarios and a powerful web-based daemon mode, it's the ultimate tool for Ethereum network testing.
+Spamoor is a robust transaction spamming tool designed for stress testing, network validation, and continuous transaction testing on Ethereum testnets. With 25+ different transaction scenarios and a powerful web-based daemon mode, it's the ultimate tool for Ethereum network testing.
 
 ## 🚀 Quick Start
 
@@ -62,29 +62,49 @@ spamoor eoatx --privkey="0x..." \
 
 ## 🎯 Transaction Scenarios
 
-Spamoor provides a comprehensive suite of transaction scenarios for different testing needs:
+Spamoor provides a comprehensive suite of transaction scenarios for different testing needs.
+
+### Simple Scenarios
+
+Ready-to-run scenarios that work out of the box with sensible defaults.
 
 | Scenario | Description |
 |----------|-------------|
 | [`eoatx`](./scenarios/eoatx/README.md) | **EOA Transactions** - Send standard ETH transfers with configurable amounts |
-| [`erc20tx`](./scenarios/erc20tx/README.md) | **ERC20 Transactions** - Deploy ERC20 tokens and perform transfers |
-| [`erc721tx`](./scenarios/erc721tx/README.md) | **ERC721 Transactions** - Deploy ERC721 NFTs and perform transfers |
-| [`erc1155tx`](./scenarios/erc1155tx/README.md) | **ERC1155 Transactions** - Deploy ERC1155 NFTs and perform transfers |
-| [`calltx`](./scenarios/calltx/README.md) | **Contract Calls** - Deploy contracts and repeatedly call functions |
-| [`deploytx`](./scenarios/deploytx/README.md) | **Contract Deployments** - Deploy contracts with custom bytecode |
-| [`deploy-destruct`](./scenarios/deploy-destruct/README.md) | **Self-Destruct Deployments** - Deploy self-destructing contracts |
-| [`setcodetx`](./scenarios/setcodetx/README.md) | **Set Code Transactions** - EIP-7702 setcode transactions |
-| [`uniswap-swaps`](./scenarios/uniswap-swaps/README.md) | **Uniswap Swaps** - Deploy and test Uniswap V2 token swaps |
-| [`blobs`](./scenarios/blobs/README.md) | **Blob Transactions** - Send blob transactions with random data |
-| [`blob-average`](./scenarios/blob-average/README.md) | **Blob Average** - Maintain network-wide average blob count per block |
-| [`blob-replacements`](./scenarios/blob-replacements/README.md) | **Blob Replacements** - Test blob transaction replacement |
-| [`blob-conflicting`](./scenarios/blob-conflicting/README.md) | **Conflicting Blobs** - Test conflicting blob/normal transactions |
-| [`blob-combined`](./scenarios/blob-combined/README.md) | **Combined Blob Testing** - Randomized blob scenario combinations |
-| [`gasburnertx`](./scenarios/gasburnertx/README.md) | **Gas Burner** - Burn specific amounts of gas |
-| [`storagespam`](./scenarios/storagespam/README.md) | **Storage Spam** - Stress test EVM storage |
-| [`geastx`](./scenarios/geastx/README.md) | **Geas Transactions** - Execute custom geas bytecode |
+| [`erc20tx`](./scenarios/erc20tx/README.md) | **ERC20 Transactions** - Deploy an ERC20 token and perform transfers |
+| [`erc721tx`](./scenarios/erc721tx/README.md) | **ERC721 Transactions** - Deploy an ERC721 NFT and perform transfers |
+| [`erc1155tx`](./scenarios/erc1155tx/README.md) | **ERC1155 Transactions** - Deploy an ERC1155 NFT and perform transfers |
+| [`erc4337`](./scenarios/erc4337/README.md) | **Account Abstraction (ERC-4337)** - Send v0.7 UserOperations via `EntryPoint.handleOps` |
+| [`uniswap-swaps`](./scenarios/uniswap-swaps/README.md) | **Uniswap Swaps** - Deploy and test Uniswap V2/V3 token swaps |
+| [`curve-swaps`](./scenarios/curve-swaps/README.md) | **Curve Swaps** - Curve StableSwap exchanges across self-deployed 3-coin stable pools |
+| [`safe-multisig`](./scenarios/safe-multisig/README.md) | **Safe Multisig** - Create Safe multisigs with varying owner counts and drive EOA & contract-call execTransactions |
 | [`xentoken`](./scenarios/xentoken/README.md) | **XEN Sybil Attack** - Simulate XEN token sybil attacks |
-| [`taskrunner`](./scenarios/taskrunner/README.md) | **Task Runner** - Execute configurable task sequences with init and execution phases |
+| [`setcodetx`](./scenarios/setcodetx/README.md) | **Set Code Transactions** - EIP-7702 set-code transactions |
+| [`gasburnertx`](./scenarios/gasburnertx/README.md) | **Gas Burner** - Burn a configurable amount of gas per transaction |
+| [`deploy-destruct`](./scenarios/deploy-destruct/README.md) | **Self-Destruct Deployments** - Deploy and self-destruct contracts |
+| [`storagerefundtx`](./scenarios/storagerefundtx/README.md) | **Storage Refund** - Write and clear storage slots to exercise gas refunds |
+| [`evm-fuzz`](./scenarios/evm-fuzz/README.md) | **EVM Fuzzer** - Deploy randomly generated bytecode to surface consensus bugs |
+| [`blobs`](./scenarios/blobs/README.md) | **Blob Transactions** - Send blob transactions with random data |
+| [`blob-average`](./scenarios/blob-average/README.md) | **Blob Average** - Maintain a network-wide average blob count per block |
+| [`blob-replacements`](./scenarios/blob-replacements/README.md) | **Blob Replacements** - Send blob transactions with replacements |
+| [`blob-conflicting`](./scenarios/blob-conflicting/README.md) | **Conflicting Blobs** - Send conflicting blob/normal transactions |
+| [`blob-combined`](./scenarios/blob-combined/README.md) | **Combined Blobs** - Randomized blob scenario combinations |
+
+### Advanced Scenarios
+
+Scenarios that require additional configuration, target specialized workloads (e.g. state bloating), or provide utilities.
+
+| Scenario | Description |
+|----------|-------------|
+| [`calltx`](./scenarios/calltx/README.md) | **Contract Calls** - Deploy a contract and repeatedly call a function on it |
+| [`deploytx`](./scenarios/deploytx/README.md) | **Contract Deployments** - Deploy contracts with custom bytecode |
+| [`factorydeploytx`](./scenarios/factorydeploytx/README.md) | **CREATE2 Deployments** - Deploy contracts via a CREATE2 factory |
+| [`geastx`](./scenarios/geastx/README.md) | **Geas Transactions** - Execute custom geas bytecode |
+| [`storagespam`](./scenarios/storagespam/README.md) | **Storage Spam** - Stress-test EVM storage growth |
+| [`erc20_bloater`](./scenarios/statebloat/erc20_bloater/README.md) | **ERC20 State Bloat** - Bloat ERC20 contract storage to a target GB size |
+| [`replay-eest`](./scenarios/replay-eest/README.md) | **EEST Replay** - Replay EEST test fixtures from intermediate representation |
+| [`taskrunner`](./scenarios/taskrunner/README.md) | **Task Runner** - Execute configurable task sequences with init and recurring execution phases |
+| [`wallets`](./scenarios/wallets/) | **Wallets** - Utility scenario that shows child wallet balances |
 
 ## 🚄 Run Command - Execute Multiple Scenarios
 

@@ -1,0 +1,65 @@
+{
+  "contracts": {
+    "contracts/GasBurner.sol:GasBurner": {
+      "abi": [
+        {
+          "anonymous": false,
+          "inputs": [
+            {
+              "indexed": true,
+              "internalType": "address",
+              "name": "caller",
+              "type": "address"
+            },
+            {
+              "indexed": false,
+              "internalType": "uint256",
+              "name": "seed",
+              "type": "uint256"
+            },
+            {
+              "indexed": false,
+              "internalType": "uint256",
+              "name": "rounds",
+              "type": "uint256"
+            },
+            {
+              "indexed": false,
+              "internalType": "bytes32",
+              "name": "digest",
+              "type": "bytes32"
+            }
+          ],
+          "name": "GasBurned",
+          "type": "event"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint256",
+              "name": "seed",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "maxRounds",
+              "type": "uint256"
+            }
+          ],
+          "name": "burn",
+          "outputs": [
+            {
+              "internalType": "uint256",
+              "name": "rounds",
+              "type": "uint256"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function"
+        }
+      ],
+      "bin": "608060405234801561000f575f80fd5b506101c98061001d5f395ff3fe608060405234801561000f575f80fd5b5060043610610029575f3560e01c8063b390c0ab1461002d575b5f80fd5b61004061003b36600461012f565b610052565b60405190815260200160405180910390f35b5f815f0361005f57600191505b5f8360405160200161007391815260200190565b60408051601f1981840301815291905280516020909101209050610097838261014f565b6100a290600161016e565b91505f5b828110156100e457604080516020810184905290810182905260600160408051601f19818403018152919052805160209091012091506001016100a6565b50604080518581526020810184905290810182905233907f55eb00fd9d99665c565ffd1235b5b5df1de64efc57d0ed57d197fd7256e8d0549060600160405180910390a25092915050565b5f8060408385031215610140575f80fd5b50508035926020909101359150565b5f8261016957634e487b7160e01b5f52601260045260245ffd5b500690565b8082018082111561018d57634e487b7160e01b5f52601160045260245ffd5b9291505056fea2646970667358221220c80f7ef215f80149137a9c5503a2783ef8487faa8d6b6ea64f57e6e4fc26fe6764736f6c63430008180033"
+    }
+  },
+  "version": "0.8.24+commit.e11b9ed9.Linux.g++"
+}
