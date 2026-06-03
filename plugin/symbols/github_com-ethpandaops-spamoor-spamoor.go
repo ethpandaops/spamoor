@@ -56,7 +56,6 @@ func init() {
 		"ClientSelectionMode":    reflect.ValueOf((*spamoor.ClientSelectionMode)(nil)),
 		"ClientSelectionOption":  reflect.ValueOf((*spamoor.ClientSelectionOption)(nil)),
 		"ClientType":             reflect.ValueOf((*spamoor.ClientType)(nil)),
-		"ContractDeployment":     reflect.ValueOf((*spamoor.ContractDeployment)(nil)),
 		"DeploymentFactory":      reflect.ValueOf((*spamoor.DeploymentFactory)(nil)),
 		"ExternalBlockEvent":     reflect.ValueOf((*spamoor.ExternalBlockEvent)(nil)),
 		"ExternalBlockSource":    reflect.ValueOf((*spamoor.ExternalBlockSource)(nil)),

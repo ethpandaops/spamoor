@@ -39,22 +39,12 @@ type DeploymentFactory struct {
 	isInitialized bool
 	isDeploying   bool
 	factoryAddr   common.Address
-
-	contractMutex       sync.Mutex
-	contractDeployments map[common.Address]*ContractDeployment
-}
-
-type ContractDeployment struct {
-	mu  *sync.Mutex
-	tx  *types.Transaction
-	err error
 }
 
 func newDeploymentFactory(txpool *TxPool, rootWallet *Wallet) *DeploymentFactory {
 	return &DeploymentFactory{
-		txpool:              txpool,
-		rootWallet:          rootWallet,
-		contractDeployments: make(map[common.Address]*ContractDeployment),
+		txpool:     txpool,
+		rootWallet: rootWallet,
 	}
 }
 
