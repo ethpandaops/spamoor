@@ -2,6 +2,7 @@ package configs
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -40,6 +41,15 @@ type optsWithMaxPending struct {
 
 func descMaxPending() *scenario.Descriptor {
 	return &scenario.Descriptor{Name: "test-mp", DefaultOptions: optsWithMaxPending{}}
+}
+
+func mustNode(t *testing.T, s string) *yaml.Node {
+	t.Helper()
+	n, err := ParseConfigNode(s)
+	if err != nil {
+		t.Fatalf("failed to parse config node: %v", err)
+	}
+	return n
 }
 
 func parseYAML(t *testing.T, s string) map[string]any {
@@ -351,6 +361,58 @@ func TestResolveRunConfigs_WeightZeroMemberStillRuns(t *testing.T) {
 	}
 }
 
+func TestMergeScenarioConfigurationPreservesCommentsAndOrder(t *testing.T) {
+	provided := mustNode(t, "# how fast\nthroughput: 5 # tps\n# fee in gwei\nbase_fee: 20\n")
+
+	out, err := MergeScenarioConfiguration(descThroughput(), provided)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{"# how fast", "# tps", "# fee in gwei"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("merged config dropped comment %q:\n%s", want, out)
+		}
+	}
+	// provided keys keep their order (throughput before base_fee) ...
+	if strings.Index(out, "throughput:") > strings.Index(out, "base_fee:") {
+		t.Fatalf("provided key order not preserved:\n%s", out)
+	}
+	// ... and omitted defaults are still appended (so the stored config is complete).
+	if !strings.Contains(out, "total_count:") || !strings.Contains(out, "max_wallets:") {
+		t.Fatalf("missing scenario defaults were not appended:\n%s", out)
+	}
+}
+
+func TestSpammerConfigRoundTripPreservesComments(t *testing.T) {
+	// Mirrors export (marshal []SpammerConfig) -> import (unmarshal) -> store.
+	cfg := []SpammerConfig{{
+		Scenario: "eoatx",
+		Name:     "x",
+		Config:   *mustNode(t, "# seed comment\nseed: abc\nthroughput: 7 # per slot\n"),
+	}}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# seed comment") || !strings.Contains(string(data), "# per slot") {
+		t.Fatalf("export YAML stripped comments:\n%s", data)
+	}
+
+	var back []ConfigImportItem
+	if err := yaml.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	remarshaled, err := yaml.Marshal(back[0].Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(remarshaled), "# seed comment") || !strings.Contains(string(remarshaled), "# per slot") {
+		t.Fatalf("import lost comments:\n%s", remarshaled)
+	}
+}
+
 func TestResolveRunConfigs_SharedSplit(t *testing.T) {
 	lookup := func(name string) *scenario.Descriptor {
 		if name == "test-tp" {
@@ -363,7 +425,7 @@ func TestResolveRunConfigs_SharedSplit(t *testing.T) {
 		{
 			Scenario: scenario.GroupScenarioName,
 			Name:     "grp",
-			Config:   map[string]any{"base_fee": 50},
+			Config:   *mustNode(t, "base_fee: 50\n"),
 			GroupConfig: map[string]any{
 				"throughput_mode":  "shared",
 				"total_throughput": 100,

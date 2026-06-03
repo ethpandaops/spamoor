@@ -479,7 +479,7 @@ func ResolveRunConfigs(all []SpammerConfig, lookup func(string) *scenario.Descri
 			return nil, fmt.Errorf("unknown scenario: %s", c.Scenario)
 		}
 
-		merged, err := MergeScenarioConfiguration(descriptor, c.Config)
+		merged, err := MergeScenarioConfiguration(descriptor, &c.Config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to merge config for %q: %w", c.Name, err)
 		}
@@ -491,7 +491,7 @@ func ResolveRunConfigs(all []SpammerConfig, lookup func(string) *scenario.Descri
 				return nil, fmt.Errorf("spammer %q references unknown group %q", c.Name, c.Group)
 			}
 			si := memberShares[i]
-			finalYAML, err = ResolveMemberConfig(descriptor, merged, group.Config, si.throughput, si.count, si.maxPending)
+			finalYAML, err = ResolveMemberConfig(descriptor, merged, NodeToMap(&group.Config), si.throughput, si.count, si.maxPending)
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve config for member %q: %w", c.Name, err)
 			}

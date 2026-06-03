@@ -316,7 +316,7 @@ func createSpammer(ctx context.Context, config configs.SpammerConfig, configYAML
 	if err := scenarioInstance.Init(&scenario.Options{
 		WalletPool: walletPool,
 		Config:     configYAML,
-		GlobalCfg:  config.Config,
+		GlobalCfg:  configs.NodeToMap(&config.Config),
 	}); err != nil {
 		return nil, fmt.Errorf("failed to initialize scenario: %w", err)
 	}

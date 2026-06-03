@@ -107,8 +107,9 @@ func (d *Daemon) ExportSpammers(spammerIDs ...int64) (string, error) {
 // spammerToExportConfig converts a spammer (standalone, group, or member) into its
 // export representation, including group overlay/totals or member weight metadata.
 func (d *Daemon) spammerToExportConfig(spammer *Spammer) (ExportSpammerConfig, error) {
-	var spammerConfig map[string]interface{}
-	if err := yaml.Unmarshal([]byte(spammer.GetConfig()), &spammerConfig); err != nil {
+	// Parse into a yaml.Node so the config's key ordering and comments are preserved.
+	configNode, err := configs.ParseConfigNode(spammer.GetConfig())
+	if err != nil {
 		return ExportSpammerConfig{}, fmt.Errorf("failed to parse config for spammer %d: %w", spammer.GetID(), err)
 	}
 
@@ -116,7 +117,9 @@ func (d *Daemon) spammerToExportConfig(spammer *Spammer) (ExportSpammerConfig, e
 		Scenario:    spammer.GetScenario(),
 		Name:        spammer.GetName(),
 		Description: spammer.GetDescription(),
-		Config:      spammerConfig,
+	}
+	if configNode != nil {
+		exportConfig.Config = *configNode
 	}
 
 	switch {
@@ -197,10 +200,11 @@ func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, 
 			continue
 		}
 
-		// The group's config is a sparse overlay; marshal it verbatim (no defaults merge).
+		// The group's config is a sparse overlay; marshal it verbatim (no defaults merge),
+		// preserving its key order and comments.
 		var overlayYAML string
-		if len(importConfig.Config) > 0 {
-			data, err := yaml.Marshal(importConfig.Config)
+		if importConfig.Config.Kind != 0 {
+			data, err := yaml.Marshal(&importConfig.Config)
 			if err != nil {
 				importErrors = append(importErrors, fmt.Sprintf("Failed to marshal overlay for group '%s': %v", importConfig.Name, err))
 				continue
@@ -247,7 +251,7 @@ func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, 
 		finalName := importConfig.Name
 
 		// Merge default configuration with imported config
-		configYAML, err := configs.MergeScenarioConfiguration(scenarioDescriptor, importConfig.Config)
+		configYAML, err := configs.MergeScenarioConfiguration(scenarioDescriptor, &importConfig.Config)
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to merge config for spammer '%s': %v", finalName, err)
 			importErrors = append(importErrors, errMsg)
