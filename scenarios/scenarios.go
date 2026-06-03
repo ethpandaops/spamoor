@@ -27,6 +27,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/geastx"
 	replayeest "github.com/ethpandaops/spamoor/scenarios/replay-eest"
+	safemultisig "github.com/ethpandaops/spamoor/scenarios/safe-multisig"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	erc20bloater "github.com/ethpandaops/spamoor/scenarios/statebloat/erc20_bloater"
 	"github.com/ethpandaops/spamoor/scenarios/storagerefundtx"
@@ -59,6 +60,7 @@ var nativeScenarioCategories = []*scenario.Category{
 			&erc1155tx.ScenarioDescriptor,
 			&evmfuzz.ScenarioDescriptor,
 			&gasburnertx.ScenarioDescriptor,
+			&safemultisig.ScenarioDescriptor,
 			&setcodetx.ScenarioDescriptor,
 			&storagerefundtx.ScenarioDescriptor,
 			&uniswapswaps.ScenarioDescriptor,

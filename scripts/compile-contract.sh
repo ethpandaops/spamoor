@@ -49,3 +49,25 @@ compile_vyper() {
     docker run --rm -u $(id -u):$(id -g) -v $(pwd):/workspace ethereum/client-go:alltools-latest abigen --bin=/workspace/$contract_name.bin --abi=/workspace/$contract_name.abi --pkg=contract --out=/workspace/$contract_name.go --type $contract_name
     rm $contract_name.bin $contract_name.abi
 }
+
+# gen_from_artifact generates Go bindings from a prebuilt hardhat/foundry artifact
+# JSON (with .abi and .bytecode fields) fetched from a URL. Used for canonical
+# multi-file contracts (e.g. Safe, ERC-4337 EntryPoint) that are too large /
+# multi-file to build with the single-file solc helper, so the published creation
+# bytecode is consumed directly. It must run from the directory the .go binding
+# should be written to.
+gen_from_artifact() {
+    local url=$1  # full artifact JSON URL
+    local name=$2 # abigen type and output .go / .output.json basename
+    local json
+
+    json=$(curl -fsSL "$url")
+    echo "$json" | jq -r '.abi' >"${name}.abi"
+    echo "$json" | jq -r '.bytecode' | sed 's/^0x//' >"${name}.bin"
+
+    docker run --rm -u "$(id -u):$(id -g)" -v "$(pwd)":/workspace ethereum/client-go:alltools-latest \
+        abigen --bin=/workspace/"${name}.bin" --abi=/workspace/"${name}.abi" --pkg=contract --out=/workspace/"${name}.go" --type "${name}"
+
+    echo "$json" | jq >"${name}.output.json"
+    rm "${name}.abi" "${name}.bin"
+}
