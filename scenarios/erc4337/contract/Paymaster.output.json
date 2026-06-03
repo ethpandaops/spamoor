@@ -1,0 +1,204 @@
+{
+  "contracts": {
+    "contracts/Paymaster.sol:AcceptAllPaymaster": {
+      "abi": [
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "_entryPoint",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "constructor"
+        },
+        {
+          "inputs": [],
+          "name": "deposit",
+          "outputs": [],
+          "stateMutability": "payable",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "entryPoint",
+          "outputs": [
+            {
+              "internalType": "contract IStakeManager",
+              "name": "",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [],
+          "name": "getDeposit",
+          "outputs": [
+            {
+              "internalType": "uint256",
+              "name": "",
+              "type": "uint256"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint8",
+              "name": "",
+              "type": "uint8"
+            },
+            {
+              "internalType": "bytes",
+              "name": "",
+              "type": "bytes"
+            },
+            {
+              "internalType": "uint256",
+              "name": "",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "",
+              "type": "uint256"
+            }
+          ],
+          "name": "postOp",
+          "outputs": [],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "components": [
+                {
+                  "internalType": "address",
+                  "name": "sender",
+                  "type": "address"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "nonce",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "bytes",
+                  "name": "initCode",
+                  "type": "bytes"
+                },
+                {
+                  "internalType": "bytes",
+                  "name": "callData",
+                  "type": "bytes"
+                },
+                {
+                  "internalType": "bytes32",
+                  "name": "accountGasLimits",
+                  "type": "bytes32"
+                },
+                {
+                  "internalType": "uint256",
+                  "name": "preVerificationGas",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "bytes32",
+                  "name": "gasFees",
+                  "type": "bytes32"
+                },
+                {
+                  "internalType": "bytes",
+                  "name": "paymasterAndData",
+                  "type": "bytes"
+                },
+                {
+                  "internalType": "bytes",
+                  "name": "signature",
+                  "type": "bytes"
+                }
+              ],
+              "internalType": "struct PackedUserOperation",
+              "name": "",
+              "type": "tuple"
+            },
+            {
+              "internalType": "bytes32",
+              "name": "",
+              "type": "bytes32"
+            },
+            {
+              "internalType": "uint256",
+              "name": "",
+              "type": "uint256"
+            }
+          ],
+          "name": "validatePaymasterUserOp",
+          "outputs": [
+            {
+              "internalType": "bytes",
+              "name": "context",
+              "type": "bytes"
+            },
+            {
+              "internalType": "uint256",
+              "name": "validationData",
+              "type": "uint256"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "stateMutability": "payable",
+          "type": "receive"
+        }
+      ],
+      "bin": "60a060405234801561000f575f80fd5b506040516105cf3803806105cf83398101604081905261002e9161003f565b6001600160a01b031660805261006c565b5f6020828403121561004f575f80fd5b81516001600160a01b0381168114610065575f80fd5b9392505050565b6080516105296100a65f395f818160660152818161012f015281816101a101528181610237015281816102c2015261034d01526105295ff3fe60806040526004361061004c575f3560e01c806352b7512c146100c95780637c627b21146100ff578063b0d691fe1461011e578063c399ec8814610169578063d0e30db01461018b575f80fd5b366100c55760405163b760faf960e01b81523060048201527f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03169063b760faf99034906024015f604051808303818588803b1580156100b1575f80fd5b505af11580156100c3573d5f803e3d5ffd5b005b5f80fd5b3480156100d4575f80fd5b506100e86100e33660046103aa565b610193565b6040516100f69291906103f9565b60405180910390f35b34801561010a575f80fd5b506100c361011936600461044b565b61022c565b348015610129575f80fd5b506101517f000000000000000000000000000000000000000000000000000000000000000081565b6040516001600160a01b0390911681526020016100f6565b348015610174575f80fd5b5061017d6102ab565b6040519081526020016100f6565b6100c3610338565b60605f336001600160a01b037f000000000000000000000000000000000000000000000000000000000000000016146102135760405162461bcd60e51b815260206004820152601e60248201527f5061796d61737465723a206e6f742066726f6d20456e747279506f696e74000060448201526064015b60405180910390fd5b505060408051602081019091525f808252935093915050565b336001600160a01b037f000000000000000000000000000000000000000000000000000000000000000016146102a45760405162461bcd60e51b815260206004820152601e60248201527f5061796d61737465723a206e6f742066726f6d20456e747279506f696e740000604482015260640161020a565b5050505050565b6040516370a0823160e01b81523060048201525f907f00000000000000000000000000000000000000000000000000000000000000006001600160a01b0316906370a0823190602401602060405180830381865afa15801561030f573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061033391906104dc565b905090565b60405163b760faf960e01b81523060048201527f00000000000000000000000000000000000000000000000000000000000000006001600160a01b03169063b760faf99034906024015f604051808303818588803b158015610398575f80fd5b505af11580156102a4573d5f803e3d5ffd5b5f805f606084860312156103bc575f80fd5b833567ffffffffffffffff8111156103d2575f80fd5b840161012081870312156103e4575f80fd5b95602085013595506040909401359392505050565b604081525f83518060408401525f5b818110156104255760208187018101516060868401015201610408565b505f606082850101526060601f19601f8301168401019150508260208301529392505050565b5f805f805f6080868803121561045f575f80fd5b853560ff8116811461046f575f80fd5b9450602086013567ffffffffffffffff8082111561048b575f80fd5b818801915088601f83011261049e575f80fd5b8135818111156104ac575f80fd5b8960208285010111156104bd575f80fd5b9699602092909201985095966040810135965060600135945092505050565b5f602082840312156104ec575f80fd5b505191905056fea2646970667358221220f7a71d13dd3b4a2870ef1137e4a0b6a3553ff3d03ff05024919d4d0b5e87a37164736f6c63430008170033"
+    },
+    "contracts/Paymaster.sol:IStakeManager": {
+      "abi": [
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "account",
+              "type": "address"
+            }
+          ],
+          "name": "balanceOf",
+          "outputs": [
+            {
+              "internalType": "uint256",
+              "name": "",
+              "type": "uint256"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "account",
+              "type": "address"
+            }
+          ],
+          "name": "depositTo",
+          "outputs": [],
+          "stateMutability": "payable",
+          "type": "function"
+        }
+      ],
+      "bin": ""
+    }
+  },
+  "version": "0.8.23+commit.f704f362.Linux.g++"
+}
