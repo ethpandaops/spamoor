@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"fmt"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/ethpandaops/spamoor/daemon/configs"
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 )
 
@@ -39,21 +41,41 @@ func (d *Daemon) ExportSpammers(spammerIDs ...int64) (string, error) {
 		return "", fmt.Errorf("no spammers to export")
 	}
 
+	// Ensure the parent group of any exported member is included so the import can
+	// re-link members even when only the members were selected.
+	exportSet := make(map[int64]*Spammer, len(spammersToExport))
+	for _, s := range spammersToExport {
+		exportSet[s.GetID()] = s
+	}
+	for _, s := range spammersToExport {
+		if s.GetGroupID() != 0 {
+			if _, ok := exportSet[s.GetGroupID()]; !ok {
+				if parent := d.GetSpammer(s.GetGroupID()); parent != nil {
+					exportSet[parent.GetID()] = parent
+				}
+			}
+		}
+	}
+
+	// Emit group rows first so the file is human-readable top-down; the importer is
+	// order-independent regardless.
+	ordered := make([]*Spammer, 0, len(exportSet))
+	for _, s := range exportSet {
+		ordered = append(ordered, s)
+	}
+	sort.SliceStable(ordered, func(a, b int) bool {
+		if ordered[a].IsGroup() != ordered[b].IsGroup() {
+			return ordered[a].IsGroup()
+		}
+		return ordered[a].GetID() < ordered[b].GetID()
+	})
+
 	var exportConfigs []ExportSpammerConfig
-	for _, spammer := range spammersToExport {
-		// Parse the existing config to extract only the custom parts
-		var spammerConfig map[string]interface{}
-		if err := yaml.Unmarshal([]byte(spammer.GetConfig()), &spammerConfig); err != nil {
-			return "", fmt.Errorf("failed to parse config for spammer %d: %w", spammer.GetID(), err)
+	for _, spammer := range ordered {
+		exportConfig, err := d.spammerToExportConfig(spammer)
+		if err != nil {
+			return "", err
 		}
-
-		exportConfig := ExportSpammerConfig{
-			Scenario:    spammer.GetScenario(),
-			Name:        spammer.GetName(),
-			Description: spammer.GetDescription(),
-			Config:      spammerConfig,
-		}
-
 		exportConfigs = append(exportConfigs, exportConfig)
 	}
 
@@ -63,6 +85,50 @@ func (d *Daemon) ExportSpammers(spammerIDs ...int64) (string, error) {
 	}
 
 	return string(yamlData), nil
+}
+
+// spammerToExportConfig converts a spammer (standalone, group, or member) into its
+// export representation, including group overlay/totals or member weight metadata.
+func (d *Daemon) spammerToExportConfig(spammer *Spammer) (ExportSpammerConfig, error) {
+	var spammerConfig map[string]interface{}
+	if err := yaml.Unmarshal([]byte(spammer.GetConfig()), &spammerConfig); err != nil {
+		return ExportSpammerConfig{}, fmt.Errorf("failed to parse config for spammer %d: %w", spammer.GetID(), err)
+	}
+
+	exportConfig := ExportSpammerConfig{
+		Scenario:    spammer.GetScenario(),
+		Name:        spammer.GetName(),
+		Description: spammer.GetDescription(),
+		Config:      spammerConfig,
+	}
+
+	switch {
+	case spammer.IsGroup():
+		gc, err := configs.ParseGroupConfig(spammer.GetGroupConfig())
+		if err != nil {
+			return ExportSpammerConfig{}, err
+		}
+		exportConfig.GroupConfig = map[string]interface{}{
+			"throughput_mode":   gc.ThroughputMode,
+			"total_throughput":  gc.TotalThroughput,
+			"total_count":       gc.TotalCount,
+			"total_max_pending": gc.TotalMaxPending,
+		}
+	case spammer.GetGroupID() != 0:
+		if parent := d.GetSpammer(spammer.GetGroupID()); parent != nil {
+			exportConfig.Group = parent.GetName()
+		}
+		mc, err := configs.ParseMemberConfig(spammer.GetGroupConfig())
+		if err == nil {
+			exportConfig.GroupConfig = map[string]interface{}{
+				"weight":     mc.Weight,
+				"enabled":    mc.Enabled,
+				"sort_order": mc.SortOrder,
+			}
+		}
+	}
+
+	return exportConfig, nil
 }
 
 // ImportSpammers imports spammers from YAML data, file path, or URL.
@@ -94,7 +160,60 @@ func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, 
 	var importErrors []string
 	var importWarnings []string
 
+	// Map group name -> group id, seeded with existing groups so members can link to
+	// groups that already exist or are created during this import.
+	groupIDByName := make(map[string]int64)
+	for _, existing := range d.GetAllSpammers() {
+		if existing.IsGroup() {
+			groupIDByName[existing.GetName()] = existing.GetID()
+		}
+	}
+
+	// Pass 1: create group rows first so members can be linked afterwards.
 	for _, importConfig := range importConfigs {
+		if importConfig.Scenario != scenario.GroupScenarioName {
+			continue
+		}
+
+		if _, exists := groupIDByName[importConfig.Name]; exists {
+			importWarnings = append(importWarnings, fmt.Sprintf("Skipped group '%s' - already exists", importConfig.Name))
+			continue
+		}
+
+		// The group's config is a sparse overlay; marshal it verbatim (no defaults merge).
+		var overlayYAML string
+		if len(importConfig.Config) > 0 {
+			data, err := yaml.Marshal(importConfig.Config)
+			if err != nil {
+				importErrors = append(importErrors, fmt.Sprintf("Failed to marshal overlay for group '%s': %v", importConfig.Name, err))
+				continue
+			}
+			overlayYAML = string(data)
+		}
+
+		groupCfg := configs.GroupConfigFromMap(importConfig.GroupConfig)
+		group, err := d.NewGroup(importConfig.Name, importConfig.Description, overlayYAML, groupCfg, userEmail)
+		if err != nil {
+			importErrors = append(importErrors, fmt.Sprintf("Failed to create group '%s': %v", importConfig.Name, err))
+			continue
+		}
+
+		groupIDByName[importConfig.Name] = group.GetID()
+		imported++
+		importedSpammers = append(importedSpammers, ImportedSpammerInfo{
+			ID:          group.GetID(),
+			Name:        importConfig.Name,
+			Scenario:    scenario.GroupScenarioName,
+			Description: importConfig.Description,
+		})
+	}
+
+	// Pass 2: create standalone spammers and group members, then link members.
+	for _, importConfig := range importConfigs {
+		if importConfig.Scenario == scenario.GroupScenarioName {
+			continue
+		}
+
 		// Skip invalid scenarios (already validated)
 		scenarioDescriptor := scenarios.GetScenario(importConfig.Scenario)
 		if scenarioDescriptor == nil {
@@ -132,6 +251,18 @@ func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, 
 			errMsg := fmt.Sprintf("Failed to create spammer '%s': %v", finalName, err)
 			importErrors = append(importErrors, errMsg)
 			continue
+		}
+
+		// Link to its group if the member references one that exists.
+		if importConfig.Group != "" {
+			if groupID, ok := groupIDByName[importConfig.Group]; ok {
+				memberCfg := configs.MemberConfigFromMap(importConfig.GroupConfig)
+				if err := d.AddSpammerToGroup(spammer.GetID(), groupID, memberCfg, userEmail); err != nil {
+					importWarnings = append(importWarnings, fmt.Sprintf("Imported '%s' but could not add to group '%s': %v", finalName, importConfig.Group, err))
+				}
+			} else {
+				importWarnings = append(importWarnings, fmt.Sprintf("Imported '%s' but group '%s' was not found", finalName, importConfig.Group))
+			}
 		}
 
 		imported++
@@ -190,12 +321,14 @@ func (d *Daemon) validateImportConfigs(importConfigs []ExportSpammerConfig) (*Im
 			Issues:      []string{},
 		}
 
-		// Check scenario validity
-		scenarioDescriptor := scenarios.GetScenario(importConfig.Scenario)
-		if scenarioDescriptor == nil {
-			info.Valid = false
-			info.Issues = append(info.Issues, "Unknown scenario")
-			result.InvalidScenarios = append(result.InvalidScenarios, importConfig.Scenario)
+		// Check scenario validity (group rows use the reserved sentinel and are valid)
+		if importConfig.Scenario != scenario.GroupScenarioName {
+			scenarioDescriptor := scenarios.GetScenario(importConfig.Scenario)
+			if scenarioDescriptor == nil {
+				info.Valid = false
+				info.Issues = append(info.Issues, "Unknown scenario")
+				result.InvalidScenarios = append(result.InvalidScenarios, importConfig.Scenario)
+			}
 		}
 
 		// Check name duplicates

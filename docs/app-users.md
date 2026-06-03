@@ -258,6 +258,55 @@ You can split configurations across multiple files using includes:
 - include: https://example.com/remote-config.yaml
 ```
 
+### Spammer Groups
+
+A **spammer group** runs a mix of scenarios as one controllable unit. The group applies a
+shared **overlay** of common fields on top of each member's own config, and in shared mode
+splits a **global throughput** (or total count) budget across members by weight.
+
+In a config file a group is an entry with `scenario: group`. Its `config` is the sparse
+overlay (only fields a member's scenario accepts are applied); `group_config` sets the
+mode and totals. Each member references the group by name and carries its own
+`group_config` with `weight`/`enabled`/`sort_order`:
+
+```yaml
+# group-config.yaml
+- scenario: group
+  name: mixed-load
+  config:
+    base_fee: 20        # applied to every member that has a base_fee field
+    tip_fee: 2
+  group_config:
+    throughput_mode: shared   # "shared" (split by weight) or "independent" (overlay only)
+    total_throughput: 100     # split across enabled members by weight
+    total_count: 0            # 0 = unlimited / not managed
+
+- scenario: eoatx
+  name: eoa-load
+  group: mixed-load
+  group_config: { weight: 20 }      # ~20 tx/slot
+
+- scenario: erc20tx
+  name: erc20-load
+  group: mixed-load
+  group_config: { weight: 50 }      # ~50 tx/slot
+
+- scenario: blobs
+  name: blob-load
+  group: mixed-load
+  group_config: { weight: 30 }      # ~30 tx/slot
+```
+
+In shared mode each member's `max_wallets` is derived from its resolved throughput
+(≈ throughput/4, clamped to [20, 1000]). A weight of 0 in shared mode means the member
+doesn't run. Scenarios without a `throughput`/`total_count` field can't take a shared
+split and should use `independent` mode (overlay only).
+
+`spamoor run` resolves groups in-process — exactly like the daemon — so the same config
+behaves identically in both. In the daemon, groups are first-class entities in the web UI
+and REST API (start/stop/edit/reclaim/delete as one unit). `--spammers` indexes refer to
+the runnable members after groups are expanded (group entries themselves are not run).
+
 ### Examples
 
 ```bash

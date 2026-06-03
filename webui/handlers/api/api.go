@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethpandaops/spamoor/daemon"
+	"github.com/ethpandaops/spamoor/daemon/configs"
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -325,13 +326,20 @@ type SpammerListEntry struct {
 	Scenario    string `json:"scenario"`
 	Status      int    `json:"status"`
 	CreatedAt   string `json:"created_at"` // RFC3339Nano formatted timestamp
+
+	// Group fields. IsGroup marks a group row; GroupID links a member to its parent
+	// group. GroupConfig is set for group rows, MemberConfig for member rows.
+	IsGroup      bool                  `json:"is_group"`
+	GroupID      int64                 `json:"group_id"`
+	GroupConfig  *configs.GroupConfig  `json:"group_config,omitempty"`
+	MemberConfig *configs.MemberConfig `json:"member_config,omitempty"`
 }
 
 // GetSpammerList godoc
 // @Id getSpammerList
 // @Summary Get all spammers
 // @Tags Spammer
-// @Description Returns a list of all configured spammers
+// @Description Returns a list of all configured spammers (including spammer groups)
 // @Produce json
 // @Success 200 {array} SpammerListEntry "Success"
 // @Router /api/spammers [get]
@@ -340,14 +348,28 @@ func (ah *APIHandler) GetSpammerList(w http.ResponseWriter, r *http.Request) {
 	response := make([]SpammerListEntry, len(spammers))
 
 	for i, s := range spammers {
-		response[i] = SpammerListEntry{
+		entry := SpammerListEntry{
 			ID:          s.GetID(),
 			Name:        s.GetName(),
 			Description: s.GetDescription(),
 			Scenario:    s.GetScenario(),
-			Status:      s.GetStatus(),
+			Status:      s.GetEffectiveStatus(),
 			CreatedAt:   time.Unix(s.GetCreatedAt(), 0).Format(time.RFC3339Nano),
+			IsGroup:     s.IsGroup(),
+			GroupID:     s.GetGroupID(),
 		}
+
+		if s.IsGroup() {
+			if gc, err := configs.ParseGroupConfig(s.GetGroupConfig()); err == nil {
+				entry.GroupConfig = gc
+			}
+		} else if s.GetGroupID() != 0 {
+			if mc, err := configs.ParseMemberConfig(s.GetGroupConfig()); err == nil {
+				entry.MemberConfig = mc
+			}
+		}
+
+		response[i] = entry
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -525,8 +547,11 @@ func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
 // @Id deleteSpammer
 // @Summary Delete a spammer
 // @Tags Spammer
-// @Description Deletes a spammer and stops it if running
+// @Description Deletes a spammer and stops it if running. For a group, the cascade query
+// @Description parameter controls whether members are deleted (cascade=true) or detached
+// @Description to standalone spammers (cascade=false, the default).
 // @Param id path int true "Spammer ID"
+// @Param cascade query bool false "For groups: delete members too (default false = detach)"
 // @Success 200 "Success"
 // @Failure 400 {string} string "Invalid spammer ID"
 // @Failure 401 {string} string "Unauthorized"
@@ -546,6 +571,18 @@ func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userEmail := ah.getUserEmail(r)
+
+	// Groups support a cascade flag: delete members, or detach them (default).
+	spammer := ah.daemon.GetSpammer(id)
+	if spammer != nil && spammer.IsGroup() {
+		cascade := r.URL.Query().Get("cascade") == "true"
+		if err := ah.daemon.DeleteGroup(id, cascade, userEmail); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 
 	err = ah.daemon.DeleteSpammer(id, userEmail)
 	if err != nil {
@@ -622,19 +659,35 @@ func (ah *APIHandler) GetSpammerDetails(w http.ResponseWriter, r *http.Request) 
 	}
 
 	response := struct {
-		ID          int64  `json:"id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Scenario    string `json:"scenario"`
-		Config      string `json:"config"`
-		Status      int    `json:"status"`
+		ID           int64                 `json:"id"`
+		Name         string                `json:"name"`
+		Description  string                `json:"description"`
+		Scenario     string                `json:"scenario"`
+		Config       string                `json:"config"`
+		Status       int                   `json:"status"`
+		IsGroup      bool                  `json:"is_group"`
+		GroupID      int64                 `json:"group_id"`
+		GroupConfig  *configs.GroupConfig  `json:"group_config,omitempty"`
+		MemberConfig *configs.MemberConfig `json:"member_config,omitempty"`
 	}{
 		ID:          spammer.GetID(),
 		Name:        spammer.GetName(),
 		Description: spammer.GetDescription(),
 		Scenario:    spammer.GetScenario(),
 		Config:      spammer.GetConfig(),
-		Status:      spammer.GetStatus(),
+		Status:      spammer.GetEffectiveStatus(),
+		IsGroup:     spammer.IsGroup(),
+		GroupID:     spammer.GetGroupID(),
+	}
+
+	if spammer.IsGroup() {
+		if gc, err := configs.ParseGroupConfig(spammer.GetGroupConfig()); err == nil {
+			response.GroupConfig = gc
+		}
+	} else if spammer.GetGroupID() != 0 {
+		if mc, err := configs.ParseMemberConfig(spammer.GetGroupConfig()); err == nil {
+			response.MemberConfig = mc
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

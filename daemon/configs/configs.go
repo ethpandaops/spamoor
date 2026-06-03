@@ -18,12 +18,21 @@ import (
 
 // SpammerConfig represents a spammer configuration for export/import.
 // This uses the same format as StartupSpammerConfig to maintain compatibility.
+//
+// Spammer groups reuse this structure: a group entry has Scenario == "group", its
+// Config holds the sparse overlay and GroupConfig holds {throughput_mode,
+// total_throughput, total_count}. A member entry sets Group to the parent group's
+// name and GroupConfig to {weight, enabled, sort_order}.
 type SpammerConfig struct {
 	Scenario    string                 `yaml:"scenario"`
 	Name        string                 `yaml:"name"`
 	Description string                 `yaml:"description"`
 	Config      map[string]interface{} `yaml:"config"`
 	Start       *bool                  `yaml:"start,omitempty"`
+
+	// Group fields
+	Group       string                 `yaml:"group,omitempty"`        // member: parent group name
+	GroupConfig map[string]interface{} `yaml:"group_config,omitempty"` // role-dependent group metadata
 }
 
 // ConfigImportItem represents either a spammer config or an include directive
@@ -34,6 +43,10 @@ type ConfigImportItem struct {
 	Description string                 `yaml:"description,omitempty"`
 	Config      map[string]interface{} `yaml:"config,omitempty"`
 	Start       *bool                  `yaml:"start,omitempty"`
+
+	// Group fields
+	Group       string                 `yaml:"group,omitempty"`
+	GroupConfig map[string]interface{} `yaml:"group_config,omitempty"`
 
 	// Include directive
 	Include string `yaml:"include,omitempty"`

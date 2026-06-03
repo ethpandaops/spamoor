@@ -109,10 +109,26 @@ func (d *Daemon) Run() (bool, error) {
 		return false, fmt.Errorf("failed to get all spammer: %w", err)
 	}
 
+	// Phase 1: load every row (including group parents) into the map without
+	// starting anything, so shared-mode members can see their complete sibling set
+	// when they resolve their effective config.
 	for _, spammer := range spammerList {
 		_, err := d.restoreSpammer(spammer)
 		if err != nil {
 			return false, fmt.Errorf("failed to restore spammer: %w", err)
+		}
+	}
+
+	// Phase 2: start only non-group rows that were previously running. Group rows
+	// are never run as a scenario; their members self-resume by their own status.
+	for _, spammer := range d.GetAllSpammers() {
+		if spammer.IsGroup() {
+			continue
+		}
+		if spammer.GetStatus() == int(SpammerStatusRunning) {
+			if err := spammer.Start(); err != nil {
+				d.logger.Errorf("failed to resume spammer %d: %v", spammer.GetID(), err)
+			}
 		}
 	}
 
@@ -166,6 +182,15 @@ func (d *Daemon) DeleteSpammer(id int64, userEmail string) error {
 	spammer := d.spammerMap[id]
 	if spammer == nil {
 		return fmt.Errorf("spammer not found")
+	}
+
+	// Group rows are deleted via DeleteGroup, which handles members. Calling
+	// DeleteSpammer on a group detaches its members to standalone spammers by default.
+	if spammer.IsGroup() {
+		d.spammerMapMtx.Unlock()
+		err := d.DeleteGroup(id, false, userEmail)
+		d.spammerMapMtx.Lock()
+		return err
 	}
 
 	// Capture name for audit log
@@ -297,6 +322,23 @@ func (d *Daemon) ReclaimSpammer(id int64, userEmail string) error {
 		return fmt.Errorf("spammer not found")
 	}
 
+	// For a group, reclaim funds from each member's wallet pool.
+	if spammer.IsGroup() {
+		for _, m := range d.getGroupMembersFromMap(id) {
+			if m.walletPool == nil {
+				continue
+			}
+			if err := m.walletPool.ReclaimFunds(d.ctx, nil); err != nil {
+				d.logger.Errorf("failed to reclaim funds for group member %d: %v", m.GetID(), err)
+			}
+		}
+
+		if d.auditLogger != nil && userEmail != "" {
+			return d.auditLogger.LogSpammerAction(userEmail, db.AuditActionSpammerReclaim, id, spammer.GetName(), nil)
+		}
+		return nil
+	}
+
 	if spammer.walletPool == nil {
 		return nil
 	}
@@ -385,7 +427,7 @@ func (d *Daemon) TrackTransactionSent(spammerID int64) {
 	}
 
 	spammer := d.GetSpammer(spammerID)
-	if spammer == nil {
+	if spammer == nil || spammer.IsGroup() {
 		return
 	}
 
@@ -403,7 +445,7 @@ func (d *Daemon) TrackTransactionFailure(spammerID int64) {
 	}
 
 	spammer := d.GetSpammer(spammerID)
-	if spammer == nil {
+	if spammer == nil || spammer.IsGroup() {
 		return
 	}
 
@@ -421,7 +463,7 @@ func (d *Daemon) TrackSpammerStatusChange(spammerID int64, running bool) {
 	}
 
 	spammer := d.GetSpammer(spammerID)
-	if spammer == nil {
+	if spammer == nil || spammer.IsGroup() {
 		return
 	}
 
