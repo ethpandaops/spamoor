@@ -149,8 +149,8 @@ func (d *Daemon) emitSpammerDeleted(id int64) {
 }
 
 // emitStatusChange emits a status event for the spammer and, when it is a group member,
-// an additional status event for the parent group whose derived status may have changed.
-// Must be called without holding spammerMapMtx.
+// a status event for the parent group — but only if the group's derived status actually
+// changed. Must be called without holding spammerMapMtx.
 func (d *Daemon) emitStatusChange(s *Spammer) {
 	if s == nil {
 		return
@@ -158,8 +158,33 @@ func (d *Daemon) emitStatusChange(s *Spammer) {
 	d.emitSpammerSnapshot(s, SpammerEventStatus)
 
 	if s.GetGroupID() != 0 {
-		if group := d.GetSpammer(s.GetGroupID()); group != nil && group.IsGroup() {
-			d.emitSpammerSnapshot(group, SpammerEventStatus)
-		}
+		d.emitGroupStatusIfChanged(s.GetGroupID())
+	}
+}
+
+// emitGroupStatusIfChanged emits a status event for the group only when its derived
+// status differs from the last one observed. This collapses the burst that would
+// otherwise fire once per member when a group's members all start/stop together (the
+// group's cached status field is reused as the last-observed marker; the authoritative
+// status is always derived). Must be called without holding spammerMapMtx.
+func (d *Daemon) emitGroupStatusIfChanged(groupID int64) {
+	group := d.GetSpammer(groupID)
+	if group == nil || !group.IsGroup() {
+		return
+	}
+
+	// Compute the derived status before taking the write lock (computeGroupStatus takes
+	// the read lock internally).
+	derived := d.computeGroupStatus(groupID)
+
+	d.spammerMapMtx.Lock()
+	changed := group.dbEntity.Status != derived
+	if changed {
+		group.dbEntity.Status = derived
+	}
+	d.spammerMapMtx.Unlock()
+
+	if changed {
+		d.emitSpammerSnapshot(group, SpammerEventStatus)
 	}
 }

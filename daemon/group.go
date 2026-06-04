@@ -219,8 +219,9 @@ func (s *Spammer) startGroup() error {
 		}
 	}
 
-	// Reflect the group's aggregate (derived) status on the dashboard.
-	s.daemon.emitSpammerSnapshot(s, SpammerEventStatus)
+	// Reflect the group's aggregate (derived) status on the dashboard (deduped — a member
+	// start above may have already emitted it).
+	s.daemon.emitGroupStatusIfChanged(s.dbEntity.ID)
 	return firstErr
 }
 
@@ -241,8 +242,8 @@ func (s *Spammer) pauseGroup() error {
 		}
 	}
 
-	// Reflect the group's aggregate (derived) status on the dashboard.
-	s.daemon.emitSpammerSnapshot(s, SpammerEventStatus)
+	// Reflect the group's aggregate (derived) status on the dashboard (deduped).
+	s.daemon.emitGroupStatusIfChanged(s.dbEntity.ID)
 	return firstErr
 }
 
