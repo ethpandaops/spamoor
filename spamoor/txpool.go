@@ -144,7 +144,7 @@ type TxPool struct {
 }
 
 type txPoolWalletRegistration struct {
-	ctxs   []context.Context
+	ctxs   map[context.Context]struct{}
 	wallet *Wallet
 }
 
@@ -210,51 +210,74 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 	return pool
 }
 
-// RegisterWallet registers a wallet with the transaction pool.
-// It is used to track the wallets that are active and need to be processed.
-// The registration is removed when the context is cancelled.
+// RegisterWallet registers a wallet with the transaction pool, keyed by address.
+// Multiple scenarios (e.g. a spammer that was paused and restarted with the same seed)
+// may register the same address; each registering context is tracked, and the
+// registration is auto-removed only once ALL of its contexts have been cancelled. This
+// ensures a restarted spammer's re-registration keeps the wallet alive instead of it
+// being evicted when the old, cancelled context's cleanup fires.
 func (pool *TxPool) RegisterWallet(wallet *Wallet, ctx context.Context) *Wallet {
 	if ctx.Err() != nil {
 		return nil
 	}
 
 	pool.walletsMutex.Lock()
-	defer pool.walletsMutex.Unlock()
-
-	if registration, ok := pool.wallets[wallet.address]; ok {
+	registration, ok := pool.wallets[wallet.address]
+	if ok {
 		if registration.wallet.privkey == nil && wallet.privkey != nil {
 			registration.wallet.privkey = wallet.privkey
 		}
+		if _, exists := registration.ctxs[ctx]; exists {
+			regWallet := registration.wallet
+			pool.walletsMutex.Unlock()
+			return regWallet
+		}
+		registration.ctxs[ctx] = struct{}{}
+	} else {
+		registration = &txPoolWalletRegistration{
+			ctxs:   map[context.Context]struct{}{ctx: {}},
+			wallet: wallet,
+		}
+		pool.wallets[wallet.address] = registration
+	}
+	regWallet := registration.wallet
+	pool.walletsMutex.Unlock()
 
-		for _, regctx := range registration.ctxs {
-			if regctx == ctx {
-				return registration.wallet
+	// Auto-cleanup when this context is cancelled. The identity check (reg == registration)
+	// guards against a later re-registration having replaced the entry.
+	context.AfterFunc(ctx, func() {
+		pool.walletsMutex.Lock()
+		if reg, ok := pool.wallets[wallet.address]; ok && reg == registration {
+			delete(reg.ctxs, ctx)
+			if len(reg.ctxs) == 0 {
+				delete(pool.wallets, wallet.address)
 			}
 		}
+		pool.walletsMutex.Unlock()
+	})
 
-		registration.ctxs = append(registration.ctxs, ctx)
-		return registration.wallet
-	}
-
-	pool.wallets[wallet.address] = &txPoolWalletRegistration{
-		ctxs:   []context.Context{ctx},
-		wallet: wallet,
-	}
-
-	return wallet
+	return regWallet
 }
 
 // RegisterWalletPool registers a wallet pool with the transaction pool.
 // It is used to track the wallet pools that are active and need to be processed.
+// The pool is auto-removed when its scenario context is cancelled (e.g. on pause or
+// restart), so a restarted spammer's stale pool does not linger and cause its
+// transactions to be double-attributed across two pools sharing the same spammer id.
 func (pool *TxPool) RegisterWalletPool(walletPool *WalletPool) {
 	if walletPool.ctx.Err() != nil {
 		return
 	}
 
 	pool.walletsMutex.Lock()
-	defer pool.walletsMutex.Unlock()
-
 	pool.walletPools[walletPool] = struct{}{}
+	pool.walletsMutex.Unlock()
+
+	context.AfterFunc(walletPool.ctx, func() {
+		pool.walletsMutex.Lock()
+		delete(pool.walletPools, walletPool)
+		pool.walletsMutex.Unlock()
+	})
 }
 
 // GetRegisteredWallet returns a wallet by address.
@@ -264,21 +287,18 @@ func (pool *TxPool) GetRegisteredWallet(address common.Address) *Wallet {
 
 	registration, found := pool.wallets[address]
 	if found {
-		for {
-			if registration.ctxs[0].Err() != nil {
-				registration.ctxs = registration.ctxs[1:]
-				if len(registration.ctxs) == 0 {
-					delete(pool.wallets, registration.wallet.address)
-					break
-				}
-			} else {
-				break
+		// Lazily prune cancelled contexts (belt-and-suspenders alongside the AfterFunc
+		// cleanup registered in RegisterWallet).
+		for c := range registration.ctxs {
+			if c.Err() != nil {
+				delete(registration.ctxs, c)
 			}
 		}
-
-		if len(registration.ctxs) > 0 {
-			return registration.wallet
+		if len(registration.ctxs) == 0 {
+			delete(pool.wallets, address)
+			return nil
 		}
+		return registration.wallet
 	}
 
 	return nil
