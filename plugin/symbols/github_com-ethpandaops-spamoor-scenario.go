@@ -6,6 +6,8 @@ import (
 	"context"
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/spf13/pflag"
+	"go/constant"
+	"go/token"
 	"reflect"
 )
 
@@ -16,6 +18,7 @@ func init() {
 		"ErrNoWallet":            reflect.ValueOf(&scenario.ErrNoWallet).Elem(),
 		"GetScenarioValidFields": reflect.ValueOf(scenario.GetScenarioValidFields),
 		"GlobalSlotDuration":     reflect.ValueOf(&scenario.GlobalSlotDuration).Elem(),
+		"GroupScenarioName":      reflect.ValueOf(constant.MakeFromLiteral("\"group\"", token.STRING, 0)),
 		"NewConfigValidator":     reflect.ValueOf(scenario.NewConfigValidator),
 		"NewRegistry":            reflect.ValueOf(scenario.NewRegistry),
 		"ParseAndValidateConfig": reflect.ValueOf(scenario.ParseAndValidateConfig),

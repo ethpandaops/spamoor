@@ -247,7 +247,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*common.Address, uint6
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
 		spamoor.WithClientGroup(deployClientGroup),
 	)
-	wallet := s.walletPool.GetWellKnownWallet("deployer")
+	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
 	var feeCap *big.Int
 	var tipCap *big.Int
