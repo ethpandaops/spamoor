@@ -8,6 +8,7 @@ import (
 	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenario"
 
+	aavelending "github.com/ethpandaops/spamoor/scenarios/aave-lending"
 	blobaverage "github.com/ethpandaops/spamoor/scenarios/blob-average"
 	blobcombined "github.com/ethpandaops/spamoor/scenarios/blob-combined"
 	blobconflicting "github.com/ethpandaops/spamoor/scenarios/blob-conflicting"
@@ -47,6 +48,7 @@ var nativeScenarioCategories = []*scenario.Category{
 		Name:        "Simple",
 		Description: "Simple scenarios",
 		Descriptors: []*scenario.Descriptor{
+			&aavelending.ScenarioDescriptor,
 			&blobaverage.ScenarioDescriptor,
 			&blobcombined.ScenarioDescriptor,
 			&blobconflicting.ScenarioDescriptor,
