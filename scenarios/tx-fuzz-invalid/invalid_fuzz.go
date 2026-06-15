@@ -128,32 +128,20 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		}
 	}
 
+	// A single burner wallet is enough: invalid txs are never mined, so they
+	// don't consume a nonce and one wallet can fire them indefinitely. This also
+	// keeps tx load on the shared root wallet minimal (just one funding tx),
+	// which is what breaks when running alongside other scenarios. More wallets
+	// only add sender diversity and can be opted into via --max-wallets.
+	walletCount := uint64(1)
 	if s.options.MaxWallets > 0 {
-		s.walletPool.SetWalletCount(s.options.MaxWallets)
-	} else if s.options.TotalCount > 0 {
-		maxWallets := s.options.TotalCount / 50
-		if maxWallets < 10 {
-			maxWallets = 10
-		} else if maxWallets > 1000 {
-			maxWallets = 1000
-		}
-		s.walletPool.SetWalletCount(maxWallets)
-	} else {
-		count := s.options.Throughput * 5
-		if count < 10 {
-			count = 10
-		} else if count > 1000 {
-			count = 1000
-		}
-		s.walletPool.SetWalletCount(count)
+		walletCount = s.options.MaxWallets
 	}
+	s.walletPool.SetWalletCount(walletCount)
 
-	// Burner wallets are a small, REUSED pool - never one funded wallet per tx -
-	// which keeps tx load on the shared root wallet low (per-tx funding would
-	// flood the root and break in combination with other scenarios). They also
-	// barely spend: most invalid txs are rejected pre-execution and never touch
-	// balance; only unstuck self-transfers and the rare accepted tx cost gas. So
-	// fund them minimally and infrequently.
+	// The burner barely spends - most invalid txs are rejected pre-execution and
+	// never touch balance; only unstuck self-transfers and the rare unexpectedly-
+	// valid tx cost gas. So fund minimally and infrequently.
 	s.walletPool.SetRefillAmount(uint256.NewInt(50_000_000_000_000_000))  // 0.05 ETH
 	s.walletPool.SetRefillBalance(uint256.NewInt(10_000_000_000_000_000)) // 0.01 ETH
 
@@ -302,13 +290,20 @@ func (s *Scenario) sendInvalid(ctx context.Context, txIdx uint64) (string, *spam
 	s.record(res.category.name, sendErr)
 
 	if sendErr == nil {
-		// The node accepted a transaction we built to be invalid. That is the
-		// interesting signal this scenario hunts for - surface it loudly.
-		s.accepted.Add(1)
-		s.logger.Warnf("node %s ACCEPTED invalid tx (category=%s) from %s - possible validation gap",
-			client.GetName(), res.category.name, wallet.GetAddress().Hex())
-		// Accepted txs may occupy a nonce; force a resync (and unstuck if it can
-		// stick at the current nonce) before this wallet is reused.
+		if res.category.alwaysInvalid {
+			// A structurally-invalid tx was accepted - that can't be legitimate,
+			// so surface it loudly as the finding this scenario hunts for.
+			s.accepted.Add(1)
+			s.logger.Warnf("node %s ACCEPTED structurally-invalid tx (category=%s) from %s - possible validation gap",
+				client.GetName(), res.category.name, wallet.GetAddress().Hex())
+		} else {
+			// State-dependent category (future/low nonce, underpriced): acceptance
+			// is expected/inconclusive, not necessarily a bug. Don't raise alarm.
+			s.logger.Debugf("node %s accepted state-dependent %s tx (not necessarily a bug)",
+				client.GetName(), res.category.name)
+		}
+		// The tx may have entered the mempool and advanced the pending nonce;
+		// resync (and unstuck if it can stick at the current nonce) before reuse.
 		st.loaded = false
 		if res.category.canStick {
 			st.needsUnstuck = true
@@ -329,10 +324,13 @@ func (s *Scenario) stateFor(addr common.Address) *walletState {
 	return st
 }
 
-// loadState fetches the on-chain nonce and balance for a burner wallet. Must be
-// called with st.mu held.
+// loadState fetches the burner wallet's pending nonce and balance. We use the
+// PENDING nonce deliberately: invalidity can't be guaranteed upfront when fuzzing
+// (a mutated tx may turn out valid), so if such a tx is accepted into the mempool
+// the pending nonce advances and follow-up txs pick the next nonce instead of all
+// burning on the consumed one. Must be called with st.mu held.
 func (s *Scenario) loadState(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, st *walletState) {
-	if nonce, err := client.GetNonceAt(ctx, wallet.GetAddress(), nil); err == nil {
+	if nonce, err := client.GetPendingNonceAt(ctx, wallet.GetAddress()); err == nil {
 		st.baseNonce = nonce
 	}
 	if bal, err := client.GetBalanceAt(ctx, wallet.GetAddress()); err == nil {

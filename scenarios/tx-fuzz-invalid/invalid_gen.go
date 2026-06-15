@@ -21,20 +21,27 @@ type invalidCategory struct {
 	// account's current nonce (occupying it) rather than rejecting it outright.
 	// Those are the only ones that require an unstuck pass before wallet reuse.
 	canStick bool
+	// alwaysInvalid is true for categories that are structurally invalid
+	// regardless of account/network state, so a node accepting one is a genuine
+	// finding. State-dependent categories (future/low nonce, underpriced) can be
+	// legitimately accepted - e.g. a future nonce queues normally, a too-low
+	// nonce equals the current nonce on a fresh account, an underpriced tx is
+	// fine when the base fee is ~0 - so their acceptance is NOT flagged.
+	alwaysInvalid bool
 }
 
 var categories = []invalidCategory{
-	{name: "chainid"},                     // wrong chain id in signature
-	{name: "lowgas"},                      // gas below intrinsic minimum
-	{name: "underpriced", canStick: true}, // fee cap below base fee
-	{name: "futurenonce"},                 // nonce far ahead (queued, dangling)
-	{name: "noncetoolow"},                 // nonce below account nonce
-	{name: "nofunds"},                     // value exceeds balance
-	{name: "gasoverflow"},                 // gas limit far above block limit
-	{name: "emptyauth"},                   // EIP-7702 setcode tx with empty auth list
-	{name: "badblob"},                     // EIP-4844 blob tx with no blob hashes
-	{name: "malformed"},                   // corrupted RLP bytes
-	{name: "truncated"},                   // truncated RLP bytes
+	{name: "chainid", alwaysInvalid: true},     // wrong chain id in signature
+	{name: "lowgas", alwaysInvalid: true},      // gas below intrinsic minimum
+	{name: "underpriced", canStick: true},      // fee cap below base fee (state-dependent)
+	{name: "futurenonce"},                      // nonce far ahead (queued, dangling - expected)
+	{name: "noncetoolow"},                      // nonce below account nonce (state-dependent)
+	{name: "nofunds"},                          // value exceeds balance (state-dependent)
+	{name: "gasoverflow", alwaysInvalid: true}, // gas limit far above block limit
+	{name: "emptyauth", alwaysInvalid: true},   // EIP-7702 setcode tx with empty auth list
+	{name: "badblob", alwaysInvalid: true},     // EIP-4844 blob tx with no blob hashes
+	{name: "malformed", alwaysInvalid: true},   // corrupted RLP bytes
+	{name: "truncated", alwaysInvalid: true},   // truncated RLP bytes
 }
 
 // categoriesByName indexes the category list for --categories filtering.

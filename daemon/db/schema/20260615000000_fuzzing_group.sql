@@ -65,7 +65,7 @@ refill_interval: 600 # check every 10 minutes
 total_count: 0
 throughput: 2
 max_pending: 20
-max_wallets: 4
+max_wallets: 1
 categories: all
 client_group: ""
 log_txs: false
