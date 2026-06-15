@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"math/big"
+	mathrand "math/rand"
 	"strings"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/utils"
 )
 
 type ScenarioOptions struct {
@@ -43,6 +46,10 @@ type ScenarioOptions struct {
 	MaxAccessList uint64 `yaml:"max_access_list"` // maximum access list entries / storage keys
 	MaxAuthList   uint64 `yaml:"max_auth_list"`   // maximum EIP-7702 authorizations per tx
 	MaxBlobs      uint64 `yaml:"max_blobs"`       // maximum blob sidecars per blob tx
+
+	// Blob format (EIP-4844 / EIP-7594) options
+	BlobV1Percent  uint64                   `yaml:"blob_v1_percent"` // % of blob txs sent with the v1 (cell-proof) wrapper after Fulu
+	FuluActivation utils.FlexibleJsonUInt64 `yaml:"fulu_activation"` // unix timestamp of the Fulu activation
 }
 
 type Scenario struct {
@@ -74,6 +81,9 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	MaxAccessList: 5,
 	MaxAuthList:   5,
 	MaxBlobs:      3,
+
+	BlobV1Percent:  100,
+	FuluActivation: math.MaxInt64,
 }
 
 var ScenarioDescriptor = scenario.Descriptor{
@@ -112,6 +122,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxAccessList, "max-access-list", ScenarioDefaultOptions.MaxAccessList, "Maximum access list entries and storage keys per entry")
 	flags.Uint64Var(&s.options.MaxAuthList, "max-auth-list", ScenarioDefaultOptions.MaxAuthList, "Maximum EIP-7702 authorizations per setcode tx")
 	flags.Uint64Var(&s.options.MaxBlobs, "max-blobs", ScenarioDefaultOptions.MaxBlobs, "Maximum blob sidecars per blob tx")
+	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to send with the v1 (cell-proof) wrapper format after Fulu")
+	flags.Uint64Var((*uint64)(&s.options.FuluActivation), "fulu-activation", uint64(ScenarioDefaultOptions.FuluActivation), "Unix timestamp of the Fulu activation")
 
 	return nil
 }
@@ -123,6 +135,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		err := scenario.ParseAndValidateConfig(&ScenarioDescriptor, options.Config, &s.options, s.logger)
 		if err != nil {
 			return err
+		}
+	}
+
+	// Pick up the network-wide Fulu activation timestamp from the daemon config
+	// (unless explicitly overridden) so blob txs use the correct sidecar format.
+	if options.GlobalCfg != nil {
+		if v, ok := options.GlobalCfg["fulu_activation"]; ok && s.options.FuluActivation == ScenarioDefaultOptions.FuluActivation {
+			s.options.FuluActivation = utils.FlexibleJsonUInt64(v.(uint64))
 		}
 	}
 
@@ -292,14 +312,37 @@ func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.Rec
 	}
 
 	receiptChan := make(scenario.ReceiptChan, 1)
-	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	sendOpts := &spamoor.SendTransactionOptions{
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
 			receiptChan <- receipt
 		},
-	})
+	}
+
+	// Blob txs: after Fulu the network expects the v1 (EIP-7594 cell-proof)
+	// sidecar wrapper. Convert in OnEncode (once, idempotent across rebroadcasts)
+	// so we submit a correctly-formatted blob tx. Before Fulu the v0 KZG-proof
+	// sidecar built by txbuilder is used as-is.
+	if ftx.kind == kindBlob {
+		blobV1Converted := false
+		sendOpts.OnEncode = func(tx *types.Transaction) ([]byte, error) {
+			sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) &&
+				mathrand.Intn(100) < int(s.options.BlobV1Percent)
+			if sendAsV1 && !blobV1Converted {
+				if sidecar := tx.BlobTxSidecar(); sidecar != nil {
+					if err := sidecar.ToV1(); err != nil {
+						return nil, err
+					}
+				}
+				blobV1Converted = true
+			}
+			return nil, nil
+		}
+	}
+
+	err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, sendOpts)
 	if err != nil {
 		return nil, tx, client, wallet, ftx.kind.String(), err
 	}

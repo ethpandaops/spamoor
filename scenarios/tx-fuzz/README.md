@@ -58,6 +58,14 @@ spamoor tx-fuzz [flags]
 - `--max-auth-list` - Maximum EIP-7702 authorizations per setcode tx (default: 5)
 - `--max-blobs` - Maximum blob sidecars per blob tx (default: 3)
 
+### Blob Format (EIP-4844 / EIP-7594)
+Blob txs use the v0 KZG-proof sidecar before Fulu and the v1 (cell-proof) wrapper
+after, so they are always submitted in the format the network expects. The Fulu
+activation timestamp is taken from the daemon's global config (`fulu_activation`)
+when available.
+- `--fulu-activation` - Unix timestamp of the Fulu activation (default: never)
+- `--blob-v1-percent` - Percentage of blob txs sent with the v1 wrapper after Fulu (default: 100)
+
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
 
