@@ -19,7 +19,7 @@ refill_interval: 600 # check every 10 minutes
 total_count: 0
 throughput: 4
 max_pending: 20
-max_wallets: 10
+max_wallets: 4
 rebroadcast: 1
 base_fee: 20
 tip_fee: 2
@@ -41,7 +41,7 @@ refill_interval: 600 # check every 10 minutes
 total_count: 0
 throughput: 4
 max_pending: 20
-max_wallets: 10
+max_wallets: 4
 rebroadcast: 1
 base_fee: 20
 tip_fee: 2
@@ -65,7 +65,7 @@ refill_interval: 600 # check every 10 minutes
 total_count: 0
 throughput: 2
 max_pending: 20
-max_wallets: 20
+max_wallets: 4
 categories: all
 client_group: ""
 log_txs: false

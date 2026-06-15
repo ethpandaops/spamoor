@@ -349,8 +349,10 @@ func (s *Scenario) buildTx(wallet *spamoor.Wallet, ftx *fuzzedTx, feeCap, tipCap
 		}
 		return wallet.BuildSetCodeTx(txData)
 	case kindBlob:
-		// blob fee cap: scale the gas fee cap up to comfortably cover blob gas
-		meta.BlobFeeCap = uint256.MustFromBig(new(big.Int).Mul(feeCap, big.NewInt(1e9)))
+		// blob fee cap: reuse the (already bumped) gas fee cap. Blob gas is priced
+		// separately and is far cheaper than this on test networks, so this keeps
+		// blob txs comfortably includable without ballooning the tx cost.
+		meta.BlobFeeCap = uint256.MustFromBig(feeCap)
 		txData, err := txbuilder.BuildBlobTx(meta, ftx.blobRefs)
 		if err != nil {
 			return nil, err
