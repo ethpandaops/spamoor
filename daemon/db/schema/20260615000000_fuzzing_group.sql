@@ -1,14 +1,14 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- Default "Fuzzing" group: bundles the EVM execution fuzzer (evm-fuzz) and the
--- transaction-layer fuzzer (tx-fuzz) under one shared throughput budget. Created
--- paused (status 0) as a template, mirroring the "Regular Chain Load" group.
--- Reserved low ids (20-22) never collide with runtime-created spammers/groups,
--- which start at id 100.
+-- "Fuzzing" group: bundles the EVM execution fuzzer (evm-fuzz), the transaction-
+-- layer fuzzer (tx-fuzz) and the invalid-transaction fuzzer (tx-fuzz-invalid)
+-- under one shared throughput budget. Created paused (status 0) as a template,
+-- mirroring the "Regular Chain Load" group. Reserved low ids (20-23) never
+-- collide with runtime-created spammers/groups, which start at id 100.
 INSERT INTO "spammers" ("id", "scenario", "name", "description", "config", "status", "created_at", "state", "group_id", "group_config")
 VALUES
-(20, 'group', 'Fuzzing', 'A mix of fuzzing scenarios - EVM execution fuzzing (random bytecode deployments) and transaction-layer fuzzing (randomized tx types, calldata, access lists, authorizations and blobs) - sharing a global budget of 50 tx/slot to surface consensus and validation bugs.', '', 0, 0, '{}', 0, '{"throughput_mode": "shared", "total_throughput": 10, "total_count": 0, "total_max_pending": 0}'),
+(20, 'group', 'Fuzzing', 'A mix of fuzzing scenarios - EVM execution fuzzing (random bytecode deployments) and transaction-layer fuzzing (randomized tx types, calldata, access lists, authorizations and blobs) - sharing a global budget of 10 tx/slot to surface consensus and validation bugs.', '', 0, 0, '{}', 0, '{"throughput_mode": "shared", "total_throughput": 10, "total_count": 0, "total_max_pending": 0}'),
 (21, 'evm-fuzz', 'EVM Execution Fuzzing', 'Deploys contracts with randomly generated, stack-aware bytecode exercising opcodes and precompiles.', '# wallet settings
 seed: evmfuzz-700001 # seed for the wallet
 refill_amount: 5000000000000000000 # refill 5 ETH when
@@ -30,7 +30,7 @@ fuzz_mode: all
 client_group: ""
 log_txs: false
 
-', 1, 0, '{}', 20, '{"weight": 2, "enabled": true, "sort_order": 0}'),
+', 0, 0, '{}', 20, '{"weight": 2, "enabled": true, "sort_order": 0}'),
 (22, 'tx-fuzz', 'Transaction Layer Fuzzing', 'Sends well-formed transactions across all types (legacy/2930/1559/4844/7702) with randomized calldata, access lists, authorizations, blobs and targets.', '# wallet settings
 seed: txfuzz-700002 # seed for the wallet
 refill_amount: 5000000000000000000 # refill 5 ETH when
@@ -54,7 +54,7 @@ max_blobs: 3
 client_group: ""
 log_txs: false
 
-', 1, 0, '{}', 20, '{"weight": 2, "enabled": true, "sort_order": 1}'),
+', 0, 0, '{}', 20, '{"weight": 2, "enabled": true, "sort_order": 1}'),
 (23, 'tx-fuzz-invalid', 'Invalid Transaction Fuzzing', 'Fires deliberately-invalid transactions (bad chainid/nonce/gas/fees, malformed RLP, empty 7702 auth, blobless blob tx) from a small reused pool of burner wallets, out-of-pool and fire-and-forget. A node accepting one is a potential validation gap.', '# wallet settings
 seed: txfuzzinvalid-700003 # seed for the wallet
 refill_amount: 50000000000000000 # refill 0.05 ETH when
@@ -70,7 +70,7 @@ categories: all
 client_group: ""
 log_txs: false
 
-', 1, 0, '{}', 20, '{"weight": 1, "enabled": true, "sort_order": 2}');
+', 0, 0, '{}', 20, '{"weight": 1, "enabled": true, "sort_order": 2}');
 
 -- +goose StatementEnd
 
