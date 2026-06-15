@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"math/big"
 	mathrand "math/rand"
 	"strings"
@@ -83,7 +82,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	MaxBlobs:      3,
 
 	BlobV1Percent:  100,
-	FuluActivation: math.MaxInt64,
+	FuluActivation: 0, // 0 = Fulu active since genesis -> send v1 (cell-proof) blobs by default
 }
 
 var ScenarioDescriptor = scenario.Descriptor{

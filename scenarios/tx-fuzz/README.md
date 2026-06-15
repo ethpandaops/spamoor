@@ -62,8 +62,10 @@ spamoor tx-fuzz [flags]
 Blob txs use the v0 KZG-proof sidecar before Fulu and the v1 (cell-proof) wrapper
 after, so they are always submitted in the format the network expects. The Fulu
 activation timestamp is taken from the daemon's global config (`fulu_activation`)
-when available.
-- `--fulu-activation` - Unix timestamp of the Fulu activation (default: never)
+when available, otherwise from this flag.
+- `--fulu-activation` - Unix timestamp of the Fulu activation. **Default: 0** (Fulu
+  active since genesis → v1 blobs), which is correct for current post-Fusaka
+  networks. Set this to a future timestamp to send v0 blobs on a pre-Fulu chain.
 - `--blob-v1-percent` - Percentage of blob txs sent with the v1 wrapper after Fulu (default: 100)
 
 ### Wallet Management
