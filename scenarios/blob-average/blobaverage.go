@@ -66,7 +66,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TipFee:          2,
 	BlobFee:         20,
 	BlobV1Percent:   100,
-	FuluActivation:  math.MaxInt64,
+	FuluActivation:  0, // 0 = Fulu active since genesis -> send v1 (cell-proof) blobs by default
 	BlobData:        "",
 	ClientGroup:     "",
 	SubmitCount:     3,
