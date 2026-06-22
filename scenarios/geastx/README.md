@@ -63,3 +63,11 @@ spamoor geastx -p "<PRIVKEY>" -h http://rpc:8545 \
   --geascode "PUSH1 0x60 PUSH1 0x40 MSTORE ..." \
   -t 5 --tipfee 3 --rebroadcast 30
 ```
+
+Stress-test **EIP-8024** (SWAPN/DUPN/EXCHANGE) on glamsterdam-devnet-6 at 3 tx/slot:
+
+```bash
+spamoor geastx -p "<PRIVKEY>" -h http://rpc:8545 \
+  --geasfile scenarios/geastx/eip8024_stack_ops.geas \
+  -t 3 --gaslimit 200000
+```
