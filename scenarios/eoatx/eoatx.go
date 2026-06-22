@@ -69,7 +69,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
-	Description:    "Send EOA transactions with different configurations",
+	Description:    "Send EOA transactions with different configurations (nonzero-value transfers emit an EIP-7708 Transfer log from SYSTEM_ADDRESS)",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }

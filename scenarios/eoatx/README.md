@@ -2,6 +2,8 @@
 
 Send standard EOA (Externally Owned Account) transactions with configurable amounts and targets.
 
+On Amsterdam (EIP-7708), every nonzero-value ETH transfer emits a `Transfer(address,address,uint256)` log from `SYSTEM_ADDRESS` (`0xfffffffffffffffffffffffffffffffffffffffe`), matching the ERC-20 event signature. The receipt for each nonzero-value `eoatx` transaction will contain exactly one such log; spamoor already logs `len(receipt.Logs)` at debug level for every confirmed transaction, which can be used to verify this behavior.
+
 ## Usage
 
 ```bash

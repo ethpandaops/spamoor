@@ -67,7 +67,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 }
 var ScenarioDescriptor = scenario.Descriptor{
 	Name:           ScenarioName,
-	Description:    "Send deploy and destruct transactions",
+	Description:    "Send deploy and destruct transactions (exercises EIP-8246: SELFDESTRUCT no longer burns ETH to address(0))",
 	DefaultOptions: ScenarioDefaultOptions,
 	NewScenario:    newScenario,
 }

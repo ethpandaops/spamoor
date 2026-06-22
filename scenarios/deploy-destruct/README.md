@@ -2,6 +2,8 @@
 
 Deploy contracts that immediately self-destruct after deployment.
 
+On Amsterdam (EIP-8246), `SELFDESTRUCT` no longer burns ETH: if a contract created in the same transaction calls `SELFDESTRUCT` with itself as beneficiary (or receives ETH after the `SELFDESTRUCT`), the balance is preserved rather than destroyed. The account's code, storage, and nonce are still cleared; if the final balance is zero the account is deleted by EIP-161. This scenario exercises CREATE/CREATE2 + SELFDESTRUCT patterns extensively, including self-targeting and cross-contract destructs, and is therefore a good stress test for EIP-8246 correctness.
+
 ## Usage
 
 ```bash

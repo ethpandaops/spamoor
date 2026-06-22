@@ -6,6 +6,8 @@ Deploy contracts using CREATE2 factory for deterministic address calculation.
 
 This scenario deploys a CREATE2 factory contract and then uses it to deploy multiple contracts with deterministic addresses. It's designed to work with the [AttackController](../calltx/contract/AttackController.sol) to enable efficient random read testing.
 
+On Amsterdam (EIP-7997), the Arachnid deterministic-deployment-proxy at `0x4e59b44847b379578588920cA78FbF26c0B4956C` is a protocol-guaranteed predeploy. Spamoor's `DeploymentFactory` (used by `safe-multisig`, `curve-swaps`, etc.) checks this address first. The `factorydeploytx` scenario uses its own internal `CREATE2Factory` contract (which it deploys), not the Arachnid predeploy — use `factory_address: "0x4e59b44847b379578588920cA78FbF26c0B4956C"` to point at the predeploy instead (note: the Arachnid factory uses a different calldata convention: `salt ++ initCode` rather than an ABI-encoded call).
+
 ## Configuration
 
 ### Basic Options
