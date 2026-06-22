@@ -1,0 +1,95 @@
+;;; EIP-8024 SWAPN/DUPN/EXCHANGE opcode stress test
+;;; glamsterdam-devnet-6
+;;;
+;;; When called, exercises all three EIP-8024 opcodes:
+;;;   SWAPN (0xe3 <imm>): swap top with (imm+2)th stack item
+;;;   DUPN  (0xe6 <imm>): dup (imm+1)th stack item to top
+;;;   EXCHANGE (0xe8 <imm>): swap (high_nibble+1)th and (low_nibble+2)th items
+;;;
+;;; Uses geas `#bytes` directive since SWAPN/DUPN/EXCHANGE are not yet
+;;; in the fjl/geas opcode table (added in Amsterdam, EIP-8024).
+;;;
+;;; Stack invariant: 8 values throughout, sum always = 1+2+3+4+5+6+7+8 = 36.
+;;; XOR result with blockhash for per-block variance.
+
+;; Push 8 values onto the stack. Stack (top-first): [8, 7, 6, 5, 4, 3, 2, 1]
+push 1
+push 2
+push 3
+push 4
+push 5
+push 6
+push 7
+push 8
+
+;;; === SWAPN exercises ===
+
+;; SWAPN 0x00: swap top (8) with (0+2=2)nd item (7) → [7, 8, 6, 5, 4, 3, 2, 1]
+#bytes 0xe3 0x00
+
+;; SWAPN 0x01: swap top (7) with (1+2=3)rd item (6) → [6, 8, 7, 5, 4, 3, 2, 1]
+#bytes 0xe3 0x01
+
+;; SWAPN 0x05: swap top (6) with (5+2=7)th item (2) → [2, 8, 7, 5, 4, 3, 6, 1]
+#bytes 0xe3 0x05
+
+;;; === DUPN exercises ===
+
+;; DUPN 0x00: dup (0+1=1)st item = DUP1 (dup top=2)
+;; stack depth: 9 → [2, 2, 8, 7, 5, 4, 3, 6, 1]
+#bytes 0xe6 0x00
+pop  ;; remove dup → depth 8: [2, 8, 7, 5, 4, 3, 6, 1]
+
+;; DUPN 0x03: dup (3+1=4)th item = 5
+;; stack depth: 9 → [5, 2, 8, 7, 5, 4, 3, 6, 1]
+#bytes 0xe6 0x03
+pop  ;; remove dup → depth 8: [2, 8, 7, 5, 4, 3, 6, 1]
+
+;; DUPN 0x06: dup (6+1=7)th item = 6
+;; stack depth: 9 → [6, 2, 8, 7, 5, 4, 3, 6, 1]
+#bytes 0xe6 0x06
+pop  ;; remove dup → depth 8: [2, 8, 7, 5, 4, 3, 6, 1]
+
+;;; === EXCHANGE exercises ===
+
+;; EXCHANGE 0x12: high=1, low=2
+;;   first  item index = high+1 = 2nd item from top (8)
+;;   second item index = low+2  = 4th item from top (5)
+;;   swap 2nd and 4th: [2, 5, 7, 8, 4, 3, 6, 1]
+#bytes 0xe8 0x12
+
+;; EXCHANGE 0x13: high=1, low=3
+;;   first  = 2nd (5)
+;;   second = 5th (4)
+;;   swap 2nd and 5th: [2, 4, 7, 8, 5, 3, 6, 1]
+#bytes 0xe8 0x13
+
+;; EXCHANGE 0x24: high=2, low=4
+;;   first  = 3rd (7)
+;;   second = 6th (3)
+;;   swap 3rd and 6th: [2, 4, 3, 8, 5, 7, 6, 1]
+#bytes 0xe8 0x24
+
+;;; === Accumulate: sum all 8 values ===
+;;; (rearranged but still: 2+4+3+8+5+7+6+1 = 36)
+add   ;; [6, 3, 8, 5, 7, 6, 1]
+add   ;; [9, 8, 5, 7, 6, 1]
+add   ;; [17, 5, 7, 6, 1]
+add   ;; [22, 7, 6, 1]
+add   ;; [29, 6, 1]
+add   ;; [35, 1]
+add   ;; [36]
+
+;;; === XOR with previous blockhash for per-block variation ===
+push 1
+number
+sub        ;; [blocknum-1]
+blockhash  ;; [h(N-1), 36]
+xor        ;; [36 ^ h(N-1)]
+
+;;; === Store result and return ===
+push 0
+mstore
+push 32
+push 0
+return
