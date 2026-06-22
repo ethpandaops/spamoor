@@ -1600,13 +1600,10 @@ func (pool *TxPool) MaxTxGas() uint64 {
 // This is the minimum tx.Gas value any transaction must set, and the value
 // our filler / funding paths use as the per-tx baseline.
 //
-// Currently always returns 21,000. Geth removed the prior +10% txpool
-// intrinsic buffer, so the raw base cost is what the validator enforces.
-//
-// EIP-2780 (Reduce intrinsic transaction gas) will lower this base cost
-// once activated (4,500 base + accessory charges that vary by tx shape;
-// ~7,756 for a value transfer to an existing account). Centralized here
-// so consumers update through a single method when EL clients ship 2780.
+// Returns 21,000 for simple transfers. EIP-2780 does NOT change TX_BASE —
+// it reduces calldata token costs (TX_DATA_TOKEN_STANDARD: 4/token) but
+// the base intrinsic for zero-calldata transfers remains 21,000.
+// Centralized here so consumers update through a single method if needed.
 func (pool *TxPool) MinIntrinsicGas() uint64 {
 	return 21_000
 }
