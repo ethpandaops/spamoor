@@ -40,6 +40,16 @@ func (s *Scenario) buildV2SwapTx(ctx context.Context, wallet *spamoor.Wallet, fe
 	diff := new(big.Int).Sub(maxAmount, minAmount)
 	randomAmount := new(big.Int).Add(minAmount, new(big.Int).Rand(mathrand.New(mathrand.NewSource(time.Now().UnixNano())), diff))
 
+	// Per-trade slippage variance: when a [min,max] band is configured,
+	// draw a random tolerance for THIS trade so the victim population has
+	// varied slippage (some far juicier sandwich targets than others).
+	// Falls back to the fixed --slippage when slippage_max <= slippage_min.
+	slippage := s.options.Slippage
+	if s.options.SlippageMax > s.options.SlippageMin {
+		span := int64(s.options.SlippageMax-s.options.SlippageMin) + 1
+		slippage = s.options.SlippageMin + uint64(mathrand.Int63n(span))
+	}
+
 	// Get current token balance from cache
 	tokenBalance := s.uniswap.GetTokenBalance(wallet.GetAddress(), pair.DaiAddr)
 
@@ -96,7 +106,7 @@ func (s *Scenario) buildV2SwapTx(ctx context.Context, wallet *spamoor.Wallet, fe
 				useWeth = false
 			} else {
 				// Calculate minimum DAI amount to receive (with slippage)
-				minDaiAmount := new(big.Int).Mul(randomAmount, big.NewInt(10000-int64(s.options.Slippage)))
+				minDaiAmount := new(big.Int).Mul(randomAmount, big.NewInt(10000-int64(slippage)))
 				minDaiAmount = minDaiAmount.Div(minDaiAmount, big.NewInt(10000))
 
 				// Build buy transaction with WETH
@@ -142,7 +152,7 @@ func (s *Scenario) buildV2SwapTx(ctx context.Context, wallet *spamoor.Wallet, fe
 			}
 
 			// Calculate minimum DAI amount to receive (with slippage)
-			minDaiAmount := new(big.Int).Mul(randomAmount, big.NewInt(10000-int64(s.options.Slippage)))
+			minDaiAmount := new(big.Int).Mul(randomAmount, big.NewInt(10000-int64(slippage)))
 			minDaiAmount = minDaiAmount.Div(minDaiAmount, big.NewInt(10000))
 
 			// Build buy transaction
@@ -183,7 +193,7 @@ func (s *Scenario) buildV2SwapTx(ctx context.Context, wallet *spamoor.Wallet, fe
 			if err != nil {
 				return nil, err
 			}
-			minWethAmount := new(big.Int).Mul(amounts[1], big.NewInt(10000-int64(s.options.Slippage)))
+			minWethAmount := new(big.Int).Mul(amounts[1], big.NewInt(10000-int64(slippage)))
 			minWethAmount = minWethAmount.Div(minWethAmount, big.NewInt(10000))
 
 			// Build sell transaction for WETH
@@ -220,7 +230,7 @@ func (s *Scenario) buildV2SwapTx(ctx context.Context, wallet *spamoor.Wallet, fe
 			if err != nil {
 				return nil, err
 			}
-			minEthAmount := new(big.Int).Mul(amounts[1], big.NewInt(10000-int64(s.options.Slippage)))
+			minEthAmount := new(big.Int).Mul(amounts[1], big.NewInt(10000-int64(slippage)))
 			minEthAmount = minEthAmount.Div(minEthAmount, big.NewInt(10000))
 
 			// Build sell transaction

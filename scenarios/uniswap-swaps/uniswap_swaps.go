@@ -32,6 +32,8 @@ type ScenarioOptions struct {
 	MaxSwapAmount     string  `yaml:"max_swap_amount"`
 	BuyRatio          uint64  `yaml:"buy_ratio"`
 	Slippage          uint64  `yaml:"slippage"`
+	SlippageMin       uint64  `yaml:"slippage_min"`
+	SlippageMax       uint64  `yaml:"slippage_max"`
 	SellThreshold     string  `yaml:"sell_threshold"`
 	Timeout           string  `yaml:"timeout"`
 	ClientGroup       string  `yaml:"client_group"`
@@ -72,6 +74,8 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	MaxSwapAmount:     "1000000000000000000000", // 1000 DAI
 	BuyRatio:          40,
 	Slippage:          50,
+	SlippageMin:       0,
+	SlippageMax:       0,
 	SellThreshold:     "50000000000000000000000", // 50000 DAI
 	Timeout:           "",
 	ClientGroup:       "",
@@ -109,6 +113,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.MaxSwapAmount, "max-swap", ScenarioDefaultOptions.MaxSwapAmount, "Maximum swap amount in wei")
 	flags.Uint64Var(&s.options.BuyRatio, "buy-ratio", ScenarioDefaultOptions.BuyRatio, "Ratio of buy vs sell swaps (0-100)")
 	flags.Uint64Var(&s.options.Slippage, "slippage", ScenarioDefaultOptions.Slippage, "Slippage tolerance in basis points")
+	flags.Uint64Var(&s.options.SlippageMin, "slippage-min", ScenarioDefaultOptions.SlippageMin, "Min per-trade slippage in bps (0 disables; use fixed --slippage)")
+	flags.Uint64Var(&s.options.SlippageMax, "slippage-max", ScenarioDefaultOptions.SlippageMax, "Max per-trade slippage in bps (when > slippage-min, slippage is randomized per trade)")
 	flags.StringVar(&s.options.SellThreshold, "sell-threshold", ScenarioDefaultOptions.SellThreshold, "DAI balance threshold to force sell (in wei)")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
