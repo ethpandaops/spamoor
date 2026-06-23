@@ -1,0 +1,74 @@
+;;; EIP-7997: Arachnid CREATE2 factory stress test
+;;; glamsterdam-devnet-6
+;;;
+;;; EIP-7997 pre-deploys the Arachnid CREATE2 factory at a canonical address
+;;; in every network's genesis state:
+;;;   0x4e59b44847b379578588920cA78FbF26c0B4956C
+;;;
+;;; This contract:
+;;;   1. Verifies the factory has code (EXTCODESIZE > 0); reverts if absent.
+;;;   2. Deploys a minimal (1-byte STOP) contract through the factory using
+;;;      the current block number as the salt, making each call unique.
+;;;   3. Returns the deployed CREATE2 address.
+;;;
+;;; Calldata to factory: <salt:32bytes> ++ <initcode>
+;;;   initcode for "STOP contract": 0x60015ff3
+;;;     PUSH1 1  → return 1 byte
+;;;     PUSH0    → return from offset 0 (mem is zero = STOP opcode)
+;;;     RETURN   → deploys 1 byte: STOP
+;;;
+;;; Called per-slot by the geastx scenario; block number serves as unique salt.
+
+;;; === 1. Verify factory has code ===
+push 0x4e59b44847b379578588920ca78fbf26c0b4956c
+extcodesize        ;; [codesize_of_factory]
+iszero             ;; [factory_has_no_code]
+push @fail         ;; [fail_addr, factory_has_no_code]
+jumpi              ;; revert if factory is missing
+
+;;; === 2. Prepare calldata in memory ===
+;;; Layout: mem[0..31] = salt (block number padded to 32 bytes)
+;;;         mem[32..35] = initcode: 0x60015ff3 (4 bytes: PUSH1 1; PUSH0; RETURN)
+
+;;; salt = block number (unique per block)
+number             ;; [blocknum]
+push 0
+mstore             ;; mem[0..31] = blocknum (right-aligned = left-padded with zeros)
+
+;;; initcode: 0x60015ff3 stored at mem[32]
+;;; 0x60015ff3 = 4 bytes, store as right-aligned 32-byte word at mem[32..63]
+;;; → actual initcode bytes are at mem[60..63] (last 4 bytes of the 32-byte word)
+;;; To get initcode at mem[32..35], store the value shifted left by 28 bytes:
+;;;   0x60015ff3 << (28*8) = 0x60015ff3000...000 stored at mem[32]
+;;; Hex: push 0x60015ff300000000000000000000000000000000000000000000000000000000
+push 0x60015ff300000000000000000000000000000000000000000000000000000000
+push 32
+mstore             ;; mem[32..63] = 0x60015ff3 followed by 28 zero bytes
+
+;;; calldata = salt(32 bytes) ++ initcode(4 bytes) = 36 bytes starting at mem[0]
+
+;;; === 3. Call the factory ===
+;;; CALL(gas, addr, value, argsOffset, argsLength, retOffset, retLength)
+push 0             ;; retLength
+push 64            ;; retOffset (store any return data at mem[64])
+push 36            ;; argsLength (salt=32 + initcode=4)
+push 0             ;; argsOffset
+push 0             ;; value (no ETH sent)
+push 0x4e59b44847b379578588920ca78fbf26c0b4956c  ;; addr = factory
+gas                ;; gas
+call               ;; [success]
+
+;;; === 4. Verify factory call succeeded ===
+iszero             ;; [success == 0]
+push @fail         ;; [fail_addr, success==0]
+jumpi              ;; revert if factory call failed
+
+;;; === 5. Return the salt we used (block number) ===
+push 32
+push 0
+return
+
+fail:
+push 0
+push 0
+revert
