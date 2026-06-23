@@ -114,18 +114,16 @@ func (f *DeploymentFactory) deployFactory(ctx context.Context, client *Client) (
 	}
 
 	// Estimate the deploy gas so we stay correct under EIP-8037 where
-	// account creation + per-byte code deposit dominate the cost. Falls back
-	// to the formula upper bound if the RPC path fails.
+	// account creation + per-byte code deposit dominate the cost. In Amsterdam
+	// eth_estimateGas omits state-gas, so always use the fallback formula there.
 	deployGas, estErr := client.EstimateGas(ctx, ethereum.CallMsg{
 		From:  f.rootWallet.GetAddress(),
 		To:    nil,
 		Value: new(big.Int),
 		Data:  create2FactoryInitcode,
 	})
-	if estErr != nil || deployGas == 0 {
+	if estErr != nil || deployGas == 0 || f.txpool.IsAmsterdam() {
 		deployGas = fallbackDeployGas(len(create2FactoryInitcode), f.txpool.IsAmsterdam(), f.txpool.GetCostPerStateByte())
-	} else if f.txpool.IsAmsterdam() {
-		deployGas = deployGas * 12 / 10
 	} else {
 		deployGas = deployGas * 11 / 10
 	}
@@ -213,18 +211,25 @@ func (f *DeploymentFactory) GetContractDeployment(ctx context.Context, initcode 
 	// Estimate the deploy gas so we stay correct under EIP-8037 where
 	// account creation + per-byte code deposit dominate the cost. Falls back
 	// to the formula upper bound if the RPC path fails.
+	//
+	// In Amsterdam, eth_estimateGas only returns the regular-gas component;
+	// state gas (EIP-8037) is charged as additional regular gas during CREATE2
+	// code deposit but is NOT included in the RPC estimate. We therefore always
+	// use the fallback formula in Amsterdam mode — it explicitly accounts for
+	// AccountCreationSize*cpsb + initcode_len*cpsb state-gas overhead.
 
 	deployData := append(salt[:], initcode...)
+	isAmsterdam := f.txpool.IsAmsterdam()
+	cpsb := f.txpool.GetCostPerStateByte()
+
 	deployGas, estErr := client.EstimateGas(ctx, ethereum.CallMsg{
 		From:  deployer.GetAddress(),
 		To:    &f.factoryAddr,
 		Value: new(big.Int),
 		Data:  deployData,
 	})
-	if estErr != nil || deployGas == 0 || f.isDeploying {
-		deployGas = fallbackDeployGas(len(deployData), f.txpool.IsAmsterdam(), f.txpool.GetCostPerStateByte()) + 50_000
-	} else if f.txpool.IsAmsterdam() {
-		deployGas = deployGas * 12 / 10
+	if estErr != nil || deployGas == 0 || f.isDeploying || isAmsterdam {
+		deployGas = fallbackDeployGas(len(deployData), isAmsterdam, cpsb) + 50_000
 	} else {
 		deployGas = deployGas * 11 / 10
 	}

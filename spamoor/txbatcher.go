@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	geas "github.com/fjl/geas/asm"
@@ -170,6 +171,26 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 	contractAddr, _, err := b.factory.GetContractDeployment(ctx, deployData, [32]byte{}, client, wallet, nil, nil, true)
 	if err != nil {
 		return err
+	}
+
+	// GetContractDeployment returns the deterministic CREATE2 address immediately
+	// after submitting the deployment tx, without waiting for confirmation. Verify
+	// that the code actually landed to catch silent OOG failures (e.g. from
+	// insufficient gas estimation under EIP-8037 state-gas on Amsterdam).
+	for i := 0; i < 10; i++ {
+		code, codeErr := client.GetCodeAt(ctx, contractAddr)
+		if codeErr == nil && len(code) > 0 {
+			break
+		}
+		if i == 9 {
+			b.isDeployed = false
+			return fmt.Errorf("batcher contract not deployed at %s after 10 attempts — deployment tx likely OOG", contractAddr.Hex())
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
 	}
 
 	b.address = contractAddr
