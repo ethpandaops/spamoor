@@ -491,6 +491,16 @@ func estimateTxGas(ctx context.Context, client *Client, from common.Address, to 
 			var buffered uint64
 			if isAmsterdam {
 				buffered = gas * 12 / 10
+				// For Amsterdam contract deployments, eth_estimateGas may have run
+				// at a pre-activation block (before Amsterdam fork), returning a gas
+				// estimate that doesn't include EIP-8037 state gas (code deposit +
+				// account creation). Use the formula fallback as a minimum floor so
+				// a timing race near fork activation can't cause a permanently stuck tx.
+				if to == nil {
+					if floor := fallbackDeployGas(len(data), true, cpsb); buffered < floor {
+						buffered = floor
+					}
+				}
 			} else {
 				buffered = gas * 11 / 10
 			}
