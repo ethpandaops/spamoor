@@ -1,19 +1,25 @@
 ;;; EIP-8024 SWAPN/DUPN/EXCHANGE opcode stress test
 ;;; glamsterdam-devnet-6
 ;;;
-;;; When called, exercises all three EIP-8024 opcodes:
-;;;   SWAPN (0xe3 <imm>): swap top with (imm+2)th stack item
-;;;   DUPN  (0xe6 <imm>): dup (imm+1)th stack item to top
-;;;   EXCHANGE (0xe8 <imm>): swap (high_nibble+1)th and (low_nibble+2)th items
+;;; Three new EVM opcodes, each taking one immediate byte:
+;;;   SWAPN (0xe7 <imm>): swap top with (decodeSingle(imm)+1)th item
+;;;   DUPN  (0xe6 <imm>): dup (decodeSingle(imm))th item to top
+;;;   EXCHANGE (0xe8 <imm>): swap (n+1)th and (m+1)th items where (n,m)=decodePair(imm)
+;;;
+;;; Encoding (avoids forbidden byte ranges for backward compatibility):
+;;;   decodeSingle(x) = (x + 145) % 256  — covers depths 17-235
+;;;   Forbidden for SWAPN/DUPN: x in [91, 127]
+;;;   decodePair(x) = triangular grid decode — covers (n,m) with 1 <= n < m <= 28
+;;;   Forbidden for EXCHANGE: x in [82, 127]
 ;;;
 ;;; Uses geas `#bytes` directive since SWAPN/DUPN/EXCHANGE are not yet
-;;; in the fjl/geas opcode table (added in Amsterdam, EIP-8024).
-;;; Note: #bytes takes a SINGLE expression; opcode+immediate are concatenated.
+;;; in the fjl/geas opcode table.
 ;;;
-;;; Stack invariant: 8 values throughout, sum always = 1+2+3+4+5+6+7+8 = 36.
+;;; Stack invariant: 20 values throughout, sum = 1+2+...+20 = 210.
 ;;; XOR result with blockhash for per-block variance.
+;;; Requires 18+ stack items for SWAPN/DUPN depth-17 operations.
 
-;; Push 8 values onto the stack. Stack (top-first): [8, 7, 6, 5, 4, 3, 2, 1]
+;; Push 20 values. Stack (top-first): [20, 19, 18, ..., 2, 1]
 push 1
 push 2
 push 3
@@ -22,71 +28,67 @@ push 5
 push 6
 push 7
 push 8
+push 9
+push 10
+push 11
+push 12
+push 13
+push 14
+push 15
+push 16
+push 17
+push 18
+push 19
+push 20
 
-;;; === SWAPN exercises ===
+;;; === SWAPN 0x80 (depth=17): swap top(20) with 18th item(3) ===
+;;; decodeSingle(0x80=128) = (128+145)%256 = 17
+;;; Stack: [3, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 20, 2, 1]
+#bytes 0xe780
 
-;; SWAPN 0x00: swap top (8) with (0+2=2)nd item (7) → [7, 8, 6, 5, 4, 3, 2, 1]
-#bytes 0xe300
+;;; === DUPN 0x80 (depth=17): dup 17th item(4) to top ===
+;;; decodeSingle(0x80=128) = 17; 17th item in stack above = item at index 16 = 4
+;;; Stack: [4, 3, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 20, 2, 1] (21)
+#bytes 0xe680
+pop   ;; remove dup → 20 items: [3, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 20, 2, 1]
 
-;; SWAPN 0x01: swap top (7) with (1+2=3)rd item (6) → [6, 8, 7, 5, 4, 3, 2, 1]
-#bytes 0xe301
+;;; === EXCHANGE 0x89: swap 2nd and 8th items ===
+;;; decodePair(0x89=137): 137^143=6, q=0,r=6, q<r → (1,7) → swap depth-1(2nd=19) and depth-7(8th=13)
+;;; Stack: [3, 13, 18, 17, 16, 15, 14, 19, 12, 11, 10, 9, 8, 7, 6, 5, 4, 20, 2, 1]
+#bytes 0xe889
 
-;; SWAPN 0x05: swap top (6) with (5+2=7)th item (2) → [2, 8, 7, 5, 4, 3, 6, 1]
-#bytes 0xe305
+;;; === EXCHANGE 0x00: swap 10th and 17th items ===
+;;; decodePair(0x00=0): 0^143=143, q=8,r=15, q<r → (9,16) → swap depth-9(10th=11) and depth-16(17th=4)
+;;; Stack: [3, 13, 18, 17, 16, 15, 14, 19, 12, 4, 10, 9, 8, 7, 6, 5, 11, 20, 2, 1]
+#bytes 0xe800
 
-;;; === DUPN exercises ===
-
-;; DUPN 0x00: dup (0+1=1)st item = DUP1 (dup top=2)
-;; stack depth: 9 → [2, 2, 8, 7, 5, 4, 3, 6, 1]
-#bytes 0xe600
-pop  ;; remove dup → depth 8: [2, 8, 7, 5, 4, 3, 6, 1]
-
-;; DUPN 0x03: dup (3+1=4)th item = 5
-;; stack depth: 9 → [5, 2, 8, 7, 5, 4, 3, 6, 1]
-#bytes 0xe603
-pop  ;; remove dup → depth 8: [2, 8, 7, 5, 4, 3, 6, 1]
-
-;; DUPN 0x06: dup (6+1=7)th item = 6
-;; stack depth: 9 → [6, 2, 8, 7, 5, 4, 3, 6, 1]
-#bytes 0xe606
-pop  ;; remove dup → depth 8: [2, 8, 7, 5, 4, 3, 6, 1]
-
-;;; === EXCHANGE exercises ===
-
-;; EXCHANGE 0x12: high=1, low=2
-;;   first  item index = high+1 = 2nd item from top (8)
-;;   second item index = low+2  = 4th item from top (5)
-;;   swap 2nd and 4th: [2, 5, 7, 8, 4, 3, 6, 1]
-#bytes 0xe812
-
-;; EXCHANGE 0x13: high=1, low=3
-;;   first  = 2nd (5)
-;;   second = 5th (4)
-;;   swap 2nd and 5th: [2, 4, 7, 8, 5, 3, 6, 1]
-#bytes 0xe813
-
-;; EXCHANGE 0x24: high=2, low=4
-;;   first  = 3rd (7)
-;;   second = 6th (3)
-;;   swap 3rd and 6th: [2, 4, 3, 8, 5, 7, 6, 1]
-#bytes 0xe824
-
-;;; === Accumulate: sum all 8 values ===
-;;; (rearranged but still: 2+4+3+8+5+7+6+1 = 36)
-add   ;; [6, 3, 8, 5, 7, 6, 1]
-add   ;; [9, 8, 5, 7, 6, 1]
-add   ;; [17, 5, 7, 6, 1]
-add   ;; [22, 7, 6, 1]
-add   ;; [29, 6, 1]
-add   ;; [35, 1]
-add   ;; [36]
+;;; === Sum all 20 values (1+2+...+20 = 210 regardless of arrangement) ===
+add   ;; [16, 18, 17, 16, 15, 14, 19, 12, 4, 10, 9, 8, 7, 6, 5, 11, 20, 2, 1]
+add
+add
+add
+add
+add
+add
+add
+add
+add
+add
+add
+add
+add
+add
+add
+add
+add
+add   ;; [210]
 
 ;;; === XOR with previous blockhash for per-block variation ===
 push 1
 number
-sub        ;; [blocknum-1]
-blockhash  ;; [h(N-1), 36]
-xor        ;; [36 ^ h(N-1)]
+sub        ;; [blocknum-1, 210]
+blockhash  ;; [h(N-1), 210]
+xor        ;; [210 ^ h(N-1)]
 
 ;;; === Store result and return ===
 push 0
