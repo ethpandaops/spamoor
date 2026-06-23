@@ -1734,13 +1734,15 @@ func (pool *TxPool) tryInitBlockStats(ctx context.Context) error {
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	latestBlock, err := client.client.BlockByNumber(fetchCtx, nil)
+	// Header-only: a full block decode fails on chains with custom tx types
+	// go-ethereum can't decode, and we only need the gas limit and base fee.
+	latestHeader, err := client.client.HeaderByNumber(fetchCtx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to fetch latest block for gas limit: %w", err)
+		return fmt.Errorf("failed to fetch latest header for gas limit: %w", err)
 	}
 
-	pool.currentGasLimit = latestBlock.GasLimit()
-	pool.currentBaseFee = latestBlock.BaseFee()
+	pool.currentGasLimit = latestHeader.GasLimit
+	pool.currentBaseFee = latestHeader.BaseFee
 	logrus.Infof("initialized block stats from latest block: gasLimit=%v baseFee=%v amsterdamFeeModel=%v",
 		pool.currentGasLimit, pool.currentBaseFee, !pool.preAmsterdamFeeModel)
 
