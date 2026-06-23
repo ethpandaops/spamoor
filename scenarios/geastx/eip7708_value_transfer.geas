@@ -1,0 +1,34 @@
+;;; EIP-7708: ETH Transfer Logger — internal CALL-with-value stress test
+;;; glamsterdam-devnet-6
+;;;
+;;; Receives ETH via msg.value (geastx amount>0) and immediately forwards
+;;; its entire balance to ORIGIN via an internal CALL-with-value.
+;;; Each tx call generates a system log event via the EIP-7708 ETH
+;;; Transfer Logger system contract (0xfffff...ffe).
+;;;
+;;; ETH flow per call:
+;;;   wallet → contract (msg.value)
+;;;   contract → origin (internal CALL with selfbalance)
+
+;;; Skip if no callvalue (safety guard)
+callvalue       ;; [callvalue]
+iszero          ;; [callvalue==0]
+push @done      ;; [done_addr, callvalue==0]
+jumpi           ;; if callvalue==0 jump to done
+
+;;; Forward entire balance to origin via CALL
+;;; CALL stack (top-first): gas, addr, value, argsOffset, argsLength, retOffset, retLength
+push 0          ;; retLength
+push 0          ;; retOffset
+push 0          ;; argsLength
+push 0          ;; argsOffset
+selfbalance     ;; value = entire contract balance
+origin          ;; addr = tx origin (EOA, safe target)
+gas             ;; gas to forward
+call            ;; [success]
+pop             ;; discard success flag
+
+done:
+push 0
+push 0
+return
