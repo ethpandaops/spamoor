@@ -251,10 +251,18 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*types.Receipt, *spamo
 		return nil, client, err
 	}
 
+	// DeployTest initcode is ~3300 bytes; Amsterdam EIP-8037 charges cpsb gas per
+	// deposited byte plus account-creation cost, pushing the deployment past 5M gas.
+	// Use 10M to be safe without needing a dynamic estimate.
+	deployGas := uint64(4_000_000)
+	if s.walletPool.GetTxPool().IsAmsterdam() {
+		deployGas = 10_000_000
+	}
+
 	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       4000000,
+		Gas:       deployGas,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		_, deployTx, _, err := contract.DeployDeployTest(transactOpts, client.GetEthClient())
