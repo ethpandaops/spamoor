@@ -10,10 +10,16 @@ import "encoding/binary"
 const (
 	probeKindCheckpoint = 0xC0
 	probeKindDelta      = 0xDE
-	// probeGasBudget is a conservative upper bound for a single probe (LOG1 data
-	// cost + memory expansion + the measured op's tiny cost) so headroom checks
-	// never let Generate()'s loop guards trip mid-probe.
-	probeGasBudget = 1100
+
+	// Modeled gas charged per probe so the generator's gas budget tracks the real
+	// EVM cost and the deploy stays within --gaslimit. LOG1 of one 32-byte word with
+	// a single topic dominates: 375 base + 375 topic + 8*32 data = 1006.
+	gasLOG1Word           = 375 + 375 + 8*32
+	gasCheckpointProbe    = gasLOG1Word + 24 // + GAS/PUSH/MSTORE scaffold (~18), incl. one 32B mem expansion
+	gasDeltaProbeScaffold = gasLOG1Word + 32 // + second GAS, SWAP1, SUB scaffold (~26)
+	// Conservative EIP-2929 cold-access cost for the BALANCE measured op so the
+	// access-cost probe is never undercounted (BALANCE(self) is warm in practice).
+	gasColdAccountAccess = 2600
 )
 
 // SetGasProbes enables/disables in-EVM gas observability probes.
@@ -75,19 +81,19 @@ func (g *OpcodeGenerator) emitGasDelta(measured []byte, seq uint32) []byte {
 }
 
 // pickNetZeroMeasuredOp returns a single instruction with net-zero stack effect and
-// zero stack-input requirement (always safe to splice), chosen deterministically.
-// These touch opcodes whose pricing the target EIPs change, so measuring each in
-// isolation localizes a mispricing to one opcode.
-func (g *OpcodeGenerator) pickNetZeroMeasuredOp() []byte {
+// zero stack-input requirement (always safe to splice), chosen deterministically,
+// along with its conservative modeled gas cost. These touch opcodes whose pricing the
+// target EIPs change, so measuring each in isolation localizes a mispricing to one opcode.
+func (g *OpcodeGenerator) pickNetZeroMeasuredOp() ([]byte, uint64) {
 	switch g.rng.Intn(4) {
 	case 0:
-		return []byte{0x3a, 0x50} // GASPRICE, POP
+		return []byte{0x3a, 0x50}, 2 + 2 // GASPRICE, POP
 	case 1:
-		return []byte{0x46, 0x50} // CHAINID, POP
+		return []byte{0x46, 0x50}, 2 + 2 // CHAINID, POP
 	case 2:
-		return []byte{0x30, 0x31, 0x50} // ADDRESS, BALANCE(self), POP -> EIP-2929 access cost
+		return []byte{0x30, 0x31, 0x50}, 2 + gasColdAccountAccess + 2 // ADDRESS, BALANCE(self), POP -> EIP-2929 access cost
 	default:
-		return []byte{0x47, 0x50} // SELFBALANCE, POP
+		return []byte{0x47, 0x50}, 5 + 2 // SELFBALANCE, POP
 	}
 }
 
@@ -96,24 +102,30 @@ func (g *OpcodeGenerator) pickNetZeroMeasuredOp() []byte {
 // sequences are net-zero on the stack, so g.stackSize is intentionally untouched.
 // Fails fast: on any tight budget it returns false without emitting a partial probe.
 func (g *OpcodeGenerator) tryEmitGasProbe() bool {
-	if g.currentGas+probeGasBudget > g.maxGas {
+	// Cheapest probe is a checkpoint; bail before consuming rng if even that won't fit.
+	if g.currentGas+gasCheckpointProbe > g.maxGas {
 		return false
 	}
 
 	var probe []byte
+	var cost uint64
 	if g.rng.Float64() < 0.7 {
 		probe = g.emitGasCheckpoint(g.probeSeq)
+		cost = gasCheckpointProbe
 	} else {
-		probe = g.emitGasDelta(g.pickNetZeroMeasuredOp(), g.probeSeq)
+		measured, measuredGas := g.pickNetZeroMeasuredOp()
+		probe = g.emitGasDelta(measured, g.probeSeq)
+		cost = gasDeltaProbeScaffold + measuredGas
 	}
 
-	if len(g.bytecode)+len(probe) > g.maxSize-32 ||
+	if g.currentGas+cost > g.maxGas ||
+		len(g.bytecode)+len(probe) > g.maxSize-32 ||
 		g.opcodeCount+g.countOpcodesInBytecode(probe) > g.maxOpcodeCount-10 {
 		return false
 	}
 
 	g.bytecode = append(g.bytecode, probe...)
-	g.currentGas += probeGasBudget
+	g.currentGas += cost
 	g.opcodeCount += g.countOpcodesInBytecode(probe)
 	g.probeSeq++
 	return true

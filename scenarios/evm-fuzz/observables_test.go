@@ -58,6 +58,24 @@ func TestGasProbesRespectBudgets(t *testing.T) {
 	}
 }
 
+// TestGasProbesNeverExceedGasBudget asserts the modeled gas stays within maxGas with
+// probes enabled across a range of (tight to loose) limits. Regression for a flat
+// under-counted probe budget: the BALANCE-access delta probe costs far more than a
+// fixed estimate, so an undercount could let a deploy OOG before emitting its logs.
+func TestGasProbesNeverExceedGasBudget(t *testing.T) {
+	for _, maxGas := range []uint64{30000, 100000, 1000000, 30000000} {
+		for txID := uint64(0); txID < 50; txID++ {
+			g := NewOpcodeGenerator(txID, testSeed, 4096, maxGas)
+			g.SetFuzzMode("all")
+			g.SetGasProbes(true)
+			g.Generate()
+			if g.currentGas > g.maxGas {
+				t.Fatalf("maxGas %d txID %d: modeled gas %d exceeds budget", maxGas, txID, g.currentGas)
+			}
+		}
+	}
+}
+
 // countProbeTopics scans for PUSH32 topic words matching txID + a known probe kind.
 func countProbeTopics(code []byte, txID uint64) (checkpoints, deltas int) {
 	prefix := make([]byte, 8)
