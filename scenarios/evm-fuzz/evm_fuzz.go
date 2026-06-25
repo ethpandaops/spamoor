@@ -159,9 +159,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("invalid fuzz mode: %v", err)
 	}
 
-	// deploy-size sweeps up to 64KiB runtime; code-deposit (200 gas/byte) dominates.
+	// deploy-size sweeps up to 64KiB runtime; under EIP-8037 (CPSB=1530) the
+	// state-creation/code-deposit cost dominates at ~1530 gas/byte (measured ~1550).
 	if s.options.FuzzMode == "deploy-size" {
-		const need = 14_000_000 // ~200*65537 + overhead for the 64KiB upper boundary
+		const need = 110_000_000 // ~1530*65537 + init/codecopy overhead for the 64KiB upper boundary
 		if s.options.GasLimit < need {
 			s.logger.Warnf("fuzz-mode=deploy-size: --gaslimit %d is below ~%d needed for 64KiB deploys; large-size txs will run out of gas (still a valid differential target). Raise --gaslimit and keep it below the block gas limit.", s.options.GasLimit, need)
 		}

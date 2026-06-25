@@ -86,7 +86,7 @@ spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 500 --fuzz-mode preco
 
 Sweep deploy sizes around the EIP-7954 / EIP-3860 boundaries:
 ```bash
-spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 1000 --fuzz-mode deploy-size --gaslimit 16000000
+spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 1000 --fuzz-mode deploy-size --gaslimit 120000000
 ```
 
 ### deploy-size mode
@@ -96,11 +96,13 @@ Targets **EIP-7954** (raises max deployed code size from 24KiB to 64KiB) and
 each deployment emits minimal init code that `CODECOPY`s an `0xfe` (INVALID)
 filler of an exact target size and `RETURN`s it as the runtime, deterministically
 sweeping `+/-1` around the 24KiB and 64KiB limits, a midpoint, and the EIP-3860
-initcode edge. Sizes above the cap (e.g. 65536/65537) are expected to fail
-code-deposit and exercise consistent cross-client rejection.
+initcode edge. 64KiB (65536 bytes) is the new EIP-7954 maximum and deploys
+successfully with enough gas; sizes above it (e.g. 65537) fail the size cap and
+exercise consistent cross-client rejection.
 
-Note: `--max-code-size` does not apply in this mode. Code-deposit gas (200/byte)
-dominates, so a 64KiB deploy needs ~13.2M gas; set `--gaslimit` accordingly (and
+Note: `--max-code-size` does not apply in this mode. Under EIP-8037 (CPSB=1530)
+the state-creation/code-deposit cost dominates at ~1530 gas/byte (measured ~1550
+on devnet), so a 64KiB deploy needs ~101M gas; set `--gaslimit` to ~110M (and
 below the block gas limit). The init code itself is fingerprinted with the
 `(seed, txID)` like all other modes.
 
