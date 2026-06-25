@@ -354,17 +354,18 @@ func (s *Scenario) sendDeploymentTx(
 }
 
 // gasLimitForSlots estimates the gas limit needed for a given number of
-// storage slots to write and clear. Accounts for EIP-2929 cold storage
-// access surcharges on top of base SSTORE costs:
-//   - Write (zero to non-zero, cold): 20,000 + 2,100 = 22,100 gas
-//   - Clear (non-zero to zero, cold): 2,900 + 2,100 = 5,000 gas
+// storage slots to write and clear. Under Amsterdam (EIP-8038), cold storage
+// write costs are restructured — COLD_STORAGE_WRITE=5000 replaces the old
+// SSTORE_SET(20000)+COLD_SLOAD(2100) combination:
+//   - Write (zero to non-zero, cold): 5,000 gas (COLD_STORAGE_WRITE)
+//   - Clear (non-zero to zero, warm): 100 gas (WARM_ACCESS)
 //   - Mapping keccak256 + loop overhead: ~200 gas per slot
 //
 // Plus fixed overhead for function call, state variable reads/writes.
 func gasLimitForSlots(slotsPerCall, costPerStateByte uint64) uint64 {
 	// Steady-state per-slot execution cost: write + clear + loop overhead.
-	writeGas := uint64(22300)   // SSTORE_SET(20k) + COLD_SLOAD(2.1k) + margin
-	clearGas := uint64(5200)    // SSTORE_RESET(2.9k) + COLD_SLOAD(2.1k) + margin
+	writeGas := uint64(5300)    // COLD_STORAGE_WRITE(5k) + margin
+	clearGas := uint64(200)     // WARM_ACCESS(100) + margin
 	loopOverhead := uint64(200) // keccak256, stack ops, jump per iteration
 	overhead := uint64(300000)  // function dispatch, state var access, margin
 
