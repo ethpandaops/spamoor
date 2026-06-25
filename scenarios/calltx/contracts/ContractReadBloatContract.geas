@@ -2,7 +2,8 @@
 ;; First bytes are seeded with origin + blockhash for uniqueness
 ;; Last 10 bytes contain magic number 0xDEADBEEFCAFEBABEDEAD
 
-;; Configuration: 24KB contract with 10-byte magic number and 32-byte seed
+;; Configuration: 64KB contract with 10-byte magic number and 32-byte seed
+;; EIP-7954 (Amsterdam) raised the max contract code size from 24576 to 65536 bytes.
 
 ;; Generate seed from origin + blockhash
 origin                     ;; [origin]
@@ -14,10 +15,10 @@ xor                        ;; [seed]
 push 0                     ;; [0, seed]
 mstore                     ;; []
 
-;; contract size
-push 24576                 ;; [contract_size]
-    
-;; Calculate position for magic number (24576 - 32)
+;; contract size: 65536 (64 KiB, new Amsterdam max per EIP-7954)
+push 65536                 ;; [contract_size]
+
+;; Calculate position for magic number (65536 - 32)
 dup1                   ;; [contract_size, contract_size]
 push 32                ;; [32, contract_size, contract_size]
 swap1                  ;; [contract_size, 32, contract_size]
