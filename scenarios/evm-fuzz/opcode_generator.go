@@ -150,7 +150,8 @@ type OpcodeGenerator struct {
 	stackBuildingOpcodes []*OpcodeInfo // Cached: opcodes with StackInput=0, StackOutput=1
 	txID                 uint64        // Transaction ID for tracking
 	baseSeed             string        // Base seed for reproducibility
-	fuzzMode             string        // Fuzzing mode: "all", "opcodes", "precompiles"
+	fuzzMode             string        // Fuzzing mode: "all", "opcodes", "precompiles", "deploy-size"
+	deploySizeN          int           // deploy-size mode: exact runtime size emitted (0 = not chosen yet)
 }
 
 // initializeOpcodes sets up the opcode definitions with sanitization
@@ -967,6 +968,10 @@ func (g *OpcodeGenerator) pushSeedAndTxID() {
 
 // Generate creates a valid bytecode sequence
 func (g *OpcodeGenerator) Generate() []byte {
+	if g.fuzzMode == "deploy-size" {
+		return g.generateDeploySizeInit()
+	}
+
 	g.bytecode = g.bytecode[:0]
 	g.stackSize = 0
 	g.jumpTargets = g.jumpTargets[:0]

@@ -102,7 +102,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MinCodeSize, "min-code-size", ScenarioDefaultOptions.MinCodeSize, "Minimum bytecode size")
 	flags.StringVar(&s.options.PayloadSeed, "payload-seed", ScenarioDefaultOptions.PayloadSeed, "Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd, empty means random)")
 	flags.Uint64Var(&s.options.TxIdOffset, "tx-id-offset", ScenarioDefaultOptions.TxIdOffset, "Start fuzzing from a specific transaction ID")
-	flags.StringVar(&s.options.FuzzMode, "fuzz-mode", ScenarioDefaultOptions.FuzzMode, "Fuzzing mode: 'all' (opcodes+precompiles), 'opcodes' (EVM opcodes only), 'precompiles' (precompiles only)")
+	flags.StringVar(&s.options.FuzzMode, "fuzz-mode", ScenarioDefaultOptions.FuzzMode, "Fuzzing mode: 'all' (opcodes+precompiles), 'opcodes' (EVM opcodes only), 'precompiles' (precompiles only), 'deploy-size' (EIP-7954/3860 exact-size deploy sweep; ignores --max-code-size, needs large --gaslimit)")
 
 	return nil
 }
@@ -157,6 +157,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	// Validate fuzz mode
 	if err := s.validateFuzzMode(s.options.FuzzMode); err != nil {
 		return fmt.Errorf("invalid fuzz mode: %v", err)
+	}
+
+	// deploy-size sweeps up to 64KiB runtime; code-deposit (200 gas/byte) dominates.
+	if s.options.FuzzMode == "deploy-size" {
+		const need = 14_000_000 // ~200*65537 + overhead for the 64KiB upper boundary
+		if s.options.GasLimit < need {
+			s.logger.Warnf("fuzz-mode=deploy-size: --gaslimit %d is below ~%d needed for 64KiB deploys; large-size txs will run out of gas (still a valid differential target). Raise --gaslimit and keep it below the block gas limit.", s.options.GasLimit, need)
+		}
 	}
 
 	return nil
@@ -358,7 +366,7 @@ func (s *Scenario) validateSeed(seed string) error {
 }
 
 func (s *Scenario) validateFuzzMode(mode string) error {
-	validModes := []string{"all", "opcodes", "precompiles"}
+	validModes := []string{"all", "opcodes", "precompiles", "deploy-size"}
 	for _, validMode := range validModes {
 		if mode == validMode {
 			return nil

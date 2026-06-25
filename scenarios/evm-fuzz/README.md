@@ -31,7 +31,7 @@ spamoor evm-fuzz [flags]
 - `--min-code-size` - Minimum bytecode size in bytes (default: 100)
 - `--payload-seed` - Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd)
 - `--tx-id-offset` - Start fuzzing from specific transaction ID (default: 0)
-- `--fuzz-mode` - Fuzzing mode: 'all' (default), 'opcodes', 'precompiles'
+- `--fuzz-mode` - Fuzzing mode: 'all' (default), 'opcodes', 'precompiles', 'deploy-size'
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
@@ -83,6 +83,26 @@ Fuzz only precompiles with stack setup:
 ```bash
 spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 500 --fuzz-mode precompiles
 ```
+
+Sweep deploy sizes around the EIP-7954 / EIP-3860 boundaries:
+```bash
+spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 1000 --fuzz-mode deploy-size --gaslimit 16000000
+```
+
+### deploy-size mode
+
+Targets **EIP-7954** (raises max deployed code size from 24KiB to 64KiB) and
+**EIP-3860** (initcode size limit / per-word gas). Instead of random bytecode,
+each deployment emits minimal init code that `CODECOPY`s an `0xfe` (INVALID)
+filler of an exact target size and `RETURN`s it as the runtime, deterministically
+sweeping `+/-1` around the 24KiB and 64KiB limits, a midpoint, and the EIP-3860
+initcode edge. Sizes above the cap (e.g. 65536/65537) are expected to fail
+code-deposit and exercise consistent cross-client rejection.
+
+Note: `--max-code-size` does not apply in this mode. Code-deposit gas (200/byte)
+dominates, so a 64KiB deploy needs ~13.2M gas; set `--gaslimit` accordingly (and
+below the block gas limit). The init code itself is fingerprinted with the
+`(seed, txID)` like all other modes.
 
 Large contract fuzzing:
 ```bash
