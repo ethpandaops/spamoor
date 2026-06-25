@@ -10,8 +10,8 @@ import (
 func (g *OpcodeGenerator) processPrecompileResult(memOffset, size int) []byte {
 	var bytecode []byte
 
-	if g.fuzzMode == "precompiles" {
-		// Precompiles-only mode: LOG the result
+	if g.fuzzMode == "precompiles" || g.fuzzMode == "system" {
+		// Precompiles-only / system-only mode: LOG the result
 		// PUSH the size of the data to log
 		if size < 256 {
 			bytecode = append(bytecode, 0x60, byte(size)) // PUSH1 size

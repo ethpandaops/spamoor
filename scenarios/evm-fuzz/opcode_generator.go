@@ -194,6 +194,11 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		{"BLS12_PAIRING_CHECK", 0x10f, 0, 1, 37700, g.generateBLS12PairingCall, 2.8},
 		{"BLS12_MAP_FP_TO_G1", 0x110, 0, 4, 5500, g.generateBLS12MapFpToG1Call, 2.2},
 		{"BLS12_MAP_FP2_TO_G2", 0x111, 0, 8, 23800, g.generateBLS12MapFp2G2Call, 2.2},
+
+		// EIP-8282 builder execution requests + EIP-7997 CREATE2 factory (system contracts)
+		{"BUILDER_DEPOSIT", 0x120, 0, 1, 50000, g.generateBuilderDepositCall, 2.5},
+		{"BUILDER_EXIT", 0x121, 0, 1, 5000, g.generateBuilderExitCall, 2.5},
+		{"CREATE2_FACTORY", 0x122, 0, 1, 40000, g.generateCreate2FactoryCall, 2.2},
 	}
 	opcodes = append(opcodes, generatorOpcodes...)
 
@@ -295,13 +300,18 @@ func (g *OpcodeGenerator) buildValidOpcodeList() {
 		// Filter based on fuzz mode
 		switch g.fuzzMode {
 		case "opcodes":
-			// Only include regular EVM opcodes (exclude precompiles 0x01-0x12)
-			if !g.isPrecompileOpcode(op.Opcode) {
+			// Only include regular EVM opcodes (exclude precompiles and system contracts)
+			if !g.isPrecompileOpcode(op.Opcode) && !g.isSystemOpcode(op.Opcode) {
 				g.validOpcodes = append(g.validOpcodes, op)
 			}
 		case "precompiles":
 			// Only include precompiles - they generate their own complete bytecode internally
 			if g.isPrecompileOpcode(op.Opcode) {
+				g.validOpcodes = append(g.validOpcodes, op)
+			}
+		case "system":
+			// Only include EIP-8282/7997 system-contract calls
+			if g.isSystemOpcode(op.Opcode) {
 				g.validOpcodes = append(g.validOpcodes, op)
 			}
 		default: // "all" or any other value

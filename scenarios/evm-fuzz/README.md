@@ -31,7 +31,8 @@ spamoor evm-fuzz [flags]
 - `--min-code-size` - Minimum bytecode size in bytes (default: 100)
 - `--payload-seed` - Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd)
 - `--tx-id-offset` - Start fuzzing from specific transaction ID (default: 0)
-- `--fuzz-mode` - Fuzzing mode: 'all' (default), 'opcodes', 'precompiles'
+- `--fuzz-mode` - Fuzzing mode: 'all' (default), 'opcodes', 'precompiles', 'system'
+  - `system` targets the EIP-8282 builder execution-request contracts (deposit/exit) and the EIP-7997 deterministic CREATE2 factory only
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
@@ -52,10 +53,11 @@ spamoor evm-fuzz [flags]
 - **Stack-aware bytecode generation** - Prevents stack underflow/overflow
 - **Weighted opcode selection** - Emphasizes interesting/new opcodes
 - **Precompile testing** - Generates calls to precompiles
+- **System-contract testing** - Generates calls to the EIP-8282 builder deposit/exit contracts and the EIP-7997 CREATE2 factory (valid + malformed payloads)
 - **Jump pattern fuzzing** - Creates valid and invalid JUMP/JUMPDEST patterns
 - **Memory sanitization** - Applies masks to prevent excessive resource usage
 - **Deterministic seeding** - Reproducible results with custom seeds
-- **Flexible fuzz modes** - Target specific EVM components (opcodes/precompiles)
+- **Flexible fuzz modes** - Target specific EVM components (opcodes/precompiles/system contracts)
 
 ## Examples
 
@@ -82,6 +84,11 @@ spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 1000 --fuzz-mode opco
 Fuzz only precompiles with stack setup:
 ```bash
 spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 500 --fuzz-mode precompiles
+```
+
+Fuzz only the EIP-8282/7997 system contracts:
+```bash
+spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 500 --fuzz-mode system
 ```
 
 Large contract fuzzing:
