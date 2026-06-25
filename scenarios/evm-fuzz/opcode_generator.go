@@ -151,6 +151,8 @@ type OpcodeGenerator struct {
 	txID                 uint64        // Transaction ID for tracking
 	baseSeed             string        // Base seed for reproducibility
 	fuzzMode             string        // Fuzzing mode: "all", "opcodes", "precompiles"
+	gasProbes            bool          // Emit gas observability LOG probes (off by default)
+	probeSeq             uint32        // Monotonic probe index, used as LOG topic for correlation
 }
 
 // initializeOpcodes sets up the opcode definitions with sanitization
@@ -973,6 +975,7 @@ func (g *OpcodeGenerator) Generate() []byte {
 	g.jumpPlaceholders = g.jumpPlaceholders[:0]
 	g.currentGas = 0
 	g.opcodeCount = 0
+	g.probeSeq = 0
 
 	// Push seed and txID as initial stack values for tracking
 	g.pushSeedAndTxID()
@@ -989,6 +992,13 @@ func (g *OpcodeGenerator) Generate() []byte {
 			g.currentGas += 1
 			g.opcodeCount += 1 // Count the JUMPDEST opcode
 			continue
+		}
+
+		// Gas observability probe sampling (off by default; composes with any fuzz-mode)
+		if g.gasProbes && g.rng.Float64() < 0.05 {
+			if g.tryEmitGasProbe() {
+				continue
+			}
 		}
 
 		if !g.generateNextInstruction() {

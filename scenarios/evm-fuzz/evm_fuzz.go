@@ -39,6 +39,7 @@ type ScenarioOptions struct {
 	PayloadSeed string `yaml:"payload_seed"` // Optional seed for reproducible fuzzing
 	TxIdOffset  uint64 `yaml:"tx_id_offset"` // Start fuzzing from a specific txID
 	FuzzMode    string `yaml:"fuzz_mode"`    // Fuzzing mode: "all", "opcodes", "precompiles"
+	GasProbes   bool   `yaml:"gas_probes"`   // Emit in-EVM gas observability LOG probes
 }
 
 type Scenario struct {
@@ -66,6 +67,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	PayloadSeed: "", // Empty means use random seed
 	TxIdOffset:  0,
 	FuzzMode:    "all", // Default to all opcodes and precompiles
+	GasProbes:   false,
 }
 
 var ScenarioDescriptor = scenario.Descriptor{
@@ -103,6 +105,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.PayloadSeed, "payload-seed", ScenarioDefaultOptions.PayloadSeed, "Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd, empty means random)")
 	flags.Uint64Var(&s.options.TxIdOffset, "tx-id-offset", ScenarioDefaultOptions.TxIdOffset, "Start fuzzing from a specific transaction ID")
 	flags.StringVar(&s.options.FuzzMode, "fuzz-mode", ScenarioDefaultOptions.FuzzMode, "Fuzzing mode: 'all' (opcodes+precompiles), 'opcodes' (EVM opcodes only), 'precompiles' (precompiles only)")
+	flags.BoolVar(&s.options.GasProbes, "gas-probes", ScenarioDefaultOptions.GasProbes, "Emit in-EVM gas observability LOG probes (GAS checkpoints + per-op deltas) to localize repricing diffs")
 
 	return nil
 }
@@ -330,6 +333,7 @@ func (s *Scenario) generateFuzzedBytecode(txIdx uint64) ([]byte, *uint256.Int) {
 
 	// Set fuzz mode
 	generator.SetFuzzMode(s.options.FuzzMode)
+	generator.SetGasProbes(s.options.GasProbes)
 
 	value := uint256.NewInt(0)
 	if generator.rng.Float64() < 0.75 { // 75% chance for random small value

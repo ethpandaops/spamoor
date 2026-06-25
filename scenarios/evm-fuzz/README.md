@@ -32,6 +32,7 @@ spamoor evm-fuzz [flags]
 - `--payload-seed` - Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd)
 - `--tx-id-offset` - Start fuzzing from specific transaction ID (default: 0)
 - `--fuzz-mode` - Fuzzing mode: 'all' (default), 'opcodes', 'precompiles'
+- `--gas-probes` - Emit in-EVM gas observability LOG probes (default: false). Composes with any `--fuzz-mode`.
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
@@ -88,6 +89,28 @@ Large contract fuzzing:
 ```bash
 spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -t 10 --min-code-size 1000 --max-code-size 20000
 ```
+
+Fuzz with gas observability probes to localize repricing diffs:
+```bash
+spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 1000 --gas-probes
+```
+
+### Gas Observability Probes (`--gas-probes`)
+
+When enabled, the generator deterministically injects stack-balanced `LOG1`
+sequences into the fuzzed bytecode. Each probe writes a gas measurement to memory
+and emits it under a self-identifying topic (`[0:8]=txID`, `[8]=kind`,
+`[28:32]=sequence`), so a cross-client receipt/log diff pins the exact probe (and
+thus operation) that diverged. Two probe kinds are emitted:
+
+- **Checkpoint** (`GAS` + `LOG1`): logs remaining gas at a point in execution.
+- **Delta** (`GAS` ... `GAS` + `SUB` + `LOG1`): logs the gas consumed by a single
+  isolated repriced opcode (e.g. `BALANCE`). The reported delta includes the
+  trailing `GAS` opcode's 2 gas, a constant identical across clients.
+
+This is a flag, not a mode: it composes with `--fuzz-mode all|opcodes|precompiles`.
+Targets gas-repricing EIPs: **EIP-2929, EIP-7778, EIP-7976, EIP-7981, EIP-8037,
+EIP-8038**.
 
 ## What This Finds
 
