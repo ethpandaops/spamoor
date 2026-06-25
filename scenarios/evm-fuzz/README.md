@@ -31,7 +31,8 @@ spamoor evm-fuzz [flags]
 - `--min-code-size` - Minimum bytecode size in bytes (default: 100)
 - `--payload-seed` - Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd)
 - `--tx-id-offset` - Start fuzzing from specific transaction ID (default: 0)
-- `--fuzz-mode` - Fuzzing mode: 'all' (default), 'opcodes', 'precompiles'
+- `--fuzz-mode` - Fuzzing mode: 'all' (default), 'opcodes', 'precompiles', 'transfers'
+  - `transfers` exercises every ETH value-movement path (CALL/CALLCODE/CREATE/CREATE2 with value, tx-level value, 0-value and self/precompile transfers, value transfers in reverting frames) plus SELFDESTRUCT across beneficiary classes and same-tx-created contexts. Targets **EIP-7708** (transfer logs) and **EIP-8246** (SELFDESTRUCT burn/credit) for cross-client diffing.
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
@@ -82,6 +83,11 @@ spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 1000 --fuzz-mode opco
 Fuzz only precompiles with stack setup:
 ```bash
 spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 500 --fuzz-mode precompiles
+```
+
+Fuzz ETH transfers and selfdestruct (EIP-7708 / EIP-8246):
+```bash
+spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 500 --fuzz-mode transfers
 ```
 
 Large contract fuzzing:

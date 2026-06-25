@@ -102,7 +102,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MinCodeSize, "min-code-size", ScenarioDefaultOptions.MinCodeSize, "Minimum bytecode size")
 	flags.StringVar(&s.options.PayloadSeed, "payload-seed", ScenarioDefaultOptions.PayloadSeed, "Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd, empty means random)")
 	flags.Uint64Var(&s.options.TxIdOffset, "tx-id-offset", ScenarioDefaultOptions.TxIdOffset, "Start fuzzing from a specific transaction ID")
-	flags.StringVar(&s.options.FuzzMode, "fuzz-mode", ScenarioDefaultOptions.FuzzMode, "Fuzzing mode: 'all' (opcodes+precompiles), 'opcodes' (EVM opcodes only), 'precompiles' (precompiles only)")
+	flags.StringVar(&s.options.FuzzMode, "fuzz-mode", ScenarioDefaultOptions.FuzzMode, "Fuzzing mode: 'all' (opcodes+precompiles), 'opcodes' (EVM opcodes only), 'precompiles' (precompiles only), 'transfers' (ETH value movement + selfdestruct, EIP-7708/8246)")
 
 	return nil
 }
@@ -358,7 +358,7 @@ func (s *Scenario) validateSeed(seed string) error {
 }
 
 func (s *Scenario) validateFuzzMode(mode string) error {
-	validModes := []string{"all", "opcodes", "precompiles"}
+	validModes := []string{"all", "opcodes", "precompiles", "transfers"}
 	for _, validMode := range validModes {
 		if mode == validMode {
 			return nil

@@ -194,6 +194,14 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		{"BLS12_PAIRING_CHECK", 0x10f, 0, 1, 37700, g.generateBLS12PairingCall, 2.8},
 		{"BLS12_MAP_FP_TO_G1", 0x110, 0, 4, 5500, g.generateBLS12MapFpToG1Call, 2.2},
 		{"BLS12_MAP_FP2_TO_G2", 0x111, 0, 8, 23800, g.generateBLS12MapFp2G2Call, 2.2},
+
+		// ETH value-transfer + selfdestruct generators (EIP-7708 / EIP-8246)
+		{"XFER_CALL", 0x120, 0, 1, 9000, g.generateValueCall, 2.5},
+		{"XFER_CALLCODE", 0x121, 0, 1, 9000, g.generateValueCallcode, 2.0},
+		{"XFER_CREATE", 0x122, 0, 1, 33000, g.generateValueCreate, 2.0},
+		{"XFER_CREATE2", 0x123, 0, 1, 33000, g.generateValueCreate2, 2.0},
+		{"XFER_REVERTING", 0x124, 0, 1, 9000, g.generateRevertingTransfer, 2.2},
+		{"SELFDESTRUCT_SWEEP", 0x125, 0, 0, 5000, g.generateSelfdestructSweep, 1.5},
 	}
 	opcodes = append(opcodes, generatorOpcodes...)
 
@@ -295,8 +303,8 @@ func (g *OpcodeGenerator) buildValidOpcodeList() {
 		// Filter based on fuzz mode
 		switch g.fuzzMode {
 		case "opcodes":
-			// Only include regular EVM opcodes (exclude precompiles 0x01-0x12)
-			if !g.isPrecompileOpcode(op.Opcode) {
+			// Only include regular EVM opcodes (exclude precompiles and transfer generators)
+			if !g.isPrecompileOpcode(op.Opcode) && !g.isTransferOpcode(op.Opcode) {
 				g.validOpcodes = append(g.validOpcodes, op)
 			}
 		case "precompiles":
@@ -304,9 +312,17 @@ func (g *OpcodeGenerator) buildValidOpcodeList() {
 			if g.isPrecompileOpcode(op.Opcode) {
 				g.validOpcodes = append(g.validOpcodes, op)
 			}
+		case "transfers":
+			// Transfer generators plus value-bearing base opcodes so tx-level
+			// value, plain CALL/CREATE and SELFDESTRUCT are exercised together.
+			if g.isTransferOpcode(op.Opcode) || g.isValueBaseOpcode(op.Opcode) {
+				g.validOpcodes = append(g.validOpcodes, op)
+			}
 		default: // "all" or any other value
-			// Include all opcodes
-			g.validOpcodes = append(g.validOpcodes, op)
+			// Include all opcodes except the transfer generators (transfers-only)
+			if !g.isTransferOpcode(op.Opcode) {
+				g.validOpcodes = append(g.validOpcodes, op)
+			}
 		}
 	}
 
