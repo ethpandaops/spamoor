@@ -31,7 +31,7 @@ spamoor evm-fuzz [flags]
 - `--min-code-size` - Minimum bytecode size in bytes (default: 100)
 - `--payload-seed` - Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd)
 - `--tx-id-offset` - Start fuzzing from specific transaction ID (default: 0)
-- `--fuzz-mode` - Fuzzing mode: 'all' (default), 'opcodes', 'precompiles'
+- `--fuzz-mode` - Fuzzing mode: 'all' (default), 'opcodes', 'precompiles', 'state-access'
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
@@ -83,6 +83,21 @@ Fuzz only precompiles with stack setup:
 ```bash
 spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 500 --fuzz-mode precompiles
 ```
+
+Fuzz storage/access-list gas accounting:
+```bash
+spamoor evm-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -c 500 --fuzz-mode state-access
+```
+
+The `state-access` mode targets storage and account-access gas accounting. It
+drives `SSTORE` through chosen `(original, current, new)` refund transitions
+(including reset-to-original and set-then-revert in a child `CREATE` frame) and
+walks cold/warm slot and account access (`SLOAD`/`EXTCODESIZE`/`BALANCE`/
+`EXTCODEHASH`/`EXTCODECOPY`). Storage keys are drawn from a per-seed shared pool
+so contracts in the same block collide on storage. EIPs: 8037 (source-based
+refunds), 8038 (access repricing), 7778 (no block-level refunds), 7981
+(access-list cost), 7928 (block access lists). Tx-level access-list pre-warming
+(EIP-7981/7928) is a documented follow-up.
 
 Large contract fuzzing:
 ```bash

@@ -150,7 +150,13 @@ type OpcodeGenerator struct {
 	stackBuildingOpcodes []*OpcodeInfo // Cached: opcodes with StackInput=0, StackOutput=1
 	txID                 uint64        // Transaction ID for tracking
 	baseSeed             string        // Base seed for reproducibility
-	fuzzMode             string        // Fuzzing mode: "all", "opcodes", "precompiles"
+	fuzzMode             string        // Fuzzing mode: "all", "opcodes", "precompiles", "state-access"
+
+	// state-access pool (EIP-8037/8038/7778/7981/7928 fuzzing)
+	sharedSlots  [4]uint64            // slot keys derived from SEED only (collide across txIDs)
+	privateSlots [4]uint64            // slot keys derived from (seed,txID)
+	sharedAddrs  [3][20]byte          // addresses derived from SEED only
+	slotState    map[uint64]slotModel // modeled (original,current) per pool slot
 }
 
 // initializeOpcodes sets up the opcode definitions with sanitization
@@ -194,6 +200,11 @@ func (g *OpcodeGenerator) initializeOpcodes() {
 		{"BLS12_PAIRING_CHECK", 0x10f, 0, 1, 37700, g.generateBLS12PairingCall, 2.8},
 		{"BLS12_MAP_FP_TO_G1", 0x110, 0, 4, 5500, g.generateBLS12MapFpToG1Call, 2.2},
 		{"BLS12_MAP_FP2_TO_G2", 0x111, 0, 8, 23800, g.generateBLS12MapFp2G2Call, 2.2},
+
+		// State & gas-accounting fuzzing (EIP-8037/8038/7778/7981/7928)
+		// StackInput/Output=0: each sequence is net stack-zero internally.
+		{"SSTORE_REFUND", 0x120, 0, 0, 20000, g.generateStorageRefundSeq, 2.5},
+		{"STATE_ACCESS_WALK", 0x121, 0, 0, 5000, g.generateAccessWalk, 2.5},
 	}
 	opcodes = append(opcodes, generatorOpcodes...)
 
@@ -276,6 +287,7 @@ func NewOpcodeGenerator(txID uint64, baseSeed string, maxSize int, maxGas uint64
 	g.buildValidOpcodeList()
 	g.buildInvalidOpcodeList()
 	g.buildStackBuildingOpcodeList()
+	g.initStatePool()
 
 	return g
 }
@@ -295,8 +307,8 @@ func (g *OpcodeGenerator) buildValidOpcodeList() {
 		// Filter based on fuzz mode
 		switch g.fuzzMode {
 		case "opcodes":
-			// Only include regular EVM opcodes (exclude precompiles 0x01-0x12)
-			if !g.isPrecompileOpcode(op.Opcode) {
+			// Only include regular EVM opcodes (exclude precompiles & state-access selectors)
+			if !g.isPrecompileOpcode(op.Opcode) && !g.isStateAccessOpcode(op.Opcode) {
 				g.validOpcodes = append(g.validOpcodes, op)
 			}
 		case "precompiles":
@@ -304,9 +316,16 @@ func (g *OpcodeGenerator) buildValidOpcodeList() {
 			if g.isPrecompileOpcode(op.Opcode) {
 				g.validOpcodes = append(g.validOpcodes, op)
 			}
+		case "state-access":
+			// Only the storage/account-access generators (EIP-8037/8038/7778/7981/7928)
+			if g.isStateAccessOpcode(op.Opcode) {
+				g.validOpcodes = append(g.validOpcodes, op)
+			}
 		default: // "all" or any other value
-			// Include all opcodes
-			g.validOpcodes = append(g.validOpcodes, op)
+			// Include everything except the state-access selectors (keeps "all" output unchanged)
+			if !g.isStateAccessOpcode(op.Opcode) {
+				g.validOpcodes = append(g.validOpcodes, op)
+			}
 		}
 	}
 
@@ -973,6 +992,11 @@ func (g *OpcodeGenerator) Generate() []byte {
 	g.jumpPlaceholders = g.jumpPlaceholders[:0]
 	g.currentGas = 0
 	g.opcodeCount = 0
+
+	// Reset per-tx storage model (pools are fixed for the generator's lifetime).
+	for k := range g.slotState {
+		delete(g.slotState, k)
+	}
 
 	// Push seed and txID as initial stack values for tracking
 	g.pushSeedAndTxID()
