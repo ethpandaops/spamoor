@@ -1,0 +1,51 @@
+;;; EIP-7843 SLOTNUM opcode (0x4b) stress test
+;;; glamsterdam-devnet-6
+;;;
+;;; SLOTNUM pushes the current beacon slot number onto the stack.
+;;; In Amsterdam, the beacon slot is embedded in the execution payload
+;;; as `slot_number` — equal to the CL slot containing this block.
+;;;
+;;; This test:
+;;;   1. Reads the slot number via SLOTNUM (0x4b).
+;;;   2. Verifies it is non-zero (we are past genesis, slot 0 is pre-fork).
+;;;   3. XORs with blockhash for per-block variation.
+;;;   4. Stores the result and returns a 32-byte value.
+;;;
+;;; SLOTNUM opcode = 0x4b (EIP-7843).
+;;; Not yet in the fjl/geas opcode table (Amsterdam addition),
+;;; so it is encoded with #bytes.
+;;;
+;;; Opcode table context for reference:
+;;;   0x49 = BLOBHASH (EIP-4844)
+;;;   0x4a = BLOBBASEFEE (EIP-7516)
+;;;   0x4b = SLOTNUM (EIP-7843) ← this opcode
+
+;;; === Read SLOTNUM ===
+#bytes 0x4b  ;; SLOTNUM — pushes beacon slot number (e.g. 695 at block 695)
+
+;;; === Verify non-zero, jump to fail if slot == 0 ===
+;;; (In practice, slot 0 is before Amsterdam fork; this is a safety check.)
+dup1         ;; [slot, slot]
+iszero       ;; [slot==0 ? 1 : 0, slot]
+push @fail   ;; [&fail, slot==0, slot]
+jumpi        ;; [slot]   — jump if slot==0 (consumes top two items)
+
+;;; === XOR with previous block hash for variance ===
+push 1
+number
+sub          ;; [blocknum-1, slot]
+blockhash    ;; [h(N-1), slot]
+xor          ;; [slot ^ h(N-1)]
+
+;;; === Store result in memory[0..31] and return ===
+push 0
+mstore
+push 32
+push 0
+return
+
+;;; === fail: slot is 0 (should not happen post-genesis), revert ===
+fail:
+push 0
+push 0
+revert
