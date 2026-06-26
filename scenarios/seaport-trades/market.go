@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -13,7 +14,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 
-	"github.com/ethpandaops/spamoor/scenarios/seaport-trades/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
 )
@@ -63,6 +63,7 @@ type Market struct {
 	counter         *big.Int // market's Seaport counter (constant for the run)
 
 	mu           sync.Mutex
+	idBase       uint64                        // first tokenId this run mints (above any prior run's range)
 	marketNFTs   []*big.Int                    // tokenIds owned by the market, available to list
 	walletNFTs   map[common.Address][]*big.Int // tokenIds currently owned by each trader
 	coinBal      map[common.Address]*big.Int   // cached stablecoin balance per address
@@ -111,12 +112,14 @@ func (m *Market) childWallets() []*spamoor.Wallet {
 	return wallets
 }
 
-// tokenId layout: the market owns the contiguous range [0, MarketInventory) and
-// trader i owns [MarketInventory + i*WalletInventory, +WalletInventory). The
-// layout is deterministic so a fresh seed needs no read-back, and replenishment
-// mints continue past the end of the seeded range.
+// tokenId layout: the NFT collection is global (shared across runs), but each run
+// mints its own fresh id range starting at idBase (the chain's current high-water
+// mark), so runs never collide on token ids. Within the run the market owns
+// [idBase, idBase+MarketInventory) and trader i owns
+// [idBase+MarketInventory + i*WalletInventory, +WalletInventory). Replenishment
+// mints continue past the end of the run's seeded range.
 func (m *Market) walletBaseID(idx uint64) uint64 {
-	return m.options.MarketInventory + idx*m.options.WalletInventory
+	return m.idBase + m.options.MarketInventory + idx*m.options.WalletInventory
 }
 
 func (m *Market) seededTokenCount() uint64 {
@@ -143,21 +146,79 @@ func (m *Market) Seed(ctx context.Context) error {
 		return fmt.Errorf("could not read market counter: %w", err)
 	}
 	m.counter = counter
-	m.nextTokenID = m.seededTokenCount()
 
-	// Detect whether seeding already happened (restart) by probing the first
-	// market-owned tokenId.
-	seeded := false
-	if _, err := m.deployment.NFT.OwnerOf(&bind.CallOpts{Context: ctx}, big.NewInt(0)); err == nil {
-		seeded = true
+	// The NFT collection is global and may already hold tokens from earlier runs.
+	// Rather than reuse and reconcile that stale inventory, every run mints a fresh
+	// id range starting above the current high-water mark, so its token ids never
+	// collide with another run's.
+	highWater, err := m.findHighWaterMark(ctx)
+	if err != nil {
+		return fmt.Errorf("could not determine nft high-water mark: %w", err)
 	}
-
-	if seeded {
-		m.logger.Infof("seaport contracts already seeded, reconstructing inventory from chain")
-		return m.reconstructInventory(ctx)
+	m.idBase = highWater
+	m.nextTokenID = m.idBase + m.seededTokenCount()
+	if highWater > 0 {
+		m.logger.Infof("nft collection already holds %d tokens, minting fresh range starting at id %d", highWater, m.idBase)
 	}
 
 	return m.seedFresh(ctx, client)
+}
+
+// findHighWaterMark returns the number of tokens already minted in the global NFT
+// collection (the first tokenId whose owner read reverts). Minting is contiguous
+// from id 0 across runs, so this is found with an exponential probe followed by a
+// binary search - O(log n) reads rather than scanning every id.
+func (m *Market) findHighWaterMark(ctx context.Context) (uint64, error) {
+	exists := func(id uint64) (bool, error) {
+		_, err := m.deployment.NFT.OwnerOf(&bind.CallOpts{Context: ctx}, new(big.Int).SetUint64(id))
+		if err == nil {
+			return true, nil
+		}
+		if isNonexistentToken(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	if ok, err := exists(0); err != nil {
+		return 0, err
+	} else if !ok {
+		return 0, nil
+	}
+
+	// exponential search for an upper bound that does not exist
+	lo, hi := uint64(0), uint64(1)
+	for {
+		ok, err := exists(hi)
+		if err != nil {
+			return 0, err
+		}
+		if !ok {
+			break
+		}
+		lo = hi
+		hi *= 2
+	}
+	// binary search in (lo, hi]: lo exists, hi does not
+	for hi-lo > 1 {
+		mid := lo + (hi-lo)/2
+		ok, err := exists(mid)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return hi, nil
+}
+
+// isNonexistentToken reports whether an ownerOf error is the expected
+// "nonexistent token" revert (as opposed to an RPC/transport error).
+func isNonexistentToken(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "nonexistent token")
 }
 
 // seedFresh mints inventories + balances and sets approvals across the market and
@@ -176,12 +237,12 @@ func (m *Market) seedFresh(ctx context.Context, client *spamoor.Client) error {
 	walletTxs := make(map[*spamoor.Wallet][]*types.Transaction)
 
 	// Market wallet: mint its listing inventory + a large coin float, then approve.
-	marketTxs, err := m.buildSeedTxs(ctx, m.marketWallet, 0, m.options.MarketInventory, marketCoinSeed, feeCap, tipCap)
+	marketTxs, err := m.buildSeedTxs(ctx, m.marketWallet, m.idBase, m.options.MarketInventory, marketCoinSeed, feeCap, tipCap)
 	if err != nil {
 		return err
 	}
 	walletTxs[m.marketWallet] = marketTxs
-	m.marketNFTs = idRange(0, m.options.MarketInventory)
+	m.marketNFTs = idRange(m.idBase, m.options.MarketInventory)
 	m.coinBal[m.marketAddr] = new(big.Int).Set(marketCoinSeed)
 
 	// Each trader (child) wallet self-mints its own NFT range + coin float, then
@@ -268,93 +329,6 @@ func (m *Market) buildSeedTxs(ctx context.Context, wallet *spamoor.Wallet, start
 		return nil, fmt.Errorf("could not build coin approve for %s: %w", wallet.GetAddress().Hex(), err)
 	}
 	return txs, nil
-}
-
-// reconstructInventory rebuilds the in-memory NFT ownership and coin balance
-// caches from chain after a restart, by reading the current owner of every
-// seeded tokenId and each participant's coin balance. Reads are fanned out
-// across clients to keep restart latency bounded.
-func (m *Market) reconstructInventory(ctx context.Context) error {
-	total := m.seededTokenCount()
-	owners := make([]common.Address, total)
-
-	sem := make(chan struct{}, m.setupConcurrency())
-	var wg sync.WaitGroup
-	for id := uint64(0); id < total; id++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		wg.Add(1)
-		go func(id uint64) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				return
-			}
-			rclient := m.walletPool.GetClient(
-				spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(id)),
-				spamoor.WithClientGroup(m.options.ClientGroup),
-				spamoor.WithoutBuilder(),
-			)
-			if rclient == nil {
-				return
-			}
-			nft, err := contract.NewMintableNFT(m.deployment.NFTAddr, rclient.GetEthClient())
-			if err != nil {
-				m.logger.Errorf("could not bind NFT for readback: %v", err)
-				return
-			}
-			owner, err := nft.OwnerOf(&bind.CallOpts{Context: ctx}, new(big.Int).SetUint64(id))
-			if err != nil {
-				m.logger.Errorf("could not read owner of token %d: %v", id, err)
-				return
-			}
-			owners[id] = owner
-		}(id)
-	}
-	wg.Wait()
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-
-	for id := uint64(0); id < total; id++ {
-		owner := owners[id]
-		if owner == (common.Address{}) {
-			continue
-		}
-		if owner == m.marketAddr {
-			m.marketNFTs = append(m.marketNFTs, new(big.Int).SetUint64(id))
-		} else {
-			m.walletNFTs[owner] = append(m.walletNFTs[owner], new(big.Int).SetUint64(id))
-		}
-	}
-
-	// Coin balances for the market and all trader (child) wallets.
-	m.coinBal[m.marketAddr] = m.readCoinBalance(ctx, m.marketAddr)
-	for _, wallet := range m.childWallets() {
-		m.coinBal[wallet.GetAddress()] = m.readCoinBalance(ctx, wallet.GetAddress())
-	}
-
-	m.logger.Infof("reconstructed inventory: market holds %d nfts", len(m.marketNFTs))
-	return nil
-}
-
-func (m *Market) readCoinBalance(ctx context.Context, owner common.Address) *big.Int {
-	bal, err := m.deployment.Coin.BalanceOf(&bind.CallOpts{Context: ctx}, owner)
-	if err != nil {
-		m.logger.Errorf("could not read coin balance of %s: %v", owner.Hex(), err)
-		return big.NewInt(0)
-	}
-	return bal
-}
-
-// setupConcurrency bounds the parallel per-id RPC fan-out used during restart
-// reconstruction, sized to the healthy client count.
-func (m *Market) setupConcurrency() int {
-	n := len(m.walletPool.GetClientPool().GetAllGoodClients())
-	return min(max(n, 1), 50)
 }
 
 // coinSeedAmount returns the per-trader starting stablecoin balance: enough to

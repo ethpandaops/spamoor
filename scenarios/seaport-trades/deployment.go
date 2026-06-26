@@ -90,6 +90,28 @@ func (s *Scenario) DeployContracts(ctx context.Context) (*DeploymentInfo, error)
 		return nil, fmt.Errorf("could not deploy ConduitController: %w", err)
 	}
 
+	// Deploy (and await) the ConduitController before building the Seaport
+	// deploy: Seaport's constructor reads the conduit code hashes from the
+	// controller, so its deploy gas can only be estimated once the controller
+	// exists on-chain. Without this the estimate reverts and the deployment
+	// factory falls back to a large upper-bound gas (~44M for Seaport's 25KB
+	// creation code under Amsterdam) instead of the real ~36.5M, which can
+	// exceed an immature devnet's still-ramping block gas limit.
+	if len(deploymentTxs) > 0 {
+		if _, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, deployerWallet, deploymentTxs, &spamoor.BatchOptions{
+			SendTransactionOptions: spamoor.SendTransactionOptions{
+				Client:      client,
+				ClientGroup: s.options.ClientGroup,
+			},
+			MaxRetries:   3,
+			PendingLimit: 10,
+		}); err != nil {
+			return nil, fmt.Errorf("could not deploy ConduitController: %w", err)
+		}
+		s.logger.Infof("deployed ConduitController")
+		deploymentTxs = deploymentTxs[:0]
+	}
+
 	info.SeaportAddr, err = deploy(contract.SeaportMetaData, info.ConduitControllerAddr)
 	if err != nil {
 		return nil, fmt.Errorf("could not deploy Seaport: %w", err)
