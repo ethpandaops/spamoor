@@ -78,29 +78,25 @@ deploy_client_group: ""
 log_txs: false
 ', 0, 0, '{}'),
 
--- Blob Transaction Spammer
-(3, 'blob-combined', 'Blob Transaction Spammer', '3 type-4 blob transactions per block with 1-2 blobs', '# wallet settings
-seed: blob-combined-3 # seed for the wallet
+-- Blob Average Spammer
+(3, 'blob-average', 'Blob Average Spammer', 'Maintains a steady average of ~3 blobs per block', '# wallet settings
+seed: blob-average-3 # seed for the wallet
 refill_amount: 2000000000000000000 # refill 2 ETH when
 refill_balance: 1000000000000000000 # balance drops below 1 ETH
 refill_interval: 600 # check every 10 minutes
 
-# scenario: blob-combined
-total_count: 0
-throughput: 3
-sidecars: 2
-max_pending: 6
+# scenario: blob-average
+target_average: 3
+tracking_seconds: 3600
+sidecars: 1
+max_pending: 10
 max_wallets: 10
-replace: 30
-max_replacements: 4
 rebroadcast: 1
 base_fee: 20
 tip_fee: 2
 blob_fee: 20
 blob_v1_percent: 100
-fulu_activation: 9223372036854775807
-throughput_increment_interval: 0
-timeout: ""
+fulu_activation: 0
 client_group: ""
 log_txs: false
 ', 0, 0, '{}'),

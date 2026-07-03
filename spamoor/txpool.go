@@ -309,9 +309,9 @@ func (pool *TxPool) GetRegisteredWallet(address common.Address) *Wallet {
 // sequentially. Also triggers stale transaction processing when new blocks arrive.
 // Runs until the context is cancelled and recovers from panics with logging.
 func (pool *TxPool) runTxPoolLoop() {
-	defer func() {
-		utils.RecoverPanic(pool.options.Logger, "TxPool.runTxPoolLoop", pool.runTxPoolLoop)
-	}()
+	// recover only stops an unwinding panic when the recovering function is
+	// deferred directly, so utils.RecoverPanic must not be wrapped in a closure.
+	defer utils.RecoverPanic(pool.options.Logger, "TxPool.runTxPoolLoop", pool.runTxPoolLoop)
 
 	if pool.options.ExternalBlockSource != nil {
 		pool.runExternalBlockSourceLoop()
@@ -364,9 +364,9 @@ func (pool *TxPool) runTxPoolLoop() {
 }
 
 func (pool *TxPool) runExternalBlockSourceLoop() {
-	defer func() {
-		utils.RecoverPanic(pool.options.Logger, "TxPool.runExternalBlockSourceLoop", pool.runExternalBlockSourceLoop)
-	}()
+	// recover only stops an unwinding panic when the recovering function is
+	// deferred directly, so utils.RecoverPanic must not be wrapped in a closure.
+	defer utils.RecoverPanic(pool.options.Logger, "TxPool.runExternalBlockSourceLoop", pool.runExternalBlockSourceLoop)
 
 	blockChan := pool.options.ExternalBlockSource.SubscribeBlocks(pool.options.Context, 10)
 	highestBlockNumber := uint64(0)
@@ -421,9 +421,9 @@ func (pool *TxPool) runExternalBlockSourceLoop() {
 // It listens for block number updates and processes stale confirmations for all
 // active wallets. Runs until the context is cancelled and recovers from panics.
 func (pool *TxPool) processStaleTransactionsLoop() {
-	defer func() {
-		utils.RecoverPanic(pool.options.Logger, "TxPool.processStaleTransactionsLoop", pool.processStaleTransactionsLoop)
-	}()
+	// recover only stops an unwinding panic when the recovering function is
+	// deferred directly, so utils.RecoverPanic must not be wrapped in a closure.
+	defer utils.RecoverPanic(pool.options.Logger, "TxPool.processStaleTransactionsLoop", pool.processStaleTransactionsLoop)
 
 	for {
 		select {
@@ -1734,13 +1734,15 @@ func (pool *TxPool) tryInitBlockStats(ctx context.Context) error {
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	latestBlock, err := client.client.BlockByNumber(fetchCtx, nil)
+	// Header-only: a full block decode fails on chains with custom tx types
+	// go-ethereum can't decode, and we only need the gas limit and base fee.
+	latestHeader, err := client.client.HeaderByNumber(fetchCtx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to fetch latest block for gas limit: %w", err)
+		return fmt.Errorf("failed to fetch latest header for gas limit: %w", err)
 	}
 
-	pool.currentGasLimit = latestBlock.GasLimit()
-	pool.currentBaseFee = latestBlock.BaseFee()
+	pool.currentGasLimit = latestHeader.GasLimit
+	pool.currentBaseFee = latestHeader.BaseFee
 	logrus.Infof("initialized block stats from latest block: gasLimit=%v baseFee=%v amsterdamFeeModel=%v",
 		pool.currentGasLimit, pool.currentBaseFee, !pool.preAmsterdamFeeModel)
 
