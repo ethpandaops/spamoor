@@ -253,8 +253,6 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 
 		go func(txIdx uint64, state *txState) {
 			defer func() {
-				utils.RecoverPanic(options.Logger, "scenario.processNextTxFn", nil)
-
 				// Mark transaction as done
 				txStatesMutex.Lock()
 				state.done = true
@@ -272,6 +270,12 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 					pendingCond.Signal()
 				}
 			}()
+
+			// recover only stops an unwinding panic when the recovering function
+			// is deferred directly, so this must not be moved into the teardown
+			// closure above. Deferred last, it runs first and recovers before the
+			// teardown executes.
+			defer utils.RecoverPanic(options.Logger, "scenario.processNextTxFn", nil)
 
 			params := &ProcessNextTxParams{
 				TxIdx: txIdx,
