@@ -297,13 +297,18 @@ outer:
 
 			go func(txIdx uint64, blobsInTx int64) {
 				defer func() {
-					utils.RecoverPanic(s.logger, "blobaverage.sendBlobTx", nil)
 					pendingWg.Done()
 					pendingCount.Add(-1)
 					if pendingCond != nil {
 						pendingCond.Signal()
 					}
 				}()
+
+				// recover only stops an unwinding panic when the recovering function
+				// is deferred directly, so this must not be moved into the teardown
+				// closure above. Deferred last, it runs first and recovers before the
+				// teardown executes.
+				defer utils.RecoverPanic(s.logger, "blobaverage.sendBlobTx", nil)
 
 				receiptChan, tx, client, wallet, txVersion, err := s.sendBlobTx(ctx, txIdx)
 				logger := s.logger
