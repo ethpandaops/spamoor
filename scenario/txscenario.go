@@ -128,7 +128,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	}
 	limiter := rate.NewLimiter(initialRate, 1)
 
-	isErrorMode := false
+	isErrorMode := atomic.Bool{}
 	errorLimiter := rate.NewLimiter(rate.Limit(0.5), 1) // 2 sec interval when in error mode
 
 	// Subscribe to block updates for stats reporting
@@ -211,7 +211,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			continue
 		}
 
-		if isErrorMode {
+		if isErrorMode.Load() {
 			if err := errorLimiter.Wait(ctx); err != nil {
 				if ctx.Err() != nil {
 					break
@@ -313,9 +313,9 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			}
 
 			if err == ErrNoClients {
-				isErrorMode = true
-			} else if isErrorMode {
-				isErrorMode = false
+				isErrorMode.Store(true)
+			} else {
+				isErrorMode.CompareAndSwap(true, false)
 			}
 		}(txIdx, state)
 
