@@ -201,9 +201,11 @@ func (mc *TxPoolMetricsCollector) processBlockForWindow(
 	mc.logger.Tracef("Processed block %d for window (granularity %d): total_gas=%d, spammer_gas=%d, others_gas=%d",
 		blockNumber, window.blockGranularity, totalGasUsed, totalSpammerGas, othersGasUsed)
 
-	// Return the data point only for short window (granularity 1)
+	// Return the data point only for short window (granularity 1). Hand back a
+	// copy so subscribers do not read the live map the collector keeps mutating.
 	if window.blockGranularity == 1 {
-		return updatedDataPoint
+		dataPointCopy := updatedDataPoint.copy()
+		return &dataPointCopy
 	}
 	return nil
 }
@@ -343,13 +345,37 @@ func (mc *TxPoolMetricsCollector) GetLongWindowMetrics() *MultiGranularityMetric
 	return mc.longWindow
 }
 
-// GetDataPoints returns a copy of data points for a specific window
+// copy returns a deep copy of the data point. The SpammerGasData map is copied
+// so callers can keep reading the result after releasing the window lock without
+// racing the collector, which keeps mutating the live map as new blocks are
+// aggregated into the current data point.
+func (p *BlockDataPoint) copy() BlockDataPoint {
+	result := *p
+	if p.SpammerGasData != nil {
+		result.SpammerGasData = make(map[uint64]*SpammerBlockData, len(p.SpammerGasData))
+		for id, data := range p.SpammerGasData {
+			if data == nil {
+				result.SpammerGasData[id] = nil
+				continue
+			}
+			dataCopy := *data
+			result.SpammerGasData[id] = &dataCopy
+		}
+	}
+	return result
+}
+
+// GetDataPoints returns a deep copy of data points for a specific window.
+// The nested maps are copied so the returned data is safe to read without
+// holding the window lock.
 func (mgm *MultiGranularityMetrics) GetDataPoints() []BlockDataPoint {
 	mgm.mutex.RLock()
 	defer mgm.mutex.RUnlock()
 
 	result := make([]BlockDataPoint, len(mgm.dataPoints))
-	copy(result, mgm.dataPoints)
+	for i := range mgm.dataPoints {
+		result[i] = mgm.dataPoints[i].copy()
+	}
 	return result
 }
 

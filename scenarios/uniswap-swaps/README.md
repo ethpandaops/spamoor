@@ -35,6 +35,8 @@ spamoor uniswap-swaps [flags]
 - `--max-swap` - Maximum swap amount in wei (default: 1000000000000000000000)
 - `--buy-ratio` - Ratio of buy vs sell swaps (0-100, default: 50)
 - `--slippage` - Slippage tolerance in basis points (default: 50)
+- `--slippage-min` - Min per-trade slippage in basis points; 0 disables and uses the fixed `--slippage` (default: 0)
+- `--slippage-max` - Max per-trade slippage in basis points; when greater than `--slippage-min`, each trade draws a uniform-random tolerance in `[min, max]` (default: 0)
 - `--sell-threshold` - DAI balance threshold to force sell in wei (default: 100000000000000000000000)
 
 ### Wallet Management

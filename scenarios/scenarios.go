@@ -35,6 +35,8 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/storagerefundtx"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
 	"github.com/ethpandaops/spamoor/scenarios/taskrunner"
+	txfuzz "github.com/ethpandaops/spamoor/scenarios/tx-fuzz"
+	txfuzzinvalid "github.com/ethpandaops/spamoor/scenarios/tx-fuzz-invalid"
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 	"github.com/ethpandaops/spamoor/scenarios/xentoken"
@@ -67,6 +69,8 @@ var nativeScenarioCategories = []*scenario.Category{
 			&seaporttrades.ScenarioDescriptor,
 			&setcodetx.ScenarioDescriptor,
 			&storagerefundtx.ScenarioDescriptor,
+			&txfuzz.ScenarioDescriptor,
+			&txfuzzinvalid.ScenarioDescriptor,
 			&uniswapswaps.ScenarioDescriptor,
 			&xentoken.ScenarioDescriptor,
 		},
