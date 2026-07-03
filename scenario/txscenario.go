@@ -84,11 +84,9 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	txStatesMutex := sync.Mutex{}
 	nextLogIdx := uint64(0)
 
-	// Helper function to process pending logs in order
+	// Helper function to process pending logs in order.
+	// The caller must hold txStatesMutex.
 	processPendingLogs := func() {
-		txStatesMutex.Lock()
-		defer txStatesMutex.Unlock()
-
 		for {
 			state, exists := txStates[nextLogIdx]
 			if !exists || !state.submitted {
@@ -258,6 +256,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 				utils.RecoverPanic(options.Logger, "scenario.processNextTxFn", nil)
 
 				// Mark transaction as done
+				txStatesMutex.Lock()
 				state.done = true
 
 				// If not submitted yet, mark as submitted to unblock logging
@@ -265,6 +264,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 					state.submitted = true
 					processPendingLogs()
 				}
+				txStatesMutex.Unlock()
 
 				pendingWg.Done()
 				pendingCount.Add(-1)
@@ -276,6 +276,9 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			params := &ProcessNextTxParams{
 				TxIdx: txIdx,
 				NotifySubmitted: func() {
+					txStatesMutex.Lock()
+					defer txStatesMutex.Unlock()
+
 					if state.submitted {
 						return
 					}
@@ -284,18 +287,28 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 					processPendingLogs()
 				},
 				OrderedLogCb: func(logcb func()) {
-					// If already submitted, process logs immediately
+					txStatesMutex.Lock()
 					if state.submitted {
+						// Already submitted, so ordered logging has passed this
+						// transaction: run the callback immediately.
+						txStatesMutex.Unlock()
 						logcb()
-					} else {
-						state.logCb = append(state.logCb, logcb)
+
+						return
 					}
+
+					state.logCb = append(state.logCb, logcb)
+					txStatesMutex.Unlock()
 				},
 			}
 
 			err := options.ProcessNextTxFn(ctx, params)
 
-			if err != nil || state.submitted {
+			txStatesMutex.Lock()
+			submitted := state.submitted
+			txStatesMutex.Unlock()
+
+			if err != nil || submitted {
 				txCount.Add(1)
 			}
 
