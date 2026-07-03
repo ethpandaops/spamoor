@@ -15,11 +15,11 @@ func TestFlexibleJsonUInt64_JSON(t *testing.T) {
 		in   string
 		want FlexibleJsonUInt64
 	}{
-		{`123`, 123},          // bare int
-		{`"123"`, 123},        // quoted int
-		{`"null"`, sentinel},  // unset -> keep default
-		{`""`, sentinel},      // unset -> keep default
-		{`null`, sentinel},    // JSON null literal -> keep default
+		{`123`, 123},         // bare int
+		{`"123"`, 123},       // quoted int
+		{`"null"`, sentinel}, // unset -> keep default
+		{`""`, sentinel},     // unset -> keep default
+		{`null`, sentinel},   // JSON null literal -> keep default
 	}
 	for _, c := range cases {
 		v := sentinel
