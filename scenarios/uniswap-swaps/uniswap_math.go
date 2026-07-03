@@ -67,6 +67,19 @@ func getLiquidityForAmount1(sqrtA, sqrtB, amount1 *big.Int) *big.Int {
 	return new(big.Int).Div(num, new(big.Int).Sub(sqrtB, sqrtA))
 }
 
+// spotAmountOut returns the output amount implied by the pool's current
+// sqrtPriceX96 for an exact input swap, ignoring fee and price impact.
+// zeroForOne indicates the swap direction (token0 in, token1 out).
+func spotAmountOut(sqrtPriceX96, amountIn *big.Int, zeroForOne bool) *big.Int {
+	// priceX192 = sqrtPriceX96^2 is the token1/token0 price scaled by 2^192.
+	priceX192 := new(big.Int).Mul(sqrtPriceX96, sqrtPriceX96)
+	q192 := new(big.Int).Mul(q96, q96)
+	if zeroForOne {
+		return new(big.Int).Div(new(big.Int).Mul(amountIn, priceX192), q192)
+	}
+	return new(big.Int).Div(new(big.Int).Mul(amountIn, q192), priceX192)
+}
+
 // fullRangeLiquidityForWeth computes the full-range liquidity bounded by the
 // available WETH budget. DAI is minted on demand by the liquidity provider, so
 // only the WETH side constrains how much liquidity can be seeded. sqrtPriceX96

@@ -40,15 +40,9 @@ func (s *Scenario) buildV2SwapTx(ctx context.Context, wallet *spamoor.Wallet, fe
 	diff := new(big.Int).Sub(maxAmount, minAmount)
 	randomAmount := new(big.Int).Add(minAmount, new(big.Int).Rand(mathrand.New(mathrand.NewSource(time.Now().UnixNano())), diff))
 
-	// Per-trade slippage variance: when a [min,max] band is configured,
-	// draw a random tolerance for THIS trade so the victim population has
-	// varied slippage (some far juicier sandwich targets than others).
-	// Falls back to the fixed --slippage when slippage_max <= slippage_min.
-	slippage := s.options.Slippage
-	if s.options.SlippageMax > s.options.SlippageMin {
-		span := int64(s.options.SlippageMax-s.options.SlippageMin) + 1
-		slippage = s.options.SlippageMin + uint64(mathrand.Int63n(span))
-	}
+	// Per-trade slippage tolerance (fixed --slippage or a random draw from
+	// the configured [slippage_min, slippage_max] band).
+	slippage := s.perTradeSlippage()
 
 	// Get current token balance from cache
 	tokenBalance := s.uniswap.GetTokenBalance(wallet.GetAddress(), pair.DaiAddr)

@@ -3,6 +3,7 @@ package uniswapswaps
 import (
 	"context"
 	"fmt"
+	mathrand "math/rand"
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/types"
@@ -305,6 +306,24 @@ func (s *Scenario) Run(ctx context.Context) error {
 	})
 
 	return err
+}
+
+// perTradeSlippage returns the slippage tolerance in basis points for a single
+// trade. When a [slippage_min, slippage_max] band is configured
+// (slippage_max > slippage_min), each trade draws a uniform random tolerance
+// from the band so the generated victim population has varied slippage;
+// otherwise the fixed --slippage applies to every trade. The result is capped
+// at 10000 bps since larger values would produce a negative output floor.
+func (s *Scenario) perTradeSlippage() uint64 {
+	slippage := s.options.Slippage
+	if s.options.SlippageMax > s.options.SlippageMin {
+		span := int64(s.options.SlippageMax-s.options.SlippageMin) + 1
+		slippage = s.options.SlippageMin + uint64(mathrand.Int63n(span))
+	}
+	if slippage > 10000 {
+		slippage = 10000
+	}
+	return slippage
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
