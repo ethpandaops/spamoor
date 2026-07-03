@@ -12,6 +12,8 @@ func (f *FlexibleJsonUInt64) UnmarshalJSON(b []byte) error {
 	if len(b) == 0 {
 		// If the input data is empty, let's do nothing and throw an error
 		return fmt.Errorf("cannot unmarshal empty int")
+	} else if string(b) == "null" {
+		return nil
 	} else if b[0] == '"' {
 		// If the input data starts with a quote, let's process it like it were a string
 
@@ -20,6 +22,10 @@ func (f *FlexibleJsonUInt64) UnmarshalJSON(b []byte) error {
 		err := json.Unmarshal(b, &targetStr)
 		if err != nil {
 			return err
+		}
+
+		if targetStr == "" || targetStr == "null" {
+			return nil
 		}
 
 		// Now, let's parse the string and extract the int that's in it (or not)
@@ -49,6 +55,10 @@ func (f *FlexibleJsonUInt64) UnmarshalYAML(unmarshal func(interface{}) error) er
 	var targetStr string
 	if err := unmarshal(&targetStr); err != nil {
 		return err
+	}
+
+	if targetStr == "" || targetStr == "null" {
+		return nil
 	}
 
 	parsedInt, err := strconv.ParseUint(targetStr, 10, 64)
