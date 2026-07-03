@@ -84,11 +84,9 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	txStatesMutex := sync.Mutex{}
 	nextLogIdx := uint64(0)
 
-	// Helper function to process pending logs in order
+	// Helper function to process pending logs in order.
+	// The caller must hold txStatesMutex.
 	processPendingLogs := func() {
-		txStatesMutex.Lock()
-		defer txStatesMutex.Unlock()
-
 		for {
 			state, exists := txStates[nextLogIdx]
 			if !exists || !state.submitted {
@@ -103,10 +101,11 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 				state.logCb = nil
 			}
 
-			// Clean up if the transaction is done
-			if state.done {
-				delete(txStates, nextLogIdx)
-			}
+			// The transaction has been logged in order, so its state is no longer
+			// needed here. The worker goroutine keeps its own reference for the
+			// rest of its teardown, so removing it from the map does not affect
+			// in-flight work and keeps the map from growing with every transaction.
+			delete(txStates, nextLogIdx)
 
 			nextLogIdx++
 		}
@@ -129,7 +128,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	}
 	limiter := rate.NewLimiter(initialRate, 1)
 
-	isErrorMode := false
+	isErrorMode := atomic.Bool{}
 	errorLimiter := rate.NewLimiter(rate.Limit(0.5), 1) // 2 sec interval when in error mode
 
 	// Subscribe to block updates for stats reporting
@@ -212,7 +211,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			continue
 		}
 
-		if isErrorMode {
+		if isErrorMode.Load() {
 			if err := errorLimiter.Wait(ctx); err != nil {
 				if ctx.Err() != nil {
 					break
@@ -254,9 +253,8 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 
 		go func(txIdx uint64, state *txState) {
 			defer func() {
-				utils.RecoverPanic(options.Logger, "scenario.processNextTxFn", nil)
-
 				// Mark transaction as done
+				txStatesMutex.Lock()
 				state.done = true
 
 				// If not submitted yet, mark as submitted to unblock logging
@@ -264,6 +262,7 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 					state.submitted = true
 					processPendingLogs()
 				}
+				txStatesMutex.Unlock()
 
 				pendingWg.Done()
 				pendingCount.Add(-1)
@@ -272,9 +271,18 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 				}
 			}()
 
+			// recover only stops an unwinding panic when the recovering function
+			// is deferred directly, so this must not be moved into the teardown
+			// closure above. Deferred last, it runs first and recovers before the
+			// teardown executes.
+			defer utils.RecoverPanic(options.Logger, "scenario.processNextTxFn", nil)
+
 			params := &ProcessNextTxParams{
 				TxIdx: txIdx,
 				NotifySubmitted: func() {
+					txStatesMutex.Lock()
+					defer txStatesMutex.Unlock()
+
 					if state.submitted {
 						return
 					}
@@ -283,25 +291,35 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 					processPendingLogs()
 				},
 				OrderedLogCb: func(logcb func()) {
-					// If already submitted, process logs immediately
+					txStatesMutex.Lock()
 					if state.submitted {
+						// Already submitted, so ordered logging has passed this
+						// transaction: run the callback immediately.
+						txStatesMutex.Unlock()
 						logcb()
-					} else {
-						state.logCb = append(state.logCb, logcb)
+
+						return
 					}
+
+					state.logCb = append(state.logCb, logcb)
+					txStatesMutex.Unlock()
 				},
 			}
 
 			err := options.ProcessNextTxFn(ctx, params)
 
-			if err != nil || state.submitted {
+			txStatesMutex.Lock()
+			submitted := state.submitted
+			txStatesMutex.Unlock()
+
+			if err != nil || submitted {
 				txCount.Add(1)
 			}
 
 			if err == ErrNoClients {
-				isErrorMode = true
-			} else if isErrorMode {
-				isErrorMode = false
+				isErrorMode.Store(true)
+			} else {
+				isErrorMode.CompareAndSwap(true, false)
 			}
 		}(txIdx, state)
 
