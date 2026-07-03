@@ -103,10 +103,11 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 				state.logCb = nil
 			}
 
-			// Clean up if the transaction is done
-			if state.done {
-				delete(txStates, nextLogIdx)
-			}
+			// The transaction has been logged in order, so its state is no longer
+			// needed here. The worker goroutine keeps its own reference for the
+			// rest of its teardown, so removing it from the map does not affect
+			// in-flight work and keeps the map from growing with every transaction.
+			delete(txStates, nextLogIdx)
 
 			nextLogIdx++
 		}
