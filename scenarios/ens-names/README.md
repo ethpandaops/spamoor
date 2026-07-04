@@ -7,9 +7,9 @@ transfers, NameWrapper wrap/unwrap and short-lived churn registrations.
 
 A background **wallet naming service** (opt-out) additionally registers a
 forward + reverse resolving `.eth` name for every spamoor wallet on the host:
-the root wallet (`root-spamoor.eth`), this scenario's wallets and — in daemon
+the root wallet (`spamoor-root.eth`), this scenario's wallets and — in daemon
 mode — every other running spammer's wallets
-(`<name/index>-<scenario><spammerid>-spamoor.eth`).
+(`spamoor-<scenario><spammerid>-<name/index>.eth`).
 
 ## Usage
 
@@ -152,7 +152,8 @@ Every slot, the service polls the host wallet registry (all running spammers'
 wallet pools + root wallet in daemon mode; the own pool in CLI mode or `pool`
 mode) and names unnamed wallets via
 `SpamRegistrarController.registerNamed()` — one tx per wallet that registers
-`<label>.eth`, sets the forward `addr` record and the `addr.reverse` record.
+`spamoor-<scenario><spammerid>-<name/index>.eth` (`spamoor-root.eth` for the
+root wallet), sets the forward `addr` record and the `addr.reverse` record.
 All txs are sent from the scenario's `nameservice` wallet, so wallets of other
 scenarios are never touched (no nonce interference). On-chain reverse-record
 checks make restarts and concurrent naming services converge without

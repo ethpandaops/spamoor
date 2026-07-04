@@ -13,27 +13,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 
+	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios/ens-names/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
-)
-
-// Static per-action gas limits. State-creating ENS writes touch several fresh
-// storage slots each, so the budgets are sized for the Amsterdam fee model
-// (see the amsterdam static gas limit fixes in other scenarios).
-const (
-	gasCommit        = 250_000
-	gasRegister      = 900_000
-	gasRenew         = 250_000
-	gasRecordUpdate  = 350_000
-	gasTransfer      = 250_000
-	gasReclaim       = 250_000
-	gasAbandon       = 300_000
-	gasReverseUpdate = 350_000
-	gasApproveForAll = 250_000
-	gasWrap          = 700_000
-	gasUnwrap        = 500_000
-	gasChurnRegister = 500_000
 )
 
 // registerRetryLimit drops a committed name after this many failed register
@@ -43,6 +26,14 @@ const registerRetryLimit = 3
 // rentPriceBufferPercent is added on top of the rentPrice() quote; overpayment
 // is refunded by the controller.
 const rentPriceBufferPercent = 5
+
+// fillCommitChance is the percent chance a below-target wallet advances its
+// registration pipeline instead of doing maintenance on the names it already
+// owns. Below 100 so the fleet doesn't march in lockstep commit/register
+// waves during the initial fill (wallets are hit round-robin, so with an
+// unconditional pipeline-first rule every wallet commits in the same slot
+// window and registers in the next one, yielding long single-action phases).
+const fillCommitChance = 70
 
 // churn registration duration bounds (seconds): short enough that names
 // visibly expire during a run.
@@ -58,7 +49,7 @@ func noopResult(bool) {}
 // it advances the commit-reveal registration pipeline until the wallet owns
 // NamesPerWallet names, then performs weighted-random maintenance operations
 // on the owned names.
-func (s *Scenario) buildActionTx(ctx context.Context, wallet *spamoor.Wallet, walletIdx uint64, txIdx uint64, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+func (s *Scenario) buildActionTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, walletIdx uint64, txIdx uint64, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
 	state := s.getWalletState(wallet.GetAddress())
 	rng := rand.New(rand.NewSource(int64(txIdx)*0x9e3779b1 + int64(walletIdx) + 1))
 
@@ -76,29 +67,36 @@ func (s *Scenario) buildActionTx(ctx context.Context, wallet *spamoor.Wallet, wa
 			s.logger.Warnf("dropping name %s: commitment expired before registration", state.pending.label)
 			state.pending = nil
 		} else if s.commitmentMature(state.pending) {
-			return s.buildRegisterTx(ctx, wallet, state, feeCap, tipCap)
+			return s.buildRegisterTx(ctx, client, wallet, state, feeCap, tipCap)
 		}
 	}
 
 	if state.pending == nil && uint64(len(state.names)) < s.options.NamesPerWallet {
-		return s.buildCommitTx(ctx, wallet, state, walletIdx, feeCap, tipCap)
+		// with no names yet there is nothing to maintain; otherwise mix in
+		// maintenance on the existing names to de-synchronize the fill waves
+		if len(state.names) == 0 || rng.Intn(100) < fillCommitChance {
+			return s.buildCommitTx(ctx, client, wallet, state, walletIdx, feeCap, tipCap)
+		}
 	}
 
 	// reclaim received transfers before anything else so registry ownership
 	// catches up with the ERC721 ownership.
 	for _, name := range state.names {
 		if name.needReclaim && !name.inFlight {
-			return s.buildReclaimTx(ctx, wallet, state, name, feeCap, tipCap)
+			return s.buildReclaimTx(ctx, client, wallet, state, name, feeCap, tipCap)
 		}
 	}
 
-	return s.buildMaintenanceTx(ctx, wallet, state, walletIdx, rng, feeCap, tipCap)
+	return s.buildMaintenanceTx(ctx, client, wallet, state, walletIdx, rng, feeCap, tipCap)
 }
 
-// commitmentMature reports whether the commitment is old enough to reveal
-// (with a small margin over the local confirmation time).
+// commitmentMature reports whether the commitment is old enough to reveal.
+// A full slot of margin is added on top of the local confirmation time so
+// the latest mined block (which the register gas estimation runs against)
+// already considers the commitment mature.
 func (s *Scenario) commitmentMature(name *nameState) bool {
-	return time.Since(name.commitTime) > time.Duration(s.options.MinCommitmentAge)*time.Second+2*time.Second
+	minAge := time.Duration(s.options.MinCommitmentAge) * time.Second
+	return time.Since(name.commitTime) > minAge+scenario.GlobalSlotDuration+2*time.Second
 }
 
 // commitmentExpired reports whether the commitment aged past the controller's
@@ -111,7 +109,7 @@ func (s *Scenario) commitmentExpired(name *nameState) bool {
 // buildCommitTx starts the commit-reveal pipeline for a fresh name: it builds
 // the v1.7.0 Registration struct, pre-checks availability, computes the
 // commitment via the controller and submits commit().
-func (s *Scenario) buildCommitTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, walletIdx uint64, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+func (s *Scenario) buildCommitTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, walletIdx uint64, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
 	label := s.newLabel(state, walletIdx)
 
 	available, err := s.deployment.Controller.Available(&bind.CallOpts{Context: ctx}, label)
@@ -162,10 +160,9 @@ func (s *Scenario) buildCommitTx(ctx context.Context, wallet *spamoor.Wallet, st
 		return nil, nil, "", fmt.Errorf("could not compute commitment for %s: %w", label, err)
 	}
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasCommit,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.Controller.Commit(transactOpts, commitment)
@@ -194,7 +191,7 @@ func (s *Scenario) buildCommitTx(ctx context.Context, wallet *spamoor.Wallet, st
 }
 
 // buildRegisterTx reveals a mature commitment, paying the oracle rent price.
-func (s *Scenario) buildRegisterTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+func (s *Scenario) buildRegisterTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
 	name := state.pending
 
 	value, err := s.rentPriceWithBuffer(ctx, name.label, name.registration.Duration)
@@ -202,10 +199,9 @@ func (s *Scenario) buildRegisterTx(ctx context.Context, wallet *spamoor.Wallet, 
 		return nil, nil, "", err
 	}
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasRegister,
 		Value:     value,
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.Controller.Register(transactOpts, name.registration)
@@ -265,11 +261,10 @@ func (s *Scenario) retireOldestNames(state *walletState) {
 
 // buildReclaimTx updates the registry ownership of a name received via ERC721
 // transfer.
-func (s *Scenario) buildReclaimTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+func (s *Scenario) buildReclaimTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasReclaim,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.Base.Reclaim(transactOpts, new(big.Int).SetBytes(name.tokenID[:]), wallet.GetAddress())
@@ -303,7 +298,7 @@ type maintenanceOp struct {
 // wallet's names. Operations that are infeasible for the current state (no
 // unwrapped name to transfer, wrapper approval missing, ...) are excluded from
 // the draw; short-lived churn registrations are the always-feasible fallback.
-func (s *Scenario) buildMaintenanceTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, walletIdx uint64, rng *rand.Rand, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+func (s *Scenario) buildMaintenanceTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, walletIdx uint64, rng *rand.Rand, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
 	pickName := func(filter func(*nameState) bool) *nameState {
 		candidates := make([]*nameState, 0, len(state.names))
 		for _, name := range state.names {
@@ -327,14 +322,14 @@ func (s *Scenario) buildMaintenanceTx(ctx context.Context, wallet *spamoor.Walle
 	// from active management once the new one lands (opt-out with weight 0)
 	if s.options.RotationWeight > 0 && state.pending == nil {
 		ops = append(ops, maintenanceOp{s.options.RotationWeight, func() (*types.Transaction, func(success bool), string, error) {
-			return s.buildCommitTx(ctx, wallet, state, walletIdx, feeCap, tipCap)
+			return s.buildCommitTx(ctx, client, wallet, state, walletIdx, feeCap, tipCap)
 		}})
 	}
 
 	if s.options.RenewWeight > 0 {
 		if name := pickName(nil); name != nil {
 			ops = append(ops, maintenanceOp{s.options.RenewWeight, func() (*types.Transaction, func(success bool), string, error) {
-				return s.buildRenewTx(ctx, wallet, state, name, feeCap, tipCap)
+				return s.buildRenewTx(ctx, client, wallet, state, name, feeCap, tipCap)
 			}})
 		}
 	}
@@ -342,7 +337,7 @@ func (s *Scenario) buildMaintenanceTx(ctx context.Context, wallet *spamoor.Walle
 	if s.options.RecordUpdateWeight > 0 {
 		if name := pickName(nil); name != nil {
 			ops = append(ops, maintenanceOp{s.options.RecordUpdateWeight, func() (*types.Transaction, func(success bool), string, error) {
-				return s.buildRecordUpdateTx(ctx, wallet, state, name, rng, feeCap, tipCap)
+				return s.buildRecordUpdateTx(ctx, client, wallet, state, name, rng, feeCap, tipCap)
 			}})
 		}
 	}
@@ -350,7 +345,7 @@ func (s *Scenario) buildMaintenanceTx(ctx context.Context, wallet *spamoor.Walle
 	if s.options.TransferWeight > 0 && s.walletPool.GetWalletCount() > 1 {
 		if name := pickName(unwrapped); name != nil {
 			ops = append(ops, maintenanceOp{s.options.TransferWeight, func() (*types.Transaction, func(success bool), string, error) {
-				return s.buildTransferTx(ctx, wallet, state, name, walletIdx, rng, feeCap, tipCap)
+				return s.buildTransferTx(ctx, client, wallet, state, name, walletIdx, rng, feeCap, tipCap)
 			}})
 		}
 	}
@@ -358,7 +353,7 @@ func (s *Scenario) buildMaintenanceTx(ctx context.Context, wallet *spamoor.Walle
 	if s.options.AbandonWeight > 0 {
 		if name := pickName(unwrapped); name != nil {
 			ops = append(ops, maintenanceOp{s.options.AbandonWeight, func() (*types.Transaction, func(success bool), string, error) {
-				return s.buildAbandonTx(ctx, wallet, state, name, feeCap, tipCap)
+				return s.buildAbandonTx(ctx, client, wallet, state, name, feeCap, tipCap)
 			}})
 		}
 	}
@@ -366,7 +361,7 @@ func (s *Scenario) buildMaintenanceTx(ctx context.Context, wallet *spamoor.Walle
 	if s.options.ReverseWeight > 0 {
 		if name := pickName(nil); name != nil {
 			ops = append(ops, maintenanceOp{s.options.ReverseWeight, func() (*types.Transaction, func(success bool), string, error) {
-				return s.buildReverseUpdateTx(ctx, wallet, state, name, feeCap, tipCap)
+				return s.buildReverseUpdateTx(ctx, client, wallet, state, name, feeCap, tipCap)
 			}})
 		}
 	}
@@ -374,18 +369,18 @@ func (s *Scenario) buildMaintenanceTx(ctx context.Context, wallet *spamoor.Walle
 	if s.options.WrapWeight > 0 {
 		if !state.wrapperApproved && !state.approveInFlight {
 			ops = append(ops, maintenanceOp{s.options.WrapWeight, func() (*types.Transaction, func(success bool), string, error) {
-				return s.buildWrapperApprovalTx(ctx, wallet, state, feeCap, tipCap)
+				return s.buildWrapperApprovalTx(ctx, client, wallet, state, feeCap, tipCap)
 			}})
 		} else if state.wrapperApproved {
 			if name := pickName(unwrapped); name != nil {
 				ops = append(ops, maintenanceOp{s.options.WrapWeight, func() (*types.Transaction, func(success bool), string, error) {
-					return s.buildWrapTx(ctx, wallet, state, name, feeCap, tipCap)
+					return s.buildWrapTx(ctx, client, wallet, state, name, feeCap, tipCap)
 				}})
 			}
 		}
 		if name := pickName(wrapped); name != nil {
 			ops = append(ops, maintenanceOp{s.options.WrapWeight, func() (*types.Transaction, func(success bool), string, error) {
-				return s.buildUnwrapTx(ctx, wallet, state, name, feeCap, tipCap)
+				return s.buildUnwrapTx(ctx, client, wallet, state, name, feeCap, tipCap)
 			}})
 		}
 	}
@@ -396,7 +391,7 @@ func (s *Scenario) buildMaintenanceTx(ctx context.Context, wallet *spamoor.Walle
 			churnWeight = 1
 		}
 		ops = append(ops, maintenanceOp{churnWeight, func() (*types.Transaction, func(success bool), string, error) {
-			return s.buildChurnTx(ctx, wallet, state, walletIdx, rng, feeCap, tipCap)
+			return s.buildChurnTx(ctx, client, wallet, state, walletIdx, rng, feeCap, tipCap)
 		}})
 	}
 
@@ -418,7 +413,7 @@ func (s *Scenario) buildMaintenanceTx(ctx context.Context, wallet *spamoor.Walle
 
 // buildRenewTx extends a name's registration through the commit-reveal
 // controller (paying rent).
-func (s *Scenario) buildRenewTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+func (s *Scenario) buildRenewTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
 	duration := new(big.Int).SetUint64(s.options.RenewalDuration)
 
 	value, err := s.rentPriceWithBuffer(ctx, name.label, duration)
@@ -426,10 +421,9 @@ func (s *Scenario) buildRenewTx(ctx context.Context, wallet *spamoor.Wallet, sta
 		return nil, nil, "", err
 	}
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasRenew,
 		Value:     value,
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.Controller.Renew(transactOpts, name.label, duration, [32]byte{})
@@ -443,7 +437,7 @@ func (s *Scenario) buildRenewTx(ctx context.Context, wallet *spamoor.Wallet, sta
 
 // buildRecordUpdateTx updates the addr record and a text record of a name via
 // the resolver's multicall.
-func (s *Scenario) buildRecordUpdateTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, name *nameState, rng *rand.Rand, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+func (s *Scenario) buildRecordUpdateTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, name *nameState, rng *rand.Rand, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
 	textKeys := []string{"url", "avatar", "description", "com.github"}
 	key := textKeys[rng.Intn(len(textKeys))]
 
@@ -456,10 +450,9 @@ func (s *Scenario) buildRecordUpdateTx(ctx context.Context, wallet *spamoor.Wall
 		return nil, nil, "", err
 	}
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasRecordUpdate,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.Resolver.MulticallWithNodeCheck(transactOpts, name.node, [][]byte{setAddrData, setTextData})
@@ -474,7 +467,7 @@ func (s *Scenario) buildRecordUpdateTx(ctx context.Context, wallet *spamoor.Wall
 // buildTransferTx hands a name's ERC721 registration to a sibling child
 // wallet; the receiver reclaims the registry ownership as its own follow-up
 // action.
-func (s *Scenario) buildTransferTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, name *nameState, walletIdx uint64, rng *rand.Rand, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+func (s *Scenario) buildTransferTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, name *nameState, walletIdx uint64, rng *rand.Rand, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
 	walletCount := s.walletPool.GetWalletCount()
 	targetIdx := (walletIdx + 1 + uint64(rng.Intn(int(walletCount-1)))) % walletCount
 	target := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(targetIdx))
@@ -483,10 +476,9 @@ func (s *Scenario) buildTransferTx(ctx context.Context, wallet *spamoor.Wallet, 
 	}
 	targetAddr := target.GetAddress()
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasTransfer,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.Base.TransferFrom(transactOpts, wallet.GetAddress(), targetAddr, new(big.Int).SetBytes(name.tokenID[:]))
@@ -526,11 +518,10 @@ func (s *Scenario) buildTransferTx(ctx context.Context, wallet *spamoor.Wallet, 
 
 // buildAbandonTx gives up a name by zeroing its registry owner (the closest
 // thing ENS has to unregistration); the wallet re-registers a fresh name later.
-func (s *Scenario) buildAbandonTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+func (s *Scenario) buildAbandonTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasAbandon,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.Registry.SetOwner(transactOpts, name.node, common.Address{})
@@ -562,11 +553,10 @@ func (s *Scenario) buildAbandonTx(ctx context.Context, wallet *spamoor.Wallet, s
 // buildReverseUpdateTx re-points the wallet's default (chain-agnostic) reverse
 // record to one of its names. The addr.reverse record is left to the wallet
 // naming service.
-func (s *Scenario) buildReverseUpdateTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+func (s *Scenario) buildReverseUpdateTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasReverseUpdate,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.DefaultReverse.SetName(transactOpts, name.label+".eth")
@@ -580,11 +570,10 @@ func (s *Scenario) buildReverseUpdateTx(ctx context.Context, wallet *spamoor.Wal
 
 // buildWrapperApprovalTx performs the one-time base registrar approval the
 // NameWrapper needs before names can be wrapped.
-func (s *Scenario) buildWrapperApprovalTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+func (s *Scenario) buildWrapperApprovalTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasApproveForAll,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.Base.SetApprovalForAll(transactOpts, s.deployment.WrapperAddr, true)
@@ -609,11 +598,10 @@ func (s *Scenario) buildWrapperApprovalTx(ctx context.Context, wallet *spamoor.W
 }
 
 // buildWrapTx wraps a name into the NameWrapper (ERC721 -> ERC1155).
-func (s *Scenario) buildWrapTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+func (s *Scenario) buildWrapTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasWrap,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.Wrapper.WrapETH2LD(transactOpts, name.label, wallet.GetAddress(), 0, s.deployment.ResolverAddr)
@@ -627,11 +615,10 @@ func (s *Scenario) buildWrapTx(ctx context.Context, wallet *spamoor.Wallet, stat
 }
 
 // buildUnwrapTx unwraps a wrapped name back to a plain ERC721 registration.
-func (s *Scenario) buildUnwrapTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+func (s *Scenario) buildUnwrapTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, name *nameState, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasUnwrap,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.Wrapper.UnwrapETH2LD(transactOpts, name.tokenID, wallet.GetAddress(), wallet.GetAddress())
@@ -647,14 +634,13 @@ func (s *Scenario) buildUnwrapTx(ctx context.Context, wallet *spamoor.Wallet, st
 // buildChurnTx registers a short-lived name through the permissionless
 // SpamRegistrarController (no commit-reveal, no minimum duration), so name
 // expiry is observable within a run. Churn names are fire-and-forget.
-func (s *Scenario) buildChurnTx(ctx context.Context, wallet *spamoor.Wallet, state *walletState, walletIdx uint64, rng *rand.Rand, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
+func (s *Scenario) buildChurnTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, state *walletState, walletIdx uint64, rng *rand.Rand, feeCap, tipCap *big.Int) (*types.Transaction, func(success bool), string, error) {
 	label := s.newChurnLabel(state, walletIdx)
 	duration := churnMinDuration + rng.Int63n(churnMaxDuration-churnMinDuration)
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       gasChurnRegister,
 		Value:     uint256.NewInt(0),
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return s.deployment.SpamController.Register(transactOpts, label, wallet.GetAddress(), big.NewInt(duration))

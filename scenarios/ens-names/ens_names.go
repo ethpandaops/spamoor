@@ -347,7 +347,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	}
 
 	walletIdx := txIdx % s.walletPool.GetWalletCount()
-	tx, onResult, desc, err := s.buildActionTx(ctx, wallet, walletIdx, txIdx, feeCap, tipCap)
+	tx, onResult, desc, err := s.buildActionTx(ctx, client, wallet, walletIdx, txIdx, feeCap, tipCap)
 	if err != nil {
 		return nil, nil, client, wallet, "", err
 	}

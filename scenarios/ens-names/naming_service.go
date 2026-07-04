@@ -18,13 +18,6 @@ import (
 	"github.com/ethpandaops/spamoor/txbuilder"
 )
 
-// gasRegisterNamed is the static gas budget of SpamRegistrarController.
-// registerNamed (base register + resolver wiring + forward addr + reverse
-// record in one tx - ~9 fresh storage slots; measured ~1.1M on an Amsterdam
-// devnet, plus headroom for long labels whose reverse name string spans
-// multiple slots).
-const gasRegisterNamed = 1_600_000
-
 // namingRetryLimit gives up naming an address after this many reverted
 // attempts (e.g. persistent races with another naming service instance).
 const namingRetryLimit = 3
@@ -107,10 +100,12 @@ func (s *Scenario) namingServiceTick(ctx context.Context, nameSvcWallet *spamoor
 		addr := candidate.addr
 		label := candidate.label
 
-		tx, err := nameSvcWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		// Gas is estimated per tx: ENS registrations create lots of fresh state
+		// and the chain's EIP-8037 cost-per-state-byte moves over time, so any
+		// static budget would eventually run out of gas.
+		tx, err := nameSvcWallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       gasRegisterNamed,
 			Value:     uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			return s.deployment.SpamController.RegisterNamed(transactOpts, label, addr, big.NewInt(namingWalletDuration))
@@ -226,12 +221,12 @@ func (s *Scenario) collectWalletInfos() []*spamoor.WalletInfo {
 }
 
 // walletEnsLabel derives the ENS label for a wallet:
-// root wallet         -> root-spamoor
-// daemon mode wallets -> <name/index>-<scenario><spammerid>-spamoor
-// CLI mode wallets    -> <name/index>-<scenario>-spamoor
+// root wallet         -> spamoor-root
+// daemon mode wallets -> spamoor-<scenario><spammerid>-<name/index>
+// CLI mode wallets    -> spamoor-<scenario>-<name/index>
 func (s *Scenario) walletEnsLabel(info *spamoor.WalletInfo) string {
 	if info.Name == "root" && info.Scenario == "" {
-		return "root-spamoor"
+		return "spamoor-root"
 	}
 
 	scenarioName := info.Scenario
@@ -240,10 +235,10 @@ func (s *Scenario) walletEnsLabel(info *spamoor.WalletInfo) string {
 	}
 
 	if info.SpammerID != 0 {
-		return fmt.Sprintf("%s-%s%d-spamoor", info.Name, scenarioName, info.SpammerID)
+		return fmt.Sprintf("spamoor-%s%d-%s", scenarioName, info.SpammerID, info.Name)
 	}
 
-	return fmt.Sprintf("%s-%s-spamoor", info.Name, scenarioName)
+	return fmt.Sprintf("spamoor-%s-%s", scenarioName, info.Name)
 }
 
 // addrReverseNode2LD returns the registry node of <addr>.addr.reverse (the
