@@ -74,6 +74,8 @@ func init() {
 		"TxPool":                 reflect.ValueOf((*spamoor.TxPool)(nil)),
 		"TxPoolOptions":          reflect.ValueOf((*spamoor.TxPoolOptions)(nil)),
 		"Wallet":                 reflect.ValueOf((*spamoor.Wallet)(nil)),
+		"WalletInfo":             reflect.ValueOf((*spamoor.WalletInfo)(nil)),
+		"WalletInfoProvider":     reflect.ValueOf((*spamoor.WalletInfoProvider)(nil)),
 		"WalletPool":             reflect.ValueOf((*spamoor.WalletPool)(nil)),
 		"WalletPoolBlockStats":   reflect.ValueOf((*spamoor.WalletPoolBlockStats)(nil)),
 		"WalletPoolConfig":       reflect.ValueOf((*spamoor.WalletPoolConfig)(nil)),
