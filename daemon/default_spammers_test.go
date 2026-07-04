@@ -90,9 +90,19 @@ func TestImportDefaultSpammers(t *testing.T) {
 	}
 
 	d := NewDaemon(context.Background(), logger, nil, nil, database)
+	d.SetAuditLogger(NewAuditLogger(d, "", "user"))
 
 	if err := d.ImportDefaultSpammers(nil, logger); err != nil {
 		t.Fatalf("failed to import default spammers: %v", err)
+	}
+
+	// The defaults insertion is a system bootstrap and must not appear in the audit log.
+	var auditCount int
+	if err := database.ReaderDb.Get(&auditCount, "SELECT COUNT(*) FROM audit_logs"); err != nil {
+		t.Fatalf("failed to count audit logs: %v", err)
+	}
+	if auditCount != 0 {
+		t.Errorf("default spammer import wrote %d audit log entries, expected none", auditCount)
 	}
 
 	defaultConfigs, err := LoadDefaultSpammerConfigs()

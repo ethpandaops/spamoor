@@ -61,7 +61,8 @@ func LoadDefaultSpammerConfigs() ([]DefaultSpammerConfig, error) {
 // the database. All defaults are created paused; the ones listed in autoStart (matched
 // by their technical key, falling back to their display name) are started afterwards.
 // Intended to be called once on the daemon's first launch, after the spammer state has
-// been restored.
+// been restored. The insertion is a system bootstrap, not a user action, so it is
+// excluded from the audit log (empty user).
 func (d *Daemon) ImportDefaultSpammers(autoStart []string, logger logrus.FieldLogger) error {
 	defaultConfigs, err := LoadDefaultSpammerConfigs()
 	if err != nil {
@@ -73,7 +74,7 @@ func (d *Daemon) ImportDefaultSpammers(autoStart []string, logger logrus.FieldLo
 		importConfigs = append(importConfigs, cfg.SpammerConfig)
 	}
 
-	result, err := d.importSpammerConfigs(importConfigs, "system", d.computeDefaultSpammerIDs(defaultConfigs))
+	result, err := d.importSpammerConfigs(importConfigs, "", d.computeDefaultSpammerIDs(defaultConfigs))
 	if err != nil {
 		return fmt.Errorf("failed to import default spammers: %w", err)
 	}
