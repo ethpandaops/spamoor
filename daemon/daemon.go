@@ -178,6 +178,37 @@ func (d *Daemon) GetAllSpammers() []*Spammer {
 	return spammerList
 }
 
+// GetWalletInfos is the daemon's spamoor.WalletInfoProvider implementation:
+// it enumerates the root wallet plus all wallets of all spammers' wallet
+// pools, so cross-cutting scenarios (e.g. the ens-names wallet naming
+// service) can discover every spamoor-managed wallet with its
+// scenario/spammer context.
+func (d *Daemon) GetWalletInfos() []*spamoor.WalletInfo {
+	spammers := d.GetAllSpammers()
+
+	infos := make([]*spamoor.WalletInfo, 0, len(spammers)*10+1)
+	if d.rootWallet != nil {
+		infos = append(infos, &spamoor.WalletInfo{
+			Wallet: d.rootWallet.GetWallet(),
+			Name:   "root",
+		})
+	}
+
+	for _, spammer := range spammers {
+		walletPool := spammer.GetWalletPool()
+		if walletPool == nil {
+			continue
+		}
+
+		for _, info := range walletPool.GetWalletInfos() {
+			info.Scenario = spammer.GetScenario()
+			infos = append(infos, info)
+		}
+	}
+
+	return infos
+}
+
 // DeleteSpammer removes a spammer from both the daemon and database.
 // If the spammer is running, it will be paused first before deletion.
 // Returns an error if the spammer is not found or if database deletion fails.
