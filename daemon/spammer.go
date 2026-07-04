@@ -103,15 +103,18 @@ func (s *Spammer) GetGroupConfig() string {
 	return s.dbEntity.GroupConfig
 }
 
-// NewSpammer creates a new spammer instance with the specified configuration.
-// It validates the config, generates a unique ID (starting from 100), persists to database,
-// and optionally starts execution immediately. The ID counter is stored in database state.
-func (d *Daemon) NewSpammer(scenarioName string, config string, name string, description string, startImmediately bool, userEmail string, isImport bool) (*Spammer, error) {
-	// parse config for sanity checks
-	yaml.Unmarshal([]byte(config), &SpammerConfig{})
+// allocateSpammerID returns the id for a new spammer row. When explicitID is non-zero
+// it is used verbatim (the range below 100 is reserved for the built-in default
+// spammers); otherwise the next id is allocated from the shared scenario counter,
+// which starts at 100 so runtime-created spammers never collide with defaults.
+func (d *Daemon) allocateSpammerID(explicitID int64) int64 {
+	if explicitID != 0 {
+		return explicitID
+	}
 
-	// get next id
 	d.spammerIdMtx.Lock()
+	defer d.spammerIdMtx.Unlock()
+
 	scenarioCounter := 0
 	d.db.GetSpamoorState("scenario_counter", &scenarioCounter)
 	if scenarioCounter < 100 {
@@ -120,10 +123,25 @@ func (d *Daemon) NewSpammer(scenarioName string, config string, name string, des
 		scenarioCounter++
 	}
 	d.db.SetSpamoorState(nil, "scenario_counter", scenarioCounter)
-	d.spammerIdMtx.Unlock()
+
+	return int64(scenarioCounter)
+}
+
+// NewSpammer creates a new spammer instance with the specified configuration.
+// It validates the config, generates a unique ID (starting from 100), persists to database,
+// and optionally starts execution immediately. The ID counter is stored in database state.
+func (d *Daemon) NewSpammer(scenarioName string, config string, name string, description string, startImmediately bool, userEmail string, isImport bool) (*Spammer, error) {
+	return d.newSpammerWithID(0, scenarioName, config, name, description, startImmediately, userEmail, isImport)
+}
+
+// newSpammerWithID creates a new spammer like NewSpammer, but with an explicit row id
+// when id is non-zero (used for the built-in defaults with their reserved ids < 100).
+func (d *Daemon) newSpammerWithID(id int64, scenarioName string, config string, name string, description string, startImmediately bool, userEmail string, isImport bool) (*Spammer, error) {
+	// parse config for sanity checks
+	yaml.Unmarshal([]byte(config), &SpammerConfig{})
 
 	dbEntity := &db.Spammer{
-		ID:          int64(scenarioCounter),
+		ID:          d.allocateSpammerID(id),
 		Scenario:    scenarioName,
 		Name:        name,
 		Description: description,

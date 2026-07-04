@@ -198,6 +198,7 @@ spamoor-daemon [flags]
 | `--privkey` | `-p` | Root wallet private key | - |
 | `--port` | `-P` | Web UI port | `8080` |
 | `--startup-spammer` | - | YAML file or URL with startup spammers | - |
+| `--startup-defaults` | - | Keys of built-in default spammers/groups to auto-start on first launch (e.g. `"regular-chain-load,fuzzing"`) | - |
 | `--startup-delay` | - | Delay in seconds before starting spammers on startup | `30` |
 | `--fulu-activation` | - | Unix timestamp of Fulu activation | `0` |
 | `--without-batcher` | - | Disable transaction batching | `false` |
