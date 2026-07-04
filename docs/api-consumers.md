@@ -180,7 +180,9 @@ Content-Type: application/json
   "throughput_mode": "shared",
   "total_throughput": 100,
   "total_count": 0,
-  "total_max_pending": 0
+  "total_max_pending": 0,
+  "auto_restart_failed": false,
+  "auto_restart_cooldown": 0
 }
 ```
 
@@ -190,6 +192,11 @@ each member's `max_wallets` is derived from its resolved throughput (≈ through
 clamped to [20, 1000]) and its `max_pending` defaults to 2× its resolved throughput.
 Set `total_max_pending` to a non-zero value to instead split an explicit
 concurrent-pending budget across members by weight. Returns the new group id.
+
+With `auto_restart_failed` enabled, members that stop in the failed (error) state are
+restarted automatically after `auto_restart_cooldown` seconds (0 = default 300).
+Members stopped normally (paused or finished) are never restarted, and manual actions
+taken during the cooldown (restart, pause, removal) always win.
 
 ### Update a Group
 

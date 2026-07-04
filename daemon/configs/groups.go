@@ -33,6 +33,10 @@ const (
 // max_pending when the group does not set an explicit total.
 const maxPendingThroughputMultiplier = 2
 
+// DefaultAutoRestartCooldownSecs is the cooldown applied before auto-restarting a
+// failed group member when the group does not configure an explicit value.
+const DefaultAutoRestartCooldownSecs = 300
+
 // Config field names that receive computed (non-overlay) handling.
 const (
 	fieldThroughput = "throughput"
@@ -50,6 +54,21 @@ type GroupConfig struct {
 	// enabled members by weight. When 0, each member's max_pending defaults to
 	// maxPendingThroughputMultiplier * its resolved throughput.
 	TotalMaxPending uint64 `json:"total_max_pending"`
+	// AutoRestartFailed restarts members that stopped in the failed state after
+	// AutoRestartCooldown seconds. Members stopped normally are never restarted.
+	AutoRestartFailed bool `json:"auto_restart_failed"`
+	// AutoRestartCooldown is the delay in seconds before a failed member is restarted.
+	// 0 falls back to DefaultAutoRestartCooldownSecs.
+	AutoRestartCooldown uint64 `json:"auto_restart_cooldown"`
+}
+
+// RestartCooldownSecs returns the configured auto-restart cooldown in seconds,
+// substituting the default when unset.
+func (c *GroupConfig) RestartCooldownSecs() uint64 {
+	if c.AutoRestartCooldown == 0 {
+		return DefaultAutoRestartCooldownSecs
+	}
+	return c.AutoRestartCooldown
 }
 
 // MemberConfig holds the JSON metadata stored in a member row's group_config column.
@@ -339,6 +358,10 @@ func GroupConfigFromMap(m map[string]any) *GroupConfig {
 	cfg.TotalThroughput = mapUint64(m, "total_throughput")
 	cfg.TotalCount = mapUint64(m, "total_count")
 	cfg.TotalMaxPending = mapUint64(m, "total_max_pending")
+	if v, ok := m["auto_restart_failed"].(bool); ok {
+		cfg.AutoRestartFailed = v
+	}
+	cfg.AutoRestartCooldown = mapUint64(m, "auto_restart_cooldown")
 	return cfg
 }
 

@@ -12,13 +12,15 @@ import (
 
 // SpammerGroupRequest is the body for creating or updating a spammer group.
 type SpammerGroupRequest struct {
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	Config          string `json:"config"`            // sparse overlay YAML
-	ThroughputMode  string `json:"throughput_mode"`   // "independent" or "shared"
-	TotalThroughput uint64 `json:"total_throughput"`  // shared mode: total tx/slot
-	TotalCount      uint64 `json:"total_count"`       // shared mode: total tx count
-	TotalMaxPending uint64 `json:"total_max_pending"` // shared mode: total pending budget (0 = 2x throughput)
+	Name                string `json:"name"`
+	Description         string `json:"description"`
+	Config              string `json:"config"`                // sparse overlay YAML
+	ThroughputMode      string `json:"throughput_mode"`       // "independent" or "shared"
+	TotalThroughput     uint64 `json:"total_throughput"`      // shared mode: total tx/slot
+	TotalCount          uint64 `json:"total_count"`           // shared mode: total tx count
+	TotalMaxPending     uint64 `json:"total_max_pending"`     // shared mode: total pending budget (0 = 2x throughput)
+	AutoRestartFailed   bool   `json:"auto_restart_failed"`   // restart failed members after a cooldown
+	AutoRestartCooldown uint64 `json:"auto_restart_cooldown"` // cooldown in seconds (0 = default 300)
 }
 
 func (r *SpammerGroupRequest) groupConfig() *configs.GroupConfig {
@@ -27,10 +29,12 @@ func (r *SpammerGroupRequest) groupConfig() *configs.GroupConfig {
 		mode = configs.GroupModeIndependent
 	}
 	return &configs.GroupConfig{
-		ThroughputMode:  mode,
-		TotalThroughput: r.TotalThroughput,
-		TotalCount:      r.TotalCount,
-		TotalMaxPending: r.TotalMaxPending,
+		ThroughputMode:      mode,
+		TotalThroughput:     r.TotalThroughput,
+		TotalCount:          r.TotalCount,
+		TotalMaxPending:     r.TotalMaxPending,
+		AutoRestartFailed:   r.AutoRestartFailed,
+		AutoRestartCooldown: r.AutoRestartCooldown,
 	}
 }
 
