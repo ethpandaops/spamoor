@@ -163,6 +163,29 @@ func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, 
 		return nil, fmt.Errorf("failed to resolve import configs: %w", err)
 	}
 
+	result, err := d.importSpammerConfigs(importConfigs, userEmail, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Audit log the import
+	if d.auditLogger != nil && userEmail != "" && result.Validation.ValidSpammers > 0 {
+		skippedCount := result.Validation.TotalSpammers - result.Validation.ValidSpammers
+		err := d.auditLogger.LogSpammersImport(userEmail, result.ImportedCount, skippedCount, input)
+		if err != nil {
+			d.logger.Errorf("Failed to create audit log for spammers import: %v", err)
+		}
+	}
+
+	return result, nil
+}
+
+// importSpammerConfigs imports already-resolved spammer configs (groups first, then
+// standalone spammers and group members). Spammers are always created paused; audit
+// logging of the import operation itself is the caller's responsibility. explicitIDs
+// optionally maps config names to fixed row ids (used for the built-in defaults);
+// names without an entry get an id from the regular runtime allocator.
+func (d *Daemon) importSpammerConfigs(importConfigs []ExportSpammerConfig, userEmail string, explicitIDs map[string]int64) (*ImportResult, error) {
 	// Validate the resolved data
 	validation, err := d.validateImportConfigs(importConfigs)
 	if err != nil {
@@ -215,7 +238,7 @@ func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, 
 		}
 
 		groupCfg := configs.GroupConfigFromMap(importConfig.GroupConfig)
-		group, err := d.NewGroup(importConfig.Name, importConfig.Description, overlayYAML, groupCfg, userEmail)
+		group, err := d.newGroupWithID(explicitIDs[importConfig.Name], importConfig.Name, importConfig.Description, overlayYAML, groupCfg, userEmail)
 		if err != nil {
 			importErrors = append(importErrors, fmt.Sprintf("Failed to create group '%s': %v", importConfig.Name, err))
 			continue
@@ -261,7 +284,8 @@ func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, 
 		}
 
 		// Create the spammer (never start immediately for safety, pass isImport=true)
-		spammer, err := d.NewSpammer(
+		spammer, err := d.newSpammerWithID(
+			explicitIDs[importConfig.Name],
 			importConfig.Scenario,
 			configYAML,
 			finalName,
@@ -305,15 +329,6 @@ func (d *Daemon) ImportSpammers(input string, userEmail string) (*ImportResult, 
 		Errors:        importErrors,
 		Warnings:      importWarnings,
 		Message:       fmt.Sprintf("Successfully imported %d out of %d spammers", imported, validation.TotalSpammers),
-	}
-
-	// Audit log the import
-	if d.auditLogger != nil && userEmail != "" {
-		skippedCount := validation.TotalSpammers - validation.ValidSpammers
-		err := d.auditLogger.LogSpammersImport(userEmail, imported, skippedCount, input)
-		if err != nil {
-			d.logger.Errorf("Failed to create audit log for spammers import: %v", err)
-		}
 	}
 
 	return result, nil
