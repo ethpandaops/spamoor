@@ -8,7 +8,7 @@
 - scenario: group
   key: regular-chain-load
   name: Regular Chain Load
-  description: A balanced mix of everyday transaction types - EOA transfers, ERC-20/721/1155 tokens, ERC-4337 account abstraction, Safe multisig, Curve / Uniswap V2+V3 swaps and blobs - sharing a global budget of 100 tx/slot to emulate organic chain activity.
+  description: A balanced mix of everyday transaction types - EOA transfers, ERC-20/721/1155 tokens, ERC-4337 account abstraction, Safe multisig, Curve / Uniswap V2+V3 swaps, blobs, Aave V3 lending, ENS name registrations and Seaport NFT trades - sharing a global budget of 100 tx/slot to emulate organic chain activity.
   group_config:
     throughput_mode: shared
     total_throughput: 100
@@ -99,13 +99,7 @@
 
 - scenario: erc1155tx
   key: regular-erc1155
-  name: ERC-1155 Multi-Token Activity
-  description: Mints and transfers ERC-1155 multi-tokens.
-  group: Regular Chain Load
-  group_config:
-    weight: 1
-    enabled: true
-    sort_order: 3
+  name: ERC-1155 Multi-Token Activityit' already pa
   config:
     # wallet settings
     seed: erc1155tx-557717 # seed for the wallet
@@ -323,3 +317,98 @@
     # for current post-Fusaka networks.
     blob_v1_percent: 100
     fulu_activation: 0
+
+- scenario: aave-lending
+  key: regular-aave-lending
+  name: Aave V3 Lending
+  description: Deploys a full Aave V3 market and organically supplies, borrows, repays and withdraws two tokens, with oracle price moves and occasional liquidations.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 10
+  config:
+    # wallet settings
+    seed: aave-lending-318472 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: aave-lending
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    min_amount: "1000000000000000000" # 1 token
+    max_amount: "2000000000000000000000" # 2000 tokens
+    seed_amount: "1000000000000000000000000" # 1M tokens of initial borrowable liquidity per reserve
+    wallet_funding: "100000000000000000000000" # 100k tokens minted to each wallet
+    risky_ratio: 6 # 1 in 6 wallets runs a near-max-LTV position (liquidation targets)
+    liquidations: true
+    price_tick_interval: 40 # random-walk an oracle price every 40 transactions
+    price_volatility: 2000 # +/- 20% price band (deep enough for occasional liquidations)
+
+- scenario: ens-names
+  key: regular-ens-names
+  name: ENS Name Registrations
+  description: Deploys the real ENS contract stack and organically registers, renews, updates and churns names, naming all spamoor wallets on the host.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 11
+  config:
+    # wallet settings
+    seed: ens-names-573208 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: ens-names
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    names_per_wallet: 3
+    wallet_naming: all # register spamoor-*.eth names for every spamoor wallet on the host
+    naming_per_slot: 2
+
+- scenario: seaport-trades
+  key: regular-seaport-trades
+  name: Seaport NFT Trades
+  description: Deploys Seaport 1.6 and fulfills signed NFT buy and sell orders against a market counterparty.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 12
+  config:
+    # wallet settings
+    seed: seaport-trades-461925 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: seaport-trades
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    buy_ratio: 50 # 50/50 mix of buy and sell fulfillments
+    min_price: "10000000000000000" # 0.01 coin
+    max_price: "100000000000000000000" # 100 coin
+    sell_threshold: 20 # force a sell when a wallet holds more than 20 NFTs
+    market_inventory: 50
+    wallet_inventory: 5
