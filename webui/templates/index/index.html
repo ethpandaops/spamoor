@@ -129,6 +129,12 @@
                   <label class="form-label">Scenario</label>
                   <input type="hidden" name="scenario" required>
                   <div id="scenarioSelectorContainer" class="scenario-selector border rounded p-0" style="max-height: 400px; overflow-y: auto;">
+                    <div class="p-2 border-bottom sticky-top bg-body" style="z-index: 5;">
+                      <div class="input-group input-group-sm">
+                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                        <input type="text" class="form-control" id="scenarioSearch" placeholder="Search scenarios by name or description...">
+                      </div>
+                    </div>
                     <div id="scenarioCategories" class="list-group list-group-flush">
                       <!-- Categories will be populated here -->
                     </div>
@@ -402,6 +408,20 @@
                 </div>
               </div>
             </div>
+            <div class="row align-items-end">
+              <div class="col-md-6 mb-3">
+                <div class="form-check">
+                  <input type="checkbox" class="form-check-input" name="auto_restart_failed" id="groupAutoRestart">
+                  <label class="form-check-label" for="groupAutoRestart">Auto-restart failed members</label>
+                </div>
+                <div class="form-text">Members that stop with an error are restarted after the cooldown. Normal stops are never restarted.</div>
+              </div>
+              <div class="col-md-6 mb-3">
+                <label class="form-label">Restart Cooldown <small class="text-muted">(seconds)</small></label>
+                <input type="number" class="form-control" name="auto_restart_cooldown" min="1" value="300">
+                <div class="form-text">Delay before a failed member is restarted (default 300s).</div>
+              </div>
+            </div>
             <div class="mb-3">
               <label class="form-label">Shared Overlay (YAML)</label>
               <textarea class="form-control font-monospace" name="config" rows="8" style="tab-size: 2;"
@@ -595,6 +615,7 @@
       {{ else }}
         <span class="badge bg-secondary">independent</span>
       {{ end }}
+      {{ if .AutoRestartFailed }}<small class="text-muted d-block"><i class="fas fa-redo me-1"></i>auto-restart</small>{{ end }}
     </td>
     <td class="status-cell">{{ template "statusBadge" .Status }}</td>
     <td class="auth-required-column">
@@ -746,11 +767,12 @@ document.getElementById('newSpammerModal').addEventListener('show.bs.modal', asy
     createBtn.disabled = true;
   }
 
-  /* Load and render scenario categories */
+  /* Load and render the scenario selector (reset any previous search) */
   if (!scenarioCategories) {
     scenarioCategories = await fetch('/api/scenarios').then(r => r.json());
   }
-  renderScenarioCategories(scenarioCategories);
+  document.getElementById('scenarioSearch').value = '';
+  renderScenarioSelector();
 });
 
 function renderScenarioCategories(categories, container = null, depth = 0) {
@@ -799,23 +821,7 @@ function renderScenarioCategories(categories, container = null, depth = 0) {
     /* Add scenarios */
     if (hasScenarios) {
       category.scenarios.forEach(scenario => {
-        const scenarioItem = document.createElement('div');
-        scenarioItem.className = 'list-group-item list-group-item-action scenario-item';
-        scenarioItem.style.paddingLeft = `${((depth + 1) * 16) + 12}px`;
-        scenarioItem.setAttribute('data-scenario', scenario.name);
-        const pluginBadge = scenario.plugin ? `<span class="badge bg-info ms-2 plugin-badge">${scenario.plugin}</span>` : '';
-        scenarioItem.innerHTML = `
-          <div class="d-flex justify-content-between align-items-center">
-            <div>
-              <i class="fas fa-cube text-primary me-2"></i>
-              <span class="scenario-name">${scenario.name}</span>
-              ${pluginBadge}
-            </div>
-          </div>
-          ${scenario.description ? `<small class="text-muted ms-4 d-block">${scenario.description}</small>` : ''}
-        `;
-        scenarioItem.addEventListener('click', () => selectScenario(scenario.name));
-        collapseDiv.appendChild(scenarioItem);
+        collapseDiv.appendChild(createScenarioItem(scenario, ((depth + 1) * 16) + 12));
       });
     }
 
@@ -825,6 +831,77 @@ function renderScenarioCategories(categories, container = null, depth = 0) {
     }
   });
 }
+
+/* Build a clickable scenario list item. pathLabel (optional) shows the category path
+   on the right, used by the flat search results. */
+function createScenarioItem(scenario, paddingLeftPx, pathLabel = '') {
+  const scenarioItem = document.createElement('div');
+  scenarioItem.className = 'list-group-item list-group-item-action scenario-item';
+  scenarioItem.style.paddingLeft = `${paddingLeftPx}px`;
+  scenarioItem.setAttribute('data-scenario', scenario.name);
+  const pluginBadge = scenario.plugin ? `<span class="badge bg-info ms-2 plugin-badge">${scenario.plugin}</span>` : '';
+  scenarioItem.innerHTML = `
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <i class="fas fa-cube text-primary me-2"></i>
+        <span class="scenario-name">${scenario.name}</span>
+        ${pluginBadge}
+      </div>
+      ${pathLabel ? `<small class="text-muted text-nowrap ms-2">${pathLabel}</small>` : ''}
+    </div>
+    ${scenario.description ? `<small class="text-muted ms-4 d-block">${scenario.description}</small>` : ''}
+  `;
+  scenarioItem.addEventListener('click', () => selectScenario(scenario.name));
+  return scenarioItem;
+}
+
+/* Flatten the category tree into {scenario, path} entries, deduped by scenario name. */
+function collectScenarios(categories, path = [], seen = new Set(), out = []) {
+  for (const category of categories) {
+    const currentPath = [...path, category.name];
+    (category.scenarios || []).forEach(scenario => {
+      if (seen.has(scenario.name)) return;
+      seen.add(scenario.name);
+      out.push({ scenario, path: currentPath });
+    });
+    if (category.children) {
+      collectScenarios(category.children, currentPath, seen, out);
+    }
+  }
+  return out;
+}
+
+/* Render a flat list of scenarios whose name or description matches the search term. */
+function renderScenarioSearchResults(term) {
+  const container = document.getElementById('scenarioCategories');
+  container.innerHTML = '';
+
+  const matches = collectScenarios(scenarioCategories).filter(({ scenario }) =>
+    scenario.name.toLowerCase().includes(term) ||
+    (scenario.description || '').toLowerCase().includes(term));
+
+  if (matches.length === 0) {
+    container.innerHTML = '<div class="list-group-item text-muted text-center py-3">No scenarios match your search.</div>';
+    return;
+  }
+
+  matches.forEach(({ scenario, path }) => {
+    container.appendChild(createScenarioItem(scenario, 12, path.join(' > ')));
+  });
+}
+
+/* Render the selector: grouped category tree while the search box is empty, flat
+   matching results otherwise. */
+function renderScenarioSelector() {
+  const term = document.getElementById('scenarioSearch').value.trim().toLowerCase();
+  if (term) {
+    renderScenarioSearchResults(term);
+  } else {
+    renderScenarioCategories(scenarioCategories);
+  }
+}
+
+document.getElementById('scenarioSearch').addEventListener('input', renderScenarioSelector);
 
 function countScenarios(category) {
   let count = category.scenarios ? category.scenarios.length : 0;
@@ -1975,6 +2052,13 @@ document.querySelectorAll('#groupForm [name="throughput_mode"]').forEach(el => {
   el.addEventListener('change', syncSharedTotals);
 });
 
+function syncAutoRestart() {
+  const enabled = document.querySelector('#groupForm [name="auto_restart_failed"]').checked;
+  document.querySelector('#groupForm [name="auto_restart_cooldown"]').disabled = !enabled;
+}
+
+document.querySelector('#groupForm [name="auto_restart_failed"]').addEventListener('change', syncAutoRestart);
+
 document.querySelector('#groupForm [name="config"]').addEventListener('keydown', function(e) {
   if (e.key === 'Tab') {
     e.preventDefault();
@@ -1993,10 +2077,13 @@ function openCreateGroup() {
   form.querySelector('[name="total_throughput"]').value = 100;
   form.querySelector('[name="total_count"]').value = 0;
   form.querySelector('[name="total_max_pending"]').value = 0;
+  form.querySelector('[name="auto_restart_failed"]').checked = false;
+  form.querySelector('[name="auto_restart_cooldown"]').value = 300;
   form.querySelector('[name="config"]').value = '';
   document.getElementById('groupModalTitle').textContent = 'Create Group';
   document.getElementById('groupSaveBtn').textContent = 'Create Group';
   syncSharedTotals();
+  syncAutoRestart();
   groupModalInstance().show();
 }
 
@@ -2020,10 +2107,13 @@ async function editGroup(id) {
     form.querySelector('[name="total_throughput"]').value = gc.total_throughput || 0;
     form.querySelector('[name="total_count"]').value = gc.total_count || 0;
     form.querySelector('[name="total_max_pending"]').value = gc.total_max_pending || 0;
+    form.querySelector('[name="auto_restart_failed"]').checked = !!gc.auto_restart_failed;
+    form.querySelector('[name="auto_restart_cooldown"]').value = gc.auto_restart_cooldown || 300;
 
     document.getElementById('groupModalTitle').textContent = 'Edit Group';
     document.getElementById('groupSaveBtn').textContent = 'Save Changes';
     syncSharedTotals();
+    syncAutoRestart();
     groupModalInstance().show();
   } catch (err) {
     alert('Failed to load group: ' + err.message);
@@ -2043,6 +2133,8 @@ async function submitGroup() {
     total_throughput: parseInt(form.querySelector('[name="total_throughput"]').value) || 0,
     total_count: parseInt(form.querySelector('[name="total_count"]').value) || 0,
     total_max_pending: parseInt(form.querySelector('[name="total_max_pending"]').value) || 0,
+    auto_restart_failed: form.querySelector('[name="auto_restart_failed"]').checked,
+    auto_restart_cooldown: parseInt(form.querySelector('[name="auto_restart_cooldown"]').value) || 0,
   };
 
   const url = id ? `/api/spammer-group/${id}` : '/api/spammer-group';
@@ -2343,6 +2435,7 @@ function groupHeaderInner(e, count) {
   } else {
     summary = '<span class="badge bg-secondary">independent</span>';
   }
+  if (e.auto_restart_failed) summary += '<small class="text-muted d-block"><i class="fas fa-redo me-1"></i>auto-restart</small>';
   const toggleBtn = running
     ? `<button class="btn btn-sm btn-warning" onclick="pauseGroup(${e.id})" title="Pause Group" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-pause"></i></button>`
     : `<button class="btn btn-sm btn-success" onclick="startGroup(${e.id})" title="Start Group" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-play"></i></button>`;
@@ -2443,6 +2536,8 @@ function normalizeEntry(e) {
   flat.total_throughput = gc.total_throughput;
   flat.total_count = gc.total_count;
   flat.total_max_pending = gc.total_max_pending;
+  flat.auto_restart_failed = gc.auto_restart_failed;
+  flat.auto_restart_cooldown = gc.auto_restart_cooldown;
   const mc = e.member_config || e;
   flat.weight = mc.weight;
   flat.enabled = mc.enabled;

@@ -277,9 +277,11 @@ mode and totals. Each member references the group by name and carries its own
     base_fee: 20        # applied to every member that has a base_fee field
     tip_fee: 2
   group_config:
-    throughput_mode: shared   # "shared" (split by weight) or "independent" (overlay only)
-    total_throughput: 100     # split across enabled members by weight
-    total_count: 0            # 0 = unlimited / not managed
+    throughput_mode: shared      # "shared" (split by weight) or "independent" (overlay only)
+    total_throughput: 100        # split across enabled members by weight
+    total_count: 0               # 0 = unlimited / not managed
+    auto_restart_failed: false   # daemon: restart members that stopped with an error
+    auto_restart_cooldown: 300   # seconds before a failed member is restarted (0 = 300)
 
 - scenario: eoatx
   name: eoa-load
@@ -369,6 +371,7 @@ spamoor-daemon \
 | `--port`, `-P` | Web interface port | 8080 |
 | `--db`, `-d` | SQLite database file | spamoor.db |
 | `--startup-spammer` | YAML file with startup spammer configurations | |
+| `--startup-defaults` | Keys of built-in default spammers/groups to auto-start on first launch | |
 | `--startup-delay` | Delay in seconds before starting spammers on startup | 30 |
 | `--without-batcher` | Disable transaction batching | false |
 | `--debug` | Enable debug mode | false |
@@ -450,6 +453,21 @@ Once the daemon is running, access the web interface at `http://localhost:8080`:
 #### Live Log Viewing
 ![Live Logs](./../.github/resources/live-logs-expanded.png)
 *Expanded log view showing real-time transaction status and debugging information*
+
+### Default Spammers
+
+On the first launch (fresh database), the daemon inserts a set of built-in default spammers and spammer groups (e.g. the "Regular Chain Load" and "Fuzzing" groups). They are created paused and serve as ready-to-use templates. The definitions are embedded in the binary from `daemon/default-spammers/*.yaml`.
+
+Each default has a short technical key (the `key` field in the YAML definitions) that stays stable even if the display name changes. To auto-start specific defaults by key on first launch, use `--startup-defaults`:
+
+```bash
+spamoor-daemon \
+  --privkey "0x1234567890abcdef..." \
+  --rpchost "http://localhost:8545" \
+  --startup-defaults "regular-chain-load,fuzzing"
+```
+
+Notable keys: `regular-chain-load` and `fuzzing` (the two default groups; starting a group starts all of its enabled members), plus standalone presets like `eoatx-heavy`, `erc20tx-heavy`, `blob-average`, `big-blocks`, `gas-burner`, `uniswap-v2-heavy` and `evm-fuzz-heavy`. The flag can be specified multiple times and only takes effect on first launch; on later launches, the previous running state is restored instead.
 
 ### Startup Spammers
 

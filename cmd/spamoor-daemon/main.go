@@ -33,6 +33,7 @@ type CliArgs struct {
 	port                 int
 	dbFile               string
 	startupSpammer       string
+	startupDefaults      []string
 	fuluActivation       uint64
 	withoutBatcher       bool
 	disableTxMetrics     bool
@@ -61,6 +62,7 @@ func main() {
 	flags.IntVarP(&cliArgs.port, "port", "P", 8080, "The port to run the webui on.")
 	flags.StringVarP(&cliArgs.dbFile, "db", "d", "spamoor.db", "The file to store the database in.")
 	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file or URL with startup spammers configuration")
+	flags.StringArrayVar(&cliArgs.startupDefaults, "startup-defaults", []string{}, "Keys of built-in default spammers/groups to auto-start on first launch (e.g. 'regular-chain-load,fuzzing', can be specified multiple times)")
 	flags.Uint64Var(&cliArgs.fuluActivation, "fulu-activation", 0, "The unix timestamp of the Fulu activation (if activated)")
 	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
 	flags.BoolVar(&cliArgs.disableTxMetrics, "disable-tx-metrics", false, "Disable transaction metrics collection and graphs page (keeps Prometheus metrics)")
@@ -266,6 +268,21 @@ func main() {
 	firstLaunch, err := spamoorDaemon.Run()
 	if err != nil {
 		panic(err)
+	}
+
+	// insert built-in default spammers on first launch and auto-start the requested ones
+	if firstLaunch {
+		startupDefaults := []string{}
+		for _, name := range strings.Split(strings.Join(cliArgs.startupDefaults, ","), ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				startupDefaults = append(startupDefaults, name)
+			}
+		}
+
+		err := spamoorDaemon.ImportDefaultSpammers(startupDefaults, logger.WithField("module", "startup"))
+		if err != nil {
+			logger.Errorf("failed to import default spammers: %v", err)
+		}
 	}
 
 	// load startup spammers if configured

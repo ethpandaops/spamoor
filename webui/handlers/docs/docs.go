@@ -2488,6 +2488,14 @@ const docTemplate = `{
         "api.SpammerGroupRequest": {
             "type": "object",
             "properties": {
+                "auto_restart_cooldown": {
+                    "description": "cooldown in seconds (0 = default 300)",
+                    "type": "integer"
+                },
+                "auto_restart_failed": {
+                    "description": "restart failed members after a cooldown",
+                    "type": "boolean"
+                },
                 "config": {
                     "description": "sparse overlay YAML",
                     "type": "string"
@@ -2771,6 +2779,14 @@ const docTemplate = `{
         "configs.GroupConfig": {
             "type": "object",
             "properties": {
+                "auto_restart_cooldown": {
+                    "description": "AutoRestartCooldown is the delay in seconds before a failed member is restarted.\n0 falls back to DefaultAutoRestartCooldownSecs.",
+                    "type": "integer"
+                },
+                "auto_restart_failed": {
+                    "description": "AutoRestartFailed restarts members that stopped in the failed state after\nAutoRestartCooldown seconds. Members stopped normally are never restarted.",
+                    "type": "boolean"
+                },
                 "throughput_mode": {
                     "type": "string"
                 },

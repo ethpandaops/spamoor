@@ -36,10 +36,12 @@ type SpammerEventInfo struct {
 	GroupID     int64  `json:"group_id"`
 
 	// Group (parent) summary, set when IsGroup is true.
-	ThroughputMode  string `json:"throughput_mode,omitempty"`
-	TotalThroughput uint64 `json:"total_throughput,omitempty"`
-	TotalCount      uint64 `json:"total_count,omitempty"`
-	TotalMaxPending uint64 `json:"total_max_pending,omitempty"`
+	ThroughputMode      string `json:"throughput_mode,omitempty"`
+	TotalThroughput     uint64 `json:"total_throughput,omitempty"`
+	TotalCount          uint64 `json:"total_count,omitempty"`
+	TotalMaxPending     uint64 `json:"total_max_pending,omitempty"`
+	AutoRestartFailed   bool   `json:"auto_restart_failed,omitempty"`
+	AutoRestartCooldown uint64 `json:"auto_restart_cooldown,omitempty"`
 
 	// Member fields, set when GroupID != 0. Enabled is always serialized so the client
 	// can distinguish a disabled member (false) from a non-member (field absent).
@@ -119,6 +121,8 @@ func (d *Daemon) buildSpammerEventInfo(s *Spammer) *SpammerEventInfo {
 			info.TotalThroughput = gc.TotalThroughput
 			info.TotalCount = gc.TotalCount
 			info.TotalMaxPending = gc.TotalMaxPending
+			info.AutoRestartFailed = gc.AutoRestartFailed
+			info.AutoRestartCooldown = gc.AutoRestartCooldown
 		}
 	case s.GetGroupID() != 0:
 		if mc, err := configs.ParseMemberConfig(s.GetGroupConfig()); err == nil {

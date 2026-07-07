@@ -28,11 +28,13 @@ type IndexPageSpammer struct {
 	GroupID int64 `json:"group_id"`
 
 	// Group (parent) fields, populated when IsGroup is true.
-	ThroughputMode  string              `json:"throughput_mode,omitempty"`
-	TotalThroughput uint64              `json:"total_throughput,omitempty"`
-	TotalCount      uint64              `json:"total_count,omitempty"`
-	TotalMaxPending uint64              `json:"total_max_pending,omitempty"`
-	Members         []*IndexPageSpammer `json:"members,omitempty"`
+	ThroughputMode      string              `json:"throughput_mode,omitempty"`
+	TotalThroughput     uint64              `json:"total_throughput,omitempty"`
+	TotalCount          uint64              `json:"total_count,omitempty"`
+	TotalMaxPending     uint64              `json:"total_max_pending,omitempty"`
+	AutoRestartFailed   bool                `json:"auto_restart_failed,omitempty"`
+	AutoRestartCooldown uint64              `json:"auto_restart_cooldown,omitempty"`
+	Members             []*IndexPageSpammer `json:"members,omitempty"`
 
 	// Member fields, populated when GroupID != 0.
 	Weight    uint64 `json:"weight,omitempty"`
@@ -91,6 +93,8 @@ func (fh *FrontendHandler) getIndexPageData() (*IndexPage, error) {
 				model.TotalThroughput = gc.TotalThroughput
 				model.TotalCount = gc.TotalCount
 				model.TotalMaxPending = gc.TotalMaxPending
+				model.AutoRestartFailed = gc.AutoRestartFailed
+				model.AutoRestartCooldown = gc.AutoRestartCooldown
 			}
 			groups[s.GetID()] = model
 			topLevel = append(topLevel, model)
