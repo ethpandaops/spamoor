@@ -1,0 +1,325 @@
+# Built-in "Regular Chain Load" default spammer group.
+#
+# A balanced mix of everyday transaction types sharing a global throughput
+# budget, created paused on first launch as a template. Inserted via the
+# regular spammer import machinery; member configs only pin values that
+# differ from the scenario defaults.
+
+- scenario: group
+  key: regular-chain-load
+  name: Regular Chain Load
+  description: A balanced mix of everyday transaction types - EOA transfers, ERC-20/721/1155 tokens, ERC-4337 account abstraction, Safe multisig, Curve / Uniswap V2+V3 swaps and blobs - sharing a global budget of 100 tx/slot to emulate organic chain activity.
+  group_config:
+    throughput_mode: shared
+    total_throughput: 100
+    total_count: 0
+    total_max_pending: 0
+
+- scenario: eoatx
+  key: regular-eoatx
+  name: EOA Transfers
+  description: Plain ETH value transfers between externally-owned accounts.
+  group: Regular Chain Load
+  group_config:
+    weight: 2
+    enabled: true
+    sort_order: 0
+  config:
+    # wallet settings
+    seed: eoatx-131922 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: eoatx
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    amount: 200
+    random_amount: true
+
+- scenario: erc20tx
+  key: regular-erc20
+  name: ERC-20 Token Transfers
+  description: Deploys an ERC-20 token and continuously transfers it between wallets.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 1
+  config:
+    # wallet settings
+    seed: erc20tx-124868 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: erc20tx
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    amount: 1000
+    random_amount: true
+
+- scenario: erc721tx
+  key: regular-erc721
+  name: ERC-721 NFT Activity
+  description: Mints and transfers ERC-721 non-fungible tokens.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 2
+  config:
+    # wallet settings
+    seed: erc721tx-849573 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: erc721tx
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+
+- scenario: erc1155tx
+  key: regular-erc1155
+  name: ERC-1155 Multi-Token Activity
+  description: Mints and transfers ERC-1155 multi-tokens.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 3
+  config:
+    # wallet settings
+    seed: erc1155tx-557717 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: erc1155tx
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    amount: 100
+    batch_size: 2
+    random_amount: true
+    random_batch_size: true
+
+- scenario: erc4337
+  key: regular-erc4337
+  name: ERC-4337 Account Abstraction
+  description: Submits ERC-4337 UserOperations through the EntryPoint via a bundler.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 4
+  config:
+    # wallet settings
+    seed: erc4337-426060 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: erc4337
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    bundle_size: 1
+    new_account_interval: 1000
+    paymaster_deposit: 10
+
+- scenario: safe-multisig
+  key: regular-safe-multisig
+  name: Safe Multisig Executions
+  description: Executes transactions through Safe (Gnosis) multisig wallets.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 5
+  config:
+    # wallet settings
+    seed: safe-multisig-96581 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: safe-multisig
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    min_owners: 1
+    max_owners: 5
+    threshold: 0
+    safes_per_wallet: 3
+    contract_ratio: 0.5
+    recreate_rate: 0.05
+    burn_rounds: 1000
+    eoa_value: 1000
+    funding_interval: 64
+
+- scenario: curve-swaps
+  key: regular-curve-swaps
+  name: Curve StableSwap Swaps
+  description: Performs token swaps on Curve StableSwap pools.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 6
+  config:
+    # wallet settings
+    seed: curve-swaps-222045 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: curve-swaps
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    pool_count: 1
+    amplification: 200
+    fee: 4000000
+    seed_amount: "1000000000000000000000000"
+    wallet_funding: "10000000000000000000000"
+    min_swap_amount: "1000000000000000000"
+    max_swap_amount: "1000000000000000000000"
+    slippage: 100
+
+- scenario: uniswap-swaps
+  key: regular-uniswap-v2
+  name: Uniswap V2 Swaps
+  description: Swaps tokens across Uniswap V2 pairs.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 7
+  config:
+    # wallet settings
+    seed: uniswap-swaps-803935 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: uniswap-swaps
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    version: 2 # Uniswap V2
+    fee_tier: 3000
+    pair_count: 1
+    min_swap_amount: "100000000000000000"
+    max_swap_amount: "1000000000000000000000"
+    buy_ratio: 40
+    slippage: 50
+    sell_threshold: "50000000000000000000000"
+
+- scenario: uniswap-swaps
+  key: regular-uniswap-v3
+  name: Uniswap V3 Swaps
+  description: Swaps tokens across Uniswap V3 pools (0.3% fee tier).
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 8
+  config:
+    # wallet settings
+    seed: uniswap-swaps-745817 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+    # fee_strategy: adaptive # uncomment for dynamic fee headroom with normal distribution
+
+    # scenario: uniswap-swaps
+    total_count: 0
+    throughput: 10
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    version: 3 # Uniswap V3
+    fee_tier: 3000
+    pair_count: 1
+    min_swap_amount: "100000000000000000"
+    max_swap_amount: "1000000000000000000000"
+    buy_ratio: 40
+    slippage: 50
+    sell_threshold: "50000000000000000000000"
+
+- scenario: blobs
+  key: regular-blobs
+  name: Blob Transactions
+  description: Sends type-3 blob transactions as part of the shared chain load.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 9
+  config:
+    # wallet settings
+    seed: blobs-700004 # seed for the wallet
+    refill_amount: 5000000000000000000 # refill 5 ETH when
+    refill_balance: 1000000000000000000 # balance drops below 1 ETH
+    refill_interval: 600 # check every 10 minutes
+
+    # scenario: blobs
+    total_count: 0
+    throughput: 10
+    sidecars: 1
+    max_pending: 20
+    max_wallets: 10
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    blob_fee: 20
+    # fulu_activation: 0 sends v1 (cell-proof) blob sidecars by default, correct
+    # for current post-Fusaka networks.
+    blob_v1_percent: 100
+    fulu_activation: 0

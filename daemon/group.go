@@ -28,6 +28,12 @@ type memberShare struct {
 // with the reserved sentinel scenario name; overlayConfig holds the sparse YAML overlay
 // applied to members and groupConfig holds the mode/totals metadata.
 func (d *Daemon) NewGroup(name string, description string, overlayConfig string, groupConfig *configs.GroupConfig, userEmail string) (*Spammer, error) {
+	return d.newGroupWithID(0, name, description, overlayConfig, groupConfig, userEmail)
+}
+
+// newGroupWithID creates a new spammer group like NewGroup, but with an explicit row id
+// when id is non-zero (used for the built-in defaults with their reserved ids < 100).
+func (d *Daemon) newGroupWithID(id int64, name string, description string, overlayConfig string, groupConfig *configs.GroupConfig, userEmail string) (*Spammer, error) {
 	// Validate the overlay is parseable YAML so members never fail at resolve time.
 	if overlayConfig != "" {
 		var probe map[string]any
@@ -48,20 +54,10 @@ func (d *Daemon) NewGroup(name string, description string, overlayConfig string,
 		return nil, err
 	}
 
-	// Reuse the shared scenario id counter so group ids never collide with spammer ids.
-	d.spammerIdMtx.Lock()
-	scenarioCounter := 0
-	d.db.GetSpamoorState("scenario_counter", &scenarioCounter)
-	if scenarioCounter < 100 {
-		scenarioCounter = 100
-	} else {
-		scenarioCounter++
-	}
-	d.db.SetSpamoorState(nil, "scenario_counter", scenarioCounter)
-	d.spammerIdMtx.Unlock()
-
 	dbEntity := &db.Spammer{
-		ID:          int64(scenarioCounter),
+		// The shared allocator reuses the scenario id counter, so group ids never
+		// collide with spammer ids.
+		ID:          d.allocateSpammerID(id),
 		Scenario:    scenario.GroupScenarioName,
 		Name:        name,
 		Description: description,
