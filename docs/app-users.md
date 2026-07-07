@@ -277,9 +277,11 @@ mode and totals. Each member references the group by name and carries its own
     base_fee: 20        # applied to every member that has a base_fee field
     tip_fee: 2
   group_config:
-    throughput_mode: shared   # "shared" (split by weight) or "independent" (overlay only)
-    total_throughput: 100     # split across enabled members by weight
-    total_count: 0            # 0 = unlimited / not managed
+    throughput_mode: shared      # "shared" (split by weight) or "independent" (overlay only)
+    total_throughput: 100        # split across enabled members by weight
+    total_count: 0               # 0 = unlimited / not managed
+    auto_restart_failed: false   # daemon: restart members that stopped with an error
+    auto_restart_cooldown: 300   # seconds before a failed member is restarted (0 = 300)
 
 - scenario: eoatx
   name: eoa-load

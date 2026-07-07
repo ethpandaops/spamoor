@@ -129,10 +129,12 @@ func (d *Daemon) spammerToExportConfig(spammer *Spammer) (ExportSpammerConfig, e
 			return ExportSpammerConfig{}, err
 		}
 		exportConfig.GroupConfig = map[string]interface{}{
-			"throughput_mode":   gc.ThroughputMode,
-			"total_throughput":  gc.TotalThroughput,
-			"total_count":       gc.TotalCount,
-			"total_max_pending": gc.TotalMaxPending,
+			"throughput_mode":       gc.ThroughputMode,
+			"total_throughput":      gc.TotalThroughput,
+			"total_count":           gc.TotalCount,
+			"total_max_pending":     gc.TotalMaxPending,
+			"auto_restart_failed":   gc.AutoRestartFailed,
+			"auto_restart_cooldown": gc.AutoRestartCooldown,
 		}
 	case spammer.GetGroupID() != 0:
 		if parent := d.GetSpammer(spammer.GetGroupID()); parent != nil {

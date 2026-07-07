@@ -40,6 +40,10 @@ type Daemon struct {
 	eventSubMtx sync.RWMutex
 	eventSubID  uint64
 
+	// Pending auto-restart timers for failed group members, keyed by spammer id.
+	autoRestartPending map[int64]struct{}
+	autoRestartMtx     sync.Mutex
+
 	globalCfg map[string]interface{}
 
 	// Metrics collector for Prometheus metrics
@@ -77,6 +81,8 @@ func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool 
 		spammerMap: make(map[int64]*Spammer),
 		globalCfg:  make(map[string]interface{}),
 		eventSubs:  make(map[uint64]chan *SpammerEvent),
+
+		autoRestartPending: make(map[int64]struct{}, 8),
 	}
 }
 
@@ -135,6 +141,10 @@ func (d *Daemon) Run() (bool, error) {
 			if err := spammer.Start(); err != nil {
 				d.logger.Errorf("failed to resume spammer %d: %v", spammer.GetID(), err)
 			}
+		} else if spammer.GetStatus() == int(SpammerStatusFailed) {
+			// Members that were already failed when the daemon went down get the same
+			// auto-restart treatment as a live failure (no-op unless the group opted in).
+			d.maybeScheduleAutoRestart(spammer)
 		}
 	}
 

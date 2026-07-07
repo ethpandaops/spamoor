@@ -311,6 +311,12 @@ func (s *Spammer) runScenario() {
 		// parent group's derived status.
 		s.daemon.emitStatusChange(s)
 
+		// Failed group members may be restarted automatically after a cooldown if their
+		// group opted in. Normal stops (paused/finished) are never restarted.
+		if s.dbEntity.Status == int(SpammerStatusFailed) {
+			s.daemon.maybeScheduleAutoRestart(s)
+		}
+
 		s.running = false
 		s.scenarioCancel()
 		s.scenarioCancel = nil
