@@ -39,9 +39,12 @@
       </div>
       <script>
         window.spamoorConfig = {
-          authDisabled: {{ if .DisableAuth }}true{{ else }}false{{ end }}
+          authProviderURL: {{ if .AuthProviderURL }}"{{ .AuthProviderURL }}"{{ else }}""{{ end }}
         };
       </script>
+      {{ if .AuthProviderURL }}
+      <script src="{{ .AuthProviderURL }}/client.js"></script>
+      {{ end }}
       <script src="/js/jquery.min.js"></script>
       <script src="/js/bootstrap.bundle.min.js"></script>
       <script src="/js/color-modes.js"></script>

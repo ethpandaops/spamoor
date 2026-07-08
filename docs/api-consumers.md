@@ -22,13 +22,31 @@ The Spamoor daemon exposes a RESTful API on port 8080 (configurable) with the fo
 
 - **Base URL**: `http://localhost:8080/api`
 - **Content Type**: `application/json` (for most endpoints)
-- **Authentication**: None (designed for trusted networks)
+- **Authentication**: Optional bearer-token JWT verified against an `authenticatoor` service (see below). Disabled by default.
 - **Documentation**: Interactive Swagger UI at `/docs`
 - **Metrics**: Prometheus metrics at `/metrics`
 
 ## Authentication
 
-The Spamoor API currently does not implement authentication. It's designed for use in trusted environments and internal networks. Ensure proper network security when deploying.
+Authentication is opt-in. When the daemon is started without `--auth-provider-url`, the API is open and every request is accepted — suitable only for trusted networks.
+
+When `--auth-provider-url=<url>` is set, all write endpoints (and SSE streams) require a JWT in the `Authorization: Bearer <token>` header. Tokens are verified against the JWKS published by the configured [`service-authenticatoor`](https://github.com/ethpandaops/service-authenticatoor) instance:
+
+- **Issuer (`iss`)**: discovered from `<url>/.well-known/openid-configuration` (falls back to `<url>` itself).
+- **Audience (`aud`)**: the parent DNS zone of the auth service host (e.g. `auth.foo.example.io` → `foo.example.io`).
+- **Identity for audit logs**: the token's `email` claim, falling back to `sub`.
+
+For SSE endpoints that cannot set headers, the token may be passed as the `auth` query parameter (sent as `Authorization: Bearer <token>` server-side).
+
+```bash
+# Open mode (default): no header required
+curl http://localhost:8080/api/spammers
+
+# With auth-provider-url configured
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/spammers
+```
+
+Browser users are redirected to the authenticatoor's login page by the web UI; the token is then stored client-side and attached automatically.
 
 ## Spammer Management
 

@@ -12,41 +12,16 @@ import (
 
 // AuditLogger handles creating audit log entries with proper diff generation
 type AuditLogger struct {
-	daemon      *Daemon
-	logger      *logrus.Entry
-	userHeader  string
-	defaultUser string
+	daemon *Daemon
+	logger *logrus.Entry
 }
 
 // NewAuditLogger creates a new audit logger instance
-func NewAuditLogger(daemon *Daemon, userHeader string, defaultUser string) *AuditLogger {
+func NewAuditLogger(daemon *Daemon) *AuditLogger {
 	return &AuditLogger{
-		daemon:      daemon,
-		logger:      daemon.logger.WithField("module", "audit"),
-		userHeader:  userHeader,
-		defaultUser: defaultUser,
+		daemon: daemon,
+		logger: daemon.logger.WithField("module", "audit"),
 	}
-}
-
-// GetUserFromRequest extracts the user email from the request header
-func (al *AuditLogger) GetUserFromRequest(headers map[string][]string) string {
-	if headers == nil {
-		return al.defaultUser
-	}
-
-	// Try exact header match first
-	if values, ok := headers[al.userHeader]; ok && len(values) > 0 {
-		return values[0]
-	}
-
-	// Try case-insensitive match
-	for key, values := range headers {
-		if strings.EqualFold(key, al.userHeader) && len(values) > 0 {
-			return values[0]
-		}
-	}
-
-	return al.defaultUser
 }
 
 // LogSpammerCreate logs a spammer creation action

@@ -735,7 +735,7 @@ This disables the `POST /api/plugins`, `DELETE /api/plugins/{name}`, and `POST /
 
 ## REST API Reference
 
-All plugin API endpoints require authentication when `--enable-auth` is set. Pass the auth token via the `Authorization` header.
+All plugin API endpoints require authentication when `--auth-provider-url` is set. Pass the JWT (issued by the configured `service-authenticatoor`) via the `Authorization: Bearer <token>` header. See [api-consumers.md](api-consumers.md#authentication) for details.
 
 ### List All Plugins
 
