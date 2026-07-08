@@ -8,6 +8,7 @@ import (
 	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenario"
 
+	aavelending "github.com/ethpandaops/spamoor/scenarios/aave-lending"
 	blobaverage "github.com/ethpandaops/spamoor/scenarios/blob-average"
 	blobcombined "github.com/ethpandaops/spamoor/scenarios/blob-combined"
 	blobconflicting "github.com/ethpandaops/spamoor/scenarios/blob-conflicting"
@@ -17,6 +18,7 @@ import (
 	curveswaps "github.com/ethpandaops/spamoor/scenarios/curve-swaps"
 	deploydestruct "github.com/ethpandaops/spamoor/scenarios/deploy-destruct"
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
+	ensnames "github.com/ethpandaops/spamoor/scenarios/ens-names"
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
 	"github.com/ethpandaops/spamoor/scenarios/erc1155tx"
 	"github.com/ethpandaops/spamoor/scenarios/erc20tx"
@@ -28,6 +30,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/geastx"
 	replayeest "github.com/ethpandaops/spamoor/scenarios/replay-eest"
 	safemultisig "github.com/ethpandaops/spamoor/scenarios/safe-multisig"
+	seaporttrades "github.com/ethpandaops/spamoor/scenarios/seaport-trades"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	erc20bloater "github.com/ethpandaops/spamoor/scenarios/statebloat/erc20_bloater"
 	"github.com/ethpandaops/spamoor/scenarios/storagerefundtx"
@@ -48,6 +51,7 @@ var nativeScenarioCategories = []*scenario.Category{
 		Name:        "Simple",
 		Description: "Simple scenarios",
 		Descriptors: []*scenario.Descriptor{
+			&aavelending.ScenarioDescriptor,
 			&blobaverage.ScenarioDescriptor,
 			&blobcombined.ScenarioDescriptor,
 			&blobconflicting.ScenarioDescriptor,
@@ -55,6 +59,7 @@ var nativeScenarioCategories = []*scenario.Category{
 			&blobreplacements.ScenarioDescriptor,
 			&curveswaps.ScenarioDescriptor,
 			&deploydestruct.ScenarioDescriptor,
+			&ensnames.ScenarioDescriptor,
 			&eoatx.ScenarioDescriptor,
 			&erc20tx.ScenarioDescriptor,
 			&erc4337.ScenarioDescriptor,
@@ -63,6 +68,7 @@ var nativeScenarioCategories = []*scenario.Category{
 			&evmfuzz.ScenarioDescriptor,
 			&gasburnertx.ScenarioDescriptor,
 			&safemultisig.ScenarioDescriptor,
+			&seaporttrades.ScenarioDescriptor,
 			&setcodetx.ScenarioDescriptor,
 			&storagerefundtx.ScenarioDescriptor,
 			&txfuzz.ScenarioDescriptor,

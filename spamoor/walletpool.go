@@ -73,6 +73,7 @@ type WalletPool struct {
 
 	childWallets         []*Wallet
 	wellKnownNames       []*WellKnownWalletConfig
+	walletInfoProvider   WalletInfoProvider
 	wellKnownWallets     map[string]*Wallet
 	customWalletPrivkeys []string
 	selectionMutex       sync.Mutex

@@ -1001,17 +1001,14 @@ func (ah *APIHandler) GetPendingTransactions(w http.ResponseWriter, r *http.Requ
 		spammerName := spammer.GetName()
 		scenarioName := spammer.GetScenario()
 
-		// Get all wallets from the pool
-		wallets := walletPool.GetAllWallets()
-
-		for _, wallet := range wallets {
+		for _, info := range walletPool.GetWalletInfos() {
 			// Create a descriptive wallet name
-			walletName := walletPool.GetWalletName(wallet.GetAddress())
+			walletName := info.Name
 			if spammerName != "" {
 				walletName = fmt.Sprintf("%s (%s)", walletName, spammerName)
 			}
 
-			processPendingTxs(wallet, walletName, scenarioName, spammerID)
+			processPendingTxs(info.Wallet, walletName, scenarioName, spammerID)
 		}
 	}
 
