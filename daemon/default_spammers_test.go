@@ -90,7 +90,7 @@ func TestImportDefaultSpammers(t *testing.T) {
 	}
 
 	d := NewDaemon(context.Background(), logger, nil, nil, database)
-	d.SetAuditLogger(NewAuditLogger(d, "", "user"))
+	d.SetAuditLogger(NewAuditLogger(d))
 
 	if err := d.ImportDefaultSpammers(nil, logger); err != nil {
 		t.Fatalf("failed to import default spammers: %v", err)
