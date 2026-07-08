@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"math/bits"
 	"math/rand"
 	"slices"
 	"strings"
@@ -23,51 +22,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// EIP-8037 (Amsterdam) chain parameters and txpool validator rules.
-// Values mirror github.com/ethereum/go-ethereum/params on the glamsterdam
-// devnet; duplicated here so spamoor's gas estimation doesn't depend on the
-// typed gas APIs in core/vm (which still churn between devnets).
-const (
-	// targetStateGrowthPerYear targets 100 GiB annual state growth per EIP-8037.
-	targetStateGrowthPerYear = 100 * 1024 * 1024 * 1024
-	// cpsbSignificantBits caps the precision of cost_per_state_byte quantization.
-	cpsbSignificantBits = 5
-	// cpsbOffset is an additive bias applied before quantization (EIP-8037).
-	cpsbOffset = 9578
-	// cpsbFloor is the minimum cpsb value spamoor will use. It matches the
-	// value that go-ethereum's glamsterdam-devnet-0 hardcodes in
-	// core/evm.go (CostPerStateByte returns 1174 with the dynamic formula
-	// commented out per the devnet-3 TODO). The dynamic formula yields 662
-	// at 60M gas limit and 1174 at 100M, so on smaller chains the floor is
-	// what keeps spamoor's gas estimates in sync with what the node actually
-	// charges. Once geth activates the dynamic formula, natural cpsb at
-	// 100M+ gas limits equals or exceeds this floor, making the clamp a
-	// no-op.
-	cpsbFloor = 1174
-)
-
-// computeCostPerStateByte implements the EIP-8037 cost_per_state_byte formula.
-// Returns 0 when gasLimit is 0 (unknown / pre-Amsterdam). Results are deterministic.
-func computeCostPerStateByte(gasLimit uint64) uint64 {
-	if gasLimit == 0 {
-		return 0
-	}
-	// raw = ceil((gasLimit * 2_628_000) / (2 * TARGET_STATE_GROWTH_PER_YEAR))
-	num := gasLimit*2_628_000 + (2*targetStateGrowthPerYear - 1)
-	raw := num / (2 * targetStateGrowthPerYear)
-
-	shifted := raw + cpsbOffset
-	shift := max(bits.Len64(shifted)-cpsbSignificantBits, 0)
-	quantized := (shifted >> shift) << shift
-	var formula uint64 = 1
-	if quantized > cpsbOffset {
-		formula = quantized - cpsbOffset
-	}
-	// Clamp to the current hardcoded value in geth so spamoor's gas budgets
-	// match the node's charging on devnets that haven't yet enabled the
-	// dynamic formula. See cpsbFloor for background.
-	return max(formula, cpsbFloor)
-}
+// CostPerStateByte is the EIP-8037 cost_per_state_byte value spamoor uses
+// when the Amsterdam fee model is active. State-gas charges (account
+// creation, code deposit, authorization delegators) multiply this by the
+// per-charge size constants below.
+const CostPerStateByte uint64 = 1530
 
 // feeWindowSize is the number of recent blocks tracked for dynamic fee headroom calculation.
 const feeWindowSize = 10
@@ -161,10 +120,11 @@ type TxPool struct {
 	// Current block gas limit tracking
 	currentGasLimit uint64
 	currentBaseFee  *big.Int
-	// isAmsterdam is true when the latest-observed block header contains a
-	// non-nil blockAccessListHash (EIP-7928, tied to Amsterdam / EIP-8037).
-	isAmsterdam     bool
 	blockStatsMutex sync.RWMutex
+
+	// preAmsterdamFeeModel selects the legacy (pre-EIP-8037) gas/fee model
+	// when true. Defaults to false: the Amsterdam fee model is active.
+	preAmsterdamFeeModel bool
 
 	// Recent block tracking for dynamic fee calculation.
 	// Sliding window of gas usage and baseFee to adjust feeCap:
@@ -184,7 +144,7 @@ type TxPool struct {
 }
 
 type txPoolWalletRegistration struct {
-	ctxs   []context.Context
+	ctxs   map[context.Context]struct{}
 	wallet *Wallet
 }
 
@@ -196,6 +156,11 @@ type TxPoolOptions struct {
 	ReorgDepth          int // Number of blocks to keep in memory for reorg tracking
 	ChainId             *big.Int
 	ExternalBlockSource *ExternalBlockSource
+	// PreAmsterdamFeeModel forces the legacy (pre-EIP-8037) gas/fee model.
+	// When false (default) spamoor uses the Amsterdam fee model, which is
+	// safe to keep on non-Amsterdam chains because its gas budgets are
+	// strictly higher than the legacy ones.
+	PreAmsterdamFeeModel bool
 }
 
 type ExternalBlockSource struct {
@@ -215,15 +180,16 @@ type ExternalBlockEvent struct {
 // transaction confirmations and reorgs.
 func NewTxPool(options *TxPoolOptions) *TxPool {
 	pool := &TxPool{
-		options:           options,
-		wallets:           make(map[common.Address]*txPoolWalletRegistration),
-		walletPools:       make(map[*WalletPool]struct{}),
-		processStaleChan:  make(chan uint64, 1),
-		blocks:            map[uint64]*BlockInfo{},
-		confirmedTxs:      map[uint64][]*TxInfo{},
-		reorgDepth:        10, // Default value
-		subscriptions:     map[uint64]*BlockSubscription{},
-		bulkSubscriptions: map[uint64]*BulkBlockSubscription{},
+		options:              options,
+		wallets:              make(map[common.Address]*txPoolWalletRegistration),
+		walletPools:          make(map[*WalletPool]struct{}),
+		processStaleChan:     make(chan uint64, 1),
+		blocks:               map[uint64]*BlockInfo{},
+		confirmedTxs:         map[uint64][]*TxInfo{},
+		reorgDepth:           10, // Default value
+		subscriptions:        map[uint64]*BlockSubscription{},
+		bulkSubscriptions:    map[uint64]*BulkBlockSubscription{},
+		preAmsterdamFeeModel: options.PreAmsterdamFeeModel,
 	}
 
 	if options.Context == nil {
@@ -234,9 +200,9 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 		pool.reorgDepth = options.ReorgDepth
 	}
 
-	// Block stats (gas limit, base fee, Amsterdam activation) are loaded by the
-	// caller via InitializeBlockStats before any scenario starts. Construction
-	// itself does not perform RPC calls.
+	// Block stats (gas limit, base fee) are loaded by the caller via
+	// InitializeBlockStats before any scenario starts. Construction itself
+	// does not perform RPC calls.
 
 	go pool.runTxPoolLoop()
 	go pool.processStaleTransactionsLoop()
@@ -244,51 +210,74 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 	return pool
 }
 
-// RegisterWallet registers a wallet with the transaction pool.
-// It is used to track the wallets that are active and need to be processed.
-// The registration is removed when the context is cancelled.
+// RegisterWallet registers a wallet with the transaction pool, keyed by address.
+// Multiple scenarios (e.g. a spammer that was paused and restarted with the same seed)
+// may register the same address; each registering context is tracked, and the
+// registration is auto-removed only once ALL of its contexts have been cancelled. This
+// ensures a restarted spammer's re-registration keeps the wallet alive instead of it
+// being evicted when the old, cancelled context's cleanup fires.
 func (pool *TxPool) RegisterWallet(wallet *Wallet, ctx context.Context) *Wallet {
 	if ctx.Err() != nil {
 		return nil
 	}
 
 	pool.walletsMutex.Lock()
-	defer pool.walletsMutex.Unlock()
-
-	if registration, ok := pool.wallets[wallet.address]; ok {
+	registration, ok := pool.wallets[wallet.address]
+	if ok {
 		if registration.wallet.privkey == nil && wallet.privkey != nil {
 			registration.wallet.privkey = wallet.privkey
 		}
+		if _, exists := registration.ctxs[ctx]; exists {
+			regWallet := registration.wallet
+			pool.walletsMutex.Unlock()
+			return regWallet
+		}
+		registration.ctxs[ctx] = struct{}{}
+	} else {
+		registration = &txPoolWalletRegistration{
+			ctxs:   map[context.Context]struct{}{ctx: {}},
+			wallet: wallet,
+		}
+		pool.wallets[wallet.address] = registration
+	}
+	regWallet := registration.wallet
+	pool.walletsMutex.Unlock()
 
-		for _, regctx := range registration.ctxs {
-			if regctx == ctx {
-				return registration.wallet
+	// Auto-cleanup when this context is cancelled. The identity check (reg == registration)
+	// guards against a later re-registration having replaced the entry.
+	context.AfterFunc(ctx, func() {
+		pool.walletsMutex.Lock()
+		if reg, ok := pool.wallets[wallet.address]; ok && reg == registration {
+			delete(reg.ctxs, ctx)
+			if len(reg.ctxs) == 0 {
+				delete(pool.wallets, wallet.address)
 			}
 		}
+		pool.walletsMutex.Unlock()
+	})
 
-		registration.ctxs = append(registration.ctxs, ctx)
-		return registration.wallet
-	}
-
-	pool.wallets[wallet.address] = &txPoolWalletRegistration{
-		ctxs:   []context.Context{ctx},
-		wallet: wallet,
-	}
-
-	return wallet
+	return regWallet
 }
 
 // RegisterWalletPool registers a wallet pool with the transaction pool.
 // It is used to track the wallet pools that are active and need to be processed.
+// The pool is auto-removed when its scenario context is cancelled (e.g. on pause or
+// restart), so a restarted spammer's stale pool does not linger and cause its
+// transactions to be double-attributed across two pools sharing the same spammer id.
 func (pool *TxPool) RegisterWalletPool(walletPool *WalletPool) {
 	if walletPool.ctx.Err() != nil {
 		return
 	}
 
 	pool.walletsMutex.Lock()
-	defer pool.walletsMutex.Unlock()
-
 	pool.walletPools[walletPool] = struct{}{}
+	pool.walletsMutex.Unlock()
+
+	context.AfterFunc(walletPool.ctx, func() {
+		pool.walletsMutex.Lock()
+		delete(pool.walletPools, walletPool)
+		pool.walletsMutex.Unlock()
+	})
 }
 
 // GetRegisteredWallet returns a wallet by address.
@@ -298,21 +287,18 @@ func (pool *TxPool) GetRegisteredWallet(address common.Address) *Wallet {
 
 	registration, found := pool.wallets[address]
 	if found {
-		for {
-			if registration.ctxs[0].Err() != nil {
-				registration.ctxs = registration.ctxs[1:]
-				if len(registration.ctxs) == 0 {
-					delete(pool.wallets, registration.wallet.address)
-					break
-				}
-			} else {
-				break
+		// Lazily prune cancelled contexts (belt-and-suspenders alongside the AfterFunc
+		// cleanup registered in RegisterWallet).
+		for c := range registration.ctxs {
+			if c.Err() != nil {
+				delete(registration.ctxs, c)
 			}
 		}
-
-		if len(registration.ctxs) > 0 {
-			return registration.wallet
+		if len(registration.ctxs) == 0 {
+			delete(pool.wallets, address)
+			return nil
 		}
+		return registration.wallet
 	}
 
 	return nil
@@ -323,9 +309,9 @@ func (pool *TxPool) GetRegisteredWallet(address common.Address) *Wallet {
 // sequentially. Also triggers stale transaction processing when new blocks arrive.
 // Runs until the context is cancelled and recovers from panics with logging.
 func (pool *TxPool) runTxPoolLoop() {
-	defer func() {
-		utils.RecoverPanic(pool.options.Logger, "TxPool.runTxPoolLoop", pool.runTxPoolLoop)
-	}()
+	// recover only stops an unwinding panic when the recovering function is
+	// deferred directly, so utils.RecoverPanic must not be wrapped in a closure.
+	defer utils.RecoverPanic(pool.options.Logger, "TxPool.runTxPoolLoop", pool.runTxPoolLoop)
 
 	if pool.options.ExternalBlockSource != nil {
 		pool.runExternalBlockSourceLoop()
@@ -378,9 +364,9 @@ func (pool *TxPool) runTxPoolLoop() {
 }
 
 func (pool *TxPool) runExternalBlockSourceLoop() {
-	defer func() {
-		utils.RecoverPanic(pool.options.Logger, "TxPool.runExternalBlockSourceLoop", pool.runExternalBlockSourceLoop)
-	}()
+	// recover only stops an unwinding panic when the recovering function is
+	// deferred directly, so utils.RecoverPanic must not be wrapped in a closure.
+	defer utils.RecoverPanic(pool.options.Logger, "TxPool.runExternalBlockSourceLoop", pool.runExternalBlockSourceLoop)
 
 	blockChan := pool.options.ExternalBlockSource.SubscribeBlocks(pool.options.Context, 10)
 	highestBlockNumber := uint64(0)
@@ -435,9 +421,9 @@ func (pool *TxPool) runExternalBlockSourceLoop() {
 // It listens for block number updates and processes stale confirmations for all
 // active wallets. Runs until the context is cancelled and recovers from panics.
 func (pool *TxPool) processStaleTransactionsLoop() {
-	defer func() {
-		utils.RecoverPanic(pool.options.Logger, "TxPool.processStaleTransactionsLoop", pool.processStaleTransactionsLoop)
-	}()
+	// recover only stops an unwinding panic when the recovering function is
+	// deferred directly, so utils.RecoverPanic must not be wrapped in a closure.
+	defer utils.RecoverPanic(pool.options.Logger, "TxPool.processStaleTransactionsLoop", pool.processStaleTransactionsLoop)
 
 	for {
 		select {
@@ -507,13 +493,7 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 
 	// Update current gas limit and recent block gas tracking
-	isAmsterdam := blockWithHash.Block.Header().BlockAccessListHash != nil
 	pool.blockStatsMutex.Lock()
-	if isAmsterdam != pool.isAmsterdam {
-		logrus.WithField("gasLimit", blockWithHash.Block.GasLimit()).
-			Infof("Amsterdam (EIP-8037) activation state changed: %v", isAmsterdam)
-		pool.isAmsterdam = isAmsterdam
-	}
 	pool.currentGasLimit = blockWithHash.Block.GasLimit()
 	pool.currentBaseFee = blockWithHash.Block.BaseFee()
 	pool.recentGasUsed[pool.recentGasIdx] = blockWithHash.Block.GasUsed()
@@ -1569,13 +1549,12 @@ func (pool *TxPool) GetCurrentGasLimit() uint64 {
 	return pool.currentGasLimit
 }
 
-// IsAmsterdam returns whether the connected chain has activated Amsterdam
-// (EIP-8037 / EIP-7928). Detected via the presence of blockAccessListHash in
-// the latest block header. Returns false before the first block is seen.
+// IsAmsterdam reports whether spamoor uses the Amsterdam (EIP-8037) gas/fee
+// model. Defaults to true; set TxPoolOptions.PreAmsterdamFeeModel to true to
+// force the legacy model. The Amsterdam model is safe to keep on non-Amsterdam
+// chains because its gas budgets are strictly higher than the legacy ones.
 func (pool *TxPool) IsAmsterdam() bool {
-	pool.blockStatsMutex.RLock()
-	defer pool.blockStatsMutex.RUnlock()
-	return pool.isAmsterdam
+	return !pool.preAmsterdamFeeModel
 }
 
 // HasObservedHead reports whether the pool has loaded chain state via
@@ -1588,25 +1567,22 @@ func (pool *TxPool) HasObservedHead() bool {
 	return pool.currentGasLimit > 0
 }
 
-// GetCostPerStateByte returns the current EIP-8037 cost_per_state_byte,
-// computed from the latest observed block gas limit. Returns 0 pre-Amsterdam.
-// Block stats are populated by InitializeBlockStats during startup, so callers
-// can rely on this returning live chain state once scenarios are running.
+// GetCostPerStateByte returns the EIP-8037 cost_per_state_byte spamoor charges
+// for state-creation gas budgeting. Returns the flat CostPerStateByte constant
+// on Amsterdam (default), or 0 when the pre-Amsterdam fee model is forced.
 func (pool *TxPool) GetCostPerStateByte() uint64 {
-	pool.blockStatsMutex.RLock()
-	defer pool.blockStatsMutex.RUnlock()
-	if !pool.isAmsterdam {
+	if pool.preAmsterdamFeeModel {
 		return 0
 	}
-	return computeCostPerStateByte(pool.currentGasLimit)
+	return CostPerStateByte
 }
 
 // MaxTxGas returns the effective per-tx gas cap for the connected chain.
-// On Amsterdam chains, EIP-8037 constrains only regular_gas (formerly
-// "compute gas") to EIP-7825's TX_MAX_GAS_LIMIT (16,777,216); total tx.gas
-// may grow up to the block gas limit when state_gas dominates (e.g. large
-// contract deployments). Pre-Amsterdam the cap is utils.MaxGasLimitPerTx,
-// clamped to the block limit on chains whose block limit is below 16.7M.
+// On Amsterdam, EIP-8037 caps only the state-creation portion at EIP-7825's
+// TX_MAX_GAS_LIMIT (16,777,216) while regular (compute) gas is bounded only by
+// the block gas limit, so MaxTxGas returns the block gas limit. Pre-Amsterdam
+// the cap is utils.MaxGasLimitPerTx, clamped to the block limit on chains
+// whose block limit is below 16.7M.
 func (pool *TxPool) MaxTxGas() uint64 {
 	blockLimit := pool.GetCurrentGasLimit()
 	if pool.IsAmsterdam() {
@@ -1758,16 +1734,17 @@ func (pool *TxPool) tryInitBlockStats(ctx context.Context) error {
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	latestBlock, err := client.client.BlockByNumber(fetchCtx, nil)
+	// Header-only: a full block decode fails on chains with custom tx types
+	// go-ethereum can't decode, and we only need the gas limit and base fee.
+	latestHeader, err := client.client.HeaderByNumber(fetchCtx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to fetch latest block for gas limit: %w", err)
+		return fmt.Errorf("failed to fetch latest header for gas limit: %w", err)
 	}
 
-	pool.currentGasLimit = latestBlock.GasLimit()
-	pool.currentBaseFee = latestBlock.BaseFee()
-	pool.isAmsterdam = latestBlock.Header().BlockAccessListHash != nil
-	logrus.Infof("initialized block stats from latest block: gasLimit=%v baseFee=%v amsterdam=%v",
-		pool.currentGasLimit, pool.currentBaseFee, pool.isAmsterdam)
+	pool.currentGasLimit = latestHeader.GasLimit
+	pool.currentBaseFee = latestHeader.BaseFee
+	logrus.Infof("initialized block stats from latest block: gasLimit=%v baseFee=%v amsterdamFeeModel=%v",
+		pool.currentGasLimit, pool.currentBaseFee, !pool.preAmsterdamFeeModel)
 
 	return nil
 }

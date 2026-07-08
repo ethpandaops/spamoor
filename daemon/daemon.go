@@ -35,6 +35,15 @@ type Daemon struct {
 	spammerMapMtx sync.RWMutex
 	spammerWg     sync.WaitGroup
 
+	// Spammer lifecycle event broker (powers the dashboard's live SSE stream).
+	eventSubs   map[uint64]chan *SpammerEvent
+	eventSubMtx sync.RWMutex
+	eventSubID  uint64
+
+	// Pending auto-restart timers for failed group members, keyed by spammer id.
+	autoRestartPending map[int64]struct{}
+	autoRestartMtx     sync.Mutex
+
 	globalCfg map[string]interface{}
 
 	// Metrics collector for Prometheus metrics
@@ -71,6 +80,9 @@ func NewDaemon(parentCtx context.Context, logger logrus.FieldLogger, clientPool 
 		db:         db,
 		spammerMap: make(map[int64]*Spammer),
 		globalCfg:  make(map[string]interface{}),
+		eventSubs:  make(map[uint64]chan *SpammerEvent),
+
+		autoRestartPending: make(map[int64]struct{}, 8),
 	}
 }
 
@@ -109,10 +121,30 @@ func (d *Daemon) Run() (bool, error) {
 		return false, fmt.Errorf("failed to get all spammer: %w", err)
 	}
 
+	// Phase 1: load every row (including group parents) into the map without
+	// starting anything, so shared-mode members can see their complete sibling set
+	// when they resolve their effective config.
 	for _, spammer := range spammerList {
 		_, err := d.restoreSpammer(spammer)
 		if err != nil {
 			return false, fmt.Errorf("failed to restore spammer: %w", err)
+		}
+	}
+
+	// Phase 2: start only non-group rows that were previously running. Group rows
+	// are never run as a scenario; their members self-resume by their own status.
+	for _, spammer := range d.GetAllSpammers() {
+		if spammer.IsGroup() {
+			continue
+		}
+		if spammer.GetStatus() == int(SpammerStatusRunning) {
+			if err := spammer.Start(); err != nil {
+				d.logger.Errorf("failed to resume spammer %d: %v", spammer.GetID(), err)
+			}
+		} else if spammer.GetStatus() == int(SpammerStatusFailed) {
+			// Members that were already failed when the daemon went down get the same
+			// auto-restart treatment as a live failure (no-op unless the group opted in).
+			d.maybeScheduleAutoRestart(spammer)
 		}
 	}
 
@@ -168,6 +200,15 @@ func (d *Daemon) DeleteSpammer(id int64, userEmail string) error {
 		return fmt.Errorf("spammer not found")
 	}
 
+	// Group rows are deleted via DeleteGroup, which handles members. Calling
+	// DeleteSpammer on a group detaches its members to standalone spammers by default.
+	if spammer.IsGroup() {
+		d.spammerMapMtx.Unlock()
+		err := d.DeleteGroup(id, false, userEmail)
+		d.spammerMapMtx.Lock()
+		return err
+	}
+
 	// Capture name for audit log
 	spammerName := spammer.GetName()
 
@@ -195,6 +236,9 @@ func (d *Daemon) DeleteSpammer(id int64, userEmail string) error {
 
 	// Remove from map
 	delete(d.spammerMap, id)
+
+	// Deletion events carry no snapshot, so emitting under the map lock is safe.
+	d.emitSpammerDeleted(id)
 	return nil
 }
 
@@ -202,48 +246,59 @@ func (d *Daemon) DeleteSpammer(id int64, userEmail string) error {
 // The configuration is validated by attempting to unmarshal it into SpammerConfig.
 // Returns an error if the spammer is not found, config is invalid, or database update fails.
 func (d *Daemon) UpdateSpammer(id int64, name string, description string, config string, userEmail string) error {
-	d.spammerMapMtx.Lock()
-	defer d.spammerMapMtx.Unlock()
+	// Perform the locked update in a closure so the lock is released before we emit the
+	// lifecycle event (event snapshots may read the spammer map under RLock).
+	spammer, err := func() (*Spammer, error) {
+		d.spammerMapMtx.Lock()
+		defer d.spammerMapMtx.Unlock()
 
-	spammer := d.spammerMap[id]
-	if spammer == nil {
-		return fmt.Errorf("spammer not found")
-	}
-
-	// Validate config
-	if err := yaml.Unmarshal([]byte(config), &SpammerConfig{}); err != nil {
-		return fmt.Errorf("invalid config: %w", err)
-	}
-
-	// Capture old values for audit logging
-	oldName := spammer.dbEntity.Name
-	oldDescription := spammer.dbEntity.Description
-	oldConfig := spammer.dbEntity.Config
-
-	// Update DB
-	spammer.dbEntity.Name = name
-	spammer.dbEntity.Description = description
-	spammer.dbEntity.Config = config
-
-	err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
-		if err := d.db.UpdateSpammer(tx, spammer.dbEntity); err != nil {
-			return err
+		spammer := d.spammerMap[id]
+		if spammer == nil {
+			return nil, fmt.Errorf("spammer not found")
 		}
 
-		// Audit log the update
-		if d.auditLogger != nil {
-			return d.auditLogger.LogSpammerUpdate(tx, userEmail, id, oldName, name, oldDescription, description, oldConfig, config)
+		// Validate config
+		if err := yaml.Unmarshal([]byte(config), &SpammerConfig{}); err != nil {
+			return nil, fmt.Errorf("invalid config: %w", err)
 		}
 
-		return nil
-	})
+		// Capture old values for audit logging
+		oldName := spammer.dbEntity.Name
+		oldDescription := spammer.dbEntity.Description
+		oldConfig := spammer.dbEntity.Config
+
+		// Update DB
+		spammer.dbEntity.Name = name
+		spammer.dbEntity.Description = description
+		spammer.dbEntity.Config = config
+
+		err := d.db.RunDBTransaction(func(tx *sqlx.Tx) error {
+			if err := d.db.UpdateSpammer(tx, spammer.dbEntity); err != nil {
+				return err
+			}
+
+			// Audit log the update
+			if d.auditLogger != nil {
+				return d.auditLogger.LogSpammerUpdate(tx, userEmail, id, oldName, name, oldDescription, description, oldConfig, config)
+			}
+
+			return nil
+		})
+		if err != nil {
+			// Revert changes on error
+			spammer.dbEntity.Name = oldName
+			spammer.dbEntity.Description = oldDescription
+			spammer.dbEntity.Config = oldConfig
+			return nil, fmt.Errorf("failed to update spammer: %w", err)
+		}
+
+		return spammer, nil
+	}()
 	if err != nil {
-		// Revert changes on error
-		spammer.dbEntity.Name = oldName
-		spammer.dbEntity.Description = oldDescription
-		spammer.dbEntity.Config = oldConfig
-		return fmt.Errorf("failed to update spammer: %w", err)
+		return err
 	}
+
+	d.emitSpammerSnapshot(spammer, SpammerEventUpdated)
 
 	return nil
 }
@@ -295,6 +350,23 @@ func (d *Daemon) ReclaimSpammer(id int64, userEmail string) error {
 	spammer := d.GetSpammer(id)
 	if spammer == nil {
 		return fmt.Errorf("spammer not found")
+	}
+
+	// For a group, reclaim funds from each member's wallet pool.
+	if spammer.IsGroup() {
+		for _, m := range d.getGroupMembersFromMap(id) {
+			if m.walletPool == nil {
+				continue
+			}
+			if err := m.walletPool.ReclaimFunds(d.ctx, nil); err != nil {
+				d.logger.Errorf("failed to reclaim funds for group member %d: %v", m.GetID(), err)
+			}
+		}
+
+		if d.auditLogger != nil && userEmail != "" {
+			return d.auditLogger.LogSpammerAction(userEmail, db.AuditActionSpammerReclaim, id, spammer.GetName(), nil)
+		}
+		return nil
 	}
 
 	if spammer.walletPool == nil {
@@ -385,7 +457,7 @@ func (d *Daemon) TrackTransactionSent(spammerID int64) {
 	}
 
 	spammer := d.GetSpammer(spammerID)
-	if spammer == nil {
+	if spammer == nil || spammer.IsGroup() {
 		return
 	}
 
@@ -403,7 +475,7 @@ func (d *Daemon) TrackTransactionFailure(spammerID int64) {
 	}
 
 	spammer := d.GetSpammer(spammerID)
-	if spammer == nil {
+	if spammer == nil || spammer.IsGroup() {
 		return
 	}
 
@@ -421,7 +493,7 @@ func (d *Daemon) TrackSpammerStatusChange(spammerID int64, running bool) {
 	}
 
 	spammer := d.GetSpammer(spammerID)
-	if spammer == nil {
+	if spammer == nil || spammer.IsGroup() {
 		return
 	}
 

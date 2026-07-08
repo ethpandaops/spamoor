@@ -18,22 +18,39 @@ import (
 
 // SpammerConfig represents a spammer configuration for export/import.
 // This uses the same format as StartupSpammerConfig to maintain compatibility.
+//
+// Spammer groups reuse this structure: a group entry has Scenario == "group", its
+// Config holds the sparse overlay and GroupConfig holds {throughput_mode,
+// total_throughput, total_count}. A member entry sets Group to the parent group's
+// name and GroupConfig to {weight, enabled, sort_order}.
+// Config is a yaml.Node (not a map) so the scenario config's key ordering and comments
+// survive export/import round-trips instead of being flattened and sorted. It is a value
+// (not a pointer) because yaml.v3 only captures a sub-document with its comments into a
+// value Node field, not a pointer field.
 type SpammerConfig struct {
-	Scenario    string                 `yaml:"scenario"`
-	Name        string                 `yaml:"name"`
-	Description string                 `yaml:"description"`
-	Config      map[string]interface{} `yaml:"config"`
-	Start       *bool                  `yaml:"start,omitempty"`
+	Scenario    string    `yaml:"scenario"`
+	Name        string    `yaml:"name"`
+	Description string    `yaml:"description"`
+	Config      yaml.Node `yaml:"config,omitempty"`
+	Start       *bool     `yaml:"start,omitempty"`
+
+	// Group fields
+	Group       string                 `yaml:"group,omitempty"`        // member: parent group name
+	GroupConfig map[string]interface{} `yaml:"group_config,omitempty"` // role-dependent group metadata
 }
 
 // ConfigImportItem represents either a spammer config or an include directive
 type ConfigImportItem struct {
 	// Spammer configuration fields
-	Scenario    string                 `yaml:"scenario,omitempty"`
-	Name        string                 `yaml:"name,omitempty"`
-	Description string                 `yaml:"description,omitempty"`
-	Config      map[string]interface{} `yaml:"config,omitempty"`
-	Start       *bool                  `yaml:"start,omitempty"`
+	Scenario    string    `yaml:"scenario,omitempty"`
+	Name        string    `yaml:"name,omitempty"`
+	Description string    `yaml:"description,omitempty"`
+	Config      yaml.Node `yaml:"config,omitempty"`
+	Start       *bool     `yaml:"start,omitempty"`
+
+	// Group fields
+	Group       string                 `yaml:"group,omitempty"`
+	GroupConfig map[string]interface{} `yaml:"group_config,omitempty"`
 
 	// Include directive
 	Include string `yaml:"include,omitempty"`
@@ -100,6 +117,8 @@ func ResolveConfigImports(input string, baseURL string, visited map[string]bool)
 				Description: item.Description,
 				Config:      item.Config,
 				Start:       item.Start,
+				Group:       item.Group,
+				GroupConfig: item.GroupConfig,
 			}
 			allConfigs = append(allConfigs, config)
 		}
@@ -108,42 +127,124 @@ func ResolveConfigImports(input string, baseURL string, visited map[string]bool)
 	return allConfigs, nil
 }
 
-// MergeScenarioConfiguration merges scenario defaults with provided configuration
-func MergeScenarioConfiguration(scenario *scenario.Descriptor, providedConfig map[string]interface{}) (string, error) {
-	// Get default configurations
-	defaultYaml, err := yaml.Marshal(scenario.DefaultOptions)
+// MergeScenarioConfiguration merges scenario defaults with the provided configuration.
+// The provided config's key ordering and comments are preserved (the provided keys come
+// first, in their original order, with their comments); any scenario/wallet default keys
+// the provided config omits are appended afterwards. A nil provided config yields the
+// defaults verbatim.
+func MergeScenarioConfiguration(scenario *scenario.Descriptor, provided *yaml.Node) (string, error) {
+	defaults, err := buildDefaultsNode(scenario)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal default config: %w", err)
+		return "", err
 	}
 
-	defaultWalletConfig := spamoor.GetDefaultWalletConfig(scenario.Name)
-	defaultWalletConfigYaml, err := yaml.Marshal(defaultWalletConfig)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal default wallet config: %w", err)
+	result := defaults
+	if providedMapping := mappingFromNode(provided); providedMapping != nil {
+		result = mergeMappingNodes(defaults, providedMapping)
 	}
 
-	// Merge configurations
-	mergedConfig := map[string]interface{}{}
-
-	if err := yaml.Unmarshal(defaultWalletConfigYaml, &mergedConfig); err != nil {
-		return "", fmt.Errorf("failed to unmarshal default wallet config: %w", err)
-	}
-
-	if err := yaml.Unmarshal(defaultYaml, &mergedConfig); err != nil {
-		return "", fmt.Errorf("failed to unmarshal default config: %w", err)
-	}
-
-	// Apply provided config overrides
-	for k, v := range providedConfig {
-		mergedConfig[k] = v
-	}
-
-	configYAML, err := yaml.Marshal(mergedConfig)
+	out, err := yaml.Marshal(result)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal merged config: %w", err)
 	}
+	return string(out), nil
+}
 
-	return string(configYAML), nil
+// buildDefaultsNode builds a mapping node of the scenario's default scenario + wallet
+// options (no comments; default keys are only ever appended for fields the user omitted).
+func buildDefaultsNode(sc *scenario.Descriptor) (*yaml.Node, error) {
+	merged := map[string]interface{}{}
+
+	walletYaml, err := yaml.Marshal(spamoor.GetDefaultWalletConfig(sc.Name))
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal default wallet config: %w", err)
+	}
+	if err := yaml.Unmarshal(walletYaml, &merged); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal default wallet config: %w", err)
+	}
+
+	defYaml, err := yaml.Marshal(sc.DefaultOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal default config: %w", err)
+	}
+	if err := yaml.Unmarshal(defYaml, &merged); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal default config: %w", err)
+	}
+
+	mergedYaml, err := yaml.Marshal(merged)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal defaults: %w", err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(mergedYaml, &doc); err != nil {
+		return nil, fmt.Errorf("failed to parse defaults: %w", err)
+	}
+	mapping := mappingFromNode(&doc)
+	if mapping == nil {
+		mapping = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	}
+	return mapping, nil
+}
+
+// mergeMappingNodes returns a mapping node with the provided node's key/value pairs first
+// (preserving their order and comments), followed by any default keys the provided node
+// does not define.
+func mergeMappingNodes(defaults, provided *yaml.Node) *yaml.Node {
+	result := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+
+	providedKeys := make(map[string]bool, len(provided.Content)/2)
+	for i := 0; i+1 < len(provided.Content); i += 2 {
+		providedKeys[provided.Content[i].Value] = true
+		result.Content = append(result.Content, provided.Content[i], provided.Content[i+1])
+	}
+	for i := 0; i+1 < len(defaults.Content); i += 2 {
+		if providedKeys[defaults.Content[i].Value] {
+			continue
+		}
+		result.Content = append(result.Content, defaults.Content[i], defaults.Content[i+1])
+	}
+	return result
+}
+
+// mappingFromNode unwraps a document node and returns the underlying mapping node, or nil
+// if the node is empty or not a mapping.
+func mappingFromNode(n *yaml.Node) *yaml.Node {
+	if n == nil {
+		return nil
+	}
+	if n.Kind == yaml.DocumentNode {
+		if len(n.Content) == 0 {
+			return nil
+		}
+		n = n.Content[0]
+	}
+	if n.Kind != yaml.MappingNode {
+		return nil
+	}
+	return n
+}
+
+// ParseConfigNode parses a YAML config string into a mapping node, preserving comments and
+// key order. Returns nil for empty/blank input.
+func ParseConfigNode(s string) (*yaml.Node, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(s), &doc); err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+	return mappingFromNode(&doc), nil
+}
+
+// NodeToMap decodes a config node into a plain map (for callers that only need the values,
+// e.g. group overlays applied at runtime).
+func NodeToMap(n *yaml.Node) map[string]interface{} {
+	m := map[string]interface{}{}
+	if n != nil {
+		_ = n.Decode(&m)
+	}
+	return m
 }
 
 // isConfigURL checks if the input string is a valid URL

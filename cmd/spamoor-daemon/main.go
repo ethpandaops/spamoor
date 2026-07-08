@@ -23,24 +23,26 @@ import (
 )
 
 type CliArgs struct {
-	verbose          bool
-	trace            bool
-	debug            bool
-	rpchosts         []string
-	rpchostsFile     string
-	privkey          string
-	port             int
-	dbFile           string
-	startupSpammer   string
-	fuluActivation   uint64
-	withoutBatcher   bool
-	disableTxMetrics bool
-	disableAuditLogs bool
-	disablePluginAPI bool
-	slotDuration     time.Duration
-	authProviderURL  string
-	startupDelay     uint64
-	plugins          []string
+	verbose              bool
+	trace                bool
+	debug                bool
+	rpchosts             []string
+	rpchostsFile         string
+	privkey              string
+	port                 int
+	dbFile               string
+	startupSpammer       string
+	startupDefaults      []string
+	fuluActivation       uint64
+	withoutBatcher       bool
+	disableTxMetrics     bool
+	disableAuditLogs     bool
+	disablePluginAPI     bool
+	slotDuration         time.Duration
+	authProviderURL      string
+	startupDelay         uint64
+	plugins              []string
+	preAmsterdamFeeModel bool
 }
 
 func main() {
@@ -56,6 +58,7 @@ func main() {
 	flags.IntVarP(&cliArgs.port, "port", "P", 8080, "The port to run the webui on.")
 	flags.StringVarP(&cliArgs.dbFile, "db", "d", "spamoor.db", "The file to store the database in.")
 	flags.StringVar(&cliArgs.startupSpammer, "startup-spammer", "", "YAML file or URL with startup spammers configuration")
+	flags.StringArrayVar(&cliArgs.startupDefaults, "startup-defaults", []string{}, "Keys of built-in default spammers/groups to auto-start on first launch (e.g. 'regular-chain-load,fuzzing', can be specified multiple times)")
 	flags.Uint64Var(&cliArgs.fuluActivation, "fulu-activation", 0, "The unix timestamp of the Fulu activation (if activated)")
 	flags.BoolVar(&cliArgs.withoutBatcher, "without-batcher", false, "Run the tool without batching funding transactions")
 	flags.BoolVar(&cliArgs.disableTxMetrics, "disable-tx-metrics", false, "Disable transaction metrics collection and graphs page (keeps Prometheus metrics)")
@@ -65,6 +68,7 @@ func main() {
 	flags.StringVar(&cliArgs.authProviderURL, "auth-provider-url", "", "Optional authenticatoor URL (e.g. https://auth.<devnet>.example.io); when set, API requests must carry a JWT verified against the authenticatoor's JWKS. When empty the API is unauthenticated.")
 	flags.Uint64Var(&cliArgs.startupDelay, "startup-delay", 30, "Delay in seconds before starting spammers on daemon startup (to allow cancellation)")
 	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files or local directories to load (can be specified multiple times)")
+	flags.BoolVar(&cliArgs.preAmsterdamFeeModel, "pre-amsterdam-fee-model", false, "Use the legacy pre-Amsterdam (pre-EIP-8037) gas/fee model. Default is the Amsterdam fee model, which is safe on non-Amsterdam chains because its gas budgets are strictly higher.")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -139,10 +143,11 @@ func main() {
 	var spamoorDaemon *daemon.Daemon
 
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
-		Context:    ctx,
-		Logger:     logger.WithField("module", "txpool"),
-		ClientPool: clientPool,
-		ChainId:    clientPool.GetChainId(),
+		Context:              ctx,
+		Logger:               logger.WithField("module", "txpool"),
+		ClientPool:           clientPool,
+		ChainId:              clientPool.GetChainId(),
+		PreAmsterdamFeeModel: cliArgs.preAmsterdamFeeModel,
 	})
 
 	// init daemon
@@ -219,9 +224,8 @@ func main() {
 		panic(fmt.Errorf("failed to prepare clients: %v", err))
 	}
 
-	// load chain state (gas limit, base fee, Amsterdam activation) before any
-	// scenario starts, so scenarios always observe real values instead of
-	// uninitialized defaults.
+	// load chain state (gas limit, base fee) before any scenario starts, so
+	// scenarios always observe real values instead of uninitialized defaults.
 	initStatsCtx, cancelInitStats := context.WithTimeout(ctx, 30*time.Second)
 	err = txpool.InitializeBlockStats(initStatsCtx)
 	cancelInitStats()
@@ -246,6 +250,21 @@ func main() {
 	firstLaunch, err := spamoorDaemon.Run()
 	if err != nil {
 		panic(err)
+	}
+
+	// insert built-in default spammers on first launch and auto-start the requested ones
+	if firstLaunch {
+		startupDefaults := []string{}
+		for _, name := range strings.Split(strings.Join(cliArgs.startupDefaults, ","), ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				startupDefaults = append(startupDefaults, name)
+			}
+		}
+
+		err := spamoorDaemon.ImportDefaultSpammers(startupDefaults, logger.WithField("module", "startup"))
+		if err != nil {
+			logger.Errorf("failed to import default spammers: %v", err)
+		}
 	}
 
 	// load startup spammers if configured

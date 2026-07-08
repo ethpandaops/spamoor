@@ -60,8 +60,10 @@ type SpammerConfig struct {
 }
 
 // restoreSpammer creates a spammer instance from database entity data.
-// It initializes logging with buffered scope, adds the spammer to the daemon map,
-// and automatically starts it if it was previously running.
+// It initializes logging with buffered scope and adds the spammer to the daemon map.
+// It deliberately does NOT auto-start: starting is handled in a second phase by Run()
+// once all rows (including group parents) have been loaded, so shared-mode members can
+// see their complete sibling set and group rows are never run as a scenario.
 func (d *Daemon) restoreSpammer(dbEntity *db.Spammer) (*Spammer, error) {
 	logger := logscope.NewLogger(&logscope.ScopeOptions{
 		Parent:     d.logger.WithField("spammer_id", dbEntity.ID),
@@ -80,22 +82,39 @@ func (d *Daemon) restoreSpammer(dbEntity *db.Spammer) (*Spammer, error) {
 	d.spammerMap[spammer.dbEntity.ID] = spammer
 	d.spammerMapMtx.Unlock()
 
-	if spammer.dbEntity.Status == int(SpammerStatusRunning) {
-		spammer.Start()
-	}
-
 	return spammer, nil
 }
 
-// NewSpammer creates a new spammer instance with the specified configuration.
-// It validates the config, generates a unique ID (starting from 100), persists to database,
-// and optionally starts execution immediately. The ID counter is stored in database state.
-func (d *Daemon) NewSpammer(scenarioName string, config string, name string, description string, startImmediately bool, userEmail string, isImport bool) (*Spammer, error) {
-	// parse config for sanity checks
-	yaml.Unmarshal([]byte(config), &SpammerConfig{})
+// IsGroup reports whether this spammer row represents a spammer group rather than a
+// runnable scenario. Group rows use the reserved sentinel scenario name and are
+// guarded against execution throughout the daemon.
+func (s *Spammer) IsGroup() bool {
+	return s.dbEntity.Scenario == scenario.GroupScenarioName
+}
 
-	// get next id
+// GetGroupID returns the parent group id for a member spammer, or 0 if the spammer is
+// standalone or a group itself.
+func (s *Spammer) GetGroupID() int64 {
+	return s.dbEntity.GroupID
+}
+
+// GetGroupConfig returns the role-dependent group_config JSON for this row.
+func (s *Spammer) GetGroupConfig() string {
+	return s.dbEntity.GroupConfig
+}
+
+// allocateSpammerID returns the id for a new spammer row. When explicitID is non-zero
+// it is used verbatim (the range below 100 is reserved for the built-in default
+// spammers); otherwise the next id is allocated from the shared scenario counter,
+// which starts at 100 so runtime-created spammers never collide with defaults.
+func (d *Daemon) allocateSpammerID(explicitID int64) int64 {
+	if explicitID != 0 {
+		return explicitID
+	}
+
 	d.spammerIdMtx.Lock()
+	defer d.spammerIdMtx.Unlock()
+
 	scenarioCounter := 0
 	d.db.GetSpamoorState("scenario_counter", &scenarioCounter)
 	if scenarioCounter < 100 {
@@ -104,10 +123,25 @@ func (d *Daemon) NewSpammer(scenarioName string, config string, name string, des
 		scenarioCounter++
 	}
 	d.db.SetSpamoorState(nil, "scenario_counter", scenarioCounter)
-	d.spammerIdMtx.Unlock()
+
+	return int64(scenarioCounter)
+}
+
+// NewSpammer creates a new spammer instance with the specified configuration.
+// It validates the config, generates a unique ID (starting from 100), persists to database,
+// and optionally starts execution immediately. The ID counter is stored in database state.
+func (d *Daemon) NewSpammer(scenarioName string, config string, name string, description string, startImmediately bool, userEmail string, isImport bool) (*Spammer, error) {
+	return d.newSpammerWithID(0, scenarioName, config, name, description, startImmediately, userEmail, isImport)
+}
+
+// newSpammerWithID creates a new spammer like NewSpammer, but with an explicit row id
+// when id is non-zero (used for the built-in defaults with their reserved ids < 100).
+func (d *Daemon) newSpammerWithID(id int64, scenarioName string, config string, name string, description string, startImmediately bool, userEmail string, isImport bool) (*Spammer, error) {
+	// parse config for sanity checks
+	yaml.Unmarshal([]byte(config), &SpammerConfig{})
 
 	dbEntity := &db.Spammer{
-		ID:          int64(scenarioCounter),
+		ID:          d.allocateSpammerID(id),
 		Scenario:    scenarioName,
 		Name:        name,
 		Description: description,
@@ -148,6 +182,8 @@ func (d *Daemon) NewSpammer(scenarioName string, config string, name string, des
 	d.spammerMap[spammer.dbEntity.ID] = spammer
 	d.spammerMapMtx.Unlock()
 
+	d.emitSpammerSnapshot(spammer, SpammerEventCreated)
+
 	if startImmediately {
 		err = spammer.Start()
 		if err != nil {
@@ -161,7 +197,14 @@ func (d *Daemon) NewSpammer(scenarioName string, config string, name string, des
 // Start begins execution of the spammer's scenario in a separate goroutine.
 // It updates the status to running in the database and launches the scenario runner.
 // Returns an error if the database update fails.
+//
+// For a group row, Start fans out to all effectively-enabled members instead of
+// running a scenario itself.
 func (s *Spammer) Start() error {
+	if s.IsGroup() {
+		return s.startGroup()
+	}
+
 	s.dbEntity.Status = int(SpammerStatusRunning)
 	err := s.daemon.db.RunDBTransaction(func(tx *sqlx.Tx) error {
 		return s.daemon.db.UpdateSpammer(tx, s.dbEntity)
@@ -173,6 +216,9 @@ func (s *Spammer) Start() error {
 	// Track spammer start for metrics
 	s.daemon.TrackSpammerStatusChange(s.dbEntity.ID, true)
 
+	// Notify the dashboard of the run-state change (and the parent group's derived status).
+	s.daemon.emitStatusChange(s)
+
 	go s.runScenario()
 
 	return nil
@@ -182,6 +228,10 @@ func (s *Spammer) Start() error {
 // It waits up to 10 seconds for the scenario to stop gracefully.
 // Returns an error if the scenario is not running or fails to stop within the timeout.
 func (s *Spammer) Pause() error {
+	if s.IsGroup() {
+		return s.pauseGroup()
+	}
+
 	scenarioCancel := s.scenarioCancel
 	if scenarioCancel == nil {
 		return fmt.Errorf("scenario is not running")
@@ -201,6 +251,13 @@ func (s *Spammer) Pause() error {
 // It manages wallet pool creation, scenario initialization, configuration loading,
 // and handles panics with stack trace logging. Updates status in database on completion.
 func (s *Spammer) runScenario() {
+	// Group rows are never executed as a scenario. This is a defensive guard; the
+	// normal lifecycle dispatches group Start/Pause to the fan-out helpers.
+	if s.IsGroup() {
+		s.logger.Errorf("refusing to run group row %d as a scenario", s.dbEntity.ID)
+		return
+	}
+
 	if s.running {
 		return
 	}
@@ -250,6 +307,16 @@ func (s *Spammer) runScenario() {
 			s.logger.Errorf("failed to update spammer: %v", err)
 		}
 
+		// Notify the dashboard of the terminal run-state (paused/finished/failed) and the
+		// parent group's derived status.
+		s.daemon.emitStatusChange(s)
+
+		// Failed group members may be restarted automatically after a cooldown if their
+		// group opted in. Normal stops (paused/finished) are never restarted.
+		if s.dbEntity.Status == int(SpammerStatusFailed) {
+			s.daemon.maybeScheduleAutoRestart(s)
+		}
+
 		s.running = false
 		s.scenarioCancel()
 		s.scenarioCancel = nil
@@ -288,9 +355,18 @@ func (s *Spammer) runScenario() {
 		pluginPath = s.plugin.PluginPath
 	}
 
+	// Resolve the effective config. For standalone spammers this is the stored config
+	// verbatim; for group members it applies the group overlay and (in shared mode) the
+	// weight-based throughput/count split plus derived max_wallets.
+	effectiveConfig, cfgErr := s.resolveEffectiveConfig()
+	if cfgErr != nil {
+		scenarioErr = fmt.Errorf("failed to resolve effective config: %w", cfgErr)
+		return
+	}
+
 	options := &scenario.Options{
 		WalletPool: s.walletPool,
-		Config:     s.dbEntity.Config,
+		Config:     effectiveConfig,
 		GlobalCfg:  s.daemon.GetGlobalCfg(),
 		PluginPath: pluginPath,
 	}
@@ -302,8 +378,8 @@ func (s *Spammer) runScenario() {
 		return
 	}
 
-	if s.dbEntity.Config != "" {
-		scenarioErr = s.walletPool.LoadConfig(s.dbEntity.Config)
+	if effectiveConfig != "" {
+		scenarioErr = s.walletPool.LoadConfig(effectiveConfig)
 		if scenarioErr != nil {
 			return
 		}

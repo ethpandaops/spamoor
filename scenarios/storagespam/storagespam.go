@@ -137,8 +137,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
-	if maxTx := s.walletPool.GetTxPool().MaxTxGas(); s.options.GasUnitsToBurn > maxTx {
-		s.logger.Warnf("Gas units to burn %d exceeds per-tx cap %d and will most likely be dropped by the execution layer client", s.options.GasUnitsToBurn, maxTx)
+	if blockLimit := s.walletPool.GetTxPool().GetCurrentGasLimit(); blockLimit > 0 && s.options.GasUnitsToBurn > blockLimit {
+		s.logger.Warnf("Gas units to burn %d exceeds block gas limit %d and will most likely be dropped by the execution layer client", s.options.GasUnitsToBurn, blockLimit)
 	}
 
 	return nil
@@ -342,10 +342,15 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
-	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+	// SetRandomForGas burns GasUnitsToBurn of *execution* gas via a gasleft()
+	// loop, writing fresh storage slots. Under the Amsterdam fee schedule each
+	// fresh slot also incurs large state-creation gas that gasleft() does not
+	// see, so the real total is many times GasUnitsToBurn and a static
+	// GasUnitsToBurn+buffer limit reverts. Estimate the true cost instead; this
+	// scenario sends few, large txs, so the extra round trip is acceptable.
+	tx, err := wallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       s.options.GasUnitsToBurn + 50000,
 	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 		return storageSpamContract.SetRandomForGas(transactOpts, big.NewInt(int64(s.options.GasUnitsToBurn)), big.NewInt(int64(txIdx)))
 	})

@@ -990,6 +990,179 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/spammer-group": {
+            "post": {
+                "description": "Creates a new spammer group with a shared overlay and throughput mode",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SpammerGroup"
+                ],
+                "summary": "Create a spammer group",
+                "operationId": "createSpammerGroup",
+                "parameters": [
+                    {
+                        "description": "Group configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.SpammerGroupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Group ID",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/spammer-group/{id}": {
+            "put": {
+                "description": "Updates a group's name, description, overlay and throughput mode/totals",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SpammerGroup"
+                ],
+                "summary": "Update a spammer group",
+                "operationId": "updateSpammerGroup",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Group ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Group configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.SpammerGroupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Group not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/spammer-group/{id}/members/order": {
+            "put": {
+                "description": "Sets the display/sort order of a group's members by id",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SpammerGroup"
+                ],
+                "summary": "Reorder a group's members",
+                "operationId": "reorderGroupMembers",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Group ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Ordered member ids",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.ReorderMembersRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Group not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/api/spammer-library/index": {
             "get": {
                 "description": "Returns the index of available spammer configurations from GitHub",
@@ -1123,12 +1296,178 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "Deletes a spammer and stops it if running",
+                "description": "Deletes a spammer and stops it if running. For a group, the cascade query\nparameter controls whether members are deleted (cascade=true) or detached\nto standalone spammers (cascade=false, the default).",
                 "tags": [
                     "Spammer"
                 ],
                 "summary": "Delete a spammer",
                 "operationId": "deleteSpammer",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Spammer ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "For groups: delete members too (default false = detach)",
+                        "name": "cascade",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "description": "Invalid spammer ID",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Spammer not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/spammer/{id}/effective-config": {
+            "get": {
+                "description": "Returns the config a spammer would actually run with. For group members\nthis includes the group overlay and (in shared mode) the resolved\nthroughput/count split and derived max_wallets.",
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "SpammerGroup"
+                ],
+                "summary": "Get a spammer's effective (resolved) config",
+                "operationId": "getEffectiveConfig",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Spammer ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Resolved YAML configuration",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid spammer ID",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Spammer not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/spammer/{id}/group": {
+            "put": {
+                "description": "Assigns a spammer to a group (or updates its weight/enabled/sort_order)",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SpammerGroup"
+                ],
+                "summary": "Add or update a spammer's group membership",
+                "operationId": "setSpammerGroup",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Spammer ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Membership configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.SetMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Spammer not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Removes a spammer from its group, leaving it a standalone spammer",
+                "tags": [
+                    "SpammerGroup"
+                ],
+                "summary": "Detach a spammer from its group",
+                "operationId": "removeSpammerGroup",
                 "parameters": [
                     {
                         "type": "integer",
@@ -1150,12 +1489,6 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Spammer not found",
                         "schema": {
                             "type": "string"
                         }
@@ -1426,7 +1759,7 @@ const docTemplate = `{
         },
         "/api/spammers": {
             "get": {
-                "description": "Returns a list of all configured spammers",
+                "description": "Returns a list of all configured spammers (including spammer groups)",
                 "produces": [
                     "application/json"
                 ],
@@ -1443,6 +1776,33 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/api.SpammerListEntry"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/spammers/events": {
+            "get": {
+                "description": "Streams spammer lifecycle events (create/update/status/membership/reorder/\ndelete) via Server-Sent Events so dashboards can update live. The stream is\nunauthenticated and carries only safe metadata — no configs, seeds or logs.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "Spammer"
+                ],
+                "summary": "Stream spammer lifecycle events",
+                "operationId": "streamSpammerEvents",
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of spammer events",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Streaming unsupported",
+                        "schema": {
+                            "type": "string"
                         }
                     }
                 }
@@ -1975,6 +2335,17 @@ const docTemplate = `{
                 }
             }
         },
+        "api.ReorderMembersRequest": {
+            "type": "object",
+            "properties": {
+                "order": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
         "api.ScenarioCategory": {
             "type": "object",
             "properties": {
@@ -2057,6 +2428,23 @@ const docTemplate = `{
                 }
             }
         },
+        "api.SetMemberRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "group_id": {
+                    "type": "integer"
+                },
+                "sort_order": {
+                    "type": "integer"
+                },
+                "weight": {
+                    "type": "integer"
+                }
+            }
+        },
         "api.SpammerBlockData": {
             "type": "object",
             "properties": {
@@ -2093,6 +2481,45 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.SpammerGroupRequest": {
+            "type": "object",
+            "properties": {
+                "auto_restart_cooldown": {
+                    "description": "cooldown in seconds (0 = default 300)",
+                    "type": "integer"
+                },
+                "auto_restart_failed": {
+                    "description": "restart failed members after a cooldown",
+                    "type": "boolean"
+                },
+                "config": {
+                    "description": "sparse overlay YAML",
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "throughput_mode": {
+                    "description": "\"independent\" or \"shared\"",
+                    "type": "string"
+                },
+                "total_count": {
+                    "description": "shared mode: total tx count",
+                    "type": "integer"
+                },
+                "total_max_pending": {
+                    "description": "shared mode: total pending budget (0 = 2x throughput)",
+                    "type": "integer"
+                },
+                "total_throughput": {
+                    "description": "shared mode: total tx/slot",
                     "type": "integer"
                 }
             }
@@ -2159,8 +2586,21 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "group_config": {
+                    "$ref": "#/definitions/configs.GroupConfig"
+                },
+                "group_id": {
+                    "type": "integer"
+                },
                 "id": {
                     "type": "integer"
+                },
+                "is_group": {
+                    "description": "Group fields. IsGroup marks a group row; GroupID links a member to its parent\ngroup. GroupConfig is set for group rows, MemberConfig for member rows.",
+                    "type": "boolean"
+                },
+                "member_config": {
+                    "$ref": "#/definitions/configs.MemberConfig"
                 },
                 "name": {
                     "type": "string"
@@ -2333,6 +2773,46 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "string"
+                }
+            }
+        },
+        "configs.GroupConfig": {
+            "type": "object",
+            "properties": {
+                "auto_restart_cooldown": {
+                    "description": "AutoRestartCooldown is the delay in seconds before a failed member is restarted.\n0 falls back to DefaultAutoRestartCooldownSecs.",
+                    "type": "integer"
+                },
+                "auto_restart_failed": {
+                    "description": "AutoRestartFailed restarts members that stopped in the failed state after\nAutoRestartCooldown seconds. Members stopped normally are never restarted.",
+                    "type": "boolean"
+                },
+                "throughput_mode": {
+                    "type": "string"
+                },
+                "total_count": {
+                    "type": "integer"
+                },
+                "total_max_pending": {
+                    "description": "TotalMaxPending, when \u003e 0, is a group-wide concurrent-pending budget split across\nenabled members by weight. When 0, each member's max_pending defaults to\nmaxPendingThroughputMultiplier * its resolved throughput.",
+                    "type": "integer"
+                },
+                "total_throughput": {
+                    "type": "integer"
+                }
+            }
+        },
+        "configs.MemberConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "sort_order": {
+                    "type": "integer"
+                },
+                "weight": {
+                    "type": "integer"
                 }
             }
         },

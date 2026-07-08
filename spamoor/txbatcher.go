@@ -3,15 +3,10 @@ package spamoor
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"sync"
 
-	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethpandaops/spamoor/txbuilder"
 	geas "github.com/fjl/geas/asm"
-	"github.com/holiman/uint256"
 )
 
 // Assembly code for the batcher contract initialization
@@ -66,7 +61,7 @@ loop:
 	SHR               ;; [address, amount, 0, 0, 0, 0, offset]
 	
 	;; forward funds
-	PUSH 30000        ;; [30000, address, amount, 0, 0, 0, 0, offset]
+	GAS               ;; [gas, address, amount, 0, 0, 0, 0, offset]
 	CALL              ;; [success, offset]
 	POP               ;; [offset]
 
@@ -97,16 +92,15 @@ exit2:
 `
 
 const (
-	// BatcherBaseGas is the pre-Amsterdam base gas cost for a batcher transaction
-	// (tx intrinsic + batcher dispatch overhead). WalletPool.batcherBaseGas uses
-	// this value on non-Amsterdam chains and a higher value on Amsterdam to
-	// cover the EIP-8037 txpool 110% intrinsic-regular buffer.
+	// BatcherBaseGas is the base gas overhead of a batcher transaction
+	// (tx intrinsic + batcher dispatch). Per-recipient cost is added on top by
+	// WalletPool.batcherGasFor.
 	BatcherBaseGas = 50000
-	// BatcherDefaultGasPerTx is the pre-Amsterdam default gas cost per recipient
-	// in the batch. Used when funding_gas_limit is not configured. On Amsterdam,
-	// WalletPool.batcherGasFor computes per-recipient cost dynamically (split by
-	// target emptiness + current cpsb) and this constant is the fallback only
-	// when txpool.GetCostPerStateByte() returns 0.
+	// BatcherDefaultGasPerTx is the legacy-model default per-recipient gas in
+	// the batch, used when funding_gas_limit is not configured and the
+	// pre-Amsterdam fee model is active (cpsb == 0). On Amsterdam,
+	// WalletPool.batcherGasFor computes per-recipient cost dynamically from
+	// target emptiness and the current cpsb.
 	BatcherDefaultGasPerTx = 35000
 	// BatcherRPCGasCap is the maximum gas allowed per RPC call (geth default: 16M).
 	// Batch boundaries are computed to keep total gas under this cap; see
@@ -125,6 +119,7 @@ const (
 // assembly code that efficiently forwards funds to multiple recipients.
 type TxBatcher struct {
 	txpool     *TxPool
+	factory    *DeploymentFactory
 	isDeployed bool
 	deployMtx  sync.Mutex
 	address    common.Address
@@ -132,9 +127,10 @@ type TxBatcher struct {
 
 // NewTxBatcher creates a new TxBatcher instance with the specified transaction pool.
 // The batcher must be deployed with Deploy() before it can be used.
-func NewTxBatcher(txpool *TxPool) *TxBatcher {
+func newTxBatcher(txpool *TxPool, deploymentFactory *DeploymentFactory) *TxBatcher {
 	return &TxBatcher{
-		txpool: txpool,
+		txpool:  txpool,
+		factory: deploymentFactory,
 	}
 }
 
@@ -171,66 +167,12 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 
 	deployData := append(initcode, batcherGeasCode...)
 
-	if client == nil {
-		client = b.txpool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
-		if client == nil {
-			return fmt.Errorf("no client available")
-		}
-	}
-	feeCap, tipCap, err := client.GetSuggestedFee(ctx)
-	if err != nil {
-		return err
-	}
-	if feeCap.Cmp(big.NewInt(400000000000)) < 0 {
-		feeCap = big.NewInt(400000000000)
-	}
-	if tipCap.Cmp(big.NewInt(200000000000)) < 0 {
-		tipCap = big.NewInt(200000000000)
-	}
-
-	// Estimate the deploy gas so we stay correct under EIP-8037 where
-	// account creation + per-byte code deposit dominate the cost. Fall back
-	// to the pre-Amsterdam hard-coded 300k if the RPC path fails.
-	deployGas, estErr := client.EstimateGas(ctx, ethereum.CallMsg{
-		From:  wallet.GetAddress(),
-		To:    nil,
-		Value: new(big.Int),
-		Data:  deployData,
-	})
-	if estErr != nil || deployGas == 0 {
-		deployGas = fallbackDeployGas(len(deployData), b.txpool.IsAmsterdam(), 0)
-	} else if b.txpool.IsAmsterdam() {
-		deployGas = deployGas * 12 / 10
-	} else {
-		deployGas = deployGas * 11 / 10
-	}
-
-	txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
-		GasFeeCap: uint256.MustFromBig(feeCap),
-		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       deployGas,
-		To:        nil,
-		Value:     uint256.NewInt(0),
-		Data:      deployData,
-	})
+	contractAddr, _, err := b.factory.GetContractDeployment(ctx, deployData, [32]byte{}, client, wallet, nil, nil, true)
 	if err != nil {
 		return err
 	}
 
-	tx, err := wallet.BuildDynamicFeeTx(txData)
-	if err != nil {
-		return err
-	}
-
-	err = b.txpool.SendTransaction(ctx, wallet, tx, &SendTransactionOptions{
-		Client:      client,
-		Rebroadcast: true,
-	})
-	if err != nil {
-		return err
-	}
-
-	b.address = crypto.CreateAddress(wallet.GetAddress(), tx.Nonce())
+	b.address = contractAddr
 
 	return nil
 }

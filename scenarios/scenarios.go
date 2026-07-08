@@ -14,22 +14,27 @@ import (
 	blobreplacements "github.com/ethpandaops/spamoor/scenarios/blob-replacements"
 	"github.com/ethpandaops/spamoor/scenarios/blobs"
 	"github.com/ethpandaops/spamoor/scenarios/calltx"
+	curveswaps "github.com/ethpandaops/spamoor/scenarios/curve-swaps"
 	deploydestruct "github.com/ethpandaops/spamoor/scenarios/deploy-destruct"
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
 	"github.com/ethpandaops/spamoor/scenarios/eoatx"
 	"github.com/ethpandaops/spamoor/scenarios/erc1155tx"
 	"github.com/ethpandaops/spamoor/scenarios/erc20tx"
+	"github.com/ethpandaops/spamoor/scenarios/erc4337"
 	"github.com/ethpandaops/spamoor/scenarios/erc721tx"
 	evmfuzz "github.com/ethpandaops/spamoor/scenarios/evm-fuzz"
 	"github.com/ethpandaops/spamoor/scenarios/factorydeploytx"
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/geastx"
 	replayeest "github.com/ethpandaops/spamoor/scenarios/replay-eest"
+	safemultisig "github.com/ethpandaops/spamoor/scenarios/safe-multisig"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
 	erc20bloater "github.com/ethpandaops/spamoor/scenarios/statebloat/erc20_bloater"
 	"github.com/ethpandaops/spamoor/scenarios/storagerefundtx"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
 	"github.com/ethpandaops/spamoor/scenarios/taskrunner"
+	txfuzz "github.com/ethpandaops/spamoor/scenarios/tx-fuzz"
+	txfuzzinvalid "github.com/ethpandaops/spamoor/scenarios/tx-fuzz-invalid"
 	uniswapswaps "github.com/ethpandaops/spamoor/scenarios/uniswap-swaps"
 	"github.com/ethpandaops/spamoor/scenarios/wallets"
 	"github.com/ethpandaops/spamoor/scenarios/xentoken"
@@ -48,15 +53,20 @@ var nativeScenarioCategories = []*scenario.Category{
 			&blobconflicting.ScenarioDescriptor,
 			&blobs.ScenarioDescriptor,
 			&blobreplacements.ScenarioDescriptor,
+			&curveswaps.ScenarioDescriptor,
 			&deploydestruct.ScenarioDescriptor,
 			&eoatx.ScenarioDescriptor,
 			&erc20tx.ScenarioDescriptor,
+			&erc4337.ScenarioDescriptor,
 			&erc721tx.ScenarioDescriptor,
 			&erc1155tx.ScenarioDescriptor,
 			&evmfuzz.ScenarioDescriptor,
 			&gasburnertx.ScenarioDescriptor,
+			&safemultisig.ScenarioDescriptor,
 			&setcodetx.ScenarioDescriptor,
 			&storagerefundtx.ScenarioDescriptor,
+			&txfuzz.ScenarioDescriptor,
+			&txfuzzinvalid.ScenarioDescriptor,
 			&uniswapswaps.ScenarioDescriptor,
 			&xentoken.ScenarioDescriptor,
 		},

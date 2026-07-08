@@ -167,6 +167,111 @@ Reclaim funds from a spammer's wallet pool back to the root wallet.
 POST /api/spammer/{id}/reclaim
 ```
 
+## Spammer Groups
+
+A **spammer group** lets you control many spammers as one unit. A group applies a
+shared **overlay** of common config fields on top of each member's own full config, and
+can optionally split a **global throughput** (or total count) budget across members by
+weight.
+
+A group is stored as a regular spammer row with the reserved sentinel `scenario: "group"`.
+Members keep their own full config; adding/removing a member only sets/clears its
+`group_id`, so an ungrouped member behaves exactly like a standalone spammer.
+
+List entries (`GET /api/spammers`) and `GET /api/spammer/{id}` include `is_group`,
+`group_id`, and a parsed `group_config` (for groups) or `member_config` (for members).
+Group rows report a **derived status** (running if any enabled member runs).
+
+The lifecycle endpoints (`/start`, `/pause`, `/reclaim`) work on a group id and fan out
+to its enabled members.
+
+### Create a Group
+
+```http
+POST /api/spammer-group
+Content-Type: application/json
+
+{
+  "name": "mixed-load",
+  "description": "broad transaction variance",
+  "config": "base_fee: 20\ntip_fee: 2\n",
+  "throughput_mode": "shared",
+  "total_throughput": 100,
+  "total_count": 0,
+  "total_max_pending": 0,
+  "auto_restart_failed": false,
+  "auto_restart_cooldown": 0
+}
+```
+
+`throughput_mode` is `"shared"` (split totals by weight) or `"independent"` (overlay
+only). In shared mode `total_throughput`/`total_count` are split across enabled members;
+each member's `max_wallets` is derived from its resolved throughput (≈ throughput/4,
+clamped to [20, 1000]) and its `max_pending` defaults to 2× its resolved throughput.
+Set `total_max_pending` to a non-zero value to instead split an explicit
+concurrent-pending budget across members by weight. Returns the new group id.
+
+With `auto_restart_failed` enabled, members that stop in the failed (error) state are
+restarted automatically after `auto_restart_cooldown` seconds (0 = default 300).
+Members stopped normally (paused or finished) are never restarted, and manual actions
+taken during the cooldown (restart, pause, removal) always win.
+
+### Update a Group
+
+```http
+PUT /api/spammer-group/{id}
+Content-Type: application/json
+
+{ "name": "...", "description": "...", "config": "...", "throughput_mode": "shared", "total_throughput": 200, "total_count": 0 }
+```
+
+### Add / Update a Member
+
+Assign a spammer to a group (or update its weight/enabled/order). A scenario with no
+`throughput`/`total_count` field is rejected from a shared group.
+
+```http
+PUT /api/spammer/{id}/group
+Content-Type: application/json
+
+{ "group_id": 100, "weight": 20, "enabled": true, "sort_order": 0 }
+```
+
+### Detach a Member
+
+Remove a spammer from its group, leaving it a working standalone spammer.
+
+```http
+DELETE /api/spammer/{id}/group
+```
+
+### Reorder Members
+
+```http
+PUT /api/spammer-group/{id}/members/order
+Content-Type: application/json
+
+{ "order": [101, 103, 102] }
+```
+
+### Delete a Group
+
+For a group, the `cascade` query parameter controls member handling: `cascade=false`
+(default) detaches members to standalone spammers; `cascade=true` deletes them too.
+
+```http
+DELETE /api/spammer/{id}?cascade=false
+```
+
+### Preview a Member's Effective Config
+
+Returns the config a member will actually run with (group overlay + resolved
+throughput/count split + derived `max_wallets`).
+
+```http
+GET /api/spammer/{id}/effective-config
+```
+
 ## Scenario Management
 
 ### List Available Scenarios
@@ -384,6 +489,35 @@ To export all spammers, send an empty array or omit the field:
     max_pending: 50
     amount: 100
 ```
+
+Groups are exported as a `scenario: group` entry (its `config` is the sparse overlay and
+`group_config` carries the mode/totals), and each member carries a `group` back-reference
+plus its `group_config` (weight/enabled/sort_order). The parent group of any exported
+member is always included so the import can re-link it:
+
+```yaml
+- scenario: group
+  name: mixed-load
+  config:
+    base_fee: 20
+  group_config:
+    throughput_mode: shared
+    total_throughput: 100
+    total_count: 0
+- scenario: eoatx
+  name: eoa-member
+  group: mixed-load
+  config:
+    amount: 100
+  group_config:
+    weight: 20
+    enabled: true
+    sort_order: 0
+```
+
+On import, groups are created first, then members are linked by group name. Importing the
+same YAML through the CLI `spamoor run` path resolves groups in-process (overlay +
+weight split) so members behave identically to the daemon.
 
 ### Import Spammers
 

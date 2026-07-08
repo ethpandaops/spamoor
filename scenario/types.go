@@ -8,6 +8,12 @@ import (
 	"github.com/spf13/pflag"
 )
 
+// GroupScenarioName is the reserved sentinel scenario name used to mark a
+// spammer row as a spammer group rather than a runnable scenario. No real
+// scenario may register under this name; group rows are never executed as a
+// scenario and are guarded against throughout the daemon.
+const GroupScenarioName = "group"
+
 // Category describes the category of a scenario.
 type Category struct {
 	Name        string

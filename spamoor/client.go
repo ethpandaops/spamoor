@@ -380,6 +380,18 @@ func (client *Client) GetBalanceAt(ctx context.Context, wallet common.Address) (
 	return balance, err
 }
 
+// GetCodeAt returns the contract code deployed at the given address at the latest
+// block. An empty result means no contract is deployed there. Used by deployment
+// helpers to detect whether a (CREATE2) contract already exists before deploying.
+func (client *Client) GetCodeAt(ctx context.Context, address common.Address) ([]byte, error) {
+	ctx, cancel := client.getContext(ctx)
+	defer cancel()
+
+	code, err := client.client.CodeAt(ctx, address, nil)
+	client.incrementRequestStats(false, err != nil)
+	return code, err
+}
+
 // EstimateGas runs eth_estimateGas against the chain for the provided call
 // message and returns the suggested gas limit. Used by deploy paths that need
 // an accurate pre-send estimate under EIP-8037 where static guesses tend to

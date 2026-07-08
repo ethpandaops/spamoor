@@ -17,10 +17,12 @@ func init() {
 		// function, constant and variable definitions
 		"Bind":                             reflect.ValueOf(bind.Bind),
 		"DeployContract":                   reflect.ValueOf(bind.DeployContract),
+		"ErrEventSignatureMismatch":        reflect.ValueOf(&bind.ErrEventSignatureMismatch).Elem(),
 		"ErrNoBlockHashState":              reflect.ValueOf(&bind.ErrNoBlockHashState).Elem(),
 		"ErrNoChainID":                     reflect.ValueOf(&bind.ErrNoChainID).Elem(),
 		"ErrNoCode":                        reflect.ValueOf(&bind.ErrNoCode).Elem(),
 		"ErrNoCodeAfterDeploy":             reflect.ValueOf(&bind.ErrNoCodeAfterDeploy).Elem(),
+		"ErrNoEventSignature":              reflect.ValueOf(&bind.ErrNoEventSignature).Elem(),
 		"ErrNoPendingState":                reflect.ValueOf(&bind.ErrNoPendingState).Elem(),
 		"ErrNotAuthorized":                 reflect.ValueOf(&bind.ErrNotAuthorized).Elem(),
 		"NewBoundContract":                 reflect.ValueOf(bind.NewBoundContract),

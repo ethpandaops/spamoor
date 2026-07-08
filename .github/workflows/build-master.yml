@@ -25,7 +25,6 @@ jobs:
     needs: [check_source]
     uses: ./.github/workflows/_shared-build.yaml
     with:
-      ref: ${{ github.sha }}
       release: "snapshot"
       docker: true
       docker_repository: "ethpandaops/spamoor"
@@ -46,7 +45,7 @@ jobs:
 
     # (re)create snapshot binary release
     - name: Update snapshot tag & remove previous snapshot release
-      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       with:
         github-token: ${{secrets.GITHUB_TOKEN}}
         script: |
@@ -105,17 +104,13 @@ jobs:
       run: |
         cd spamoor_linux_arm64
         tar -czf ../spamoor_snapshot_linux_arm64.tar.gz .
-    - name: "Generate release package: spamoor_snapshot_darwin_amd64.tar.gz"
-      run: |
-        cd spamoor_darwin_amd64
-        tar -czf ../spamoor_snapshot_darwin_amd64.tar.gz .
     - name: "Generate release package: spamoor_snapshot_darwin_arm64.tar.gz"
       run: |
         cd spamoor_darwin_arm64
         tar -czf ../spamoor_snapshot_darwin_arm64.tar.gz .
 
     - name: Create snapshot release
-      uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+      uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
       with:
         draft: false
         prerelease: true
@@ -131,11 +126,9 @@ jobs:
           | [spamoor_snapshot_windows_amd64.zip](https://github.com/ethpandaops/spamoor/releases/download/snapshot/spamoor_snapshot_windows_amd64.zip) | spamoor executables for windows/amd64 |
           | [spamoor_snapshot_linux_amd64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/snapshot/spamoor_snapshot_linux_amd64.tar.gz) | spamoor executables for linux/amd64 |
           | [spamoor_snapshot_linux_arm64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/snapshot/spamoor_snapshot_linux_arm64.tar.gz) | spamoor executables for linux/arm64 |
-          | [spamoor_snapshot_darwin_amd64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/snapshot/spamoor_snapshot_darwin_amd64.tar.gz) | spamoor executable for macos/amd64 |
           | [spamoor_snapshot_darwin_arm64.tar.gz](https://github.com/ethpandaops/spamoor/releases/download/snapshot/spamoor_snapshot_darwin_arm64.tar.gz) | spamoor executable for macos/arm64 |
         files: |
           spamoor_snapshot_windows_amd64.zip
           spamoor_snapshot_linux_amd64.tar.gz
           spamoor_snapshot_linux_arm64.tar.gz
-          spamoor_snapshot_darwin_amd64.tar.gz
           spamoor_snapshot_darwin_arm64.tar.gz

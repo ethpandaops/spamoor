@@ -169,9 +169,12 @@ func RunCommand(args []string) {
 			logger.Fatalf("Spammer %d: missing scenario", i)
 		}
 
-		scenario := scenarios.GetScenario(config.Scenario)
-		if scenario == nil {
-			logger.Fatalf("Spammer %d: unknown scenario '%s'", i, config.Scenario)
+		// Group rows use the reserved sentinel name and are not real scenarios.
+		if config.Scenario != scenario.GroupScenarioName {
+			sc := scenarios.GetScenario(config.Scenario)
+			if sc == nil {
+				logger.Fatalf("Spammer %d: unknown scenario '%s'", i, config.Scenario)
+			}
 		}
 
 		if config.Name == "" {
@@ -180,17 +183,29 @@ func RunCommand(args []string) {
 		}
 	}
 
-	// Filter spammers if specified
-	var configsToRun []configs.SpammerConfig
+	// Resolve spammer groups in-process: group entries are removed and each member's
+	// config gets the group overlay plus (in shared mode) the weight-based throughput/
+	// count split and derived max_wallets — matching the daemon's behaviour.
+	resolvedConfigs, err := configs.ResolveRunConfigs(spammerConfigs, scenarios.GetScenario)
+	if err != nil {
+		logger.WithError(err).Fatal("Failed to resolve spammer configurations")
+	}
+	if len(resolvedConfigs) == 0 {
+		logger.Fatal("No runnable spammer configurations found in YAML file")
+	}
+
+	// Filter spammers if specified (indexes refer to the runnable list after groups
+	// have been expanded into their members).
+	var configsToRun []configs.ResolvedRunConfig
 	if len(selectedSpammers) > 0 {
 		for _, idx := range selectedSpammers {
-			if idx < 0 || idx >= len(spammerConfigs) {
-				logger.Fatalf("Invalid spammer index %d (valid range: 0-%d)", idx, len(spammerConfigs)-1)
+			if idx < 0 || idx >= len(resolvedConfigs) {
+				logger.Fatalf("Invalid spammer index %d (valid range: 0-%d)", idx, len(resolvedConfigs)-1)
 			}
-			configsToRun = append(configsToRun, spammerConfigs[idx])
+			configsToRun = append(configsToRun, resolvedConfigs[idx])
 		}
 	} else {
-		configsToRun = spammerConfigs
+		configsToRun = resolvedConfigs
 	}
 
 	logger.Infof("Preparing to run %d spammer(s)", len(configsToRun))
@@ -212,10 +227,10 @@ func RunCommand(args []string) {
 
 	// Create and initialize spammers
 	spammers := make([]*RunSpammer, len(configsToRun))
-	for i, config := range configsToRun {
-		spammer, err := createSpammer(ctx, config, rootWallet, clientPool, txpool, logger, i)
+	for i, rc := range configsToRun {
+		spammer, err := createSpammer(ctx, rc.Config, rc.ConfigYAML, rootWallet, clientPool, txpool, logger, i)
 		if err != nil {
-			logger.WithError(err).Fatalf("Failed to create spammer %d (%s)", i, config.Name)
+			logger.WithError(err).Fatalf("Failed to create spammer %d (%s)", i, rc.Config.Name)
 		}
 		spammers[i] = spammer
 	}
@@ -268,8 +283,10 @@ func RunCommand(args []string) {
 	logger.Info("All spammers completed")
 }
 
-// createSpammer creates and initializes a spammer instance
-func createSpammer(ctx context.Context, config configs.SpammerConfig, rootWallet *spamoor.RootWallet,
+// createSpammer creates and initializes a spammer instance. configYAML is the fully
+// resolved config (defaults merged, plus group overlay/split for group members) and is
+// used verbatim; the sparse config.Config is still passed through as the global config.
+func createSpammer(ctx context.Context, config configs.SpammerConfig, configYAML string, rootWallet *spamoor.RootWallet,
 	clientPool *spamoor.ClientPool, txpool *spamoor.TxPool, logger *logrus.Logger, index int) (*RunSpammer, error) {
 
 	// Get scenario descriptor
@@ -295,17 +312,11 @@ func createSpammer(ctx context.Context, config configs.SpammerConfig, rootWallet
 	walletPool := spamoor.NewWalletPool(ctx, spammerLogger.WithField("module", "walletpool"),
 		rootWallet, clientPool, txpool)
 
-	// Merge configuration with defaults using scenario's method
-	configYAML, err := configs.MergeScenarioConfiguration(descriptor, config.Config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to merge configuration: %w", err)
-	}
-
 	// Initialize scenario
 	if err := scenarioInstance.Init(&scenario.Options{
 		WalletPool: walletPool,
 		Config:     configYAML,
-		GlobalCfg:  config.Config,
+		GlobalCfg:  configs.NodeToMap(&config.Config),
 	}); err != nil {
 		return nil, fmt.Errorf("failed to initialize scenario: %w", err)
 	}

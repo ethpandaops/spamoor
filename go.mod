@@ -4,16 +4,16 @@ go 1.25.7
 
 require (
 	github.com/consensys/gnark-crypto v0.20.1
-	github.com/ethereum/go-ethereum v1.17.3-0.20260421080339-499762852cf2
-	github.com/ethpandaops/service-authenticatoor v0.0.0-20260509005850-92ddd15b91e6
-	github.com/fjl/geas v0.3.1
+	github.com/ethereum/go-ethereum v1.17.4
+	github.com/ethpandaops/service-authenticatoor v0.0.2
+	github.com/fjl/geas v0.3.2
 	github.com/glebarez/go-sqlite v1.22.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/mux v1.8.1
 	github.com/holiman/uint256 v1.3.2
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/pmezard/go-difflib v1.0.0
-	github.com/pressly/goose/v3 v3.27.1
+	github.com/pressly/goose/v3 v3.27.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
@@ -42,6 +42,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.6 // indirect
+	github.com/fjl/jsonw v0.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -78,15 +79,15 @@ require (
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	golang.org/x/crypto v0.50.0 // indirect
-	golang.org/x/mod v0.35.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/tools v0.44.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/mod v0.36.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/tools v0.45.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	modernc.org/libc v1.72.1 // indirect
+	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.49.1 // indirect
+	modernc.org/sqlite v1.53.0 // indirect
 )

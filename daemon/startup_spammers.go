@@ -42,6 +42,11 @@ func (d *Daemon) ImportSpammersOnStartup(source string, logger logrus.FieldLogge
 		for _, importedInfo := range result.Imported {
 			spammer := d.GetSpammer(importedInfo.ID)
 			if spammer != nil {
+				// Group members are started by their parent group's Start(), so don't
+				// start them individually here (that would double-start them).
+				if spammer.GetGroupID() != 0 {
+					continue
+				}
 				if importedInfo.Start != nil && !*importedInfo.Start {
 					logger.Infof("  - Skipped ID %d: %s (%s)", importedInfo.ID, importedInfo.Name, importedInfo.Scenario)
 					continue

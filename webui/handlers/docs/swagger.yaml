@@ -266,6 +266,13 @@ definitions:
           type: string
         type: array
     type: object
+  api.ReorderMembersRequest:
+    properties:
+      order:
+        items:
+          type: integer
+        type: array
+    type: object
   api.ScenarioCategory:
     properties:
       children:
@@ -323,6 +330,17 @@ definitions:
       txHash:
         type: string
     type: object
+  api.SetMemberRequest:
+    properties:
+      enabled:
+        type: boolean
+      group_id:
+        type: integer
+      sort_order:
+        type: integer
+      weight:
+        type: integer
+    type: object
   api.SpammerBlockData:
     properties:
       confirmed:
@@ -347,6 +365,34 @@ definitions:
       scenario:
         type: string
       status:
+        type: integer
+    type: object
+  api.SpammerGroupRequest:
+    properties:
+      auto_restart_cooldown:
+        description: cooldown in seconds (0 = default 300)
+        type: integer
+      auto_restart_failed:
+        description: restart failed members after a cooldown
+        type: boolean
+      config:
+        description: sparse overlay YAML
+        type: string
+      description:
+        type: string
+      name:
+        type: string
+      throughput_mode:
+        description: '"independent" or "shared"'
+        type: string
+      total_count:
+        description: 'shared mode: total tx count'
+        type: integer
+      total_max_pending:
+        description: 'shared mode: total pending budget (0 = 2x throughput)'
+        type: integer
+      total_throughput:
+        description: 'shared mode: total tx/slot'
         type: integer
     type: object
   api.SpammerLibraryEntry:
@@ -390,8 +436,19 @@ definitions:
         type: string
       description:
         type: string
+      group_config:
+        $ref: '#/definitions/configs.GroupConfig'
+      group_id:
+        type: integer
       id:
         type: integer
+      is_group:
+        description: |-
+          Group fields. IsGroup marks a group row; GroupID links a member to its parent
+          group. GroupConfig is set for group rows, MemberConfig for member rows.
+        type: boolean
+      member_config:
+        $ref: '#/definitions/configs.MemberConfig'
       name:
         type: string
       scenario:
@@ -504,6 +561,40 @@ definitions:
         type: string
       version:
         type: string
+    type: object
+  configs.GroupConfig:
+    properties:
+      auto_restart_cooldown:
+        description: |-
+          AutoRestartCooldown is the delay in seconds before a failed member is restarted.
+          0 falls back to DefaultAutoRestartCooldownSecs.
+        type: integer
+      auto_restart_failed:
+        description: |-
+          AutoRestartFailed restarts members that stopped in the failed state after
+          AutoRestartCooldown seconds. Members stopped normally are never restarted.
+        type: boolean
+      throughput_mode:
+        type: string
+      total_count:
+        type: integer
+      total_max_pending:
+        description: |-
+          TotalMaxPending, when > 0, is a group-wide concurrent-pending budget split across
+          enabled members by weight. When 0, each member's max_pending defaults to
+          maxPendingThroughputMultiplier * its resolved throughput.
+        type: integer
+      total_throughput:
+        type: integer
+    type: object
+  configs.MemberConfig:
+    properties:
+      enabled:
+        type: boolean
+      sort_order:
+        type: integer
+      weight:
+        type: integer
     type: object
   daemon.ImportResult:
     properties:
@@ -1228,6 +1319,122 @@ paths:
       summary: Create a new spammer
       tags:
       - Spammer
+  /api/spammer-group:
+    post:
+      consumes:
+      - application/json
+      description: Creates a new spammer group with a shared overlay and throughput
+        mode
+      operationId: createSpammerGroup
+      parameters:
+      - description: Group configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.SpammerGroupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Group ID
+          schema:
+            type: integer
+        "400":
+          description: Invalid request
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Create a spammer group
+      tags:
+      - SpammerGroup
+  /api/spammer-group/{id}:
+    put:
+      consumes:
+      - application/json
+      description: Updates a group's name, description, overlay and throughput mode/totals
+      operationId: updateSpammerGroup
+      parameters:
+      - description: Group ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Group configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.SpammerGroupRequest'
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Invalid request
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "404":
+          description: Group not found
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Update a spammer group
+      tags:
+      - SpammerGroup
+  /api/spammer-group/{id}/members/order:
+    put:
+      consumes:
+      - application/json
+      description: Sets the display/sort order of a group's members by id
+      operationId: reorderGroupMembers
+      parameters:
+      - description: Group ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Ordered member ids
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.ReorderMembersRequest'
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Invalid request
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "404":
+          description: Group not found
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Reorder a group's members
+      tags:
+      - SpammerGroup
   /api/spammer-library/index:
     get:
       description: Returns the index of available spammer configurations from GitHub
@@ -1248,7 +1455,10 @@ paths:
       - SpammerLibrary
   /api/spammer/{id}:
     delete:
-      description: Deletes a spammer and stops it if running
+      description: |-
+        Deletes a spammer and stops it if running. For a group, the cascade query
+        parameter controls whether members are deleted (cascade=true) or detached
+        to standalone spammers (cascade=false, the default).
       operationId: deleteSpammer
       parameters:
       - description: Spammer ID
@@ -1256,6 +1466,10 @@ paths:
         name: id
         required: true
         type: integer
+      - description: 'For groups: delete members too (default false = detach)'
+        in: query
+        name: cascade
+        type: boolean
       responses:
         "200":
           description: Success
@@ -1348,6 +1562,112 @@ paths:
       summary: Update a spammer
       tags:
       - Spammer
+  /api/spammer/{id}/effective-config:
+    get:
+      description: |-
+        Returns the config a spammer would actually run with. For group members
+        this includes the group overlay and (in shared mode) the resolved
+        throughput/count split and derived max_wallets.
+      operationId: getEffectiveConfig
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: Resolved YAML configuration
+          schema:
+            type: string
+        "400":
+          description: Invalid spammer ID
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "404":
+          description: Spammer not found
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Get a spammer's effective (resolved) config
+      tags:
+      - SpammerGroup
+  /api/spammer/{id}/group:
+    delete:
+      description: Removes a spammer from its group, leaving it a standalone spammer
+      operationId: removeSpammerGroup
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Invalid spammer ID
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Detach a spammer from its group
+      tags:
+      - SpammerGroup
+    put:
+      consumes:
+      - application/json
+      description: Assigns a spammer to a group (or updates its weight/enabled/sort_order)
+      operationId: setSpammerGroup
+      parameters:
+      - description: Spammer ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Membership configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.SetMemberRequest'
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Invalid request
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "404":
+          description: Spammer not found
+          schema:
+            type: string
+        "500":
+          description: Server Error
+          schema:
+            type: string
+      summary: Add or update a spammer's group membership
+      tags:
+      - SpammerGroup
   /api/spammer/{id}/logs:
     get:
       description: Returns the most recent logs for a specific spammer
@@ -1520,7 +1840,7 @@ paths:
       - Spammer
   /api/spammers:
     get:
-      description: Returns a list of all configured spammers
+      description: Returns a list of all configured spammers (including spammer groups)
       operationId: getSpammerList
       produces:
       - application/json
@@ -1532,6 +1852,27 @@ paths:
               $ref: '#/definitions/api.SpammerListEntry'
             type: array
       summary: Get all spammers
+      tags:
+      - Spammer
+  /api/spammers/events:
+    get:
+      description: |-
+        Streams spammer lifecycle events (create/update/status/membership/reorder/
+        delete) via Server-Sent Events so dashboards can update live. The stream is
+        unauthenticated and carries only safe metadata — no configs, seeds or logs.
+      operationId: streamSpammerEvents
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE stream of spammer events
+          schema:
+            type: string
+        "500":
+          description: Streaming unsupported
+          schema:
+            type: string
+      summary: Stream spammer lifecycle events
       tags:
       - Spammer
   /api/spammers/export:

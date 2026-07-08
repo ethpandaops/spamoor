@@ -506,8 +506,11 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 			To:        &s.contractAddr,
 			GasFeeCap: uint256.MustFromBig(feeCap),
 			GasTipCap: uint256.MustFromBig(tipCap),
-			Gas:       65000, // ERC20 transfer ~50-55k gas + buffer
-			Value:     uint256.NewInt(0),
+			// Every transfer targets a fresh recipient (state bloat by design), so
+			// it creates a new balance slot. Under the Amsterdam fee schedule that
+			// costs ~133k gas (vs ~50k pre-Amsterdam); keep static headroom.
+			Gas:   200000,
+			Value: uint256.NewInt(0),
 		}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
 			return s.contractInstance.Transfer(transactOpts, recipientAddr, tokensPerWallet)
 		})

@@ -20,21 +20,22 @@ import (
 )
 
 type CliArgs struct {
-	verbose          bool
-	trace            bool
-	rpchosts         []string
-	rpchostsFile     string
-	privkey          string
-	seed             string
-	refillAmount     uint64
-	refillBalance    uint64
-	refillAmountWei  string
-	refillBalanceWei string
-	refillInterval   uint64
-	slotDuration     time.Duration
-	fundingGasLimit  uint64
-	plugins          []string
-	feeStrategy      string
+	verbose              bool
+	trace                bool
+	rpchosts             []string
+	rpchostsFile         string
+	privkey              string
+	seed                 string
+	refillAmount         uint64
+	refillBalance        uint64
+	refillAmountWei      string
+	refillBalanceWei     string
+	refillInterval       uint64
+	slotDuration         time.Duration
+	fundingGasLimit      uint64
+	plugins              []string
+	feeStrategy          string
+	preAmsterdamFeeModel bool
 }
 
 func main() {
@@ -65,6 +66,7 @@ func main() {
 	flags.Uint64Var(&cliArgs.fundingGasLimit, "funding-gas-limit", 0, "Gas limit for wallet funding transactions (0 = auto-detect from chain state; use 100000+ for L2s).")
 	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files to load (can be specified multiple times).")
 	flags.StringVar(&cliArgs.feeStrategy, "fee-strategy", "", "Fee calculation strategy: 'adaptive' for dynamic headroom with normal distribution (default: use network-suggested fees).")
+	flags.BoolVar(&cliArgs.preAmsterdamFeeModel, "pre-amsterdam-fee-model", false, "Use the legacy pre-Amsterdam (pre-EIP-8037) gas/fee model. Default is the Amsterdam fee model, which is safe on non-Amsterdam chains because its gas budgets are strictly higher.")
 
 	flags.Parse(os.Args)
 
@@ -196,15 +198,15 @@ func main() {
 
 	// prepare txpool
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
-		Context:    ctx,
-		Logger:     logger.WithField("module", "txpool"),
-		ClientPool: clientPool,
-		ChainId:    clientPool.GetChainId(),
+		Context:              ctx,
+		Logger:               logger.WithField("module", "txpool"),
+		ClientPool:           clientPool,
+		ChainId:              clientPool.GetChainId(),
+		PreAmsterdamFeeModel: cliArgs.preAmsterdamFeeModel,
 	})
 
-	// load chain state (gas limit, base fee, Amsterdam activation) before any
-	// scenario starts, so scenarios always observe real values instead of
-	// uninitialized defaults.
+	// load chain state (gas limit, base fee) before any scenario starts, so
+	// scenarios always observe real values instead of uninitialized defaults.
 	initStatsCtx, cancelInitStats := context.WithTimeout(ctx, 30*time.Second)
 	err = txpool.InitializeBlockStats(initStatsCtx)
 	cancelInitStats()

@@ -43,6 +43,9 @@
       </div>
 
       <div class="d-flex gap-2 d-none" data-auth-required>
+        <button class="btn btn-outline-primary" onclick="openCreateGroup()">
+          <i class="fas fa-layer-group"></i> Create Group
+        </button>
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newSpammerModal">
           <i class="fas fa-plus"></i> Create Spammer
         </button>
@@ -63,69 +66,16 @@
             <th class="text-end auth-required-column" style="width: 180px">Actions</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="spammerTableBody">
           {{ range .Spammers }}
-          <tr class="align-middle">
-            <td class="auth-required-column">
-              <input type="checkbox" class="form-check-input spammer-checkbox" data-spammer-id="{{ .ID }}"
-                     onchange="updateMassActions()">
-            </td>
-            <td>{{ .ID }}</td>
-            <td>
-              {{ .Name }}
-              {{ if .Description }}
-                <small class="text-muted d-block">{{ .Description }}</small>
+            {{ if .IsGroup }}
+              {{ template "groupHeaderRow" . }}
+              {{ range .Members }}
+                {{ template "spammerRow" . }}
               {{ end }}
-            </td>
-            <td>{{ .Scenario }}</td>
-            <td class="status-cell">
-              {{ if eq .Status 0 }}
-                <span class="badge bg-info">Paused</span>
-              {{ else if eq .Status 1 }}
-                <span class="badge bg-success">Running</span>
-              {{ else if eq .Status 2 }}
-                <span class="badge bg-secondary">Finished</span>
-              {{ else if eq .Status 3 }}
-                <span class="badge bg-danger">Failed</span>
-              {{ else }}
-                <span class="badge bg-danger">Unknown</span>
-              {{ end }}
-            </td>
-            <td class="auth-required-column">
-              <div class="d-flex gap-2" style="flex-direction: row-reverse;">
-                <button class="btn btn-sm btn-outline-secondary" onclick="toggleLogs(this, {{ .ID }})" title="Toggle Logs" data-bs-toggle="tooltip" data-bs-placement="top">
-                  <i class="fas fa-chevron-down"></i>
-                </button>
-                <div class="btn-group">
-                  {{ if or (eq .Status 0) (eq .Status 2) (eq .Status 3) }}
-                    <button class="btn btn-sm btn-success spammer-toggle-btn" onclick="startSpammer({{ .ID }})" title="Start Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
-                      <i class="fas fa-play"></i>
-                    </button>
-                  {{ else }}
-                    <button class="btn btn-sm btn-warning spammer-toggle-btn" onclick="pauseSpammer({{ .ID }})" title="Pause Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
-                      <i class="fas fa-pause"></i>
-                    </button>
-                  {{ end }}
-                  <button class="btn btn-sm btn-primary" onclick="editSpammer({{ .ID }})" title="Edit Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
-                    <i class="fas fa-edit"></i>
-                  </button>
-                  <button class="btn btn-sm btn-info spammer-reclaim-btn" {{ if eq .Status 1 }}disabled="disabled"{{ end }} onclick="reclaimFunds({{ .ID }})" title="Reclaim Funds" data-bs-toggle="tooltip" data-bs-placement="top">
-                    <i class="fas fa-money-bill-wave"></i>
-                  </button>
-                  <button class="btn btn-sm btn-danger" onclick="deleteSpammer({{ .ID }})" title="Delete Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
-                    <i class="fas fa-trash"></i>
-                  </button>
-                </div>
-              </div>
-            </td>
-          </tr>
-          <tr class="d-none log-row" data-spammer-id="{{ .ID }}">
-            <td colspan="6" class="p-0">
-              <div class="log-container p-3" style="max-height: 400px; overflow-y: auto;">
-                <div class="logs font-monospace small"></div>
-              </div>
-            </td>
-          </tr>
+            {{ else }}
+              {{ template "spammerRow" . }}
+            {{ end }}
           {{ end }}
         </tbody>
       </table>
@@ -179,6 +129,12 @@
                   <label class="form-label">Scenario</label>
                   <input type="hidden" name="scenario" required>
                   <div id="scenarioSelectorContainer" class="scenario-selector border rounded p-0" style="max-height: 400px; overflow-y: auto;">
+                    <div class="p-2 border-bottom sticky-top bg-body" style="z-index: 5;">
+                      <div class="input-group input-group-sm">
+                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                        <input type="text" class="form-control" id="scenarioSearch" placeholder="Search scenarios by name or description...">
+                      </div>
+                    </div>
                     <div id="scenarioCategories" class="list-group list-group-flush">
                       <!-- Categories will be populated here -->
                     </div>
@@ -341,16 +297,41 @@
           </div>
           <form id="editSpammerForm">
             <input type="hidden" name="id">
+            <input type="hidden" name="sort_order">
             <div class="mb-3">
               <label class="form-label">Name</label>
               <input type="text" class="form-control" name="name" required>
             </div>
-            
+
             <div class="mb-3">
               <label class="form-label">Description</label>
               <textarea class="form-control" name="description" rows="2"></textarea>
             </div>
-            
+
+            <div id="editMembershipSection" class="border rounded p-3 mb-3 d-none">
+              <div class="d-flex align-items-center mb-2">
+                <i class="fas fa-layer-group text-primary me-2"></i>
+                <strong>Group Membership</strong>
+              </div>
+              <div class="row g-2 align-items-end">
+                <div class="col-md-6">
+                  <label class="form-label mb-1">Group</label>
+                  <select class="form-select form-select-sm" name="group_id"></select>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label mb-1">Weight</label>
+                  <input type="number" class="form-control form-control-sm" name="weight" min="0" value="1">
+                </div>
+                <div class="col-md-3">
+                  <div class="form-check mt-3">
+                    <input type="checkbox" class="form-check-input" name="enabled" id="editMemberEnabled" checked>
+                    <label class="form-check-label" for="editMemberEnabled">Enabled</label>
+                  </div>
+                </div>
+              </div>
+              <small class="text-muted d-block mt-2">Weight sets this member's share of the group total in shared mode. In shared mode a weight of 0 means the member won't run.</small>
+            </div>
+
             <div class="mb-3">
               <label class="form-label">Scenario</label>
               <input type="text" class="form-control" name="scenario" readonly>
@@ -372,6 +353,300 @@
     </div>
   </div>
 
+  <!-- Group Create/Edit Modal -->
+  <div class="modal fade" id="groupModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="groupModalTitle">Create Group</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>
+            A group applies a shared overlay on top of each member's own config. In
+            <strong>shared</strong> mode the total throughput/count is split across enabled
+            members by weight. Changes apply the next time a member starts.
+          </div>
+          <form id="groupForm">
+            <input type="hidden" name="id">
+            <div class="mb-3">
+              <label class="form-label">Name</label>
+              <input type="text" class="form-control" name="name" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Description</label>
+              <textarea class="form-control" name="description" rows="2"></textarea>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Throughput Mode</label>
+              <div class="btn-group w-100" role="group">
+                <input type="radio" class="btn-check" name="throughput_mode" id="modeShared" value="shared" checked>
+                <label class="btn btn-outline-primary" for="modeShared"><i class="fas fa-divide me-2"></i>Shared (split by weight)</label>
+                <input type="radio" class="btn-check" name="throughput_mode" id="modeIndependent" value="independent">
+                <label class="btn btn-outline-primary" for="modeIndependent"><i class="fas fa-layer-group me-2"></i>Independent (overlay only)</label>
+              </div>
+            </div>
+            <div id="sharedTotalsContainer">
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Total Throughput <small class="text-muted">(tx/slot)</small></label>
+                  <input type="number" class="form-control" name="total_throughput" min="0" value="100">
+                  <div class="form-text">Split across enabled members by weight. Leave 0 to not manage throughput.</div>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Total Count <small class="text-muted">(optional)</small></label>
+                  <input type="number" class="form-control" name="total_count" min="0" value="0">
+                  <div class="form-text">Split across members. 0 = unlimited / not managed.</div>
+                </div>
+              </div>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Total Max Pending <small class="text-muted">(optional)</small></label>
+                  <input type="number" class="form-control" name="total_max_pending" min="0" value="0">
+                  <div class="form-text">Concurrent-pending budget split across members. 0 = default to 2× each member's throughput.</div>
+                </div>
+              </div>
+            </div>
+            <div class="row align-items-end">
+              <div class="col-md-6 mb-3">
+                <div class="form-check">
+                  <input type="checkbox" class="form-check-input" name="auto_restart_failed" id="groupAutoRestart">
+                  <label class="form-check-label" for="groupAutoRestart">Auto-restart failed members</label>
+                </div>
+                <div class="form-text">Members that stop with an error are restarted after the cooldown. Normal stops are never restarted.</div>
+              </div>
+              <div class="col-md-6 mb-3">
+                <label class="form-label">Restart Cooldown <small class="text-muted">(seconds)</small></label>
+                <input type="number" class="form-control" name="auto_restart_cooldown" min="1" value="300">
+                <div class="form-text">Delay before a failed member is restarted (default 300s).</div>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Shared Overlay (YAML)</label>
+              <textarea class="form-control font-monospace" name="config" rows="8" style="tab-size: 2;"
+                placeholder="# sparse overlay applied to every member that accepts the field, e.g.&#10;# base_fee: 20&#10;# tip_fee: 2&#10;# client_group: validators"></textarea>
+              <div class="form-text">Only fields a member's scenario actually defines are applied; everything else is ignored.</div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="groupSaveBtn" onclick="submitGroup()">Create Group</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Members Modal -->
+  <div class="modal fade" id="addMembersModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Add Members</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="addMembersGroupId">
+          <p class="text-muted">Select standalone spammers to add to this group (weight defaults to 1).</p>
+          <div id="addMembersList" class="list-group" style="max-height: 360px; overflow-y: auto;"></div>
+          <div id="addMembersEmpty" class="text-muted text-center py-3 d-none">No ungrouped spammers available.</div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" onclick="submitAddMembers()">Add Selected</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Group Modal -->
+  <div class="modal fade" id="deleteGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Delete Group</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="deleteGroupId">
+          <p>Delete group <strong id="deleteGroupName"></strong>. What should happen to its members?</p>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="deleteGroupMode" id="deleteDetach" value="detach" checked>
+            <label class="form-check-label" for="deleteDetach">
+              <strong>Detach members</strong> — keep them as standalone spammers (recommended)
+            </label>
+          </div>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="radio" name="deleteGroupMode" id="deleteCascade" value="cascade">
+            <label class="form-check-label" for="deleteCascade">
+              <strong class="text-danger">Delete members</strong> — permanently remove all members too
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-danger" onclick="confirmDeleteGroup()">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Effective Config Modal -->
+  <div class="modal fade" id="effectiveConfigModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Effective Config</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted">The config this member will actually run with — group overlay and (in shared mode) the resolved throughput/count split and derived max_wallets applied on top of its own config.</p>
+          <pre id="effectiveConfigContent" class="border rounded p-2 small" style="max-height: 480px; overflow-y: auto;"></pre>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+{{ end }}
+
+{{ define "statusBadge" }}
+  {{ if eq . 0 }}<span class="badge bg-info">Paused</span>
+  {{ else if eq . 1 }}<span class="badge bg-success">Running</span>
+  {{ else if eq . 2 }}<span class="badge bg-secondary">Finished</span>
+  {{ else if eq . 3 }}<span class="badge bg-danger">Failed</span>
+  {{ else }}<span class="badge bg-danger">Unknown</span>
+  {{ end }}
+{{ end }}
+
+{{ define "spammerRow" }}
+  <tr class="align-middle dash-main-row{{ if gt .GroupID 0 }} group-member-row d-none{{ end }}" data-row-id="{{ .ID }}"{{ if gt .GroupID 0 }} data-group-id="{{ .GroupID }}"{{ end }}>
+    <td class="auth-required-column">
+      <input type="checkbox" class="form-check-input spammer-checkbox" data-spammer-id="{{ .ID }}"
+             onchange="updateMassActions()">
+    </td>
+    <td>{{ .ID }}</td>
+    <td>
+      {{ if gt .GroupID 0 }}<i class="fas fa-turn-up fa-rotate-90 text-muted ms-3 me-1"></i>{{ end }}
+      {{ .Name }}
+      {{ if gt .GroupID 0 }}
+        <span class="badge bg-secondary ms-1" title="weight">w:{{ .Weight }}</span>
+        {{ if not .Enabled }}<span class="badge bg-warning text-dark ms-1">disabled</span>{{ end }}
+      {{ end }}
+      {{ if .Description }}<small class="text-muted d-block">{{ .Description }}</small>{{ end }}
+    </td>
+    <td>{{ .Scenario }}</td>
+    <td class="status-cell">{{ template "statusBadge" .Status }}</td>
+    <td class="auth-required-column">
+      <div class="d-flex gap-2" style="flex-direction: row-reverse;">
+        <button class="btn btn-sm btn-outline-secondary" onclick="toggleLogs(this, {{ .ID }})" title="Toggle Logs" data-bs-toggle="tooltip" data-bs-placement="top">
+          <i class="fas fa-chevron-down"></i>
+        </button>
+        <div class="btn-group">
+          {{ if or (eq .Status 0) (eq .Status 2) (eq .Status 3) }}
+            <button class="btn btn-sm btn-success spammer-toggle-btn" onclick="startSpammer({{ .ID }})" title="Start Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+              <i class="fas fa-play"></i>
+            </button>
+          {{ else }}
+            <button class="btn btn-sm btn-warning spammer-toggle-btn" onclick="pauseSpammer({{ .ID }})" title="Pause Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+              <i class="fas fa-pause"></i>
+            </button>
+          {{ end }}
+          <button class="btn btn-sm btn-primary" onclick="editSpammer({{ .ID }})" title="Edit Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+            <i class="fas fa-edit"></i>
+          </button>
+          {{ if gt .GroupID 0 }}
+            <button class="btn btn-sm btn-danger" onclick="deleteSpammer({{ .ID }})" title="Delete Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+              <i class="fas fa-trash"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item member-reclaim-item{{ if eq .Status 1 }} disabled{{ end }}" href="#" onclick="reclaimFunds({{ .ID }}); return false;"><i class="fas fa-money-bill-wave me-2"></i>Reclaim funds</a></li>
+              <li><a class="dropdown-item" href="#" onclick="showEffectiveConfig({{ .ID }}); return false;"><i class="fas fa-eye me-2"></i>View effective config</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item text-warning" href="#" onclick="removeFromGroup({{ .ID }}); return false;"><i class="fas fa-unlink me-2"></i>Remove from group</a></li>
+            </ul>
+            <button type="button" class="btn btn-sm btn-secondary" style="width: 32px;" data-bs-toggle="dropdown" aria-expanded="false" title="More">
+              <i class="fas fa-ellipsis-v"></i>
+            </button>
+          {{ else }}
+            <button class="btn btn-sm btn-info spammer-reclaim-btn" {{ if eq .Status 1 }}disabled="disabled"{{ end }} onclick="reclaimFunds({{ .ID }})" title="Reclaim Funds" data-bs-toggle="tooltip" data-bs-placement="top">
+              <i class="fas fa-money-bill-wave"></i>
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="deleteSpammer({{ .ID }})" title="Delete Spammer" data-bs-toggle="tooltip" data-bs-placement="top">
+              <i class="fas fa-trash"></i>
+            </button>
+          {{ end }}
+        </div>
+      </div>
+    </td>
+  </tr>
+  <tr class="d-none log-row{{ if gt .GroupID 0 }} group-member-row{{ end }}" data-spammer-id="{{ .ID }}"{{ if gt .GroupID 0 }} data-group-id="{{ .GroupID }}"{{ end }}>
+    <td colspan="6" class="p-0">
+      <div class="log-container p-3" style="max-height: 400px; overflow-y: auto;">
+        <div class="logs font-monospace small"></div>
+      </div>
+    </td>
+  </tr>
+{{ end }}
+
+{{ define "groupHeaderRow" }}
+  <tr class="align-middle dash-main-row group-header-row table-active" data-row-id="{{ .ID }}" data-group-header="{{ .ID }}">
+    <td class="auth-required-column">
+      <input type="checkbox" class="form-check-input spammer-checkbox" data-spammer-id="{{ .ID }}" data-is-group="true"
+             onchange="updateMassActions()">
+    </td>
+    <td>{{ .ID }}</td>
+    <td>
+      <i class="fas fa-chevron-right group-chevron me-2" role="button" onclick="toggleGroup({{ .ID }}, this)"></i>
+      <i class="fas fa-layer-group text-primary me-1"></i>
+      <strong>{{ .Name }}</strong>
+      <span class="badge bg-secondary ms-1">{{ len .Members }} member{{ if ne (len .Members) 1 }}s{{ end }}</span>
+      {{ if .Description }}<small class="text-muted d-block">{{ .Description }}</small>{{ end }}
+    </td>
+    <td>
+      {{ if eq .ThroughputMode "shared" }}
+        <span class="badge bg-info">shared</span>
+        {{ if gt .TotalThroughput 0 }}<small class="text-muted d-block">{{ .TotalThroughput }} tx/slot</small>{{ end }}
+        {{ if gt .TotalCount 0 }}<small class="text-muted d-block">{{ .TotalCount }} total</small>{{ end }}
+        {{ if gt .TotalMaxPending 0 }}<small class="text-muted d-block">{{ .TotalMaxPending }} max pending</small>{{ end }}
+      {{ else }}
+        <span class="badge bg-secondary">independent</span>
+      {{ end }}
+      {{ if .AutoRestartFailed }}<small class="text-muted d-block"><i class="fas fa-redo me-1"></i>auto-restart</small>{{ end }}
+    </td>
+    <td class="status-cell">{{ template "statusBadge" .Status }}</td>
+    <td class="auth-required-column">
+      <div class="d-flex gap-2" style="flex-direction: row-reverse;">
+        <span style="display:inline-block; width: 31px;"></span>
+        <div class="btn-group">
+          {{ if or (eq .Status 0) (eq .Status 2) (eq .Status 3) }}
+            <button class="btn btn-sm btn-success" onclick="startGroup({{ .ID }})" title="Start Group" data-bs-toggle="tooltip" data-bs-placement="top">
+              <i class="fas fa-play"></i>
+            </button>
+          {{ else }}
+            <button class="btn btn-sm btn-warning" onclick="pauseGroup({{ .ID }})" title="Pause Group" data-bs-toggle="tooltip" data-bs-placement="top">
+              <i class="fas fa-pause"></i>
+            </button>
+          {{ end }}
+          <button class="btn btn-sm btn-outline-primary" onclick="addMemberToGroup({{ .ID }})" title="Add Member" data-bs-toggle="tooltip" data-bs-placement="top">
+            <i class="fas fa-plus"></i>
+          </button>
+          <button class="btn btn-sm btn-primary" onclick="editGroup({{ .ID }})" title="Edit Group" data-bs-toggle="tooltip" data-bs-placement="top">
+            <i class="fas fa-edit"></i>
+          </button>
+          <button class="btn btn-sm btn-info" onclick="reclaimFunds({{ .ID }})" title="Reclaim Group Funds" data-bs-toggle="tooltip" data-bs-placement="top">
+            <i class="fas fa-money-bill-wave"></i>
+          </button>
+          <button class="btn btn-sm btn-danger" onclick="deleteGroup({{ .ID }})" title="Delete Group" data-bs-toggle="tooltip" data-bs-placement="top">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+      </div>
+    </td>
+  </tr>
 {{ end }}
 
 {{ define "js" }}
@@ -415,25 +690,7 @@ async function startSpammer(id) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-
-    const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
-    const statusCell = row.querySelector('.status-cell');
-    const toggleButton = row.querySelector('.spammer-toggle-btn');
-    const reclaimButton = row.querySelector('.spammer-reclaim-btn');
-
-    statusCell.innerHTML = '<span class="badge bg-success">Running</span>';
-
-    toggleButton.className = 'btn btn-sm btn-warning spammer-toggle-btn';
-    toggleButton.setAttribute('onclick', `pauseSpammer(${id})`);
-    toggleButton.setAttribute('title', 'Pause Spammer');
-    toggleButton.innerHTML = '<i class="fas fa-pause"></i>';
-    reclaimButton.disabled = true;
-
-    const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
-    if (tooltip) {
-      tooltip.dispose();
-    }
-    new bootstrap.Tooltip(toggleButton);
+    /* the resulting SSE event updates the dashboard live */
   } catch (err) {
     alert('Failed to start spammer: ' + err.message);
   }
@@ -448,25 +705,7 @@ async function pauseSpammer(id) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-
-    const row = document.querySelector(`tr[data-spammer-id="${id}"]`).previousElementSibling;
-    const statusCell = row.querySelector('.status-cell');
-    const toggleButton = row.querySelector('.spammer-toggle-btn');
-    const reclaimButton = row.querySelector('.spammer-reclaim-btn');
-
-    statusCell.innerHTML = '<span class="badge bg-info">Paused</span>';
-
-    toggleButton.className = 'btn btn-sm btn-success spammer-toggle-btn';
-    toggleButton.setAttribute('onclick', `startSpammer(${id})`);
-    toggleButton.setAttribute('title', 'Start Spammer');
-    toggleButton.innerHTML = '<i class="fas fa-play"></i>';
-    reclaimButton.disabled = false;
-
-    const tooltip = bootstrap.Tooltip.getInstance(toggleButton);
-    if (tooltip) {
-      tooltip.dispose();
-    }
-    new bootstrap.Tooltip(toggleButton);
+    /* the resulting SSE event updates the dashboard live */
   } catch (err) {
     alert('Failed to pause spammer: ' + err.message);
   }
@@ -482,7 +721,7 @@ async function deleteSpammer(id) {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-    window.location.reload();
+    /* the resulting SSE event updates the dashboard live */
   } catch (err) {
     alert('Failed to delete spammer: ' + err.message);
   }
@@ -528,11 +767,12 @@ document.getElementById('newSpammerModal').addEventListener('show.bs.modal', asy
     createBtn.disabled = true;
   }
 
-  /* Load and render scenario categories */
+  /* Load and render the scenario selector (reset any previous search) */
   if (!scenarioCategories) {
     scenarioCategories = await fetch('/api/scenarios').then(r => r.json());
   }
-  renderScenarioCategories(scenarioCategories);
+  document.getElementById('scenarioSearch').value = '';
+  renderScenarioSelector();
 });
 
 function renderScenarioCategories(categories, container = null, depth = 0) {
@@ -581,23 +821,7 @@ function renderScenarioCategories(categories, container = null, depth = 0) {
     /* Add scenarios */
     if (hasScenarios) {
       category.scenarios.forEach(scenario => {
-        const scenarioItem = document.createElement('div');
-        scenarioItem.className = 'list-group-item list-group-item-action scenario-item';
-        scenarioItem.style.paddingLeft = `${((depth + 1) * 16) + 12}px`;
-        scenarioItem.setAttribute('data-scenario', scenario.name);
-        const pluginBadge = scenario.plugin ? `<span class="badge bg-info ms-2 plugin-badge">${scenario.plugin}</span>` : '';
-        scenarioItem.innerHTML = `
-          <div class="d-flex justify-content-between align-items-center">
-            <div>
-              <i class="fas fa-cube text-primary me-2"></i>
-              <span class="scenario-name">${scenario.name}</span>
-              ${pluginBadge}
-            </div>
-          </div>
-          ${scenario.description ? `<small class="text-muted ms-4 d-block">${scenario.description}</small>` : ''}
-        `;
-        scenarioItem.addEventListener('click', () => selectScenario(scenario.name));
-        collapseDiv.appendChild(scenarioItem);
+        collapseDiv.appendChild(createScenarioItem(scenario, ((depth + 1) * 16) + 12));
       });
     }
 
@@ -607,6 +831,77 @@ function renderScenarioCategories(categories, container = null, depth = 0) {
     }
   });
 }
+
+/* Build a clickable scenario list item. pathLabel (optional) shows the category path
+   on the right, used by the flat search results. */
+function createScenarioItem(scenario, paddingLeftPx, pathLabel = '') {
+  const scenarioItem = document.createElement('div');
+  scenarioItem.className = 'list-group-item list-group-item-action scenario-item';
+  scenarioItem.style.paddingLeft = `${paddingLeftPx}px`;
+  scenarioItem.setAttribute('data-scenario', scenario.name);
+  const pluginBadge = scenario.plugin ? `<span class="badge bg-info ms-2 plugin-badge">${scenario.plugin}</span>` : '';
+  scenarioItem.innerHTML = `
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <i class="fas fa-cube text-primary me-2"></i>
+        <span class="scenario-name">${scenario.name}</span>
+        ${pluginBadge}
+      </div>
+      ${pathLabel ? `<small class="text-muted text-nowrap ms-2">${pathLabel}</small>` : ''}
+    </div>
+    ${scenario.description ? `<small class="text-muted ms-4 d-block">${scenario.description}</small>` : ''}
+  `;
+  scenarioItem.addEventListener('click', () => selectScenario(scenario.name));
+  return scenarioItem;
+}
+
+/* Flatten the category tree into {scenario, path} entries, deduped by scenario name. */
+function collectScenarios(categories, path = [], seen = new Set(), out = []) {
+  for (const category of categories) {
+    const currentPath = [...path, category.name];
+    (category.scenarios || []).forEach(scenario => {
+      if (seen.has(scenario.name)) return;
+      seen.add(scenario.name);
+      out.push({ scenario, path: currentPath });
+    });
+    if (category.children) {
+      collectScenarios(category.children, currentPath, seen, out);
+    }
+  }
+  return out;
+}
+
+/* Render a flat list of scenarios whose name or description matches the search term. */
+function renderScenarioSearchResults(term) {
+  const container = document.getElementById('scenarioCategories');
+  container.innerHTML = '';
+
+  const matches = collectScenarios(scenarioCategories).filter(({ scenario }) =>
+    scenario.name.toLowerCase().includes(term) ||
+    (scenario.description || '').toLowerCase().includes(term));
+
+  if (matches.length === 0) {
+    container.innerHTML = '<div class="list-group-item text-muted text-center py-3">No scenarios match your search.</div>';
+    return;
+  }
+
+  matches.forEach(({ scenario, path }) => {
+    container.appendChild(createScenarioItem(scenario, 12, path.join(' > ')));
+  });
+}
+
+/* Render the selector: grouped category tree while the search box is empty, flat
+   matching results otherwise. */
+function renderScenarioSelector() {
+  const term = document.getElementById('scenarioSearch').value.trim().toLowerCase();
+  if (term) {
+    renderScenarioSearchResults(term);
+  } else {
+    renderScenarioCategories(scenarioCategories);
+  }
+}
+
+document.getElementById('scenarioSearch').addEventListener('input', renderScenarioSelector);
 
 function countScenarios(category) {
   let count = category.scenarios ? category.scenarios.length : 0;
@@ -701,7 +996,9 @@ function clearScenarioSelection() {
 
 document.getElementById('newSpammerModal').addEventListener('hidden.bs.modal', () => {
   if (hasImportedSpammers) {
-    window.location.reload();
+    hasImportedSpammers = false;
+    /* imported spammers arrive as live "created" events; re-seed as a safety net */
+    seedDashboard();
   }
 });
 
@@ -775,7 +1072,8 @@ async function submitNewSpammer() {
       const errorText = await response.text();
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
-    window.location.reload();
+    bootstrap.Modal.getInstance(document.getElementById('newSpammerModal'))?.hide();
+    /* the SSE "created" event adds the new row live */
   } catch (err) {
     alert('Failed to create spammer: ' + err.message);
   }
@@ -968,7 +1266,20 @@ async function editSpammer(id) {
     form.querySelector('[name="description"]').value = spammer.description;
     form.querySelector('[name="scenario"]').value = spammer.scenario;
     form.querySelector('[name="config"]').value = spammer.config;
-    
+
+    /* Group membership section: only shown for members */
+    const membershipSection = document.getElementById('editMembershipSection');
+    if (spammer.group_id && spammer.group_id !== 0) {
+      const mc = spammer.member_config || {};
+      form.querySelector('[name="weight"]').value = mc.weight != null ? mc.weight : 1;
+      form.querySelector('[name="enabled"]').checked = mc.enabled !== false;
+      form.querySelector('[name="sort_order"]').value = mc.sort_order || 0;
+      await loadGroupsInto(form.querySelector('[name="group_id"]'), spammer.group_id);
+      membershipSection.classList.remove('d-none');
+    } else {
+      membershipSection.classList.add('d-none');
+    }
+
     const modalFooter = document.querySelector('#editSpammerModal .modal-footer');
     let saveRestartBtn = document.getElementById('saveRestartBtn');
     let saveStartBtn = document.getElementById('saveStartBtn');
@@ -1036,6 +1347,29 @@ async function submitEditSpammer(action) {
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
+    /* Persist group membership changes when the membership section is shown */
+    const membershipSection = document.getElementById('editMembershipSection');
+    if (!membershipSection.classList.contains('d-none')) {
+      const groupId = parseInt(form.querySelector('[name="group_id"]').value);
+      if (groupId) {
+        const memberData = {
+          group_id: groupId,
+          weight: parseInt(form.querySelector('[name="weight"]').value) || 0,
+          enabled: form.querySelector('[name="enabled"]').checked,
+          sort_order: parseInt(form.querySelector('[name="sort_order"]').value) || 0,
+        };
+        const memberResp = await spamoor.authFetch(`/api/spammer/${id}/group`, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(memberData)
+        });
+        if (!memberResp.ok) {
+          const errorText = await memberResp.text();
+          throw new Error(`Failed to update membership: ${errorText}`);
+        }
+      }
+    }
+
     if (action === 'restart') {
       const pauseResponse = await spamoor.authFetch(`/api/spammer/${id}/pause`, {method: 'POST'});
       if (!pauseResponse.ok) {
@@ -1057,7 +1391,8 @@ async function submitEditSpammer(action) {
       }
     }
 
-    window.location.reload();
+    bootstrap.Modal.getInstance(document.getElementById('editSpammerModal'))?.hide();
+    /* SSE "updated"/"status" events refresh the row live */
   } catch (err) {
     alert('Failed to update spammer: ' + err.message);
   }
@@ -1167,7 +1502,7 @@ async function massStart() {
   }
 
   alert(`Started ${successCount} out of ${selectedIds.length} spammers`);
-  window.location.reload();
+  /* SSE status events refresh the rows live */
 }
 
 async function massStop() {
@@ -1194,7 +1529,7 @@ async function massStop() {
   }
 
   alert(`Stopped ${successCount} out of ${selectedIds.length} spammers`);
-  window.location.reload();
+  /* SSE status events refresh the rows live */
 }
 
 async function massDelete() {
@@ -1221,7 +1556,7 @@ async function massDelete() {
   }
 
   alert(`Deleted ${successCount} out of ${selectedIds.length} spammers`);
-  window.location.reload();
+  /* SSE deleted events remove the rows live */
 }
 
 document.querySelectorAll('input[name="importMethod"]').forEach(radio => {
@@ -1702,11 +2037,684 @@ function updateCountdown() {
 updateCountdown();
 {{ end }}
 
+/* ===================== Spammer Groups ===================== */
+
+function groupModalInstance() {
+  return bootstrap.Modal.getOrCreateInstance(document.getElementById('groupModal'));
+}
+
+function syncSharedTotals() {
+  const mode = document.querySelector('#groupForm [name="throughput_mode"]:checked').value;
+  document.getElementById('sharedTotalsContainer').style.display = (mode === 'shared') ? '' : 'none';
+}
+
+document.querySelectorAll('#groupForm [name="throughput_mode"]').forEach(el => {
+  el.addEventListener('change', syncSharedTotals);
+});
+
+function syncAutoRestart() {
+  const enabled = document.querySelector('#groupForm [name="auto_restart_failed"]').checked;
+  document.querySelector('#groupForm [name="auto_restart_cooldown"]').disabled = !enabled;
+}
+
+document.querySelector('#groupForm [name="auto_restart_failed"]').addEventListener('change', syncAutoRestart);
+
+document.querySelector('#groupForm [name="config"]').addEventListener('keydown', function(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const start = this.selectionStart, end = this.selectionEnd;
+    this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+    this.selectionStart = this.selectionEnd = start + 2;
+  }
+});
+
+function openCreateGroup() {
+  if (!requireAuth()) return;
+  const form = document.getElementById('groupForm');
+  form.reset();
+  form.querySelector('[name="id"]').value = '';
+  form.querySelector('[name="throughput_mode"][value="shared"]').checked = true;
+  form.querySelector('[name="total_throughput"]').value = 100;
+  form.querySelector('[name="total_count"]').value = 0;
+  form.querySelector('[name="total_max_pending"]').value = 0;
+  form.querySelector('[name="auto_restart_failed"]').checked = false;
+  form.querySelector('[name="auto_restart_cooldown"]').value = 300;
+  form.querySelector('[name="config"]').value = '';
+  document.getElementById('groupModalTitle').textContent = 'Create Group';
+  document.getElementById('groupSaveBtn').textContent = 'Create Group';
+  syncSharedTotals();
+  syncAutoRestart();
+  groupModalInstance().show();
+}
+
+async function editGroup(id) {
+  if (!requireAuth()) return;
+  try {
+    const resp = await spamoor.authFetch(`/api/spammer/${id}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const group = await resp.json();
+
+    const form = document.getElementById('groupForm');
+    form.reset();
+    form.querySelector('[name="id"]').value = group.id;
+    form.querySelector('[name="name"]').value = group.name;
+    form.querySelector('[name="description"]').value = group.description || '';
+    form.querySelector('[name="config"]').value = group.config || '';
+
+    const gc = group.group_config || {};
+    const mode = gc.throughput_mode === 'shared' ? 'shared' : 'independent';
+    form.querySelector(`[name="throughput_mode"][value="${mode}"]`).checked = true;
+    form.querySelector('[name="total_throughput"]').value = gc.total_throughput || 0;
+    form.querySelector('[name="total_count"]').value = gc.total_count || 0;
+    form.querySelector('[name="total_max_pending"]').value = gc.total_max_pending || 0;
+    form.querySelector('[name="auto_restart_failed"]').checked = !!gc.auto_restart_failed;
+    form.querySelector('[name="auto_restart_cooldown"]').value = gc.auto_restart_cooldown || 300;
+
+    document.getElementById('groupModalTitle').textContent = 'Edit Group';
+    document.getElementById('groupSaveBtn').textContent = 'Save Changes';
+    syncSharedTotals();
+    syncAutoRestart();
+    groupModalInstance().show();
+  } catch (err) {
+    alert('Failed to load group: ' + err.message);
+  }
+}
+
+async function submitGroup() {
+  if (!requireAuth()) return;
+  const form = document.getElementById('groupForm');
+  const id = form.querySelector('[name="id"]').value;
+  const mode = form.querySelector('[name="throughput_mode"]:checked').value;
+  const data = {
+    name: form.querySelector('[name="name"]').value,
+    description: form.querySelector('[name="description"]').value,
+    config: form.querySelector('[name="config"]').value,
+    throughput_mode: mode,
+    total_throughput: parseInt(form.querySelector('[name="total_throughput"]').value) || 0,
+    total_count: parseInt(form.querySelector('[name="total_count"]').value) || 0,
+    total_max_pending: parseInt(form.querySelector('[name="total_max_pending"]').value) || 0,
+    auto_restart_failed: form.querySelector('[name="auto_restart_failed"]').checked,
+    auto_restart_cooldown: parseInt(form.querySelector('[name="auto_restart_cooldown"]').value) || 0,
+  };
+
+  const url = id ? `/api/spammer-group/${id}` : '/api/spammer-group';
+  const method = id ? 'PUT' : 'POST';
+
+  try {
+    const resp = await spamoor.authFetch(url, {
+      method: method,
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    bootstrap.Modal.getInstance(document.getElementById('groupModal'))?.hide();
+    /* SSE created/updated event refreshes the group live */
+  } catch (err) {
+    alert('Failed to save group: ' + err.message);
+  }
+}
+
+async function loadGroupsInto(selectEl, selectedId) {
+  const resp = await spamoor.authFetch('/api/spammers');
+  const spammers = await resp.json();
+  selectEl.innerHTML = '';
+  spammers.filter(s => s.is_group).forEach(g => {
+    const opt = document.createElement('option');
+    opt.value = g.id;
+    opt.textContent = `${g.name} (#${g.id})`;
+    if (selectedId && g.id === selectedId) opt.selected = true;
+    selectEl.appendChild(opt);
+  });
+  if (selectEl.options.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No groups — create one first';
+    selectEl.appendChild(opt);
+  }
+}
+
+async function removeFromGroup(spammerId) {
+  if (!requireAuth()) return;
+  if (!confirm('Remove this spammer from its group? It will become a standalone spammer.')) return;
+  try {
+    const resp = await spamoor.authFetch(`/api/spammer/${spammerId}/group`, {method: 'DELETE'});
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    /* SSE membership event moves it out of the group live */
+  } catch (err) {
+    alert('Failed to remove from group: ' + err.message);
+  }
+}
+
+async function addMemberToGroup(groupId) {
+  if (!requireAuth()) return;
+  document.getElementById('addMembersGroupId').value = groupId;
+  const listEl = document.getElementById('addMembersList');
+  const emptyEl = document.getElementById('addMembersEmpty');
+  listEl.innerHTML = '';
+
+  const resp = await spamoor.authFetch('/api/spammers');
+  const spammers = await resp.json();
+  const candidates = spammers.filter(s => !s.is_group && (!s.group_id || s.group_id === 0));
+
+  if (candidates.length === 0) {
+    emptyEl.classList.remove('d-none');
+  } else {
+    emptyEl.classList.add('d-none');
+    candidates.forEach(s => {
+      const label = document.createElement('label');
+      label.className = 'list-group-item d-flex align-items-center gap-2';
+      label.innerHTML = `
+        <input type="checkbox" class="form-check-input add-member-cb" value="${s.id}">
+        <span><strong>${esc(s.name)}</strong> <small class="text-muted">#${s.id} · ${esc(s.scenario)}</small></span>`;
+      listEl.appendChild(label);
+    });
+  }
+
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('addMembersModal')).show();
+}
+
+async function submitAddMembers() {
+  if (!requireAuth()) return;
+  const groupId = parseInt(document.getElementById('addMembersGroupId').value);
+  const ids = Array.from(document.querySelectorAll('.add-member-cb:checked')).map(cb => parseInt(cb.value));
+  if (ids.length === 0) { alert('Select at least one spammer'); return; }
+
+  let ok = 0;
+  for (const id of ids) {
+    try {
+      const resp = await spamoor.authFetch(`/api/spammer/${id}/group`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({group_id: groupId, weight: 1, enabled: true, sort_order: 0}),
+      });
+      if (resp.ok) ok++;
+      else console.error(`Failed to add ${id}: HTTP ${resp.status}`);
+    } catch (err) {
+      console.error(`Failed to add ${id}:`, err);
+    }
+  }
+  if (ok < ids.length) alert(`Added ${ok} of ${ids.length} members (some scenarios may be incompatible with shared mode).`);
+  bootstrap.Modal.getInstance(document.getElementById('addMembersModal'))?.hide();
+  /* SSE membership events nest the added members live */
+}
+
+function deleteGroup(id) {
+  if (!requireAuth()) return;
+  const header = document.querySelector(`tr[data-group-header="${id}"]`);
+  const name = header ? header.querySelector('strong').textContent : `#${id}`;
+  document.getElementById('deleteGroupId').value = id;
+  document.getElementById('deleteGroupName').textContent = name;
+  document.getElementById('deleteDetach').checked = true;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteGroupModal')).show();
+}
+
+async function confirmDeleteGroup() {
+  if (!requireAuth()) return;
+  const id = document.getElementById('deleteGroupId').value;
+  const cascade = document.querySelector('input[name="deleteGroupMode"]:checked').value === 'cascade';
+  try {
+    const resp = await spamoor.authFetch(`/api/spammer/${id}?cascade=${cascade}`, {method: 'DELETE'});
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    bootstrap.Modal.getInstance(document.getElementById('deleteGroupModal'))?.hide();
+    /* SSE deleted/membership events update the dashboard live */
+  } catch (err) {
+    alert('Failed to delete group: ' + err.message);
+  }
+}
+
+async function startGroup(id) {
+  if (!requireAuth()) return;
+  try {
+    const resp = await spamoor.authFetch(`/api/spammer/${id}/start`, {method: 'POST'});
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    /* SSE status events refresh the group and its members live */
+  } catch (err) {
+    alert('Failed to start group: ' + err.message);
+  }
+}
+
+async function pauseGroup(id) {
+  if (!requireAuth()) return;
+  try {
+    const resp = await spamoor.authFetch(`/api/spammer/${id}/pause`, {method: 'POST'});
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    /* SSE status events refresh the group and its members live */
+  } catch (err) {
+    alert('Failed to pause group: ' + err.message);
+  }
+}
+
+const GROUP_STATE_PREFIX = 'spamoor:groupExpanded:';
+
+function setGroupExpanded(id, expanded) {
+  try {
+    if (expanded) {
+      sessionStorage.setItem(GROUP_STATE_PREFIX + id, '1');
+    } else {
+      sessionStorage.removeItem(GROUP_STATE_PREFIX + id);
+    }
+  } catch (e) { /* sessionStorage may be unavailable */ }
+}
+
+function isGroupExpanded(id) {
+  try {
+    return sessionStorage.getItem(GROUP_STATE_PREFIX + id) === '1';
+  } catch (e) {
+    return false;
+  }
+}
+
+/* expand/collapse a group's member rows. persist=false is used during the initial
+   render restore so it doesn't rewrite the stored state. */
+function applyGroupState(id, expand, icon, persist) {
+  const mainRows = document.querySelectorAll(`tr.group-member-row[data-group-id="${id}"]:not(.log-row)`);
+  const logRows = document.querySelectorAll(`tr.log-row.group-member-row[data-group-id="${id}"]`);
+
+  if (expand) {
+    if (icon) icon.classList.replace('fa-chevron-right', 'fa-chevron-down');
+    mainRows.forEach(r => r.classList.remove('d-none'));
+  } else {
+    if (icon) icon.classList.replace('fa-chevron-down', 'fa-chevron-right');
+    mainRows.forEach(r => r.classList.add('d-none'));
+    logRows.forEach(r => {
+      if (!r.classList.contains('d-none')) {
+        r.classList.add('d-none');
+        stopLogStream(parseInt(r.dataset.spammerId));
+      }
+    });
+  }
+
+  if (persist) setGroupExpanded(id, expand);
+}
+
+function toggleGroup(id, icon) {
+  const collapsed = icon.classList.contains('fa-chevron-right');
+  applyGroupState(id, collapsed, icon, true);
+}
+
+/* Restore each group's collapse state from sessionStorage. Groups render collapsed by
+   default; only previously-expanded groups are re-expanded. */
+function restoreGroupStates() {
+  document.querySelectorAll('tr[data-group-header]').forEach(header => {
+    const id = header.getAttribute('data-group-header');
+    if (isGroupExpanded(id)) {
+      applyGroupState(id, true, header.querySelector('.group-chevron'), false);
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', restoreGroupStates);
+
+async function showEffectiveConfig(id) {
+  if (!requireAuth()) return;
+  try {
+    const resp = await spamoor.authFetch(`/api/spammer/${id}/effective-config`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    document.getElementById('effectiveConfigContent').textContent = await resp.text();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('effectiveConfigModal')).show();
+  } catch (err) {
+    alert('Failed to load effective config: ' + err.message);
+  }
+}
+
+/* ===================== Live dashboard (SSE) ===================== */
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+function statusBadgeHtml(status) {
+  switch (status) {
+    case 0: return '<span class="badge bg-info">Paused</span>';
+    case 1: return '<span class="badge bg-success">Running</span>';
+    case 2: return '<span class="badge bg-secondary">Finished</span>';
+    case 3: return '<span class="badge bg-danger">Failed</span>';
+    default: return '<span class="badge bg-danger">Unknown</span>';
+  }
+}
+
+/* Inner HTML (the <td> cells) for a standalone/member spammer row. Mirrors the
+   "spammerRow" Go template. */
+function spammerRowInner(e) {
+  const isMember = e.group_id && e.group_id !== 0;
+  const running = e.status === 1;
+  const desc = e.description ? `<small class="text-muted d-block">${esc(e.description)}</small>` : '';
+  const indent = isMember ? '<i class="fas fa-turn-up fa-rotate-90 text-muted ms-3 me-1"></i>' : '';
+  const memberBadges = isMember
+    ? `<span class="badge bg-secondary ms-1" title="weight">w:${e.weight || 0}</span>${e.enabled === false ? '<span class="badge bg-warning text-dark ms-1">disabled</span>' : ''}`
+    : '';
+  const toggleBtn = running
+    ? `<button class="btn btn-sm btn-warning spammer-toggle-btn" onclick="pauseSpammer(${e.id})" title="Pause Spammer" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-pause"></i></button>`
+    : `<button class="btn btn-sm btn-success spammer-toggle-btn" onclick="startSpammer(${e.id})" title="Start Spammer" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-play"></i></button>`;
+  let tail;
+  if (isMember) {
+    tail = `
+      <button class="btn btn-sm btn-danger" onclick="deleteSpammer(${e.id})" title="Delete Spammer" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-trash"></i></button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li><a class="dropdown-item member-reclaim-item${running ? ' disabled' : ''}" href="#" onclick="reclaimFunds(${e.id}); return false;"><i class="fas fa-money-bill-wave me-2"></i>Reclaim funds</a></li>
+        <li><a class="dropdown-item" href="#" onclick="showEffectiveConfig(${e.id}); return false;"><i class="fas fa-eye me-2"></i>View effective config</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item text-warning" href="#" onclick="removeFromGroup(${e.id}); return false;"><i class="fas fa-unlink me-2"></i>Remove from group</a></li>
+      </ul>
+      <button type="button" class="btn btn-sm btn-secondary" style="width: 32px;" data-bs-toggle="dropdown" aria-expanded="false" title="More"><i class="fas fa-ellipsis-v"></i></button>`;
+  } else {
+    tail = `
+      <button class="btn btn-sm btn-info spammer-reclaim-btn"${running ? ' disabled="disabled"' : ''} onclick="reclaimFunds(${e.id})" title="Reclaim Funds" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-money-bill-wave"></i></button>
+      <button class="btn btn-sm btn-danger" onclick="deleteSpammer(${e.id})" title="Delete Spammer" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-trash"></i></button>`;
+  }
+  return `
+    <td class="auth-required-column"><input type="checkbox" class="form-check-input spammer-checkbox" data-spammer-id="${e.id}" onchange="updateMassActions()"></td>
+    <td>${e.id}</td>
+    <td>${indent}${esc(e.name)}${memberBadges}${desc}</td>
+    <td>${esc(e.scenario)}</td>
+    <td class="status-cell">${statusBadgeHtml(e.status)}</td>
+    <td class="auth-required-column">
+      <div class="d-flex gap-2" style="flex-direction: row-reverse;">
+        <button class="btn btn-sm btn-outline-secondary" onclick="toggleLogs(this, ${e.id})" title="Toggle Logs" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-chevron-down"></i></button>
+        <div class="btn-group">
+          ${toggleBtn}
+          <button class="btn btn-sm btn-primary" onclick="editSpammer(${e.id})" title="Edit Spammer" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-edit"></i></button>
+          ${tail}
+        </div>
+      </div>
+    </td>`;
+}
+
+/* Inner HTML for a group header row. Mirrors the "groupHeaderRow" Go template. */
+function groupHeaderInner(e, count) {
+  const running = e.status === 1;
+  const desc = e.description ? `<small class="text-muted d-block">${esc(e.description)}</small>` : '';
+  let summary;
+  if (e.throughput_mode === 'shared') {
+    summary = '<span class="badge bg-info">shared</span>';
+    if (e.total_throughput > 0) summary += `<small class="text-muted d-block">${e.total_throughput} tx/slot</small>`;
+    if (e.total_count > 0) summary += `<small class="text-muted d-block">${e.total_count} total</small>`;
+    if (e.total_max_pending > 0) summary += `<small class="text-muted d-block">${e.total_max_pending} max pending</small>`;
+  } else {
+    summary = '<span class="badge bg-secondary">independent</span>';
+  }
+  if (e.auto_restart_failed) summary += '<small class="text-muted d-block"><i class="fas fa-redo me-1"></i>auto-restart</small>';
+  const toggleBtn = running
+    ? `<button class="btn btn-sm btn-warning" onclick="pauseGroup(${e.id})" title="Pause Group" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-pause"></i></button>`
+    : `<button class="btn btn-sm btn-success" onclick="startGroup(${e.id})" title="Start Group" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-play"></i></button>`;
+  return `
+    <td class="auth-required-column"><input type="checkbox" class="form-check-input spammer-checkbox" data-spammer-id="${e.id}" data-is-group="true" onchange="updateMassActions()"></td>
+    <td>${e.id}</td>
+    <td>
+      <i class="fas fa-chevron-right group-chevron me-2" role="button" onclick="toggleGroup(${e.id}, this)"></i>
+      <i class="fas fa-layer-group text-primary me-1"></i>
+      <strong>${esc(e.name)}</strong>
+      <span class="badge bg-secondary ms-1">${count} member${count === 1 ? '' : 's'}</span>
+      ${desc}
+    </td>
+    <td>${summary}</td>
+    <td class="status-cell">${statusBadgeHtml(e.status)}</td>
+    <td class="auth-required-column">
+      <div class="d-flex gap-2" style="flex-direction: row-reverse;">
+        <span style="display:inline-block; width: 31px;"></span>
+        <div class="btn-group">
+          ${toggleBtn}
+          <button class="btn btn-sm btn-outline-primary" onclick="addMemberToGroup(${e.id})" title="Add Member" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-plus"></i></button>
+          <button class="btn btn-sm btn-primary" onclick="editGroup(${e.id})" title="Edit Group" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-sm btn-info" onclick="reclaimFunds(${e.id})" title="Reclaim Group Funds" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-money-bill-wave"></i></button>
+          <button class="btn btn-sm btn-danger" onclick="deleteGroup(${e.id})" title="Delete Group" data-bs-toggle="tooltip" data-bs-placement="top"><i class="fas fa-trash"></i></button>
+        </div>
+      </div>
+    </td>`;
+}
+
+function ensureLogRow(tbody, id, groupId) {
+  let log = tbody.querySelector(`tr.log-row[data-spammer-id="${id}"]`);
+  if (!log) {
+    log = document.createElement('tr');
+    log.className = 'd-none log-row' + (groupId ? ' group-member-row' : '');
+    log.setAttribute('data-spammer-id', id);
+    if (groupId) log.setAttribute('data-group-id', groupId);
+    log.innerHTML = '<td colspan="6" class="p-0"><div class="log-container p-3" style="max-height: 400px; overflow-y: auto;"><div class="logs font-monospace small"></div></div></td>';
+  }
+  return log;
+}
+
+/* Apply an entry to a main row node, re-rendering its inner HTML only when its content
+   signature changed (keeps tooltips/dropdowns stable for untouched rows). */
+/* Dispose any Bootstrap tooltips inside a node so their popovers don't orphan/stick on
+   screen when the node's content is replaced or the node is removed. */
+function disposeTooltips(node) {
+  node.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+    const t = bootstrap.Tooltip.getInstance(el);
+    if (t) t.dispose();
+  });
+}
+
+function applyMainRow(node, entry, count) {
+  const sig = JSON.stringify(entry) + '|' + (count == null ? '' : count);
+  if (entry.is_group) {
+    node.className = 'align-middle dash-main-row group-header-row table-active';
+    node.setAttribute('data-row-id', entry.id);
+    node.setAttribute('data-group-header', entry.id);
+    node.removeAttribute('data-group-id');
+    if (node.dataset.sig !== sig) {
+      disposeTooltips(node);
+      node.innerHTML = groupHeaderInner(entry, count);
+      node.dataset.sig = sig;
+    }
+  } else {
+    const isMember = entry.group_id && entry.group_id !== 0;
+    node.className = 'align-middle dash-main-row' + (isMember ? ' group-member-row' : '');
+    node.setAttribute('data-row-id', entry.id);
+    if (isMember) node.setAttribute('data-group-id', entry.group_id); else node.removeAttribute('data-group-id');
+    if (node.dataset.sig !== sig) {
+      disposeTooltips(node);
+      node.innerHTML = spammerRowInner(entry);
+      node.dataset.sig = sig;
+    }
+  }
+}
+
+/* Client-side model keyed by spammer/group id. Seeded once from the API when the event
+   stream connects (and on reconnect, to catch anything missed) and thereafter updated
+   purely from SSE event payloads — no per-event re-fetch. */
+const dashboardState = new Map();
+let renderTimer = null;
+
+function scheduleRender() {
+  if (renderTimer) return;
+  renderTimer = setTimeout(() => { renderTimer = null; renderDashboard(); }, 80);
+}
+
+/* Normalize a /api/spammers list entry (nested group_config/member_config) or an SSE
+   event payload (flat fields) into a single flat shape used by the renderers. */
+function normalizeEntry(e) {
+  const flat = {
+    id: e.id, name: e.name, description: e.description, scenario: e.scenario,
+    status: e.status, is_group: !!e.is_group, group_id: e.group_id || 0,
+  };
+  const gc = e.group_config || e;
+  flat.throughput_mode = gc.throughput_mode;
+  flat.total_throughput = gc.total_throughput;
+  flat.total_count = gc.total_count;
+  flat.total_max_pending = gc.total_max_pending;
+  flat.auto_restart_failed = gc.auto_restart_failed;
+  flat.auto_restart_cooldown = gc.auto_restart_cooldown;
+  const mc = e.member_config || e;
+  flat.weight = mc.weight;
+  flat.enabled = mc.enabled;
+  flat.sort_order = mc.sort_order;
+  return flat;
+}
+
+/* Seed the model from the API. Used on (re)connect of the event stream. */
+async function seedDashboard() {
+  try {
+    const resp = await fetch('/api/spammers');
+    if (!resp.ok) return;
+    const list = await resp.json();
+    dashboardState.clear();
+    list.forEach(e => dashboardState.set(e.id, normalizeEntry(e)));
+    renderDashboard();
+  } catch (e) {
+    /* will retry on next reconnect */
+  }
+}
+
+/* Apply a single SSE event to the model, then re-render (debounced to coalesce bursts). */
+function applyDashboardEvent(ev) {
+  if (!ev || !ev.type) return;
+  switch (ev.type) {
+    case 'deleted':
+      dashboardState.delete(ev.id);
+      break;
+    case 'reorder':
+      (ev.order || []).forEach((mid, idx) => {
+        const m = dashboardState.get(mid);
+        if (m) m.sort_order = idx;
+      });
+      break;
+    default: /* created | updated | status | membership */
+      if (ev.spammer) dashboardState.set(ev.spammer.id, normalizeEntry(ev.spammer));
+      break;
+  }
+  scheduleRender();
+}
+
+function renderDashboard() {
+  const tbody = document.getElementById('spammerTableBody');
+  if (!tbody) return;
+  const list = [...dashboardState.values()];
+
+  const groupIds = new Set(list.filter(e => e.is_group).map(e => e.id));
+  const membersByGroup = {};
+  list.forEach(e => {
+    if (!e.is_group && e.group_id && groupIds.has(e.group_id)) {
+      (membersByGroup[e.group_id] = membersByGroup[e.group_id] || []).push(e);
+    }
+  });
+
+  /* top-level: standalone spammers + groups + orphan members (group missing), id desc */
+  const top = list.filter(e => e.is_group || !e.group_id || !groupIds.has(e.group_id));
+  top.sort((a, b) => b.id - a.id);
+
+  const ordered = [];
+  top.forEach(e => {
+    ordered.push(e);
+    if (e.is_group) {
+      const mems = (membersByGroup[e.id] || []).slice().sort((a, b) => (a.sort_order - b.sort_order) || (a.id - b.id));
+      mems.forEach(m => ordered.push(m));
+    }
+  });
+
+  /* preserve current checkbox selection */
+  const checked = new Set([...tbody.querySelectorAll('.spammer-checkbox:checked')].map(cb => cb.dataset.spammerId));
+
+  const seen = new Set();
+  ordered.forEach(entry => {
+    seen.add(String(entry.id));
+    let main = tbody.querySelector(`tr.dash-main-row[data-row-id="${entry.id}"]`);
+    if (!main) {
+      main = document.createElement('tr');
+    }
+    const count = entry.is_group ? (membersByGroup[entry.id] || []).length : null;
+    applyMainRow(main, entry, count);
+    tbody.appendChild(main);
+
+    if (!entry.is_group) {
+      const log = ensureLogRow(tbody, entry.id, entry.group_id);
+      tbody.appendChild(log);
+
+      /* restore the log-toggle chevron if this row's logs are open */
+      const open = !log.classList.contains('d-none');
+      const chevron = main.querySelector('.fa-chevron-down, .fa-chevron-up');
+      if (chevron) chevron.className = chevron.className.replace(open ? 'fa-chevron-down' : 'fa-chevron-up', open ? 'fa-chevron-up' : 'fa-chevron-down');
+    }
+  });
+
+  /* remove rows that no longer exist (and stop their log streams) */
+  [...tbody.querySelectorAll('tr.dash-main-row')].forEach(row => {
+    if (!seen.has(row.dataset.rowId)) {
+      const next = row.nextElementSibling;
+      disposeTooltips(row);
+      row.remove();
+      if (next && next.classList.contains('log-row')) {
+        stopLogStream(parseInt(next.dataset.spammerId));
+        next.remove();
+      }
+    }
+  });
+
+  /* apply group collapse state (default collapsed; expanded persists in sessionStorage) */
+  ordered.forEach(entry => {
+    if (!entry.is_group && entry.group_id && groupIds.has(entry.group_id)) {
+      const expanded = isGroupExpanded(entry.group_id);
+      const main = tbody.querySelector(`tr.dash-main-row[data-row-id="${entry.id}"]`);
+      const log = tbody.querySelector(`tr.log-row[data-spammer-id="${entry.id}"]`);
+      if (main) main.classList.toggle('d-none', !expanded);
+      if (log && !expanded) log.classList.add('d-none');
+    }
+  });
+  /* group chevrons reflect expanded state */
+  tbody.querySelectorAll('tr[data-group-header]').forEach(header => {
+    const expanded = isGroupExpanded(header.getAttribute('data-group-header'));
+    const chevron = header.querySelector('.group-chevron');
+    if (chevron) {
+      chevron.classList.toggle('fa-chevron-down', expanded);
+      chevron.classList.toggle('fa-chevron-right', !expanded);
+    }
+  });
+
+  /* restore selection, auth columns, mass actions, tooltips */
+  checked.forEach(id => {
+    const cb = tbody.querySelector(`.spammer-checkbox[data-spammer-id="${id}"]`);
+    if (cb) cb.checked = true;
+  });
+  updateAuthColumns(window.spamoor ? window.spamoor.isAuthenticated() : false);
+  updateMassActions();
+  tbody.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+    if (!bootstrap.Tooltip.getInstance(el)) new bootstrap.Tooltip(el);
+  });
+}
+
+/* Connect to the live event stream. EventSource auto-reconnects; each (re)connect emits
+   a "ready" event which re-seeds the model so nothing is missed across drops. */
+let dashboardEvents = null;
+function connectDashboardEvents() {
+  if (!document.getElementById('spammerTableBody')) return;
+  if (dashboardEvents) return;
+  const es = new EventSource('/api/spammers/events');
+  es.addEventListener('ready', () => seedDashboard());
+  es.onmessage = (e) => {
+    try { applyDashboardEvent(JSON.parse(e.data)); } catch (err) { /* ignore */ }
+  };
+  es.onerror = () => { /* EventSource auto-reconnects; "ready" re-seeds */ };
+  dashboardEvents = es;
+}
+
+document.addEventListener('DOMContentLoaded', connectDashboardEvents);
+
 </script>
 {{ end }}
 
 {{ define "css" }}
 <style>
+/* Spammer group rows */
+.group-header-row .group-chevron {
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.group-member-row > td:first-child,
+.group-member-row > td {
+  background-color: var(--bs-tertiary-bg);
+}
+.group-member-row td:nth-child(3) {
+  /* visually nest member names under their group */
+  font-size: 0.95rem;
+}
+/* nest a member's expanded logs one level deeper than the member row */
+.group-member-row.log-row .log-container {
+  margin-left: 2.5rem;
+}
+
 /* Log Container - Adapts to theme */
 .log-container {
   background-color: var(--bs-body-bg);
