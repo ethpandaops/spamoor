@@ -8,6 +8,7 @@ import (
 	"math/big"
 	mathrand "math/rand"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -36,6 +37,7 @@ type ScenarioOptions struct {
 	Timeout     string  `yaml:"timeout"`
 	ClientGroup string  `yaml:"client_group"`
 	LogTxs      bool    `yaml:"log_txs"`
+	UnstuckTime uint64  `yaml:"unstuck_time"` // seconds to wait for a tx before replacing it to free the nonce (0 = disabled)
 
 	// Fuzzing specific options
 	TxTypes       string `yaml:"tx_types"`        // comma list: legacy,accesslist,dynfee,blob,setcode (or "all")
@@ -59,6 +61,11 @@ type Scenario struct {
 	seed       string
 }
 
+// unstuckMaxTries bounds how many escalating-fee replacement attempts are made
+// to clear a single stuck nonce before giving up and letting the pool's own
+// rebroadcast/gap-fill take over.
+const unstuckMaxTries = 5
+
 var ScenarioName = "tx-fuzz"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TotalCount:  0,
@@ -72,6 +79,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	Timeout:     "",
 	ClientGroup: "",
 	LogTxs:      false,
+	UnstuckTime: 60,
 
 	TxTypes:       "all",
 	PayloadSeed:   "",
@@ -113,6 +121,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
+	flags.Uint64Var(&s.options.UnstuckTime, "unstuck-time", ScenarioDefaultOptions.UnstuckTime, "Seconds to wait for a fuzzed tx before replacing it with a cancel tx to free the nonce (0 disables)")
 
 	flags.StringVar(&s.options.TxTypes, "tx-types", ScenarioDefaultOptions.TxTypes, "Comma-separated tx types to fuzz: legacy,accesslist,dynfee,blob,setcode (or 'all')")
 	flags.StringVar(&s.options.PayloadSeed, "payload-seed", ScenarioDefaultOptions.PayloadSeed, "Custom hex seed for reproducible fuzzing (e.g. 0x1234abcd, empty means random)")
@@ -271,8 +280,26 @@ func (s *Scenario) Run(ctx context.Context) error {
 			})
 
 			if receiptChan != nil {
-				if _, err := receiptChan.Wait(ctx); err != nil {
-					return err
+				// Bound the wait: a fuzzed tx may be accepted into a mempool but
+				// never mined (invalid execution, pool eviction, blob/non-blob
+				// account reservation conflicts, ...). The unstuck goroutine
+				// spawned in sendFuzzedTx replaces such a tx at its nonce so the
+				// wallet keeps moving; this deadline is a backstop so the slot is
+				// freed even if every replacement also fails to land.
+				waitCtx := ctx
+				if s.options.UnstuckTime > 0 {
+					var cancel context.CancelFunc
+					deadline := time.Duration(s.options.UnstuckTime*(unstuckMaxTries+2)) * time.Second
+					waitCtx, cancel = context.WithTimeout(ctx, deadline)
+					defer cancel()
+				}
+				if _, werr := receiptChan.Wait(waitCtx); werr != nil {
+					if ctx.Err() != nil {
+						return werr
+					}
+					// per-tx deadline hit (scenario still running): give up on this
+					// tx and free the slot rather than block the whole scenario.
+					logger.Warnf("fuzz tx %6d.0 (%s) not confirmed within unstuck deadline, freeing slot", params.TxIdx+1, kind)
 				}
 			}
 
@@ -311,11 +338,13 @@ func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.Rec
 	}
 
 	receiptChan := make(scenario.ReceiptChan, 1)
+	confirmed := &atomic.Bool{}
 	sendOpts := &spamoor.SendTransactionOptions{
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			confirmed.Store(true)
 			receiptChan <- receipt
 		},
 	}
@@ -346,7 +375,111 @@ func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.Rec
 		return nil, tx, client, wallet, ftx.kind.String(), err
 	}
 
+	// The tx submitted fine, but fuzzed txs frequently never mine (invalid
+	// execution, pool eviction, blob/non-blob account reservation conflicts).
+	// Watch it and, once it looks stuck, replace it at its nonce with a cheap
+	// cancel tx so the wallet's nonce advances regardless of the original's fate.
+	if s.options.UnstuckTime > 0 {
+		go s.unstuckLoop(ctx, wallet, tx, confirmed)
+	}
+
 	return receiptChan, tx, client, wallet, ftx.kind.String(), nil
+}
+
+// unstuckLoop waits for the fuzzed tx to confirm; if it doesn't within
+// UnstuckTime, it repeatedly submits a fee-bumped cancel transaction at the same
+// nonce until either the nonce clears or the try budget is exhausted. This is the
+// key liveness guarantee for the fuzzer: because a fuzzed tx may be accepted by a
+// node yet never be includable, the only way to keep a wallet usable is to
+// forcibly replace the stuck nonce rather than wait on an outcome that never comes.
+func (s *Scenario) unstuckLoop(ctx context.Context, wallet *spamoor.Wallet, stuckTx *types.Transaction, confirmed *atomic.Bool) {
+	nonce := stuckTx.Nonce()
+	for try := 0; try < unstuckMaxTries; try++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Duration(s.options.UnstuckTime) * time.Second):
+		}
+
+		// The original (or a prior replacement) confirmed, or the wallet already
+		// mined past this nonce: nothing to unstuck.
+		if confirmed.Load() || wallet.GetConfirmedNonce() > nonce {
+			return
+		}
+
+		if err := s.sendCancelTx(ctx, wallet, stuckTx, try); err != nil {
+			s.logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress())).
+				Debugf("unstuck attempt %d for nonce %d failed: %v", try+1, nonce, err)
+		} else {
+			s.logger.WithField("wallet", s.walletPool.GetWalletName(wallet.GetAddress())).
+				Debugf("submitted unstuck cancel tx for nonce %d (attempt %d)", nonce, try+1)
+		}
+	}
+}
+
+// sendCancelTx replaces the stuck tx at its nonce with a minimal, definitely-
+// mineable transaction carrying aggressively bumped fees. A blob tx can only be
+// replaced by another blob tx (go-ethereum keeps blob and non-blob txs in
+// separate subpools), so the cancel matches the stuck tx's pool class.
+func (s *Scenario) sendCancelTx(ctx context.Context, wallet *spamoor.Wallet, stuckTx *types.Transaction, try int) error {
+	client := s.walletPool.GetClient(
+		spamoor.WithClientSelectionMode(spamoor.SelectClientRandom),
+		spamoor.WithClientGroup(s.options.ClientGroup),
+	)
+	if client == nil {
+		return fmt.Errorf("no client available")
+	}
+
+	baseFeeWei, tipFeeWei := spamoor.ResolveFees(s.options.BaseFee, s.options.TipFee, s.options.BaseFeeWei, s.options.TipFeeWei)
+	feeCap, tipCap, err := s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
+	if err != nil {
+		return err
+	}
+
+	// Escalate fees each attempt so replacements clear go-ethereum's price-bump
+	// requirement (>=10% for regular txs, >=100% for blob fees) even against a
+	// previous replacement.
+	bump := big.NewInt(int64(1) << uint(try+1)) // 2x, 4x, 8x, ...
+	feeCap = new(big.Int).Mul(feeCap, bump)
+	tipCap = new(big.Int).Mul(tipCap, bump)
+
+	nonce := stuckTx.Nonce()
+	to := wallet.GetAddress()
+
+	var cancelTx *types.Transaction
+	if stuckTx.Type() == types.BlobTxType {
+		meta := &txbuilder.TxMetadata{
+			GasFeeCap:  uint256.MustFromBig(feeCap),
+			GasTipCap:  uint256.MustFromBig(tipCap),
+			BlobFeeCap: uint256.MustFromBig(feeCap),
+			Gas:        21000,
+			To:         &to,
+			Value:      uint256.NewInt(0),
+		}
+		blobTx, berr := txbuilder.BuildBlobTx(meta, [][]string{{"random:full"}})
+		if berr != nil {
+			return berr
+		}
+		cancelTx, err = wallet.ReplaceBlobTx(blobTx, nonce)
+	} else {
+		txData := &types.DynamicFeeTx{
+			GasFeeCap: feeCap,
+			GasTipCap: tipCap,
+			Gas:       21000,
+			To:        &to,
+			Value:     big.NewInt(0),
+		}
+		cancelTx, err = wallet.ReplaceDynamicFeeTx(txData, nonce)
+	}
+	if err != nil {
+		return err
+	}
+
+	return s.walletPool.GetTxPool().SendTransaction(ctx, wallet, cancelTx, &spamoor.SendTransactionOptions{
+		Client:      client,
+		ClientGroup: s.options.ClientGroup,
+		Rebroadcast: true,
+	})
 }
 
 // buildTx turns a fuzzed envelope into a concrete signed transaction of the

@@ -47,6 +47,7 @@ spamoor tx-fuzz [flags]
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--gaslimit` - Gas limit per transaction (default: 500000)
 - `--rebroadcast` - Seconds to wait before rebroadcasting (default: 30)
+- `--unstuck-time` - Seconds to wait for a fuzzed tx before replacing it with a cancel tx to free the nonce (default: 60, 0 disables)
 - `--timeout` - Maximum duration to run (e.g. '1h', '30m', '5s')
 
 ### Fuzzing Configuration
