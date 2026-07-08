@@ -76,18 +76,13 @@ func (fh *FrontendHandler) getWalletsPageData() (*WalletsPage, error) {
 			continue
 		}
 
-		for _, wallet := range walletPool.GetAllWallets() {
-			addr := wallet.GetAddress()
-			balance := wallet.GetBalance()
-			pendingNonce := wallet.GetNonce()
-			confirmedNonce := wallet.GetConfirmedNonce()
-
+		for _, info := range walletPool.GetWalletInfos() {
 			data.SpammerWallets = append(data.SpammerWallets, &WalletInfo{
-				Address:        addr.String(),
-				Name:           walletPool.GetWalletName(addr),
-				Balance:        weiToEthString(balance),
-				PendingNonce:   pendingNonce,
-				ConfirmedNonce: confirmedNonce,
+				Address:        info.Wallet.GetAddress().String(),
+				Name:           info.Name,
+				Balance:        weiToEthString(info.Wallet.GetBalance()),
+				PendingNonce:   info.Wallet.GetNonce(),
+				ConfirmedNonce: info.Wallet.GetConfirmedNonce(),
 				SpammerID:      spammer.GetID(),
 				SpammerName:    spammer.GetName(),
 				SpammerStatus:  spammer.GetStatus(),
