@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"math/big"
 	mathrand "math/rand"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"golang.org/x/time/rate"
 
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
@@ -40,13 +43,14 @@ type ScenarioOptions struct {
 	UnstuckTime uint64  `yaml:"unstuck_time"` // seconds to wait for a tx before replacing it to free the nonce (0 = disabled)
 
 	// Fuzzing specific options
-	TxTypes       string `yaml:"tx_types"`        // comma list: legacy,accesslist,dynfee,blob,setcode (or "all")
-	PayloadSeed   string `yaml:"payload_seed"`    // optional hex seed for reproducible fuzzing
-	TxIdOffset    uint64 `yaml:"tx_id_offset"`    // start fuzzing from a specific txID
-	MaxCallData   uint64 `yaml:"max_call_data"`   // maximum calldata/initcode size in bytes
-	MaxAccessList uint64 `yaml:"max_access_list"` // maximum access list entries / storage keys
-	MaxAuthList   uint64 `yaml:"max_auth_list"`   // maximum EIP-7702 authorizations per tx
-	MaxBlobs      uint64 `yaml:"max_blobs"`       // maximum blob sidecars per blob tx
+	TxTypes          string `yaml:"tx_types"`             // comma list: legacy,accesslist,dynfee,blob,setcode (or "all")
+	PayloadSeed      string `yaml:"payload_seed"`         // optional hex seed for reproducible fuzzing
+	TxIdOffset       uint64 `yaml:"tx_id_offset"`         // start fuzzing from a specific txID
+	MaxCallData      uint64 `yaml:"max_call_data"`        // maximum calldata/initcode size in bytes
+	MaxAccessList    uint64 `yaml:"max_access_list"`      // maximum access list entries / storage keys
+	MaxAuthList      uint64 `yaml:"max_auth_list"`        // maximum EIP-7702 authorizations per tx
+	MaxBlobs         uint64 `yaml:"max_blobs"`            // maximum blob sidecars per blob tx
+	MaxBlobTxPerSlot uint64 `yaml:"max_blob_tx_per_slot"` // maximum blob txs submitted per slot (0 = unlimited)
 
 	// Blob format (EIP-4844 / EIP-7594) options
 	BlobV1Percent  uint64                   `yaml:"blob_v1_percent"` // % of blob txs sent with the v1 (cell-proof) wrapper after Fulu
@@ -59,6 +63,27 @@ type Scenario struct {
 	walletPool *spamoor.WalletPool
 	fuzzer     *fuzzer
 	seed       string
+
+	// blobWalletCount is the size of the blob wallet partition: wallets with
+	// index [0, blobWalletCount) send blob txs, the rest send everything else.
+	// go-ethereum reserves each account to a single subpool, so mixing blob and
+	// non-blob txs on one wallet causes "address already reserved" failures.
+	blobWalletCount uint64
+	// blobOnly is true when kindBlob is the only enabled tx kind.
+	blobOnly bool
+
+	// blobLimiter rate-limits blob tx submissions (see --max-blob-tx-per-slot);
+	// nil = unlimited.
+	blobLimiter *rate.Limiter
+
+	// confirmWg tracks detached receipt-await and unstuck goroutines so Run can
+	// drain them after the submission loop finishes.
+	confirmWg sync.WaitGroup
+
+	// registry of contracts successfully deployed by fuzzed creation txs, used
+	// as call targets and 7702 delegates. Capped at maxDeployedContracts.
+	deployedMtx       sync.Mutex
+	deployedContracts []common.Address
 }
 
 // unstuckMaxTries bounds how many escalating-fee replacement attempts are made
@@ -66,11 +91,15 @@ type Scenario struct {
 // rebroadcast/gap-fill take over.
 const unstuckMaxTries = 5
 
+// maxDeployedContracts caps the deployed-contract registry; once full, the
+// oldest entries are evicted.
+const maxDeployedContracts = 1024
+
 var ScenarioName = "tx-fuzz"
 var ScenarioDefaultOptions = ScenarioOptions{
 	TotalCount:  0,
 	Throughput:  50,
-	MaxPending:  100,
+	MaxPending:  0,
 	MaxWallets:  0,
 	Rebroadcast: 30,
 	BaseFee:     20,
@@ -81,13 +110,14 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	LogTxs:      false,
 	UnstuckTime: 60,
 
-	TxTypes:       "all",
-	PayloadSeed:   "",
-	TxIdOffset:    0,
-	MaxCallData:   1024,
-	MaxAccessList: 5,
-	MaxAuthList:   5,
-	MaxBlobs:      3,
+	TxTypes:          "all",
+	PayloadSeed:      "",
+	TxIdOffset:       0,
+	MaxCallData:      1024,
+	MaxAccessList:    5,
+	MaxAuthList:      5,
+	MaxBlobs:         3,
+	MaxBlobTxPerSlot: 4,
 
 	BlobV1Percent:  100,
 	FuluActivation: 0, // 0 = Fulu active since genesis -> send v1 (cell-proof) blobs by default
@@ -110,7 +140,7 @@ func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64VarP(&s.options.TotalCount, "count", "c", ScenarioDefaultOptions.TotalCount, "Total number of fuzzed transactions to send")
 	flags.Uint64VarP(&s.options.Throughput, "throughput", "t", ScenarioDefaultOptions.Throughput, "Number of fuzzed transactions to send per slot")
-	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions")
+	flags.Uint64Var(&s.options.MaxPending, "max-pending", ScenarioDefaultOptions.MaxPending, "Maximum number of pending transactions (0 = auto-size from throughput and wallet count)")
 	flags.Uint64Var(&s.options.MaxWallets, "max-wallets", ScenarioDefaultOptions.MaxWallets, "Maximum number of child wallets to use")
 	flags.Uint64Var(&s.options.Rebroadcast, "rebroadcast", ScenarioDefaultOptions.Rebroadcast, "Enable reliable rebroadcast with unlimited retries and exponential backoff")
 	flags.Float64Var(&s.options.BaseFee, "basefee", ScenarioDefaultOptions.BaseFee, "Max fee per gas to use in transactions (in gwei)")
@@ -130,6 +160,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.MaxAccessList, "max-access-list", ScenarioDefaultOptions.MaxAccessList, "Maximum access list entries and storage keys per entry")
 	flags.Uint64Var(&s.options.MaxAuthList, "max-auth-list", ScenarioDefaultOptions.MaxAuthList, "Maximum EIP-7702 authorizations per setcode tx")
 	flags.Uint64Var(&s.options.MaxBlobs, "max-blobs", ScenarioDefaultOptions.MaxBlobs, "Maximum blob sidecars per blob tx")
+	flags.Uint64Var(&s.options.MaxBlobTxPerSlot, "max-blob-tx-per-slot", ScenarioDefaultOptions.MaxBlobTxPerSlot, "Maximum blob txs to submit per slot, excess blob txs are re-fuzzed as non-blob txs (0 = unlimited)")
 	flags.Uint64Var(&s.options.BlobV1Percent, "blob-v1-percent", ScenarioDefaultOptions.BlobV1Percent, "Percentage of blob transactions to send with the v1 (cell-proof) wrapper format after Fulu")
 	flags.Uint64Var((*uint64)(&s.options.FuluActivation), "fulu-activation", uint64(ScenarioDefaultOptions.FuluActivation), "Unix timestamp of the Fulu activation")
 
@@ -191,14 +222,47 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		}
 	}
 
+	// Partition the wallets into a blob and a non-blob class. go-ethereum
+	// reserves each account to a single subpool, so a wallet must only ever send
+	// one class of transactions to avoid "address already reserved" failures.
+	walletCount := s.walletPool.GetConfiguredWalletCount()
+	blobEnabled := false
+	for _, k := range enabledKinds {
+		if k == kindBlob {
+			blobEnabled = true
+		}
+	}
+	s.blobOnly = blobEnabled && len(enabledKinds) == 1
+	switch {
+	case s.blobOnly:
+		s.blobWalletCount = walletCount
+	case blobEnabled:
+		s.blobWalletCount = walletCount / uint64(len(enabledKinds))
+		if s.blobWalletCount < 1 {
+			s.blobWalletCount = 1
+		}
+	default:
+		s.blobWalletCount = 0
+	}
+
+	nonBlobKinds := make([]txKind, 0, len(enabledKinds))
+	for _, k := range enabledKinds {
+		if k != kindBlob {
+			nonBlobKinds = append(nonBlobKinds, k)
+		}
+	}
+
 	s.fuzzer = &fuzzer{
-		chainID:      s.walletPool.GetChainId().Uint64(),
-		enabledKinds: enabledKinds,
-		maxCallData:  int(s.options.MaxCallData),
-		maxAccessLen: int(s.options.MaxAccessList),
-		maxAuthList:  int(s.options.MaxAuthList),
-		maxBlobs:     int(s.options.MaxBlobs),
-		poolAddrs:    s.poolAddresses,
+		chainID:       s.walletPool.GetChainId().Uint64(),
+		enabledKinds:  enabledKinds,
+		nonBlobKinds:  nonBlobKinds,
+		maxCallData:   int(s.options.MaxCallData),
+		maxAccessLen:  int(s.options.MaxAccessList),
+		maxAuthList:   int(s.options.MaxAuthList),
+		maxBlobs:      int(s.options.MaxBlobs),
+		gasLimit:      s.options.GasLimit,
+		poolAddrs:     s.poolAddresses,
+		deployedAddrs: s.deployedAddresses,
 	}
 
 	return nil
@@ -231,6 +295,16 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 	}
 
+	if s.options.Throughput > 0 && s.options.MaxPending > 0 && s.options.Throughput > s.options.MaxPending {
+		s.logger.Warnf("--throughput (%d) is higher than --max-pending (%d); the pending cap makes the requested throughput unreachable", s.options.Throughput, s.options.MaxPending)
+	}
+
+	// Blob txs are additionally rate limited: chain blob capacity is far lower
+	// than tx capacity, so unrestricted blob fuzzing would hoard pending slots.
+	if s.options.MaxBlobTxPerSlot > 0 {
+		s.blobLimiter = rate.NewLimiter(rate.Limit(float64(s.options.MaxBlobTxPerSlot)/scenario.GlobalSlotDuration.Seconds()), int(s.options.MaxBlobTxPerSlot))
+	}
+
 	var timeout time.Duration
 	var err error
 	if s.options.Timeout != "" {
@@ -249,12 +323,13 @@ func (s *Scenario) Run(ctx context.Context) error {
 	}).Info("Starting transaction-layer fuzzer scenario")
 
 	err = scenario.RunTransactionScenario(ctx, scenario.TransactionScenarioOptions{
-		TotalCount: s.options.TotalCount,
-		Throughput: s.options.Throughput,
-		MaxPending: maxPending,
-		Timeout:    timeout,
-		WalletPool: s.walletPool,
-		Logger:     s.logger.(*logrus.Entry),
+		TotalCount:          s.options.TotalCount,
+		Throughput:          s.options.Throughput,
+		MaxPending:          maxPending,
+		Timeout:             timeout,
+		WalletPool:          s.walletPool,
+		Logger:              s.logger.(*logrus.Entry),
+		NoAwaitTransactions: true,
 		ProcessNextTxFn: func(ctx context.Context, params *scenario.ProcessNextTxParams) error {
 			logger := s.logger
 			receiptChan, tx, client, wallet, kind, err := s.sendFuzzedTx(ctx, params.TxIdx)
@@ -280,40 +355,141 @@ func (s *Scenario) Run(ctx context.Context) error {
 			})
 
 			if receiptChan != nil {
-				// Bound the wait: a fuzzed tx may be accepted into a mempool but
-				// never mined (invalid execution, pool eviction, blob/non-blob
-				// account reservation conflicts, ...). The unstuck goroutine
-				// spawned in sendFuzzedTx replaces such a tx at its nonce so the
-				// wallet keeps moving; this deadline is a backstop so the slot is
-				// freed even if every replacement also fails to land.
-				waitCtx := ctx
-				if s.options.UnstuckTime > 0 {
-					var cancel context.CancelFunc
-					deadline := time.Duration(s.options.UnstuckTime*(unstuckMaxTries+2)) * time.Second
-					waitCtx, cancel = context.WithTimeout(ctx, deadline)
-					defer cancel()
-				}
-				if _, werr := receiptChan.Wait(waitCtx); werr != nil {
-					if ctx.Err() != nil {
-						return werr
+				// Await the receipt in a detached goroutine instead of blocking
+				// this worker: the pending slot is released right after
+				// submission, so MaxPending bounds concurrent submissions and the
+				// throughput limiter alone governs the send rate.
+				//
+				// The wait is bounded: a fuzzed tx may be accepted into a mempool
+				// but never mined (invalid execution, pool eviction, ...). The
+				// unstuck goroutine spawned in sendFuzzedTx replaces such a tx at
+				// its nonce so the wallet keeps moving; this deadline is a
+				// backstop so the goroutine exits even if every replacement also
+				// fails to land.
+				s.confirmWg.Add(1)
+				go func(txIdx uint64, kind string, tx *types.Transaction, logger logrus.FieldLogger) {
+					defer s.confirmWg.Done()
+
+					waitCtx := ctx
+					if s.options.UnstuckTime > 0 {
+						var cancel context.CancelFunc
+						deadline := time.Duration(s.options.UnstuckTime*(unstuckMaxTries+2)) * time.Second
+						waitCtx, cancel = context.WithTimeout(ctx, deadline)
+						defer cancel()
 					}
-					// per-tx deadline hit (scenario still running): give up on this
-					// tx and free the slot rather than block the whole scenario.
-					logger.Warnf("fuzz tx %6d.0 (%s) not confirmed within unstuck deadline, freeing slot", params.TxIdx+1, kind)
-				}
+
+					receipt, werr := receiptChan.Wait(waitCtx)
+					if werr != nil {
+						if ctx.Err() == nil {
+							logger.Warnf("fuzz tx %6d.0 (%s) not confirmed within unstuck deadline", txIdx+1, kind)
+						}
+						return
+					}
+
+					// Track successfully deployed contracts so later fuzzed txs
+					// can call them and 7702 auths can delegate to them.
+					if tx != nil && tx.To() == nil && receipt != nil &&
+						receipt.Status == types.ReceiptStatusSuccessful &&
+						receipt.ContractAddress != (common.Address{}) {
+						s.recordDeployedContract(receipt.ContractAddress)
+					}
+				}(params.TxIdx, kind, tx, logger)
 			}
 
 			return err
 		},
 	})
 
+	// Graceful drain: wait for the detached confirm/unstuck goroutines to finish
+	// before returning. The waits are bounded by the unstuck deadline and abort
+	// early on context cancellation.
+	confirmDone := make(chan struct{})
+	go func() {
+		s.confirmWg.Wait()
+		close(confirmDone)
+	}()
+	select {
+	case <-confirmDone:
+	case <-ctx.Done():
+	}
+
 	return err
+}
+
+// recordDeployedContract adds a successfully deployed contract address to the
+// registry (evicting the oldest entry once the cap is reached).
+func (s *Scenario) recordDeployedContract(addr common.Address) {
+	s.deployedMtx.Lock()
+	defer s.deployedMtx.Unlock()
+	if len(s.deployedContracts) >= maxDeployedContracts {
+		s.deployedContracts = s.deployedContracts[1:]
+	}
+	s.deployedContracts = append(s.deployedContracts, addr)
+}
+
+// deployedAddresses returns a snapshot of the deployed-contract registry.
+func (s *Scenario) deployedAddresses() []common.Address {
+	s.deployedMtx.Lock()
+	defer s.deployedMtx.Unlock()
+	return append([]common.Address(nil), s.deployedContracts...)
+}
+
+// pickWallet selects a wallet for the given tx kind from the matching wallet
+// partition (blob wallets are the index range [0, blobWalletCount), non-blob
+// wallets the rest), choosing the wallet with the lowest pending tx depth and
+// breaking ties deterministically by txIdx.
+func (s *Scenario) pickWallet(kind txKind, txIdx uint64) *spamoor.Wallet {
+	wallets := s.walletPool.GetAllWallets()
+	count := uint64(len(wallets))
+	if count == 0 {
+		return nil
+	}
+
+	blobCount := s.blobWalletCount
+	if blobCount > count {
+		blobCount = count
+	}
+
+	var start, end uint64
+	if kind == kindBlob {
+		start, end = 0, blobCount
+	} else {
+		start, end = blobCount, count
+	}
+	if end <= start {
+		// empty partition (e.g. single-wallet pool): fall back to all wallets
+		start, end = 0, count
+	}
+
+	partitionSize := end - start
+	offset := txIdx % partitionSize
+	var best *spamoor.Wallet
+	bestDepth := uint64(math.MaxUint64)
+	for i := uint64(0); i < partitionSize; i++ {
+		wallet := wallets[start+(offset+i)%partitionSize]
+		if wallet == nil {
+			continue
+		}
+		depth := wallet.GetNonce() - wallet.GetConfirmedNonce()
+		if depth < bestDepth {
+			bestDepth = depth
+			best = wallet
+		}
+	}
+	return best
 }
 
 func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, string, error) {
 	ftx := s.fuzzer.generate(txIdx + s.options.TxIdOffset)
 
-	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByPendingTxCount, int(txIdx))
+	// Blob txs are rate limited separately (chain blob capacity is far lower
+	// than tx capacity). When the slot's blob budget is exhausted, re-fuzz the
+	// envelope as a non-blob kind instead of blocking the worker.
+	if ftx.kind == kindBlob && !s.blobOnly && s.blobLimiter != nil && !s.blobLimiter.Allow() {
+		ftx = s.fuzzer.generateNonBlob(txIdx + s.options.TxIdOffset)
+	}
+
+	wallet := s.pickWallet(ftx.kind, txIdx)
 	if wallet == nil {
 		return nil, nil, nil, nil, ftx.kind.String(), fmt.Errorf("no wallet available")
 	}
@@ -380,7 +556,11 @@ func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.Rec
 	// Watch it and, once it looks stuck, replace it at its nonce with a cheap
 	// cancel tx so the wallet's nonce advances regardless of the original's fate.
 	if s.options.UnstuckTime > 0 {
-		go s.unstuckLoop(ctx, wallet, tx, confirmed)
+		s.confirmWg.Add(1)
+		go func() {
+			defer s.confirmWg.Done()
+			s.unstuckLoop(ctx, wallet, tx, confirmed)
+		}()
 	}
 
 	return receiptChan, tx, client, wallet, ftx.kind.String(), nil
@@ -395,10 +575,19 @@ func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.Rec
 func (s *Scenario) unstuckLoop(ctx context.Context, wallet *spamoor.Wallet, stuckTx *types.Transaction, confirmed *atomic.Bool) {
 	nonce := stuckTx.Nonce()
 	for try := 0; try < unstuckMaxTries; try++ {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(time.Duration(s.options.UnstuckTime) * time.Second):
+		// Wait UnstuckTime before (re)placing, but poll for early confirmation
+		// so this goroutine (and the scenario's final drain) doesn't linger
+		// after the tx has already mined.
+		waitEnd := time.Now().Add(time.Duration(s.options.UnstuckTime) * time.Second)
+		for time.Now().Before(waitEnd) {
+			if confirmed.Load() || wallet.GetConfirmedNonce() > nonce {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
 		}
 
 		// The original (or a prior replacement) confirmed, or the wallet already
@@ -485,12 +674,22 @@ func (s *Scenario) sendCancelTx(ctx context.Context, wallet *spamoor.Wallet, stu
 // buildTx turns a fuzzed envelope into a concrete signed transaction of the
 // matching type using the wallet's managed-nonce build methods.
 func (s *Scenario) buildTx(wallet *spamoor.Wallet, ftx *fuzzedTx, feeCap, tipCap *big.Int) (*types.Transaction, error) {
+	// Use the fuzzed gas value, clamped to the current block gas limit (the
+	// configured --gaslimit already caps it at generation time).
+	gas := ftx.gas
+	if gas == 0 {
+		gas = s.options.GasLimit
+	}
+	if blockLimit := s.walletPool.GetTxPool().GetCurrentGasLimit(); blockLimit > 0 && gas > blockLimit {
+		gas = blockLimit
+	}
+
 	fee := uint256.MustFromBig(feeCap)
 	tip := uint256.MustFromBig(tipCap)
 	meta := &txbuilder.TxMetadata{
 		GasFeeCap:  fee,
 		GasTipCap:  tip,
-		Gas:        s.options.GasLimit,
+		Gas:        gas,
 		To:         ftx.to,
 		Value:      ftx.value,
 		Data:       ftx.data,
