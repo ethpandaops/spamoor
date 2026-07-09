@@ -23,30 +23,44 @@ spamoor tx-fuzz [flags]
 
 - **Transaction type** — legacy (0), access list (2930), dynamic fee (1559),
   blob (4844), set code (7702), chosen uniformly from the enabled set per tx.
-- **Calldata / initcode** — mixed empty / small / large random payloads.
-- **Recipient** — recoverable child wallets, the zero address, precompile
-  addresses, system contracts (beacon roots, withdrawal/consolidation queues,
-  history storage), and fully random addresses. Legacy/2930/1559 are sometimes
-  contract creations (`to == nil`).
-- **Access lists** — random EIP-2930 tuples (often empty).
+- **Calldata / initcode** — mixed empty / small / large random payloads, with an
+  occasional near-`--max-call-data` payload.
+- **Recipient** — recoverable child wallets, contracts deployed by earlier
+  fuzzed creations (so calldata executes against real bytecode), the zero
+  address, precompile addresses, system contracts (beacon roots,
+  withdrawal/consolidation queues, history storage), and fully random
+  addresses. Legacy/2930/1559 are sometimes contract creations (`to == nil`).
+- **Value** — zero, 1 wei, or a small random amount (up to ~0.001 ETH).
+  Meaningful value is only sent to pool wallets so funds stay reclaimable.
+- **Gas limit** — fuzzed across buckets: the exact intrinsic-gas floor
+  (out-of-gas on the first unit of work), floor plus small slack, mid-range, and
+  the configured `--gaslimit` cap. Always at or above the intrinsic floor so
+  every tx stays includable.
+- **Access lists** — random EIP-2930 tuples (often empty), with an occasional
+  near-limit list (max entries, each fully loaded with storage keys).
 - **Authorizations** — fuzzed EIP-7702 auth lists signed with throwaway keys
   (decoupled from pool nonce accounting), with mixed valid/garbage chain IDs and
-  nonces.
+  nonces. A fraction of setcode txs additionally carry an authorization that
+  actually *applies* (fresh ephemeral authority with nonce 0, real chain id,
+  delegate with code) and call the authority so the delegated code executes.
 - **Blobs** — random blob sidecars plus known edge cases (all-zero, repeated,
-  duplicate commitments).
+  duplicate commitments), occasionally the full `--max-blobs` budget.
 
 ## Configuration
 
 ### Volume Control (either -c or -t required)
 - `-c, --count` - Total number of transactions to send
 - `-t, --throughput` - Transactions to send per slot (default: 50)
-- `--max-pending` - Maximum number of pending transactions (default: 100)
+- `--max-pending` - Maximum number of concurrent pending submissions (default: 0
+  = auto-sized from throughput and wallet count). Workers no longer hold a
+  pending slot until confirmation, so throughput is governed by `-t` alone.
 
 ### Transaction Settings
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
 - `--gaslimit` - Gas limit per transaction (default: 500000)
 - `--rebroadcast` - Seconds to wait before rebroadcasting (default: 30)
+- `--unstuck-time` - Seconds to wait for a fuzzed tx before replacing it with a cancel tx to free the nonce (default: 60, 0 disables)
 - `--timeout` - Maximum duration to run (e.g. '1h', '30m', '5s')
 
 ### Fuzzing Configuration
@@ -57,6 +71,9 @@ spamoor tx-fuzz [flags]
 - `--max-access-list` - Maximum access list entries and storage keys (default: 5)
 - `--max-auth-list` - Maximum EIP-7702 authorizations per setcode tx (default: 5)
 - `--max-blobs` - Maximum blob sidecars per blob tx (default: 3)
+- `--max-blob-tx-per-slot` - Maximum blob txs submitted per slot (default: 4,
+  0 = unlimited). Excess blob txs are re-fuzzed as non-blob txs instead of
+  hoarding pending slots on blob capacity.
 
 ### Blob Format (EIP-4844 / EIP-7594)
 Blob txs use the v0 KZG-proof sidecar before Fulu and the v1 (cell-proof) wrapper
@@ -70,6 +87,11 @@ when available, otherwise from this flag.
 
 ### Wallet Management
 - `--max-wallets` - Maximum number of child wallets to use
+
+The wallet pool is partitioned into a blob and a non-blob class: each wallet
+only ever sends one class of transactions. go-ethereum reserves every account
+to a single subpool, so mixing blob and non-blob txs on one wallet would cause
+"address already reserved" rejections.
 
 ### Client Settings
 - `--client-group` - Client group to use for sending transactions
