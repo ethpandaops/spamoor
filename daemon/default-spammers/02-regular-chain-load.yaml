@@ -99,7 +99,13 @@
 
 - scenario: erc1155tx
   key: regular-erc1155
-  name: ERC-1155 Multi-Token Activityit' already pa
+  name: ERC-1155 Multi-Token Activity
+  description: Mints and transfers ERC-1155 multi-tokens.
+  group: Regular Chain Load
+  group_config:
+    weight: 1
+    enabled: true
+    sort_order: 3
   config:
     # wallet settings
     seed: erc1155tx-557717 # seed for the wallet
