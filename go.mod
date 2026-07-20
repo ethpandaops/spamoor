@@ -6,7 +6,7 @@ require (
 	github.com/consensys/gnark-crypto v0.20.1
 	github.com/ethereum/go-ethereum v1.17.4
 	github.com/ethpandaops/service-authenticatoor v0.0.2
-	github.com/fjl/geas v0.3.2
+	github.com/fjl/geas v0.3.3
 	github.com/glebarez/go-sqlite v1.22.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/mux v1.8.1

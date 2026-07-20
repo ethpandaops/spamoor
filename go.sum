@@ -70,8 +70,8 @@ github.com/ethpandaops/service-authenticatoor v0.0.2 h1:0rqHA2Rw64+NG0HVGRfqVhJE
 github.com/ethpandaops/service-authenticatoor v0.0.2/go.mod h1:nIInMlq5O7YQDLVCL5gf0TeVAvVd9Q50k3sm3abTeG0=
 github.com/ferranbt/fastssz v0.1.4 h1:OCDB+dYDEQDvAgtAGnTSidK1Pe2tW3nFV40XyMkTeDY=
 github.com/ferranbt/fastssz v0.1.4/go.mod h1:Ea3+oeoRGGLGm5shYAeDgu6PGUlcvQhE2fILyD9+tGg=
-github.com/fjl/geas v0.3.2 h1:IN+CdsbiZYd6ZZw23lky3Cm9hEJltcQ7qmb0kC6AEfk=
-github.com/fjl/geas v0.3.2/go.mod h1:HjLwTY9i/Sn5pXobhKYWh7oG/26fjn4KqjfhwRCvdDQ=
+github.com/fjl/geas v0.3.3 h1:CtVkRXysF+1gf1L0MgisG4vcr/Zv/uf8ukq/uqiUEUs=
+github.com/fjl/geas v0.3.3/go.mod h1:HjLwTY9i/Sn5pXobhKYWh7oG/26fjn4KqjfhwRCvdDQ=
 github.com/fjl/jsonw v0.1.0 h1:V3MyR79fjLpn/+bMgvegdGUIhoJOzjmqWcKDgcOmY1I=
 github.com/fjl/jsonw v0.1.0/go.mod h1:2KMLevM6FXEJnfhtk7naXu9vZdVfOma1GlnGdPRlumU=
 github.com/fsnotify/fsnotify v1.9.0 h1:2Ml+OJNzbYCTzsxtv8vKSFD9PbJjmhYF14k/jKC7S9k=
