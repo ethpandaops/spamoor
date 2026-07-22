@@ -1139,32 +1139,39 @@ function startLogStream(id, logsDiv) {
       url.searchParams.set('since', lastTime);
     }
 
-    /* Add auth token to SSE connection via query param (EventSource doesn't support headers) */
-    const token = spamoor.getAuthToken();
-    if (token) {
-      url.searchParams.set('auth', token);
-    }
-
-    const sse = new EventSource(url.toString());
-
-    sse.onmessage = (event) => {
-      const logs = JSON.parse(event.data);
-      appendLogs(logs, logsDiv);
-    };
-
-    sse.onerror = (error) => {
-      console.error('Log stream error:', error);
-      sse.close();
-      logEventSources.delete(id);
-
+    /* Fetch a fresh auth token for the SSE query param (EventSource doesn't
+       support headers). getAuthToken() resolves async via the auth client. */
+    spamoor.getAuthToken().then((token) => {
+      /* Panel closed (or stream restarted) while the token was resolving */
       const logRow = logsDiv.closest('.log-row');
-      if (!logRow.classList.contains('d-none')) {
-        console.log('Reconnecting log stream in 2 seconds...');
-        setTimeout(() => connect(), 2000);
+      if (logRow.classList.contains('d-none') || logEventSources.has(id)) {
+        return;
       }
-    };
 
-    logEventSources.set(id, sse);
+      if (token) {
+        url.searchParams.set('auth', token);
+      }
+
+      const sse = new EventSource(url.toString());
+
+      sse.onmessage = (event) => {
+        const logs = JSON.parse(event.data);
+        appendLogs(logs, logsDiv);
+      };
+
+      sse.onerror = (error) => {
+        console.error('Log stream error:', error);
+        sse.close();
+        logEventSources.delete(id);
+
+        if (!logRow.classList.contains('d-none')) {
+          console.log('Reconnecting log stream in 2 seconds...');
+          setTimeout(() => connect(), 2000);
+        }
+      };
+
+      logEventSources.set(id, sse);
+    });
   }
 
   connect();
