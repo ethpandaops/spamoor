@@ -1,13 +1,19 @@
 
 (function() {
-  // Authentication state mirrored from window.ethpandaops.authenticatoor.
+  // Authentication state mirrored from the authenticatoor v2 client
+  // (window.ethpandaops.authenticatoor). The v2 client owns the session —
+  // a hidden iframe on the auth-service origin refreshes tokens before
+  // expiry and keeps login state in sync across every ethpandaops app and
+  // tab; its "status" events land in applyClientState below. Tokens are
+  // NOT cached here: getAuthToken() asks the client for a fresh one on
+  // every call.
+  //
   // In open mode (no auth provider configured), authDisabled stays true
   // and isAuthenticated is unconditionally true so all UI is unlocked.
   // authError is set when an auth provider is configured but its
   // client.js failed to load — the UI surfaces this as "Auth unreachable"
   // rather than silently treating the request as open.
   var authState = {
-    token: null,
     user: null,
     expiresAt: null,
     isAuthenticated: false,
@@ -54,8 +60,9 @@
   // exposed window.ethpandaops.authenticatoor, surface that as a visible
   // error state and stay unauthenticated (so API calls produce real 401s
   // rather than silent failures behind a fake-authed UI). Otherwise wire
-  // the login button and run checkLogin (fragment → cache → silent
-  // iframe) in the background.
+  // the login button and subscribe to the v2 client's "status" events —
+  // every session change (login/logout/refresh in ANY ethpandaops app or
+  // tab) re-renders the top bar through applyClientState.
   function initAuth() {
     if (isOpenMode()) {
       authState.isAuthenticated = true;
@@ -65,13 +72,13 @@
     }
 
     var client = authClient();
-    if (!client) {
+    if (!client || typeof client.addEventListener !== 'function') {
       authState.isAuthenticated = false;
       authState.authDisabled = false;
       authState.authError = 'Auth provider unreachable';
       console.error('spamoor: auth provider configured (' +
         window.spamoorConfig.authProviderURL +
-        ') but client.js failed to load — API calls will return 401');
+        ') but client.js (v2) failed to load — API calls will return 401');
       updateAuthUI();
       return;
     }
@@ -87,20 +94,19 @@
       });
     }
 
-    client.checkLogin().then(function(info) {
-      if (info && info.authenticated) {
-        applyClientState(info);
-      }
-    }).catch(function() {
-      // Stay unauthenticated; user can click Login.
-    });
+    // The client replays the current session state once on subscribe, so
+    // this also settles the initial UI.
+    client.addEventListener('status', applyClientState);
   }
 
-  // Mirror the auth client's state into our local authState.
+  // Mirror a TokenInfo pushed by the auth client into our local
+  // authState. The "refreshing" status still carries authenticated=true
+  // while the old token is valid, so the top bar doesn't flicker during
+  // background refreshes. No token is stored — getAuthToken() fetches a
+  // fresh one per request.
   function applyClientState(info) {
-    authState.token = info.token || null;
-    authState.user = info.user || info.email || null;
-    authState.expiresAt = info.exp ? info.exp * 1000 : null;
+    authState.user = info.authenticated ? (info.user || null) : null;
+    authState.expiresAt = info.authenticated && info.exp ? info.exp * 1000 : null;
     authState.isAuthenticated = !!info.authenticated;
     authState.authDisabled = false;
     updateAuthUI();
@@ -159,45 +165,41 @@
     window.dispatchEvent(new CustomEvent('authStateChanged', { detail: authState }));
   }
 
-  // Get current auth token. In open mode there's no token to send;
-  // returns null and authFetch leaves the request unauthenticated.
+  // Resolve a FRESH auth token from the v2 client — asked for on every
+  // call, never cached here (the client's shared frame refreshes it
+  // before expiry). Returns a Promise<string|null>; resolves null in open
+  // mode or when unauthenticated.
   function getAuthToken() {
     var client = authClient();
-    if (client) {
-      var t = client.getToken();
-      if (t) return t;
-    }
-    return null;
+    if (!client) return Promise.resolve(null);
+    return client.getToken().catch(function() { return null; });
   }
 
   // Check if user is authenticated. In open mode this is always true
-  // (the backend treats every request as authorized).
+  // (the backend treats every request as authorized). Kept in sync by the
+  // client's "status" events.
   function isAuthenticated() {
     if (authState.authDisabled) return true;
-    var client = authClient();
-    if (client) return !!client.isLoggedIn();
-    return false;
+    return !!authState.isAuthenticated;
   }
 
-  // Fetch with the current bearer token attached. On 401 the auth client
-  // is asked to re-check (the client itself decides whether to silent-
-  // refresh or surface a logged-out state).
+  // Fetch with a fresh bearer token attached (resolved per request from
+  // the auth client). On 401 the client is asked for its current status
+  // so the top bar converges with reality.
   function authFetch(url, options) {
     options = options || {};
     options.headers = options.headers || {};
 
-    var token = getAuthToken();
-    if (token) {
-      options.headers['Authorization'] = 'Bearer ' + token;
-    }
-
-    return fetch(url, options).then(function(response) {
+    return getAuthToken().then(function(token) {
+      if (token) {
+        options.headers['Authorization'] = 'Bearer ' + token;
+      }
+      return fetch(url, options);
+    }).then(function(response) {
       if (response.status === 401) {
         var client = authClient();
-        if (client) {
-          client.checkLogin().then(function(info) {
-            if (info && info.authenticated) applyClientState(info);
-          });
+        if (client && typeof client.getStatus === 'function') {
+          client.getStatus().then(applyClientState).catch(function() {});
         }
       }
       return response;
