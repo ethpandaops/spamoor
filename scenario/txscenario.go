@@ -308,13 +308,12 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 
 			err := options.ProcessNextTxFn(ctx, params)
 
-			txStatesMutex.Lock()
-			submitted := state.submitted
-			txStatesMutex.Unlock()
-
-			if err != nil || submitted {
-				txCount.Add(1)
-			}
+			// Every returned call counts toward TotalCount, regardless of whether it
+			// submitted a transaction, failed, or completed without ever calling
+			// NotifySubmitted. Counting only submissions and errors let a
+			// ProcessNextTxFn that finishes successfully without calling
+			// NotifySubmitted run forever, since the count never advanced for it.
+			txCount.Add(1)
 
 			if err == ErrNoClients {
 				isErrorMode.Store(true)

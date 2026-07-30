@@ -365,3 +365,35 @@ func TestScenarioThroughputIncrement(t *testing.T) {
 		t.Fatalf("expected at least 5 transactions to be processed, got %d", processed.Load())
 	}
 }
+
+// TestTotalCountHonoredWithoutNotifySubmitted verifies that a ProcessNextTxFn
+// which completes successfully without ever calling NotifySubmitted still
+// counts toward TotalCount. Some scenarios handle all of their own logging
+// and never call NotifySubmitted, and the scenario must still stop at the
+// configured count for them instead of running until the context ends.
+func TestTotalCountHonoredWithoutNotifySubmitted(t *testing.T) {
+	const total = 50
+
+	var calls atomic.Int64
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := RunTransactionScenario(ctx, TransactionScenarioOptions{
+		TotalCount: total,
+		Throughput: 12000, // ~1000/s at the default 12s slot time
+		Logger:     discardLogger(),
+		ProcessNextTxFn: func(_ context.Context, _ *ProcessNextTxParams) error {
+			calls.Add(1)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("scenario error: %v", err)
+	}
+
+	n := calls.Load()
+	if n > total+20 {
+		t.Fatalf("expected the run to stop around TotalCount=%d, got %d calls", total, n)
+	}
+}
