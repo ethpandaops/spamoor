@@ -267,7 +267,9 @@ func (pool *ClientPool) watchClientStatus() error {
 			goodClients = append(goodClients, client)
 		}
 	}
+	pool.selectionMutex.Lock()
 	pool.goodClients = goodClients
+	pool.selectionMutex.Unlock()
 	pool.logger.Infof("client check completed (%v good clients, %v bad clients)", len(goodClients), len(pool.allClients)-len(goodClients))
 
 	return nil
@@ -345,19 +347,17 @@ func (pool *ClientPool) GetClient(options ...ClientSelectionOption) *Client {
 		selectedIndex = opts.index % len(clientCandidates)
 	case SelectClientRandom:
 		selectedIndex = rand.Intn(len(clientCandidates))
-	case SelectClientRoundRobin:
-		selectedIndex = pool.rrClientIdx
-		pool.rrClientIdx++
-		if pool.rrClientIdx >= len(clientCandidates) {
-			pool.rrClientIdx = 0
-		}
 	default:
-		// Fallback to round-robin
-		selectedIndex = pool.rrClientIdx
-		pool.rrClientIdx++
+		// Round-robin (also the fallback for any unrecognized mode). The cursor is
+		// shared across calls that can each see a differently sized candidate set
+		// (different group, different exclusions, clients toggling enabled), so it
+		// has to be clamped to the current candidate list before it is used, not
+		// just after advancing it.
 		if pool.rrClientIdx >= len(clientCandidates) {
 			pool.rrClientIdx = 0
 		}
+		selectedIndex = pool.rrClientIdx
+		pool.rrClientIdx++
 	}
 
 	return clientCandidates[selectedIndex]
