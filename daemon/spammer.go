@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethpandaops/spamoor/daemon/db"
@@ -44,7 +45,7 @@ type Spammer struct {
 	walletPool     *spamoor.WalletPool
 	scenarioCtx    context.Context
 	scenarioCancel context.CancelFunc
-	running        bool
+	running        atomic.Bool
 	runningChan    chan struct{}
 	plugin         *plugin.LoadedPlugin // nil for native scenarios
 }
@@ -258,10 +259,9 @@ func (s *Spammer) runScenario() {
 		return
 	}
 
-	if s.running {
+	if !s.running.CompareAndSwap(false, true) {
 		return
 	}
-	s.running = true
 	s.daemon.spammerWg.Add(1)
 
 	if s.scenarioCancel != nil {
@@ -283,7 +283,15 @@ func (s *Spammer) runScenario() {
 		}
 
 		s.daemon.spammerWg.Done()
-		close(s.runningChan)
+
+		// Clear the running flag before releasing anything blocked on runningChan
+		// (Pause waits on it), so a Start issued right after a Pause returns never
+		// sees a stale "still running" state. Close the local channel this run
+		// created, not s.runningChan: clearing the flag above can let a new run
+		// start immediately and overwrite that field with its own channel before
+		// this defer gets to close it.
+		s.running.Store(false)
+		close(runningChan)
 
 		if s.daemon.ctx.Err() != nil {
 			return
@@ -317,7 +325,6 @@ func (s *Spammer) runScenario() {
 			s.daemon.maybeScheduleAutoRestart(s)
 		}
 
-		s.running = false
 		s.scenarioCancel()
 		s.scenarioCancel = nil
 

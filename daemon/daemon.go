@@ -587,7 +587,7 @@ func (d *Daemon) Shutdown() {
 	d.spammerMapMtx.RLock()
 	spammers := make([]*Spammer, 0, len(d.spammerMap))
 	for _, s := range d.spammerMap {
-		if s.running {
+		if s.running.Load() {
 			spammers = append(spammers, s)
 		}
 	}
