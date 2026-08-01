@@ -621,7 +621,9 @@ func (wallet *Wallet) MarkSkippedNonce(nonce uint64) {
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
 
-	if nonce >= wallet.confirmedTxCount {
+	// Only nonces at or above the confirmed count are still pending and can be
+	// reused. Nonces below it are already confirmed on chain, so ignore them.
+	if nonce < wallet.confirmedTxCount {
 		return
 	}
 
