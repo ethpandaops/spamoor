@@ -32,6 +32,7 @@ func init() {
 		"NewKeyStoreTransactor":       reflect.ValueOf(bind.NewKeyStoreTransactor),
 		"NewKeyedTransactor":          reflect.ValueOf(bind.NewKeyedTransactor),
 		"Transact":                    reflect.ValueOf(bind.Transact),
+		"WaitAccepted":                reflect.ValueOf(bind.WaitAccepted),
 		"WaitDeployed":                reflect.ValueOf(bind.WaitDeployed),
 		"WaitMined":                   reflect.ValueOf(bind.WaitMined),
 
@@ -83,6 +84,7 @@ type _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_Backend struct {
 	WSubscribeFilterLogs func(ctx context.Context, q ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
 	WSuggestGasPrice     func(ctx context.Context) (*big.Int, error)
 	WSuggestGasTipCap    func(ctx context.Context) (*big.Int, error)
+	WTransactionByHash   func(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error)
 	WTransactionReceipt  func(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
 }
 
@@ -119,6 +121,9 @@ func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_Backend) SuggestGa
 func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_Backend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
 	return W.WSuggestGasTipCap(ctx)
 }
+func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_Backend) TransactionByHash(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error) {
+	return W.WTransactionByHash(ctx, hash)
+}
 func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_Backend) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	return W.WTransactionReceipt(ctx, txHash)
 }
@@ -151,6 +156,7 @@ type _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractBackend struc
 	WSubscribeFilterLogs func(ctx context.Context, q ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
 	WSuggestGasPrice     func(ctx context.Context) (*big.Int, error)
 	WSuggestGasTipCap    func(ctx context.Context) (*big.Int, error)
+	WTransactionByHash   func(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error)
 }
 
 func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
@@ -185,6 +191,9 @@ func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractBackend) S
 }
 func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
 	return W.WSuggestGasTipCap(ctx)
+}
+func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractBackend) TransactionByHash(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error) {
+	return W.WTransactionByHash(ctx, hash)
 }
 
 // _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractCaller is an interface wrapper for ContractCaller type
@@ -227,14 +236,15 @@ func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractFilterer) 
 
 // _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractTransactor is an interface wrapper for ContractTransactor type
 type _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractTransactor struct {
-	IValue            interface{}
-	WEstimateGas      func(ctx context.Context, call ethereum.CallMsg) (uint64, error)
-	WHeaderByNumber   func(ctx context.Context, number *big.Int) (*types.Header, error)
-	WPendingCodeAt    func(ctx context.Context, account common.Address) ([]byte, error)
-	WPendingNonceAt   func(ctx context.Context, account common.Address) (uint64, error)
-	WSendTransaction  func(ctx context.Context, tx *types.Transaction) error
-	WSuggestGasPrice  func(ctx context.Context) (*big.Int, error)
-	WSuggestGasTipCap func(ctx context.Context) (*big.Int, error)
+	IValue             interface{}
+	WEstimateGas       func(ctx context.Context, call ethereum.CallMsg) (uint64, error)
+	WHeaderByNumber    func(ctx context.Context, number *big.Int) (*types.Header, error)
+	WPendingCodeAt     func(ctx context.Context, account common.Address) ([]byte, error)
+	WPendingNonceAt    func(ctx context.Context, account common.Address) (uint64, error)
+	WSendTransaction   func(ctx context.Context, tx *types.Transaction) error
+	WSuggestGasPrice   func(ctx context.Context) (*big.Int, error)
+	WSuggestGasTipCap  func(ctx context.Context) (*big.Int, error)
+	WTransactionByHash func(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error)
 }
 
 func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractTransactor) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
@@ -257,6 +267,9 @@ func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractTransactor
 }
 func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractTransactor) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
 	return W.WSuggestGasTipCap(ctx)
+}
+func (W _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_ContractTransactor) TransactionByHash(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error) {
+	return W.WTransactionByHash(ctx, hash)
 }
 
 // _github_com_ethereum_go_ethereum_accounts_abi_bind_v2_DeployBackend is an interface wrapper for DeployBackend type
