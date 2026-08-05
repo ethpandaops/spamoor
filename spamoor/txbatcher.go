@@ -151,8 +151,6 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 		return nil
 	}
 
-	b.isDeployed = true
-
 	compiler := geas.NewCompiler(nil)
 
 	initcode := compiler.CompileString(batcherGeasInit)
@@ -173,6 +171,13 @@ func (b *TxBatcher) Deploy(ctx context.Context, wallet *Wallet, client *Client) 
 	}
 
 	b.address = contractAddr
+	// Only mark as deployed once we actually have a real address: marking it
+	// before the fallible deployment step meant a transient failure left
+	// isDeployed permanently true with address still zero, so every later
+	// call short-circuited to "success" with a zero address, and every
+	// funding transaction built against it became a real-value transfer to
+	// the zero address instead of a contract creation.
+	b.isDeployed = true
 
 	return nil
 }
