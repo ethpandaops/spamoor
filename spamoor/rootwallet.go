@@ -122,6 +122,7 @@ func (wallet *RootWallet) GetWallet() *Wallet {
 //   - lockedFn: function to execute while holding the locks
 func (wallet *RootWallet) WithWalletLock(ctx context.Context, txCount int, fundingAmount *uint256.Int, clientPool *ClientPool, lockedLogFn func(reason string), lockedFn func() error) error {
 	acquiredCount := 0
+	reserved := false
 
 	acquireLock := func() error {
 		wallet.txSemMutex.Lock()
@@ -137,6 +138,7 @@ func (wallet *RootWallet) WithWalletLock(ctx context.Context, txCount int, fundi
 			wallet.pendingFundingMutex.Lock()
 			wallet.pendingFundingTotal = wallet.pendingFundingTotal.Add(wallet.pendingFundingTotal, fundingAmount)
 			wallet.pendingFundingMutex.Unlock()
+			reserved = true
 		}
 
 		for i := 0; i < txCount; i++ {
@@ -174,8 +176,12 @@ func (wallet *RootWallet) WithWalletLock(ctx context.Context, txCount int, fundi
 			<-wallet.txSemaphore
 		}
 
-		// Release funding reservation
-		if fundingAmount != nil {
+		// Release funding reservation, but only if it was actually added.
+		// waitForSufficientBalance can fail (e.g. the context is cancelled
+		// while still waiting for funds) before the reservation is made, and
+		// unconditionally subtracting here would underflow the uint256
+		// total, permanently corrupting every future balance check.
+		if reserved {
 			wallet.pendingFundingMutex.Lock()
 			wallet.pendingFundingTotal = wallet.pendingFundingTotal.Sub(wallet.pendingFundingTotal, fundingAmount)
 			wallet.pendingFundingMutex.Unlock()
