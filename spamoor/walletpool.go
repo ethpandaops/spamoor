@@ -1193,6 +1193,10 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 					return err
 				}
 				txList = append(txList, tx)
+				// Record this as a batch of one so the credit loop below,
+				// which is shared with the batcher path, finds it and
+				// credits the recipient once the transfer confirms.
+				batchTxMap[tx.Hash()] = []*FundingRequest{req}
 			}
 		}
 
