@@ -1026,6 +1026,13 @@ func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxMap map[common.Hash]*
 // whether to immediately submit or just set up confirmation tracking.
 func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, submitNow bool) error {
 	if ctx.Err() != nil {
+		// OnComplete is documented as always called regardless of success/failure.
+		// Callers that rely on it firing to release a WaitGroup or semaphore (e.g.
+		// WalletPool.ReclaimFunds) would otherwise hang forever if the context is
+		// already cancelled by the time this call is dispatched.
+		if options.OnComplete != nil {
+			options.OnComplete(tx, nil, ctx.Err())
+		}
 		return ctx.Err()
 	}
 
