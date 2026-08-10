@@ -385,7 +385,20 @@ func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*W
 					var finalErr error
 					if lastErr != nil {
 						finalErr = fmt.Errorf("failed to submit after %d attempts: %w", maxRetries, lastErr)
-						state.errorChan <- lastErr // Signal hard error
+
+						// Best-effort signal: errorChan has capacity 1 and the
+						// manager below only ever drains one error from it
+						// before cancelling and returning. Once that happens,
+						// nothing drains it again, so a blocking send here
+						// would leave every other failing sub-goroutine for
+						// this wallet stuck forever, never releasing its
+						// semaphore slot. The error is still recorded in
+						// errors[wallet][txIndex] below regardless of whether
+						// this send lands.
+						select {
+						case state.errorChan <- lastErr:
+						default:
+						}
 					}
 
 					resultsMutex.Lock()
