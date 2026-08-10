@@ -309,6 +309,26 @@ func (wallet *Wallet) SetNonce(nonce uint64) {
 	wallet.confirmedTxCount = nonce
 }
 
+// advancePendingTxCountTo raises pendingTxCount to target if it is not
+// already there or beyond. This is called from the confirmation path under
+// txNonceMutex, while GetNextNonce advances the same counter with an atomic
+// Add under a different lock (nonceMutex). A plain Load-then-Store would not
+// be atomic as a whole here: a Store computed from a stale Load could
+// clobber a concurrent Add and roll the counter backwards, handing out a
+// nonce that is already in flight. Retrying with CompareAndSwap ensures the
+// update only lands against the value it was actually computed from.
+func (wallet *Wallet) advancePendingTxCountTo(target uint64) {
+	for {
+		current := wallet.pendingTxCount.Load()
+		if target <= current {
+			return
+		}
+		if wallet.pendingTxCount.CompareAndSwap(current, target) {
+			return
+		}
+	}
+}
+
 // GetNextNonce atomically increments and returns the next available nonce.
 // This is used when building transactions to ensure unique nonces.
 // It first checks for any skipped nonces that can be reused.
