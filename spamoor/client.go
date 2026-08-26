@@ -13,10 +13,11 @@ import (
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // sharedHTTPClient is reused across all RPC clients to enable TCP connection
@@ -56,15 +57,17 @@ func (ct ClientType) IsValid() bool {
 }
 
 // Client represents an Ethereum RPC client with additional functionality for transaction management,
-// gas estimation caching, and block height tracking. It wraps the standard go-ethereum ethclient
-// with enhanced features for spam testing and transaction automation.
+// gas estimation caching, and block height tracking. Engine calls go through the raw
+// JSON-RPC client so that spamoor's own encoding and decoding applies.
 type Client struct {
 	Timeout        time.Duration
 	rpchost        string
-	client         *ethclient.Client
 	rpcClient      *rpc.Client
 	externalClient *ExternalClientOptions
 	logger         *logrus.Entry
+
+	ethClient     *ethclient.Client
+	ethClientOnce sync.Once
 
 	clientGroups     []string
 	clientType       ClientType
@@ -187,7 +190,6 @@ func NewClient(options *ClientOptions) (*Client, error) {
 	}
 
 	return &Client{
-		client:       ethclient.NewClient(rpcClient),
 		rpcClient:    rpcClient,
 		rpchost:      rpchost,
 		logger:       logrus.WithField("rpc", rpchost),
@@ -255,9 +257,15 @@ func (client *Client) IsBuilder() bool {
 	return client.GetClientType() == ClientTypeBuilder
 }
 
-// GetEthClient returns the underlying go-ethereum ethclient.Client instance.
+// GetEthClient returns a go-ethereum ethclient.Client sharing this client's RPC
+// connection, for use as the bind.ContractBackend of abigen contract bindings.
+// Constructed on first use.
 func (client *Client) GetEthClient() *ethclient.Client {
-	return client.client
+	client.ethClientOnce.Do(func() {
+		client.ethClient = ethclient.NewClient(client.rpcClient)
+	})
+
+	return client.ethClient
 }
 
 // GetRPCHost returns the original RPC host URL used to create this client.
@@ -338,58 +346,70 @@ func (client *Client) getContext(ctx context.Context) (context.Context, context.
 	return context.WithCancel(ctx)
 }
 
-// GetChainId returns the chain ID of the connected Ethereum network.
-func (client *Client) GetChainId(ctx context.Context) (*big.Int, error) {
+// callRPC performs a JSON-RPC call with the client's timeout and records request
+// statistics. isTxRequest marks submission calls, which are counted separately.
+func (client *Client) callRPC(ctx context.Context, isTxRequest bool, result any, method string, args ...any) error {
 	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
-	chainId, err := client.client.ChainID(ctx)
-	client.incrementRequestStats(false, err != nil)
-	return chainId, err
+	err := client.rpcClient.CallContext(ctx, result, method, args...)
+	client.incrementRequestStats(isTxRequest, err != nil)
+
+	return err
+}
+
+// GetChainId returns the chain ID of the connected Ethereum network.
+func (client *Client) GetChainId(ctx context.Context) (*big.Int, error) {
+	var result hexutil.Big
+	if err := client.callRPC(ctx, false, &result, "eth_chainId"); err != nil {
+		return nil, err
+	}
+
+	return (*big.Int)(&result), nil
 }
 
 // GetNonceAt returns the nonce for the given address at the specified block number.
 // If blockNumber is nil, returns the nonce at the latest block.
 func (client *Client) GetNonceAt(ctx context.Context, wallet common.Address, blockNumber *big.Int) (uint64, error) {
-	ctx, cancel := client.getContext(ctx)
-	defer cancel()
+	var result hexutil.Uint64
+	if err := client.callRPC(ctx, false, &result, "eth_getTransactionCount", wallet, toBlockNumberArg(blockNumber)); err != nil {
+		return 0, err
+	}
 
-	nonce, err := client.client.NonceAt(ctx, wallet, blockNumber)
-	client.incrementRequestStats(false, err != nil)
-	return nonce, err
+	return uint64(result), nil
 }
 
 // GetPendingNonceAt returns the pending nonce for the given address,
 // including transactions in the mempool.
 func (client *Client) GetPendingNonceAt(ctx context.Context, wallet common.Address) (uint64, error) {
-	ctx, cancel := client.getContext(ctx)
-	defer cancel()
+	var result hexutil.Uint64
+	if err := client.callRPC(ctx, false, &result, "eth_getTransactionCount", wallet, "pending"); err != nil {
+		return 0, err
+	}
 
-	nonce, err := client.client.PendingNonceAt(ctx, wallet)
-	client.incrementRequestStats(false, err != nil)
-	return nonce, err
+	return uint64(result), nil
 }
 
 // GetBalanceAt returns the balance of the given address at the latest block.
 func (client *Client) GetBalanceAt(ctx context.Context, wallet common.Address) (*big.Int, error) {
-	ctx, cancel := client.getContext(ctx)
-	defer cancel()
+	var result hexutil.Big
+	if err := client.callRPC(ctx, false, &result, "eth_getBalance", wallet, "latest"); err != nil {
+		return nil, err
+	}
 
-	balance, err := client.client.BalanceAt(ctx, wallet, nil)
-	client.incrementRequestStats(false, err != nil)
-	return balance, err
+	return (*big.Int)(&result), nil
 }
 
 // GetCodeAt returns the contract code deployed at the given address at the latest
 // block. An empty result means no contract is deployed there. Used by deployment
 // helpers to detect whether a (CREATE2) contract already exists before deploying.
 func (client *Client) GetCodeAt(ctx context.Context, address common.Address) ([]byte, error) {
-	ctx, cancel := client.getContext(ctx)
-	defer cancel()
+	var result hexutil.Bytes
+	if err := client.callRPC(ctx, false, &result, "eth_getCode", address, "latest"); err != nil {
+		return nil, err
+	}
 
-	code, err := client.client.CodeAt(ctx, address, nil)
-	client.incrementRequestStats(false, err != nil)
-	return code, err
+	return result, nil
 }
 
 // EstimateGas runs eth_estimateGas against the chain for the provided call
@@ -397,12 +417,12 @@ func (client *Client) GetCodeAt(ctx context.Context, address common.Address) ([]
 // an accurate pre-send estimate under EIP-8037 where static guesses tend to
 // under-allocate.
 func (client *Client) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
-	ctx, cancel := client.getContext(ctx)
-	defer cancel()
+	var result hexutil.Uint64
+	if err := client.callRPC(ctx, false, &result, "eth_estimateGas", toCallArg(call)); err != nil {
+		return 0, err
+	}
 
-	gas, err := client.client.EstimateGas(ctx, call)
-	client.incrementRequestStats(false, err != nil)
-	return gas, err
+	return uint64(result), nil
 }
 
 // GetSuggestedFee returns suggested gas price and tip cap for transactions.
@@ -416,51 +436,103 @@ func (client *Client) GetSuggestedFee(ctx context.Context) (*big.Int, *big.Int, 
 		return client.lastGasCap, client.lastTipCap, nil
 	}
 
-	ctx, cancel := client.getContext(ctx)
-	defer cancel()
-
-	gasCap, err := client.client.SuggestGasPrice(ctx)
-	client.incrementRequestStats(false, err != nil)
-	if err != nil {
+	var gasCapResult hexutil.Big
+	if err := client.callRPC(ctx, false, &gasCapResult, "eth_gasPrice"); err != nil {
 		return nil, nil, err
 	}
-	tipCap, err := client.client.SuggestGasTipCap(ctx)
-	client.incrementRequestStats(false, err != nil)
-	if err != nil {
-		tipCap = big.NewInt(2000000000)
+
+	gasCap := (*big.Int)(&gasCapResult)
+
+	var tipCapResult hexutil.Big
+
+	tipCap := big.NewInt(2000000000)
+	if err := client.callRPC(ctx, false, &tipCapResult, "eth_maxPriorityFeePerGas"); err == nil {
+		tipCap = (*big.Int)(&tipCapResult)
 	}
 
 	client.lastGasSuggestion = time.Now()
 	client.lastGasCap = gasCap
 	client.lastTipCap = tipCap
+
 	return gasCap, tipCap, nil
 }
 
-// SendTransaction submits a transaction to the network using the provided context.
-// Logs the transaction hash at trace level.
-func (client *Client) SendTransaction(ctx context.Context, tx *types.Transaction) error {
+// SendTransaction submits a transaction to the network in its network encoding,
+// which for blob transactions includes the sidecar.
+func (client *Client) SendTransaction(ctx context.Context, tx *txtypes.Transaction) error {
 	client.logger.Tracef("submitted transaction %v", tx.Hash().String())
 
-	err := client.client.SendTransaction(ctx, tx)
-	client.incrementRequestStats(true, err != nil)
-	return err
+	encoded, err := tx.MarshalNetwork()
+	if err != nil {
+		return fmt.Errorf("failed encoding transaction: %w", err)
+	}
+
+	return client.SendRawTransaction(ctx, encoded)
 }
 
-// SendRawTransaction submits a raw transaction bytes to the network using eth_sendRawTransaction RPC call.
+// SendRawTransaction submits raw transaction bytes to the network using the
+// eth_sendRawTransaction RPC call.
 func (client *Client) SendRawTransaction(ctx context.Context, tx []byte) error {
-	err := client.client.Client().CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(tx))
-	client.incrementRequestStats(true, err != nil)
-	return err
+	return client.callRPC(ctx, true, nil, "eth_sendRawTransaction", hexutil.Encode(tx))
 }
 
 // GetTransactionReceipt retrieves the receipt for a given transaction hash.
-// Logs the request at trace level.
-func (client *Client) GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+// Returns a nil receipt without error when the transaction is not yet mined.
+func (client *Client) GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*txtypes.Receipt, error) {
 	client.logger.Tracef("get receipt: 0x%x", txHash.Bytes())
 
-	receipt, err := client.client.TransactionReceipt(ctx, txHash)
-	client.incrementRequestStats(false, err != nil)
-	return receipt, err
+	var receipt *txtypes.Receipt
+	if err := client.callRPC(ctx, false, &receipt, "eth_getTransactionReceipt", txHash); err != nil {
+		return nil, err
+	}
+
+	if receipt == nil {
+		return nil, ethereum.NotFound
+	}
+
+	return receipt, nil
+}
+
+// GetBlockByNumber retrieves a full block including its transaction objects.
+func (client *Client) GetBlockByNumber(ctx context.Context, blockNumber uint64) (*txtypes.Block, error) {
+	var block *txtypes.Block
+	if err := client.callRPC(ctx, false, &block, "eth_getBlockByNumber", rpc.BlockNumber(blockNumber), true); err != nil {
+		return nil, err
+	}
+
+	if block == nil {
+		return nil, ethereum.NotFound
+	}
+
+	return block, nil
+}
+
+// GetHeaderByNumber retrieves a block header. A nil blockNumber requests the latest.
+func (client *Client) GetHeaderByNumber(ctx context.Context, blockNumber *big.Int) (*txtypes.Header, error) {
+	var header *txtypes.Header
+	if err := client.callRPC(ctx, false, &header, "eth_getBlockByNumber", toBlockNumberArg(blockNumber), false); err != nil {
+		return nil, err
+	}
+
+	if header == nil {
+		return nil, ethereum.NotFound
+	}
+
+	return header, nil
+}
+
+// GetBlockReceipts retrieves all transaction receipts of a block.
+func (client *Client) GetBlockReceipts(ctx context.Context, blockHash common.Hash) ([]*txtypes.Receipt, error) {
+	var receipts []*txtypes.Receipt
+	if err := client.callRPC(ctx, false, &receipts, "eth_getBlockReceipts", rpc.BlockNumberOrHash{BlockHash: &blockHash}); err != nil {
+		return nil, err
+	}
+
+	if receipts == nil {
+		return nil, ethereum.NotFound
+	}
+
+	return receipts, nil
 }
 
 // GetBlockHeight returns the current block number.
@@ -475,19 +547,85 @@ func (client *Client) GetBlockHeight(ctx context.Context) (uint64, error) {
 
 	client.logger.Tracef("get block number")
 
-	ctx, cancel := client.getContext(ctx)
-	defer cancel()
-
-	blockHeight, err := client.client.BlockNumber(ctx)
-	client.incrementRequestStats(false, err != nil)
-	if err != nil {
-		return blockHeight, err
+	var result hexutil.Uint64
+	if err := client.callRPC(ctx, false, &result, "eth_blockNumber"); err != nil {
+		return client.blockHeight, err
 	}
+
+	blockHeight := uint64(result)
 	if blockHeight > client.blockHeight {
 		client.blockHeight = blockHeight
 		client.blockHeightTime = time.Now()
 	}
+
 	return client.blockHeight, nil
+}
+
+// toBlockNumberArg converts a block number to its JSON-RPC representation, mapping
+// nil to "latest".
+func toBlockNumberArg(blockNumber *big.Int) any {
+	if blockNumber == nil {
+		return "latest"
+	}
+
+	return hexutil.EncodeBig(blockNumber)
+}
+
+// toCallArg converts a call message to the JSON-RPC argument object.
+func toCallArg(msg ethereum.CallMsg) any {
+	arg := map[string]any{
+		"from": msg.From,
+		"to":   msg.To,
+	}
+
+	if len(msg.Data) > 0 {
+		arg["input"] = hexutil.Bytes(msg.Data)
+	}
+
+	if msg.Value != nil {
+		arg["value"] = (*hexutil.Big)(msg.Value)
+	}
+
+	if msg.Gas != 0 {
+		arg["gas"] = hexutil.Uint64(msg.Gas)
+	}
+
+	if msg.GasPrice != nil {
+		arg["gasPrice"] = (*hexutil.Big)(msg.GasPrice)
+	}
+
+	if msg.GasFeeCap != nil {
+		arg["maxFeePerGas"] = (*hexutil.Big)(msg.GasFeeCap)
+	}
+
+	if msg.GasTipCap != nil {
+		arg["maxPriorityFeePerGas"] = (*hexutil.Big)(msg.GasTipCap)
+	}
+
+	if msg.AccessList != nil {
+		arg["accessList"] = msg.AccessList
+	}
+
+	if msg.BlobGasFeeCap != nil {
+		arg["maxFeePerBlobGas"] = (*hexutil.Big)(msg.BlobGasFeeCap)
+	}
+
+	if msg.BlobHashes != nil {
+		arg["blobVersionedHashes"] = msg.BlobHashes
+	}
+
+	return arg
+}
+
+// GetBlockNumber returns the current block number, bypassing the cache used by
+// GetBlockHeight. Head tracking needs an unsmoothed value.
+func (client *Client) GetBlockNumber(ctx context.Context) (uint64, error) {
+	var result hexutil.Uint64
+	if err := client.callRPC(ctx, false, &result, "eth_blockNumber"); err != nil {
+		return 0, err
+	}
+
+	return uint64(result), nil
 }
 
 // GetLastBlockHeight returns the last cached block height and the time it was retrieved.

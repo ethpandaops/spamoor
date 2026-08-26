@@ -3,10 +3,11 @@
 package symbols
 
 import (
-	"github.com/ethpandaops/spamoor/spamoor"
 	"go/constant"
 	"go/token"
 	"reflect"
+
+	"github.com/ethpandaops/spamoor/spamoor"
 )
 
 func init() {
@@ -61,6 +62,9 @@ func init() {
 		"ExternalBlockSource":    reflect.ValueOf((*spamoor.ExternalBlockSource)(nil)),
 		"ExternalClientOptions":  reflect.ValueOf((*spamoor.ExternalClientOptions)(nil)),
 		"FundingRequest":         reflect.ValueOf((*spamoor.FundingRequest)(nil)),
+		"GethTxCompleteFn":       reflect.ValueOf((*spamoor.GethTxCompleteFn)(nil)),
+		"GethTxConfirmFn":        reflect.ValueOf((*spamoor.GethTxConfirmFn)(nil)),
+		"GethTxEncodeFn":         reflect.ValueOf((*spamoor.GethTxEncodeFn)(nil)),
 		"GlobalBlockStats":       reflect.ValueOf((*spamoor.GlobalBlockStats)(nil)),
 		"PendingTx":              reflect.ValueOf((*spamoor.PendingTx)(nil)),
 		"RootWallet":             reflect.ValueOf((*spamoor.RootWallet)(nil)),

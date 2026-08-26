@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // TaskExecutionContext contains context information for task execution
@@ -29,7 +29,7 @@ type Task interface {
 	// Validate checks if the task configuration is valid
 	Validate() error
 	// BuildTransaction creates a transaction for this task
-	BuildTransaction(ctx context.Context, wallet *spamoor.Wallet, registry *ContractRegistry, execCtx *TaskExecutionContext) (*types.Transaction, error)
+	BuildTransaction(ctx context.Context, wallet *spamoor.Wallet, registry *ContractRegistry, execCtx *TaskExecutionContext) (*txtypes.Transaction, error)
 }
 
 // TaskConfig represents the generic configuration for any task

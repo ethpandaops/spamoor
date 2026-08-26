@@ -9,9 +9,10 @@ import (
 	"math/rand"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
+
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // invalidCategory identifies a class of deliberately-malformed transaction.
@@ -129,7 +130,7 @@ func generateInvalid(rng *rand.Rand, enabled []invalidCategory, in genInput) (*g
 		}
 		gas = gas*100 + uint64(rng.Intn(1_000_000))
 	case "emptyauth":
-		return signEnvelope(in.key, chainID, &types.SetCodeTx{
+		return signEnvelope(in.key, chainID, &txtypes.SetCodeTx{
 			ChainID:   uint256.NewInt(chainID),
 			Nonce:     nonce,
 			GasTipCap: uint256.MustFromBig(gasTip),
@@ -137,10 +138,10 @@ func generateInvalid(rng *rand.Rand, enabled []invalidCategory, in genInput) (*g
 			Gas:       gas,
 			To:        to,
 			Value:     value,
-			AuthList:  []types.SetCodeAuthorization{}, // empty -> invalid 7702
+			AuthList:  []txtypes.SetCodeAuthorization{}, // empty -> invalid 7702
 		}, cat)
 	case "badblob":
-		return signEnvelope(in.key, chainID, &types.BlobTx{
+		return signEnvelope(in.key, chainID, &txtypes.BlobTx{
 			ChainID:    uint256.NewInt(chainID),
 			Nonce:      nonce,
 			GasTipCap:  uint256.MustFromBig(gasTip),
@@ -153,7 +154,7 @@ func generateInvalid(rng *rand.Rand, enabled []invalidCategory, in genInput) (*g
 		}, cat)
 	case "malformed", "truncated":
 		// build a well-formed dynfee tx, then corrupt or truncate its bytes
-		res, err := signEnvelope(in.key, chainID, &types.DynamicFeeTx{
+		res, err := signEnvelope(in.key, chainID, &txtypes.DynamicFeeTx{
 			ChainID:   big.NewInt(int64(chainID)),
 			Nonce:     nonce,
 			GasTipCap: gasTip,
@@ -174,7 +175,7 @@ func generateInvalid(rng *rand.Rand, enabled []invalidCategory, in genInput) (*g
 	}
 
 	// default path: a properly-signed dynfee tx whose fields make it invalid
-	return signEnvelope(in.key, chainID, &types.DynamicFeeTx{
+	return signEnvelope(in.key, chainID, &txtypes.DynamicFeeTx{
 		ChainID:   big.NewInt(int64(chainID)),
 		Nonce:     nonce,
 		GasTipCap: gasTip,
@@ -188,14 +189,12 @@ func generateInvalid(rng *rand.Rand, enabled []invalidCategory, in genInput) (*g
 // signEnvelope signs the given tx data with the burner key (using a signer for
 // the provided chainID, which may be deliberately wrong) and returns its raw
 // network encoding.
-func signEnvelope(key *ecdsa.PrivateKey, chainID uint64, data types.TxData, cat invalidCategory) (*genResult, error) {
-	tx := types.NewTx(data)
-	signer := types.LatestSignerForChainID(new(big.Int).SetUint64(chainID))
-	signed, err := types.SignTx(tx, signer, key)
+func signEnvelope(key *ecdsa.PrivateKey, chainID uint64, data txtypes.TxData, cat invalidCategory) (*genResult, error) {
+	signed, err := txtypes.SignTx(txtypes.NewTx(data), new(big.Int).SetUint64(chainID), key)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := signed.MarshalBinary()
+	raw, err := signed.MarshalNetwork()
 	if err != nil {
 		return nil, err
 	}

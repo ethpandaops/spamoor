@@ -400,7 +400,7 @@ Use the `BuildBoundTx` pattern for contract interactions. This is required becau
 
 **Deploy a contract:**
 ```go
-func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, error) {
+func (s *Scenario) deployContract(ctx context.Context) (*txtypes.Receipt, error) {
     deployerWallet := s.walletPool.GetWellKnownWallet("deployer")
     client := s.walletPool.GetClient(
         spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),

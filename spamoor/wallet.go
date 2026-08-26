@@ -16,10 +16,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethpandaops/spamoor/txbuilder"
-	"github.com/ethpandaops/spamoor/utils"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
+	"github.com/ethpandaops/spamoor/utils"
 )
 
 // Wallet represents an Ethereum wallet with private key management, nonce tracking,
@@ -52,12 +54,12 @@ type Wallet struct {
 // nonceStatus tracks the confirmation status of a transaction with a specific nonce
 type nonceStatus struct {
 	txs     []*PendingTx
-	receipt *types.Receipt
+	receipt *txtypes.Receipt
 	channel chan bool
 }
 
 type PendingTx struct {
-	Tx               *types.Transaction
+	Tx               *txtypes.Transaction
 	Submitted        time.Time
 	LastRebroadcast  time.Time
 	RebroadcastCount uint64
@@ -394,7 +396,7 @@ func (wallet *Wallet) checkLowBalance() {
 
 // BuildDynamicFeeTx builds and signs a dynamic fee (EIP-1559) transaction.
 // It automatically assigns the next available nonce and signs the transaction.
-func (wallet *Wallet) BuildDynamicFeeTx(txData *types.DynamicFeeTx) (*types.Transaction, error) {
+func (wallet *Wallet) BuildDynamicFeeTx(txData *txtypes.DynamicFeeTx) (*txtypes.Transaction, error) {
 	txData.ChainID = wallet.chainid
 	txData.Nonce = wallet.GetNextNonce()
 	return wallet.signTx(txData)
@@ -402,14 +404,14 @@ func (wallet *Wallet) BuildDynamicFeeTx(txData *types.DynamicFeeTx) (*types.Tran
 
 // BuildLegacyTx builds and signs a legacy transaction.
 // It automatically assigns the next available nonce and signs the transaction.
-func (wallet *Wallet) BuildLegacyTx(txData *types.LegacyTx) (*types.Transaction, error) {
+func (wallet *Wallet) BuildLegacyTx(txData *txtypes.LegacyTx) (*txtypes.Transaction, error) {
 	txData.Nonce = wallet.GetNextNonce()
 	return wallet.signTx(txData)
 }
 
 // BuildAccessListTx builds and signs an access list transaction.
 // It automatically assigns the next available nonce and signs the transaction.
-func (wallet *Wallet) BuildAccessListTx(txData *types.AccessListTx) (*types.Transaction, error) {
+func (wallet *Wallet) BuildAccessListTx(txData *txtypes.AccessListTx) (*txtypes.Transaction, error) {
 	txData.ChainID = wallet.chainid
 	txData.Nonce = wallet.GetNextNonce()
 	return wallet.signTx(txData)
@@ -417,7 +419,7 @@ func (wallet *Wallet) BuildAccessListTx(txData *types.AccessListTx) (*types.Tran
 
 // BuildBlobTx builds and signs a blob transaction (EIP-4844).
 // It automatically assigns the next available nonce and signs the transaction.
-func (wallet *Wallet) BuildBlobTx(txData *types.BlobTx) (*types.Transaction, error) {
+func (wallet *Wallet) BuildBlobTx(txData *txtypes.BlobTx) (*txtypes.Transaction, error) {
 	txData.ChainID = uint256.MustFromBig(wallet.chainid)
 	txData.Nonce = wallet.GetNextNonce()
 	return wallet.signTx(txData)
@@ -425,7 +427,7 @@ func (wallet *Wallet) BuildBlobTx(txData *types.BlobTx) (*types.Transaction, err
 
 // BuildSetCodeTx builds and signs a set code transaction (EIP-7702).
 // It automatically assigns the next available nonce and signs the transaction.
-func (wallet *Wallet) BuildSetCodeTx(txData *types.SetCodeTx) (*types.Transaction, error) {
+func (wallet *Wallet) BuildSetCodeTx(txData *txtypes.SetCodeTx) (*txtypes.Transaction, error) {
 	txData.ChainID = uint256.NewInt(wallet.chainid.Uint64())
 	txData.Nonce = wallet.GetNextNonce()
 	return wallet.signTx(txData)
@@ -434,7 +436,8 @@ func (wallet *Wallet) BuildSetCodeTx(txData *types.SetCodeTx) (*types.Transactio
 // BuildBoundTx builds a transaction using the go-ethereum bind package.
 // It sets up a TransactOpts with the wallet's credentials and calls the provided
 // buildFn to construct the actual transaction. Useful for contract interactions.
-func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMetadata, buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
+// The transaction built by abigen is converted to spamoor's representation.
+func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMetadata, buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error)) (*txtypes.Transaction, error) {
 	if wallet.privkey == nil {
 		return nil, errors.New("wallet has no private key")
 	}
@@ -455,7 +458,13 @@ func (wallet *Wallet) BuildBoundTx(ctx context.Context, txData *txbuilder.TxMeta
 	transactor.Value = txData.Value.ToBig()
 	transactor.NoSend = true
 
-	tx, err := buildFn(transactor)
+	gethTx, err := buildFn(transactor)
+	if err != nil {
+		wallet.MarkSkippedNonce(nonce)
+		return nil, err
+	}
+
+	tx, err := txtypes.FromGethTx(gethTx)
 	if err != nil {
 		wallet.MarkSkippedNonce(nonce)
 		return nil, err
@@ -492,7 +501,7 @@ func (wallet *Wallet) BuildBoundTxWithEstimate(
 	txpool *TxPool,
 	txData *txbuilder.TxMetadata,
 	buildFn func(transactOpts *bind.TransactOpts) (*types.Transaction, error),
-) (*types.Transaction, error) {
+) (*txtypes.Transaction, error) {
 	explicitGas := txData.Gas
 	// Placeholder large enough that abigen's deploy helpers don't error.
 	// Sized to EIP-7825's TX_MAX_GAS_LIMIT (2^24) so a single placeholder works
@@ -511,7 +520,7 @@ func (wallet *Wallet) BuildBoundTxWithEstimate(
 	if explicitGas != 0 {
 		return tx, nil
 	}
-	if tx.Type() != types.DynamicFeeTxType {
+	if tx.Type() != txtypes.DynamicFeeTxType {
 		return tx, nil
 	}
 
@@ -547,7 +556,7 @@ func (wallet *Wallet) BuildBoundTxWithEstimate(
 		refinedGas = cap
 	}
 
-	newInner := &types.DynamicFeeTx{
+	newInner := &txtypes.DynamicFeeTx{
 		ChainID:    tx.ChainId(),
 		Nonce:      tx.Nonce(),
 		GasTipCap:  tx.GasTipCap(),
@@ -563,7 +572,7 @@ func (wallet *Wallet) BuildBoundTxWithEstimate(
 
 // ReplaceDynamicFeeTx builds a replacement dynamic fee transaction with a specific nonce.
 // This is useful for replacing stuck transactions with higher gas prices.
-func (wallet *Wallet) ReplaceDynamicFeeTx(txData *types.DynamicFeeTx, nonce uint64) (*types.Transaction, error) {
+func (wallet *Wallet) ReplaceDynamicFeeTx(txData *txtypes.DynamicFeeTx, nonce uint64) (*txtypes.Transaction, error) {
 	txData.ChainID = wallet.chainid
 	txData.Nonce = nonce
 	return wallet.signTx(txData)
@@ -571,14 +580,14 @@ func (wallet *Wallet) ReplaceDynamicFeeTx(txData *types.DynamicFeeTx, nonce uint
 
 // ReplaceLegacyTx builds a replacement legacy transaction with a specific nonce.
 // This is useful for replacing stuck transactions with higher gas prices.
-func (wallet *Wallet) ReplaceLegacyTx(txData *types.LegacyTx, nonce uint64) (*types.Transaction, error) {
+func (wallet *Wallet) ReplaceLegacyTx(txData *txtypes.LegacyTx, nonce uint64) (*txtypes.Transaction, error) {
 	txData.Nonce = nonce
 	return wallet.signTx(txData)
 }
 
 // ReplaceAccessListTx builds a replacement access list transaction with a specific nonce.
 // This is useful for replacing stuck transactions with higher gas prices.
-func (wallet *Wallet) ReplaceAccessListTx(txData *types.AccessListTx, nonce uint64) (*types.Transaction, error) {
+func (wallet *Wallet) ReplaceAccessListTx(txData *txtypes.AccessListTx, nonce uint64) (*txtypes.Transaction, error) {
 	txData.ChainID = wallet.chainid
 	txData.Nonce = nonce
 	return wallet.signTx(txData)
@@ -586,7 +595,7 @@ func (wallet *Wallet) ReplaceAccessListTx(txData *types.AccessListTx, nonce uint
 
 // ReplaceSetCodeTx builds a replacement set code transaction with a specific nonce.
 // This is useful for replacing stuck set code transactions with higher gas prices.
-func (wallet *Wallet) ReplaceSetCodeTx(txData *types.SetCodeTx, nonce uint64) (*types.Transaction, error) {
+func (wallet *Wallet) ReplaceSetCodeTx(txData *txtypes.SetCodeTx, nonce uint64) (*txtypes.Transaction, error) {
 	txData.ChainID = uint256.NewInt(wallet.chainid.Uint64())
 	txData.Nonce = nonce
 	return wallet.signTx(txData)
@@ -594,7 +603,7 @@ func (wallet *Wallet) ReplaceSetCodeTx(txData *types.SetCodeTx, nonce uint64) (*
 
 // ReplaceBlobTx builds a replacement blob transaction with a specific nonce.
 // This is useful for replacing stuck blob transactions with higher gas prices.
-func (wallet *Wallet) ReplaceBlobTx(txData *types.BlobTx, nonce uint64) (*types.Transaction, error) {
+func (wallet *Wallet) ReplaceBlobTx(txData *txtypes.BlobTx, nonce uint64) (*txtypes.Transaction, error) {
 	txData.ChainID = uint256.MustFromBig(wallet.chainid)
 	txData.Nonce = nonce
 	return wallet.signTx(txData)
@@ -641,26 +650,19 @@ func (wallet *Wallet) MarkNeedResync() {
 }
 
 // signTx signs a transaction using the wallet's private key and chain ID.
-// It creates a new transaction from the provided transaction data and signs it
-// using the latest signer for the wallet's configured chain ID.
-func (wallet *Wallet) signTx(txData types.TxData) (*types.Transaction, error) {
+func (wallet *Wallet) signTx(txData txtypes.TxData) (*txtypes.Transaction, error) {
 	if wallet.privkey == nil {
 		return nil, errors.New("wallet has no private key")
 	}
 
-	tx := types.NewTx(txData)
-	signedTx, err := types.SignTx(tx, types.LatestSignerForChainID(wallet.chainid), wallet.privkey)
-	if err != nil {
-		return nil, err
-	}
-	return signedTx, nil
+	return txtypes.SignTx(txtypes.NewTx(txData), wallet.chainid, wallet.privkey)
 }
 
 // getTxNonceChan returns or creates a nonce status channel for tracking transaction confirmation.
 // It manages a map of nonce channels used to wait for specific transaction confirmations.
 // Returns the nonce status and a boolean indicating if this is the first pending transaction.
 // If the target nonce is already confirmed, returns nil and false.
-func (wallet *Wallet) getTxNonceChan(tx *types.Transaction, options *SendTransactionOptions) (*nonceStatus, bool) {
+func (wallet *Wallet) getTxNonceChan(tx *txtypes.Transaction, options *SendTransactionOptions) (*nonceStatus, bool) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
@@ -704,7 +706,7 @@ func (wallet *Wallet) getTxNonceChan(tx *types.Transaction, options *SendTransac
 	return nonceChan, len(wallet.txNonceChans) == 1
 }
 
-func (wallet *Wallet) dropPendingTx(tx *types.Transaction) {
+func (wallet *Wallet) dropPendingTx(tx *txtypes.Transaction) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
@@ -722,7 +724,7 @@ func (wallet *Wallet) dropPendingTx(tx *types.Transaction) {
 	nonceChan.txs = txs
 }
 
-func (wallet *Wallet) GetPendingTx(tx *types.Transaction) *PendingTx {
+func (wallet *Wallet) GetPendingTx(tx *txtypes.Transaction) *PendingTx {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
@@ -824,8 +826,8 @@ func (wallet *Wallet) GetNonceGaps() []uint64 {
 // The transaction sends 0 value to the wallet's own address.
 // Callers pass the target gas value; pool-level callers should use
 // TxPool.MinIntrinsicGas so they automatically follow EIP-2780 once it ships.
-func (wallet *Wallet) BuildFillerTx(nonce uint64, gasTipCap, gasFeeCap *big.Int, gas uint64) (*types.Transaction, error) {
-	txData := &types.DynamicFeeTx{
+func (wallet *Wallet) BuildFillerTx(nonce uint64, gasTipCap, gasFeeCap *big.Int, gas uint64) (*txtypes.Transaction, error) {
+	txData := &txtypes.DynamicFeeTx{
 		ChainID:   wallet.chainid,
 		Nonce:     nonce,
 		GasTipCap: gasTipCap,

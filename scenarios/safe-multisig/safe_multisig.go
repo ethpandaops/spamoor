@@ -20,6 +20,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/safe-multisig/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -419,7 +420,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
@@ -465,7 +466,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 //   - otherwise: execute a transaction.
 //
 // At --recreate-rate 1 this is a pure safe-creation (state-bloat) workload.
-func (s *Scenario) sendManagedTx(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, pool *walletSafePool, feeCap, tipCap *big.Int) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendManagedTx(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, pool *walletSafePool, feeCap, tipCap *big.Int) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	target := int(s.options.SafesPerWallet)
 
 	pool.mu.Lock()
@@ -526,7 +527,7 @@ func (s *Scenario) sendManagedTx(ctx context.Context, txIdx uint64, client *spam
 // or an EOA value transfer to a sibling safe; an EOA transfer is only used when
 // it is funded (value transfers stay within the safe set so funds are not lost),
 // otherwise it falls back to a contract call.
-func (s *Scenario) sendExecThrough(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, pool *walletSafePool, feeCap, tipCap *big.Int) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendExecThrough(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, pool *walletSafePool, feeCap, tipCap *big.Int) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	pool.mu.Lock()
 
 	safe := pool.pickUsableLocked()
@@ -616,8 +617,8 @@ func (s *Scenario) sendExecThrough(ctx context.Context, txIdx uint64, client *sp
 	if isContract {
 		action = "burn"
 	}
-	receiptChan, err := s.submit(ctx, txIdx, client, wallet, tx, func(receipt *types.Receipt) {
-		if receipt != nil && receipt.Status != types.ReceiptStatusSuccessful {
+	receiptChan, err := s.submit(ctx, txIdx, client, wallet, tx, func(receipt *txtypes.Receipt) {
+		if receipt != nil && receipt.Status != txtypes.ReceiptStatusSuccessful {
 			// A reverted execTransaction did not advance the on-chain nonce and
 			// did not move funds; flag for resync and roll back the optimistic
 			// balance change.
@@ -651,7 +652,7 @@ func (s *Scenario) sendExecThrough(ctx context.Context, txIdx uint64, client *sp
 // (the lowest-balance one) via a single execTransaction, then untracks the old
 // safe on confirmation. The abandoned safe stays on-chain, contributing to state
 // growth, while its funds are preserved within the pool.
-func (s *Scenario) sweepAndTeardown(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, pool *walletSafePool, oldest *safeEntry, feeCap, tipCap *big.Int) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sweepAndTeardown(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, pool *walletSafePool, oldest *safeEntry, feeCap, tipCap *big.Int) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	// Sync the safe's actual current balance from chain before tearing down.
 	onchain, err := client.GetEthClient().BalanceAt(ctx, oldest.addr, nil)
 	if err != nil {
@@ -725,9 +726,9 @@ func (s *Scenario) sweepAndTeardown(ctx context.Context, txIdx uint64, client *s
 	}
 	pool.mu.Unlock()
 
-	receiptChan, err := s.submit(ctx, txIdx, client, wallet, tx, func(receipt *types.Receipt) {
+	receiptChan, err := s.submit(ctx, txIdx, client, wallet, tx, func(receipt *txtypes.Receipt) {
 		pool.mu.Lock()
-		if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+		if receipt != nil && receipt.Status == txtypes.ReceiptStatusSuccessful {
 			if recipient != nil {
 				recipient.balance = new(big.Int).Add(safeBalance(recipient), value)
 			}
@@ -762,7 +763,7 @@ func (s *Scenario) sweepAndTeardown(ctx context.Context, txIdx uint64, client *s
 // remaining balance to the root wallet, then dropping it and scheduling a
 // replacement. It runs only after the first teardown sweep has confirmed, so the
 // balance it reads already excludes the small amount sent to the sibling.
-func (s *Scenario) drainSafeToRoot(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, pool *walletSafePool, oldest *safeEntry, feeCap, tipCap *big.Int) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) drainSafeToRoot(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, pool *walletSafePool, oldest *safeEntry, feeCap, tipCap *big.Int) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	balance, err := client.GetEthClient().BalanceAt(ctx, oldest.addr, nil)
 	if err != nil {
 		// Retry the drain on the next iteration.
@@ -803,9 +804,9 @@ func (s *Scenario) drainSafeToRoot(ctx context.Context, txIdx uint64, client *sp
 	}
 	pool.mu.Unlock()
 
-	receiptChan, err := s.submit(ctx, txIdx, client, wallet, tx, func(receipt *types.Receipt) {
+	receiptChan, err := s.submit(ctx, txIdx, client, wallet, tx, func(receipt *txtypes.Receipt) {
 		pool.mu.Lock()
-		if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+		if receipt != nil && receipt.Status == txtypes.ReceiptStatusSuccessful {
 			pool.removeSafeLocked(oldest)
 			pool.needCreate = true
 			pool.mu.Unlock()
@@ -834,7 +835,7 @@ func (s *Scenario) drainSafeToRoot(ctx context.Context, txIdx uint64, client *sp
 // threshold, salt) via SafeProxyFactory and appends it to the executor's pool.
 // The safe is held pending until its creation transaction confirms, so it is not
 // selected for execution before it exists on-chain.
-func (s *Scenario) createSafe(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, pool *walletSafePool, feeCap, tipCap *big.Int) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) createSafe(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, pool *walletSafePool, feeCap, tipCap *big.Int) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	walletCount := s.walletPool.GetConfiguredWalletCount()
 
 	// Pseudo-random shape + salt. Recreated safes are ephemeral churn, so they
@@ -897,9 +898,9 @@ func (s *Scenario) createSafe(ctx context.Context, txIdx uint64, client *spamoor
 	pool.opCount++
 	pool.mu.Unlock()
 
-	receiptChan, err := s.submit(ctx, txIdx, client, wallet, tx, func(receipt *types.Receipt) {
+	receiptChan, err := s.submit(ctx, txIdx, client, wallet, tx, func(receipt *txtypes.Receipt) {
 		pool.mu.Lock()
-		if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+		if receipt != nil && receipt.Status == txtypes.ReceiptStatusSuccessful {
 			newEntry.pending = false
 			pool.mu.Unlock()
 			s.logger.WithField("rpc", client.GetName()).Debugf(
@@ -949,7 +950,7 @@ func (s *Scenario) clearRemoving(pool *walletSafePool, safe *safeEntry) {
 // buildExecTx builds (without sending) a Safe execTransaction for params, signed
 // by the safe's lowest-addressed threshold owners. Must be called with the
 // owning pool's mutex held (it reads the safe's owners/domain separator).
-func (s *Scenario) buildExecTx(ctx context.Context, wallet *spamoor.Wallet, safe *safeEntry, params *safeTxParams, gasLimit uint64, feeCap, tipCap *big.Int) (*types.Transaction, error) {
+func (s *Scenario) buildExecTx(ctx context.Context, wallet *spamoor.Wallet, safe *safeEntry, params *safeTxParams, gasLimit uint64, feeCap, tipCap *big.Int) (*txtypes.Transaction, error) {
 	safeTxHash, err := computeSafeTxHash(safe.domainSep, params)
 	if err != nil {
 		return nil, err
@@ -975,16 +976,16 @@ func (s *Scenario) buildExecTx(ctx context.Context, wallet *spamoor.Wallet, safe
 
 // submit sends tx asynchronously, wiring a receipt channel and an optional
 // confirmation callback, and returns the channel the caller waits on.
-func (s *Scenario) submit(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, tx *types.Transaction, onConfirm func(*types.Receipt)) (scenario.ReceiptChan, error) {
+func (s *Scenario) submit(ctx context.Context, txIdx uint64, client *spamoor.Client, wallet *spamoor.Wallet, tx *txtypes.Transaction, onConfirm func(*txtypes.Receipt)) (scenario.ReceiptChan, error) {
 	receiptChan := make(scenario.ReceiptChan, 1)
 	err := s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+		OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 			receiptChan <- receipt
 		},
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+		OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
 			if onConfirm != nil {
 				onConfirm(receipt)
 			}

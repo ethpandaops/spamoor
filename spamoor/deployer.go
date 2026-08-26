@@ -9,11 +9,11 @@ import (
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // CanonicalCreate2FactoryAddress is the address of the Arachnid
@@ -153,9 +153,9 @@ func (f *DeploymentFactory) deployFactory(ctx context.Context, client *Client) (
 	err = f.txpool.SendTransaction(ctx, f.rootWallet, tx, &SendTransactionOptions{
 		Client:      client,
 		Rebroadcast: true,
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+		OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
 			f.isDeploying = false
-			if receipt.Status == types.ReceiptStatusSuccessful {
+			if receipt.Status == txtypes.ReceiptStatusSuccessful {
 				f.txpool.options.Logger.Infof("deployed CREATE2 factory at %s (block #%v)", factoryAddr.Hex(), receipt.BlockNumber.Uint64())
 			} else {
 				f.txpool.options.Logger.Errorf("failed to deploy CREATE2 factory (block #%v)", receipt.BlockNumber.Uint64())
@@ -170,7 +170,7 @@ func (f *DeploymentFactory) deployFactory(ctx context.Context, client *Client) (
 	return factoryAddr, nil
 }
 
-func (f *DeploymentFactory) GetContractDeployment(ctx context.Context, initcode []byte, salt [32]byte, client *Client, deployer *Wallet, feeCap *big.Int, tipCap *big.Int, submit bool) (common.Address, *types.Transaction, error) {
+func (f *DeploymentFactory) GetContractDeployment(ctx context.Context, initcode []byte, salt [32]byte, client *Client, deployer *Wallet, feeCap *big.Int, tipCap *big.Int, submit bool) (common.Address, *txtypes.Transaction, error) {
 	err := f.lazyInit(ctx)
 	if err != nil {
 		return common.Address{}, nil, err

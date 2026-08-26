@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -16,6 +15,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 type ScenarioOptions struct {
@@ -243,7 +243,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 					return err
 				} else if receipt != nil {
 					// Log interesting deployment results
-					if receipt.Status == types.ReceiptStatusSuccessful {
+					if receipt.Status == txtypes.ReceiptStatusSuccessful {
 						logger.Debugf("contract deployed at %v, gas used: %d", receipt.ContractAddress.Hex(), receipt.GasUsed)
 					} else {
 						logger.Debugf("contract deployment failed, gas used: %d", receipt.GasUsed)
@@ -258,7 +258,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-func (s *Scenario) deployFuzzedContract(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) deployFuzzedContract(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	// Generate fuzzed bytecode for contract deployment
 	fuzzedBytecode, value := s.generateFuzzedBytecode(txIdx)
 
@@ -310,7 +310,7 @@ func (s *Scenario) deployFuzzedContract(ctx context.Context, txIdx uint64) (scen
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+		OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 			receiptChan <- receipt
 		},
 	})

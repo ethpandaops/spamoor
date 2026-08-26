@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
@@ -28,6 +27,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // ScenarioOptions holds all configurable parameters
@@ -506,11 +506,11 @@ func (s *Scenario) executeDeployerTxs(
 	}
 
 	// Build, submit, and wait for each transaction one by one
-	receipts := make([]*types.Receipt, len(txs))
+	receipts := make([]*txtypes.Receipt, len(txs))
 	errors := make([]error, len(txs))
 	pendingTxs := 0
 	pendingChan := make(chan struct{}, 1)
-	txObjects := make([]*types.Transaction, len(txs))
+	txObjects := make([]*txtypes.Transaction, len(txs))
 
 	var timer *time.Timer
 	if s.payloadTimeout > 0 {
@@ -536,7 +536,7 @@ func (s *Scenario) executeDeployerTxs(
 			Client:      client,
 			ClientGroup: s.options.ClientGroup,
 			Rebroadcast: s.options.Rebroadcast > 0,
-			OnComplete: func(_ *types.Transaction, receipt *types.Receipt, err error) {
+			OnComplete: func(_ *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 				receipts[txIdx] = receipt
 				errors[txIdx] = err
 				pendingChan <- struct{}{}
@@ -602,11 +602,11 @@ func (s *Scenario) executeSenderTxs(
 	}
 
 	// Build, submit, and wait for each transaction one by one
-	receipts := make([]*types.Receipt, len(txs))
+	receipts := make([]*txtypes.Receipt, len(txs))
 	errors := make([]error, len(txs))
 	pendingTxs := 0
 	pendingChan := make(chan struct{}, 1)
-	txObjects := make([]*types.Transaction, len(txs))
+	txObjects := make([]*txtypes.Transaction, len(txs))
 
 	var timer *time.Timer
 	if s.payloadTimeout > 0 {
@@ -632,7 +632,7 @@ func (s *Scenario) executeSenderTxs(
 			Client:      client,
 			ClientGroup: s.options.ClientGroup,
 			Rebroadcast: s.options.Rebroadcast > 0,
-			OnComplete: func(_ *types.Transaction, receipt *types.Receipt, err error) {
+			OnComplete: func(_ *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 				receipts[txIdx] = receipt
 				errors[txIdx] = err
 				pendingChan <- struct{}{}
@@ -692,7 +692,7 @@ func (s *Scenario) buildTransaction(
 	addressMap map[string]common.Address,
 	senderWallets []*spamoor.Wallet,
 	feeCap, tipCap *big.Int,
-) (*types.Transaction, error) {
+) (*txtypes.Transaction, error) {
 	// Replace placeholders in data
 	data, err := s.replacePlaceholders(tx.Data, addressMap)
 	if err != nil {
@@ -736,9 +736,9 @@ func (s *Scenario) buildTransaction(
 	}
 
 	// Convert access list if present
-	var accessList types.AccessList
+	var accessList txtypes.AccessList
 	if len(tx.AccessList) > 0 {
-		accessList = make(types.AccessList, len(tx.AccessList))
+		accessList = make(txtypes.AccessList, len(tx.AccessList))
 		for i, entry := range tx.AccessList {
 			// Replace placeholders in access list address
 			addrStr, err := s.replacePlaceholders(entry.Address, addressMap)
@@ -752,7 +752,7 @@ func (s *Scenario) buildTransaction(
 				storageKeys[j] = common.HexToHash(key)
 			}
 
-			accessList[i] = types.AccessTuple{
+			accessList[i] = txtypes.AccessTuple{
 				Address:     addr,
 				StorageKeys: storageKeys,
 			}
@@ -760,7 +760,7 @@ func (s *Scenario) buildTransaction(
 	}
 
 	// Build transaction based on type
-	var signedTx *types.Transaction
+	var signedTx *txtypes.Transaction
 
 	switch tx.Type {
 	case 0: // Legacy
@@ -848,7 +848,7 @@ func (s *Scenario) buildTransaction(
 		}
 
 		// Build authorization list
-		authList := make([]types.SetCodeAuthorization, len(tx.AuthorizationList))
+		authList := make([]txtypes.SetCodeAuthorization, len(tx.AuthorizationList))
 		for i, authItem := range tx.AuthorizationList {
 			// Resolve the target address (may have placeholders like $contract[1])
 			addrStr, err := s.replacePlaceholders(authItem.Address, addressMap)
@@ -857,7 +857,7 @@ func (s *Scenario) buildTransaction(
 			}
 			targetAddr := common.HexToAddress(addrStr)
 
-			auth := types.SetCodeAuthorization{
+			auth := txtypes.SetCodeAuthorization{
 				ChainID: *uint256.NewInt(authItem.ChainID),
 				Address: targetAddr,
 				Nonce:   authItem.Nonce,
@@ -872,7 +872,7 @@ func (s *Scenario) buildTransaction(
 				signerWallet := senderWallets[senderIdx-1]
 
 				// Sign the authorization with the sender's private key
-				auth, err = types.SignSetCode(signerWallet.GetPrivateKey(), auth)
+				auth, err = txtypes.SignAuthorization(auth, signerWallet.GetPrivateKey())
 				if err != nil {
 					return nil, fmt.Errorf("failed to sign authorization: %w", err)
 				}
@@ -911,12 +911,12 @@ func (s *Scenario) buildTransaction(
 }
 
 // replaceWithDummyTxs
-func (s *Scenario) replaceWithDummyTxs(ctx context.Context, txs []*types.Transaction, wallet *spamoor.Wallet, client *spamoor.Client, feeCap, tipCap *big.Int) error {
+func (s *Scenario) replaceWithDummyTxs(ctx context.Context, txs []*txtypes.Transaction, wallet *spamoor.Wallet, client *spamoor.Client, feeCap, tipCap *big.Int) error {
 	doubleFeeCap := new(big.Int).Mul(feeCap, big.NewInt(2))
 	doubleTipCap := new(big.Int).Mul(tipCap, big.NewInt(2))
 	walletAddr := wallet.GetAddress()
 
-	replaceTxs := make([]*types.Transaction, len(txs))
+	replaceTxs := make([]*txtypes.Transaction, len(txs))
 	for i, tx := range txs {
 		txData, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(doubleFeeCap),

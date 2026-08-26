@@ -8,11 +8,13 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/holiman/uint256"
+
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios/uniswap-swaps/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
-	"github.com/holiman/uint256"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // V3DeploymentInfo holds the deployed Uniswap v3 contract set for the scenario.
@@ -81,7 +83,7 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
 
-	deploymentTxs := []*types.Transaction{}
+	deploymentTxs := []*txtypes.Transaction{}
 	deployContract := func(metadata *bind.MetaData, global bool, salt uint32, params ...interface{}) (common.Address, error) {
 		parsed, err := metadata.GetAbi()
 		if err != nil {
@@ -209,7 +211,7 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 	info.TickSpacing = tickSpacing.Int64()
 
 	// Phase 2: create the per-factory pools that don't exist yet.
-	createTxs := []*types.Transaction{}
+	createTxs := []*txtypes.Transaction{}
 	for i := range info.Pools {
 		dai := info.Pools[i].DaiAddr
 		for _, factory := range []*contract.UniswapV3Factory{info.FactoryA, info.FactoryB} {
@@ -267,7 +269,7 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 	}
 
 	// Phase 3: initialize pools and grant the liquidity provider mint rights.
-	setupTxs := []*types.Transaction{}
+	setupTxs := []*txtypes.Transaction{}
 	for i := range info.Pools {
 		poolInfo := info.Pools[i]
 		sqrtPriceX96 := u.v3SqrtPriceX96(poolInfo.WethIsToken0)
@@ -381,7 +383,7 @@ func (u *Uniswap) provideV3Liquidity(info *V3DeploymentInfo, client *spamoor.Cli
 	return rootWallet.WithWalletLock(u.ctx, poolCount, pairFundingAmount, u.walletPool.GetClientPool(), func(reason string) {
 		u.logger.Infof("root wallet is locked, %s", reason)
 	}, func() error {
-		liquidityTxs := []*types.Transaction{}
+		liquidityTxs := []*txtypes.Transaction{}
 
 		// WETH budget bounds the seeded liquidity; DAI is minted on demand.
 		wethBudget := new(big.Int).Div(
@@ -416,7 +418,7 @@ func (u *Uniswap) provideV3Liquidity(info *V3DeploymentInfo, client *spamoor.Cli
 
 // sendBatch submits a batch of transactions from a single wallet and waits for
 // them to confirm, logging progress. It is a no-op for an empty batch.
-func (u *Uniswap) sendBatch(wallet *spamoor.Wallet, client *spamoor.Client, txs []*types.Transaction, action string) error {
+func (u *Uniswap) sendBatch(wallet *spamoor.Wallet, client *spamoor.Client, txs []*txtypes.Transaction, action string) error {
 	if len(txs) == 0 {
 		return nil
 	}

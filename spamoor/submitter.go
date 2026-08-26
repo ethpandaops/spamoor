@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // TxConfirmFn is a callback function called when a transaction is confirmed or fails.
 // It receives the transaction, receipt (if successful), and any error that occurred.
-type TxConfirmFn func(tx *types.Transaction, receipt *types.Receipt)
+type TxConfirmFn func(tx *txtypes.Transaction, receipt *txtypes.Receipt)
 
 // TxCompleteFn is a callback function called when transaction processing is complete (confirmed or failed).
 // Always called regardless of success/failure.
-type TxCompleteFn func(tx *types.Transaction, receipt *types.Receipt, err error)
+type TxCompleteFn func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error)
 
 // TxLogFn is a callback function for logging transaction submission attempts.
 // It receives the client used, retry count, rebroadcast count, and any error.
@@ -23,7 +24,7 @@ type TxLogFn func(client *Client, retry int, rebroadcast int, err error)
 
 // TxEncodeFn is a callback function called to encode a transaction to bytes.
 // It receives the transaction and should return the encoded bytes.
-type TxEncodeFn func(tx *types.Transaction) ([]byte, error)
+type TxEncodeFn func(tx *txtypes.Transaction) ([]byte, error)
 
 // SendTransactionOptions contains options for transaction submission including
 // client selection, confirmation callbacks, rebroadcast settings, and logging.
@@ -47,6 +48,12 @@ type SendTransactionOptions struct {
 	OnComplete TxCompleteFn // Always called when processing completes
 	OnEncode   TxEncodeFn   // Called to encode tx to bytes on-demand
 	LogFn      TxLogFn      // Custom logging function (uses default if nil)
+
+	// go-ethereum-typed callbacks for library consumers. They are skipped for
+	// transaction types go-ethereum cannot represent. See compat.go.
+	OnGethConfirm  GethTxConfirmFn
+	OnGethComplete GethTxCompleteFn
+	OnGethEncode   GethTxEncodeFn
 }
 
 // BatchOptions contains options for batch transaction submission.
@@ -75,7 +82,7 @@ type BatchOptions struct {
 	LogInterval int
 }
 
-func GetDefaultLogFn(logger logrus.FieldLogger, txTypeName string, txIdx string, tx *types.Transaction) TxLogFn {
+func GetDefaultLogFn(logger logrus.FieldLogger, txTypeName string, txIdx string, tx *txtypes.Transaction) TxLogFn {
 	if txTypeName != "" {
 		txTypeName = txTypeName + " "
 	}
@@ -105,7 +112,7 @@ func GetDefaultLogFn(logger logrus.FieldLogger, txTypeName string, txIdx string,
 
 // batchState tracks the state of transaction submission for a single wallet
 type batchState struct {
-	txs          []*types.Transaction
+	txs          []*txtypes.Transaction
 	sem          chan struct{}
 	completeChan chan int // Signals when a tx at index completes
 	errorChan    chan error
@@ -113,14 +120,14 @@ type batchState struct {
 
 // SendTransaction submits a single transaction with the given options.
 // This is a lower-level interface that provides access to all callback options.
-func (p *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, opts *SendTransactionOptions) error {
+func (p *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction, opts *SendTransactionOptions) error {
 	return p.submitTransaction(ctx, wallet, tx, opts, true)
 }
 
 // Await waits for a transaction to be confirmed and returns its receipt.
 // It monitors the blockchain for the transaction and handles reorgs by continuing
 // to wait if the transaction gets reorged out of the chain.
-func (p *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction) (*types.Receipt, error) {
+func (p *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction) (*txtypes.Receipt, error) {
 	return p.awaitTransaction(ctx, wallet, tx, nil, nil)
 }
 
@@ -134,13 +141,13 @@ func (p *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *types
 //	    Rebroadcast: true,
 //	}
 //	receipt, err := submitter.SendAndAwaitTransaction(ctx, wallet, tx, options)
-func (p *TxPool) SendAndAwaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, opts *SendTransactionOptions) (*types.Receipt, error) {
+func (p *TxPool) SendAndAwaitTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction, opts *SendTransactionOptions) (*txtypes.Receipt, error) {
 	if opts == nil {
 		opts = &SendTransactionOptions{Rebroadcast: true}
 	}
 
 	resultChan := make(chan struct {
-		receipt *types.Receipt
+		receipt *txtypes.Receipt
 		err     error
 	}, 1)
 
@@ -149,7 +156,7 @@ func (p *TxPool) SendAndAwaitTransaction(ctx context.Context, wallet *Wallet, tx
 
 	// Override OnComplete to capture the result
 	originalOnComplete := sendOpts.OnComplete
-	sendOpts.OnComplete = func(tx *types.Transaction, receipt *types.Receipt, err error) {
+	sendOpts.OnComplete = func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 		// Call the original callback if it exists
 		if originalOnComplete != nil {
 			originalOnComplete(tx, receipt, err)
@@ -157,7 +164,7 @@ func (p *TxPool) SendAndAwaitTransaction(ctx context.Context, wallet *Wallet, tx
 
 		// Send the result to our channel
 		resultChan <- struct {
-			receipt *types.Receipt
+			receipt *txtypes.Receipt
 			err     error
 		}{receipt, err}
 	}
@@ -188,8 +195,8 @@ func (p *TxPool) SendAndAwaitTransaction(ctx context.Context, wallet *Wallet, tx
 //	    PendingLimit: 100,
 //	}
 //	receipts, err := submitter.SendBatchWithOptions(ctx, wallet, txs, options)
-func (p *TxPool) SendTransactionBatch(ctx context.Context, wallet *Wallet, txs []*types.Transaction, opts *BatchOptions) ([]*types.Receipt, error) {
-	batchMap := make(map[*Wallet][]*types.Transaction)
+func (p *TxPool) SendTransactionBatch(ctx context.Context, wallet *Wallet, txs []*txtypes.Transaction, opts *BatchOptions) ([]*txtypes.Receipt, error) {
+	batchMap := make(map[*Wallet][]*txtypes.Transaction)
 	batchMap[wallet] = txs
 	receipts, err := p.SendMultiTransactionBatch(ctx, batchMap, opts)
 	if err != nil {
@@ -211,9 +218,9 @@ func (p *TxPool) SendTransactionBatch(ctx context.Context, wallet *Wallet, txs [
 //	    MaxRetries: 3,    // 3 retries per transaction
 //	}
 //	receipts, err := submitter.SendMultiTransactionBatch(ctx, walletTxs, options)
-func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*Wallet][]*types.Transaction, opts *BatchOptions) (map[*Wallet][]*types.Receipt, error) {
+func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*Wallet][]*txtypes.Transaction, opts *BatchOptions) (map[*Wallet][]*txtypes.Receipt, error) {
 	if len(walletTxs) == 0 {
-		return make(map[*Wallet][]*types.Receipt), nil
+		return make(map[*Wallet][]*txtypes.Receipt), nil
 	}
 
 	if opts == nil {
@@ -226,7 +233,7 @@ func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*W
 	// Count total transactions and initialize result structures
 	totalTxs := 0
 	resultsMutex := sync.Mutex{}
-	receipts := make(map[*Wallet][]*types.Receipt)
+	receipts := make(map[*Wallet][]*txtypes.Receipt)
 	errors := make(map[*Wallet][]error)
 
 	// Global confirmed transaction counter for LogFn callback
@@ -234,12 +241,12 @@ func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*W
 
 	for wallet, txs := range walletTxs {
 		totalTxs += len(txs)
-		receipts[wallet] = make([]*types.Receipt, len(txs))
+		receipts[wallet] = make([]*txtypes.Receipt, len(txs))
 		errors[wallet] = make([]error, len(txs))
 	}
 
 	if totalTxs == 0 {
-		return make(map[*Wallet][]*types.Receipt), nil
+		return make(map[*Wallet][]*txtypes.Receipt), nil
 	}
 
 	if opts.LogFn != nil {
@@ -296,7 +303,7 @@ func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*W
 				}
 
 				// Submit transaction with retry logic
-				go func(txIndex int, tx *types.Transaction) {
+				go func(txIndex int, tx *txtypes.Transaction) {
 					defer func() {
 						<-state.sem // Release semaphore
 						state.completeChan <- txIndex
@@ -310,7 +317,7 @@ func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*W
 					originalOnComplete := opts.SendTransactionOptions.OnComplete
 
 					var lastErr error
-					var receipt *types.Receipt
+					var receipt *txtypes.Receipt
 
 				attemptLoop:
 					for attempt := 0; attempt < maxRetries; attempt++ {
@@ -335,14 +342,14 @@ func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*W
 						}
 
 						completed := make(chan struct {
-							receipt *types.Receipt
+							receipt *txtypes.Receipt
 							err     error
 						}, 1)
 
-						sendOpts.OnComplete = func(tx *types.Transaction, receipt *types.Receipt, err error) {
+						sendOpts.OnComplete = func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 							// Send completion signal
 							completed <- struct {
-								receipt *types.Receipt
+								receipt *txtypes.Receipt
 								err     error
 							}{receipt, err}
 						}

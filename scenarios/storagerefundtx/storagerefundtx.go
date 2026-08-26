@@ -17,6 +17,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/storagerefundtx/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -293,7 +294,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 func (s *Scenario) sendDeploymentTx(
 	ctx context.Context,
-) (*types.Receipt, *spamoor.Client, error) {
+) (*txtypes.Receipt, *spamoor.Client, error) {
 	deployClientGroup := s.options.DeployClientGroup
 	if deployClientGroup == "" {
 		deployClientGroup = s.options.ClientGroup
@@ -382,7 +383,7 @@ func gasLimitForSlots(slotsPerCall, costPerStateByte uint64) uint64 {
 
 func (s *Scenario) sendTx(
 	ctx context.Context, txIdx uint64,
-) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(
 			spamoor.SelectClientByIndex, int(txIdx),
@@ -455,13 +456,13 @@ func (s *Scenario) sendTx(
 			ClientGroup: s.options.ClientGroup,
 			Rebroadcast: s.options.Rebroadcast > 0,
 			OnComplete: func(
-				tx *types.Transaction,
-				receipt *types.Receipt,
+				tx *txtypes.Transaction,
+				receipt *txtypes.Receipt,
 				err error,
 			) {
 				receiptChan <- receipt
 			},
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+			OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
 				txFees := utils.GetTransactionFees(tx, receipt)
 				s.logger.WithField("rpc", client.GetName()).Debugf(
 					" transaction %d confirmed in block #%v. "+

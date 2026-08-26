@@ -15,6 +15,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/seaport-trades/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // fulfillGasLimit is the static gas limit for every fulfillOrder spam tx. A
@@ -41,7 +42,7 @@ type tradeResult func(success bool)
 // is pushed to sell), and falls back to the other direction if the preferred one
 // is not currently fulfillable. The returned tradeResult must be called with the
 // fulfillment's success once it completes so the inventory caches stay accurate.
-func (m *Market) BuildTrade(ctx context.Context, taker *spamoor.Wallet, feeCap, tipCap *big.Int) (*types.Transaction, tradeResult, error) {
+func (m *Market) BuildTrade(ctx context.Context, taker *spamoor.Wallet, feeCap, tipCap *big.Int) (*txtypes.Transaction, tradeResult, error) {
 	takerAddr := taker.GetAddress()
 	price := m.randomPrice()
 
@@ -53,11 +54,11 @@ func (m *Market) BuildTrade(ctx context.Context, taker *spamoor.Wallet, feeCap, 
 		isBuy = false // shed a large inventory
 	}
 
-	order := []func() (*types.Transaction, tradeResult, bool, error){
-		func() (*types.Transaction, tradeResult, bool, error) {
+	order := []func() (*txtypes.Transaction, tradeResult, bool, error){
+		func() (*txtypes.Transaction, tradeResult, bool, error) {
 			return m.buildBuy(ctx, taker, feeCap, tipCap, price)
 		},
-		func() (*types.Transaction, tradeResult, bool, error) {
+		func() (*txtypes.Transaction, tradeResult, bool, error) {
 			return m.buildSell(ctx, taker, feeCap, tipCap, price)
 		},
 	}
@@ -81,7 +82,7 @@ func (m *Market) BuildTrade(ctx context.Context, taker *spamoor.Wallet, feeCap, 
 // stablecoin and the taker buys it: the taker pays `price` coin to the market and
 // receives the NFT. ok=false when the market has no inventory or the taker cannot
 // afford the price.
-func (m *Market) buildBuy(ctx context.Context, taker *spamoor.Wallet, feeCap, tipCap, price *big.Int) (*types.Transaction, tradeResult, bool, error) {
+func (m *Market) buildBuy(ctx context.Context, taker *spamoor.Wallet, feeCap, tipCap, price *big.Int) (*txtypes.Transaction, tradeResult, bool, error) {
 	takerAddr := taker.GetAddress()
 
 	tokenID, ok := m.reserveMarketNFT()
@@ -143,7 +144,7 @@ func (m *Market) buildBuy(ctx context.Context, taker *spamoor.Wallet, feeCap, ti
 // the taker's NFTs and the taker accepts: the taker hands over the NFT and
 // receives `price` coin from the market. ok=false when the taker holds no NFT or
 // the market's coin float is (cache-)exhausted.
-func (m *Market) buildSell(ctx context.Context, taker *spamoor.Wallet, feeCap, tipCap, price *big.Int) (*types.Transaction, tradeResult, bool, error) {
+func (m *Market) buildSell(ctx context.Context, taker *spamoor.Wallet, feeCap, tipCap, price *big.Int) (*txtypes.Transaction, tradeResult, bool, error) {
 	takerAddr := taker.GetAddress()
 
 	tokenID, ok := m.reserveWalletNFT(takerAddr)
@@ -204,7 +205,7 @@ func (m *Market) buildSell(ctx context.Context, taker *spamoor.Wallet, feeCap, t
 // buildFulfill signs the market order and wraps it in a taker-submitted
 // fulfillOrder transaction with a zero fulfiller conduit key (transfers route
 // through Seaport directly against the approvals granted at seed time).
-func (m *Market) buildFulfill(ctx context.Context, taker *spamoor.Wallet, feeCap, tipCap *big.Int, params contract.OrderParameters) (*types.Transaction, error) {
+func (m *Market) buildFulfill(ctx context.Context, taker *spamoor.Wallet, feeCap, tipCap *big.Int, params contract.OrderParameters) (*txtypes.Transaction, error) {
 	signature, _, err := m.signOrder(params)
 	if err != nil {
 		return nil, err

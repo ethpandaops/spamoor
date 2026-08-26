@@ -9,11 +9,13 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/holiman/uint256"
+	"github.com/sirupsen/logrus"
+
 	"github.com/ethpandaops/spamoor/scenarios/uniswap-swaps/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
-	"github.com/holiman/uint256"
-	"github.com/sirupsen/logrus"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 type UniswapOptions struct {
@@ -288,7 +290,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 	// Track all approval transactions
 	var (
-		approvalTxs     []*types.Transaction
+		approvalTxs     []*txtypes.Transaction
 		approvalWallets []*spamoor.Wallet
 		mu              sync.Mutex
 		wg              sync.WaitGroup
@@ -411,12 +413,12 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 			wg.Add(1)
 
-			go func(tx *types.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
+			go func(tx *txtypes.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
 				u.walletPool.GetTxPool().SendTransaction(u.ctx, wallet, tx, &spamoor.SendTransactionOptions{
 					Client:      client,
 					ClientGroup: u.options.ClientGroup,
 					Rebroadcast: true,
-					OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+					OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 						if err != nil {
 							u.logger.Errorf("approval tx failed: %v", err)
 						}

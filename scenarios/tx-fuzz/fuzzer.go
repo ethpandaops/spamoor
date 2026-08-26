@@ -8,10 +8,11 @@ import (
 	"math/rand"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
+
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // txKind enumerates the transaction envelope types the fuzzer can emit.
@@ -66,8 +67,8 @@ type fuzzedTx struct {
 	data       []byte
 	value      *uint256.Int
 	gas        uint64
-	accessList types.AccessList
-	authList   []types.SetCodeAuthorization
+	accessList txtypes.AccessList
+	authList   []txtypes.SetCodeAuthorization
 	blobRefs   [][]string
 }
 
@@ -302,7 +303,7 @@ func (f *fuzzer) fuzzTarget(rng *rand.Rand) (*common.Address, bool) {
 
 // fuzzAccessList builds a random EIP-2930 access list (often empty), with a
 // handful of random addresses each carrying a few random storage keys.
-func (f *fuzzer) fuzzAccessList(rng *rand.Rand) types.AccessList {
+func (f *fuzzer) fuzzAccessList(rng *rand.Rand) txtypes.AccessList {
 	if f.maxAccessLen <= 0 || rng.Intn(2) == 0 {
 		return nil // ~50% empty
 	}
@@ -314,7 +315,7 @@ func (f *fuzzer) fuzzAccessList(rng *rand.Rand) types.AccessList {
 	if nearLimit {
 		n = f.maxAccessLen
 	}
-	al := make(types.AccessList, 0, n)
+	al := make(txtypes.AccessList, 0, n)
 	for i := 0; i < n; i++ {
 		var addr common.Address
 		copy(addr[:], randomBytes(rng, 20))
@@ -330,7 +331,7 @@ func (f *fuzzer) fuzzAccessList(rng *rand.Rand) types.AccessList {
 			keys = append(keys, key)
 		}
 
-		al = append(al, types.AccessTuple{Address: addr, StorageKeys: keys})
+		al = append(al, txtypes.AccessTuple{Address: addr, StorageKeys: keys})
 	}
 	return al
 }
@@ -338,13 +339,13 @@ func (f *fuzzer) fuzzAccessList(rng *rand.Rand) types.AccessList {
 // fuzzAuthList builds a fuzzed EIP-7702 authorization list. Each entry is signed
 // by a fresh ephemeral key so it never touches managed wallet nonce state -
 // invalid/non-applying authorizations are expected and fine (the tx still mines).
-func (f *fuzzer) fuzzAuthList(rng *rand.Rand) []types.SetCodeAuthorization {
+func (f *fuzzer) fuzzAuthList(rng *rand.Rand) []txtypes.SetCodeAuthorization {
 	if f.maxAuthList <= 0 {
 		return nil
 	}
 
 	n := rng.Intn(f.maxAuthList) + 1
-	auths := make([]types.SetCodeAuthorization, 0, n)
+	auths := make([]txtypes.SetCodeAuthorization, 0, n)
 	for i := 0; i < n; i++ {
 		// delegate target address (random, system, or zero)
 		delegate, _ := f.fuzzTarget(rng)
@@ -359,7 +360,7 @@ func (f *fuzzer) fuzzAuthList(rng *rand.Rand) []types.SetCodeAuthorization {
 			chainID = rng.Uint64()
 		}
 
-		auth := types.SetCodeAuthorization{
+		auth := txtypes.SetCodeAuthorization{
 			ChainID: *uint256.NewInt(chainID),
 			Address: *delegate,
 			Nonce:   rng.Uint64(),
@@ -370,7 +371,7 @@ func (f *fuzzer) fuzzAuthList(rng *rand.Rand) []types.SetCodeAuthorization {
 		if err != nil {
 			continue
 		}
-		signed, err := types.SignSetCode(sk, auth)
+		signed, err := txtypes.SignAuthorization(auth, sk)
 		if err != nil {
 			continue
 		}
@@ -386,7 +387,7 @@ func (f *fuzzer) fuzzAuthList(rng *rand.Rand) []types.SetCodeAuthorization {
 // known to hold code (a fuzz-deployed contract if available, else a system
 // contract). Returns the signed authorization plus the authority address so the
 // caller can target it and execute the delegated code in the same tx.
-func (f *fuzzer) applyingAuth(rng *rand.Rand) (*types.SetCodeAuthorization, *common.Address) {
+func (f *fuzzer) applyingAuth(rng *rand.Rand) (*txtypes.SetCodeAuthorization, *common.Address) {
 	var delegate common.Address
 	if f.deployedAddrs != nil {
 		if addrs := f.deployedAddrs(); len(addrs) > 0 {
@@ -404,11 +405,11 @@ func (f *fuzzer) applyingAuth(rng *rand.Rand) (*types.SetCodeAuthorization, *com
 		return nil, nil
 	}
 	authority := crypto.PubkeyToAddress(sk.PublicKey)
-	signed, err := types.SignSetCode(sk, types.SetCodeAuthorization{
+	signed, err := txtypes.SignAuthorization(txtypes.SetCodeAuthorization{
 		ChainID: *uint256.NewInt(f.chainID),
 		Address: delegate,
 		Nonce:   0, // fresh key => on-chain nonce 0 => the authorization applies
-	})
+	}, sk)
 	if err != nil {
 		return nil, nil
 	}

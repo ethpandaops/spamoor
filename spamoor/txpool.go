@@ -3,7 +3,6 @@ package spamoor
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -15,11 +14,10 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethpandaops/spamoor/utils"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/spamoor/txtypes"
+	"github.com/ethpandaops/spamoor/utils"
 )
 
 // CostPerStateByte is the EIP-8037 cost_per_state_byte value spamoor uses
@@ -44,7 +42,7 @@ type BlockInfo struct {
 // BlockWithHash represents a block with its hash.
 type BlockWithHash struct {
 	Hash  common.Hash
-	Block *types.Block
+	Block *txtypes.Block
 }
 
 // TxInfo represents information about a confirmed transaction including
@@ -53,7 +51,7 @@ type TxInfo struct {
 	TxHash     common.Hash
 	From       common.Address
 	To         *common.Address
-	Tx         *types.Transaction
+	Tx         *txtypes.Transaction
 	TxFees     *utils.TxFees
 	FromWallet *Wallet
 	ToWallet   *Wallet
@@ -71,14 +69,14 @@ type WalletPoolBlockStats struct {
 	ConfirmedTxCount uint64
 	TotalTxFees      *big.Int
 	AffectedWallets  int
-	Block            *types.Block
+	Block            *txtypes.Block
 	ConfirmedTxs     []*TxInfo
-	Receipts         []*types.Receipt
+	Receipts         []*txtypes.Receipt
 }
 
 type GlobalBlockStats struct {
-	Block           *types.Block
-	Receipts        []*types.Receipt
+	Block           *txtypes.Block
+	Receipts        []*txtypes.Receipt
 	WalletPoolStats map[*WalletPool]*WalletPoolBlockStats
 }
 
@@ -171,7 +169,7 @@ type ExternalBlockEvent struct {
 	Number   uint64
 	Clients  []*Client
 	Block    *BlockWithHash
-	Receipts []*types.Receipt
+	Receipts []*txtypes.Receipt
 }
 
 // NewTxPool creates a new transaction pool with the specified options.
@@ -453,7 +451,7 @@ func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
 // It loads the block body, checks for chain reorganizations by comparing parent hashes,
 // stores block information for reorg tracking, and processes all transactions in the block.
 // Also handles cleanup of old block data based on the reorg depth setting.
-func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, receipts []*types.Receipt) error {
+func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, receipts []*txtypes.Receipt) error {
 	pool.lastBlockNumber = blockNumber
 
 	walletMap := pool.getWalletMap()
@@ -461,9 +459,8 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 		return nil
 	}
 
-	txSkipMap := make(map[uint32]bool)
 	if blockWithHash == nil || blockWithHash.Block == nil {
-		blockWithHash, txSkipMap = pool.getBlockBody(ctx, client, blockNumber)
+		blockWithHash = pool.getBlockBody(ctx, client, blockNumber)
 		if blockWithHash == nil {
 			return fmt.Errorf("could not load block body")
 		}
@@ -474,9 +471,9 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	lastBlock, hasLastBlock := pool.blocks[blockNumber-1]
 	pool.blocksMutex.RUnlock()
 
-	if hasLastBlock && lastBlock.Hash != blockWithHash.Block.ParentHash() {
+	if hasLastBlock && lastBlock.Hash != blockWithHash.Block.ParentHash {
 		logrus.Warnf("Detected chain reorganization at block %d. Parent hash mismatch: expected %s, got %s",
-			blockNumber, lastBlock.Hash.Hex(), blockWithHash.Block.ParentHash().Hex())
+			blockNumber, lastBlock.Hash.Hex(), blockWithHash.Block.ParentHash.Hex())
 
 		// Handle reorg
 		pool.handleReorg(ctx, client, blockNumber, blockWithHash, walletMap)
@@ -487,18 +484,18 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	pool.blocks[blockNumber] = &BlockInfo{
 		Number:     blockNumber,
 		Hash:       blockWithHash.Hash,
-		ParentHash: blockWithHash.Block.ParentHash(),
-		Timestamp:  blockWithHash.Block.Time(),
-		GasLimit:   blockWithHash.Block.GasLimit(),
+		ParentHash: blockWithHash.Block.ParentHash,
+		Timestamp:  blockWithHash.Block.Timestamp,
+		GasLimit:   blockWithHash.Block.GasLimit,
 	}
 
 	// Update current gas limit and recent block gas tracking
 	pool.blockStatsMutex.Lock()
-	pool.currentGasLimit = blockWithHash.Block.GasLimit()
-	pool.currentBaseFee = blockWithHash.Block.BaseFee()
-	pool.recentGasUsed[pool.recentGasIdx] = blockWithHash.Block.GasUsed()
-	pool.recentGasLimit[pool.recentGasIdx] = blockWithHash.Block.GasLimit()
-	pool.recentBaseFees[pool.recentGasIdx] = blockWithHash.Block.BaseFee() // returns new *big.Int
+	pool.currentGasLimit = blockWithHash.Block.GasLimit
+	pool.currentBaseFee = new(big.Int).Set(blockWithHash.Block.BaseFee)
+	pool.recentGasUsed[pool.recentGasIdx] = blockWithHash.Block.GasUsed
+	pool.recentGasLimit[pool.recentGasIdx] = blockWithHash.Block.GasLimit
+	pool.recentBaseFees[pool.recentGasIdx] = new(big.Int).Set(blockWithHash.Block.BaseFee)
 	pool.recentGasIdx = (pool.recentGasIdx + 1) % feeWindowSize
 	if pool.recentGasLen < feeWindowSize {
 		pool.recentGasLen++
@@ -511,19 +508,19 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 	pool.blocksMutex.Unlock()
 
-	return pool.processBlockTxs(ctx, client, blockNumber, blockWithHash, walletMap, txSkipMap, receipts)
+	return pool.processBlockTxs(ctx, client, blockNumber, blockWithHash, walletMap, receipts)
 }
 
 // processBlockTxs processes all transactions in a block for confirmation tracking.
 // It loads block receipts, decodes transaction senders, updates wallet states for
 // confirmed transactions, and tracks transaction information for reorg recovery.
 // Also handles cleanup of old confirmed transaction data.
-func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, walletMap map[common.Address]*Wallet, txSkipMap map[uint32]bool, receipts []*types.Receipt) error {
+func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, walletMap map[common.Address]*Wallet, receipts []*txtypes.Receipt) error {
 	t1 := time.Now()
-	txCount := len(blockWithHash.Block.Transactions())
+	txCount := len(blockWithHash.Block.Transactions)
 	if receipts == nil {
 		var err error
-		receipts, err = pool.getBlockReceipts(ctx, client, blockWithHash.Hash, txCount, txSkipMap)
+		receipts, err = pool.getBlockReceipts(ctx, client, blockWithHash.Hash, txCount)
 		if err != nil {
 			return fmt.Errorf("could not load block receipts: %w", err)
 		}
@@ -532,21 +529,20 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 	loadingTime := time.Since(t1)
 	t1 = time.Now()
 
-	signer := types.LatestSignerForChainID(pool.options.ChainId)
 	confirmCount := 0
 	affectedWalletMap := map[common.Address]bool{}
 	pool.txsMutex.Lock()
 	pool.confirmedTxs[blockNumber] = []*TxInfo{}
 	pool.txsMutex.Unlock()
 
-	for idx, tx := range blockWithHash.Block.Transactions() {
+	for idx, tx := range blockWithHash.Block.Transactions {
 		receipt := receipts[idx]
 		if receipt == nil {
 			logrus.Warnf("missing receipt for tx %v in block %v", idx, blockNumber)
 			continue
 		}
 
-		txFrom, err := types.Sender(signer, tx)
+		txFrom, err := tx.From(pool.options.ChainId)
 		if err != nil {
 			logrus.Warnf("error decoding tx sender (block %v, tx %v): %v", blockNumber, idx, err)
 			continue
@@ -635,7 +631,7 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			blockNumber, err := client.client.BlockNumber(ctx)
+			blockNumber, err := client.GetBlockNumber(ctx)
 			if err != nil {
 				return
 			}
@@ -656,100 +652,34 @@ func (pool *TxPool) getHighestBlockNumber() (uint64, []*Client) {
 }
 
 // getBlockBody retrieves a block body from the specified client.
-// It uses a 5-second timeout and returns the block if successful, nil otherwise.
 // Builder clients are not supported as they don't provide eth_getBlockByNumber.
-func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumber uint64) (*BlockWithHash, map[uint32]bool) {
-	// Builder clients don't support eth_getBlockByNumber
+func (pool *TxPool) getBlockBody(ctx context.Context, client *Client, blockNumber uint64) *BlockWithHash {
 	if client.IsBuilder() {
-		return nil, nil
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	/*
-		blockBody, err := client.client.BlockByNumber(ctx, big.NewInt(int64(blockNumber)))
-		if err == nil {
-			return blockBody
-		}
-	*/
-
-	var raw json.RawMessage
-	err := client.client.Client().CallContext(ctx, &raw, "eth_getBlockByNumber", rpc.BlockNumber(blockNumber), true)
-	if err != nil {
-		return nil, nil
+	block, err := client.GetBlockByNumber(ctx, blockNumber)
+	if err != nil || block == nil {
+		return nil
 	}
 
-	// Decode header and transactions.
-	var head *types.Header
-	if err := json.Unmarshal(raw, &head); err != nil {
-		return nil, nil
-	}
-	// When the block is not found, the API returns JSON null.
-	if head == nil {
-		return nil, nil
-	}
-
-	var body struct {
-		Hash         common.Hash       `json:"hash"`
-		Transactions []json.RawMessage `json:"transactions"`
-	}
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return nil, nil
-	}
-
-	transactions := make([]*types.Transaction, 0, len(body.Transactions))
-	txSkipMap := make(map[uint32]bool)
-	for idx, rawTx := range body.Transactions {
-		var txHeader struct {
-			Type hexutil.Uint64 `json:"type"`
-		}
-
-		isValid := false
-
-		if err := json.Unmarshal(rawTx, &txHeader); err == nil {
-			switch txHeader.Type {
-			case types.LegacyTxType, types.AccessListTxType, types.DynamicFeeTxType, types.BlobTxType, types.SetCodeTxType:
-				isValid = true
-			}
-		}
-
-		if isValid {
-			var tx types.Transaction
-			if err := json.Unmarshal(rawTx, &tx); err != nil {
-				isValid = false
-			}
-			transactions = append(transactions, &tx)
-		}
-
-		if !isValid {
-			txSkipMap[uint32(idx)] = true
-			continue
-		}
-	}
-
-	block := types.NewBlockWithHeader(head).WithBody(
-		types.Body{
-			Transactions: transactions,
-		},
-	)
-
-	if body.Hash.Cmp(common.Hash{}) == 0 {
-		body.Hash = block.Hash()
+	if block.Hash == (common.Hash{}) {
+		return nil
 	}
 
 	return &BlockWithHash{
-		Hash:  body.Hash,
+		Hash:  block.Hash,
 		Block: block,
-	}, txSkipMap
+	}
 }
 
-// getBlockReceipts retrieves all transaction receipts for a block.
-// It validates that the number of receipts matches the expected transaction count
-// and uses a 5-second timeout for the request.
+// getBlockReceipts retrieves all transaction receipts for a block and validates that
+// their count matches the block's transaction count.
 // Builder clients are not supported as they don't provide eth_getBlockReceipts.
-func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockHash common.Hash, txCount int, txSkipMap map[uint32]bool) ([]*types.Receipt, error) {
-	// Builder clients don't support eth_getBlockReceipts
+func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockHash common.Hash, txCount int) ([]*txtypes.Receipt, error) {
 	if client.IsBuilder() {
 		return nil, fmt.Errorf("builder clients do not support eth_getBlockReceipts")
 	}
@@ -757,32 +687,16 @@ func (pool *TxPool) getBlockReceipts(ctx context.Context, client *Client, blockH
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	var receiptErr error
-
-	blockReceipts, err := client.client.BlockReceipts(ctx, rpc.BlockNumberOrHash{
-		BlockHash: &blockHash,
-	})
+	blockReceipts, err := client.GetBlockReceipts(ctx, blockHash)
 	if err != nil {
-		receiptErr = err
-	} else {
-		if len(txSkipMap) > 0 {
-			filteredBlockReceipts := make([]*types.Receipt, 0, txCount)
-			for idx, receipt := range blockReceipts {
-				if !txSkipMap[uint32(idx)] {
-					filteredBlockReceipts = append(filteredBlockReceipts, receipt)
-				}
-			}
-			blockReceipts = filteredBlockReceipts
-		}
-
-		if len(blockReceipts) != txCount {
-			return nil, fmt.Errorf("block %v has %v receipts, expected %v", blockHash.Hex(), len(blockReceipts), txCount)
-		}
-
-		return blockReceipts, nil
+		return nil, err
 	}
 
-	return nil, receiptErr
+	if len(blockReceipts) != txCount {
+		return nil, fmt.Errorf("block %v has %v receipts, expected %v", blockHash.Hex(), len(blockReceipts), txCount)
+	}
+
+	return blockReceipts, nil
 }
 
 // SubscribeToBlockUpdates subscribes to block update notifications for a specific wallet pool.
@@ -849,7 +763,7 @@ func (pool *TxPool) UnsubscribeFromBulkBlockUpdates(id uint64) {
 }
 
 // notifyBlockSubscribers notifies all subscribers about a processed block with wallet-specific stats.
-func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, block *types.Block, receipts []*types.Receipt) {
+func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, block *txtypes.Block, receipts []*txtypes.Receipt) {
 	pool.subscriptionsMutex.RLock()
 
 	// Copy subscriptions for concurrent access
@@ -900,11 +814,11 @@ func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, block *types.Bloc
 }
 
 // calculateWalletPoolStats calculates transaction statistics for a specific wallet pool.
-func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTxMap map[common.Hash]*TxInfo, block *types.Block, receipts []*types.Receipt) *WalletPoolBlockStats {
+func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTxMap map[common.Hash]*TxInfo, block *txtypes.Block, receipts []*txtypes.Receipt) *WalletPoolBlockStats {
 	stats := &WalletPoolBlockStats{
 		TotalTxFees:  big.NewInt(0),
 		Block:        block,
-		Receipts:     make([]*types.Receipt, 0, len(confirmedTxMap)),
+		Receipts:     make([]*txtypes.Receipt, 0, len(confirmedTxMap)),
 		ConfirmedTxs: make([]*TxInfo, 0, len(confirmedTxMap)),
 	}
 
@@ -920,7 +834,7 @@ func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTx
 		walletSet[wallet.GetAddress()] = true
 	}
 
-	for idx, tx := range block.Transactions() {
+	for idx, tx := range block.Transactions {
 		txInfo, ok := confirmedTxMap[tx.Hash()]
 		if !ok {
 			continue
@@ -946,7 +860,7 @@ func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTx
 
 // calculateAllWalletPoolStats efficiently calculates statistics for ALL active wallet pools in a single pass.
 // This avoids recalculating the same data multiple times for bulk subscribers.
-func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxMap map[common.Hash]*TxInfo, block *types.Block, receipts []*types.Receipt) *GlobalBlockStats {
+func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxMap map[common.Hash]*TxInfo, block *txtypes.Block, receipts []*txtypes.Receipt) *GlobalBlockStats {
 	// Get all active wallet pools
 	activeWalletPools := pool.GetActiveWalletPools()
 
@@ -969,7 +883,7 @@ func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxMap map[common.Hash]*
 		allStats[walletPool] = &WalletPoolBlockStats{
 			TotalTxFees:  big.NewInt(0),
 			Block:        block,
-			Receipts:     make([]*types.Receipt, 0, len(confirmedTxMap)),
+			Receipts:     make([]*txtypes.Receipt, 0, len(confirmedTxMap)),
 			ConfirmedTxs: make([]*TxInfo, 0, len(confirmedTxMap)),
 		}
 	}
@@ -981,7 +895,7 @@ func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxMap map[common.Hash]*
 	}
 
 	// Single pass through confirmed transactions
-	for idx, tx := range block.Transactions() {
+	for idx, tx := range block.Transactions {
 		txInfo, ok := confirmedTxMap[tx.Hash()]
 		if !ok {
 			continue
@@ -1024,7 +938,7 @@ func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxMap map[common.Hash]*
 // It starts a confirmation tracking goroutine, submits the transaction to clients,
 // and optionally sets up automatic rebroadcasting. The submitNow parameter controls
 // whether to immediately submit or just set up confirmation tracking.
-func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, submitNow bool) error {
+func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction, options *SendTransactionOptions, submitNow bool) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -1036,7 +950,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 	submissionComplete := make(chan error, 1)
 
 	go func() {
-		var receipt *types.Receipt
+		var receipt *txtypes.Receipt
 
 		var err error
 
@@ -1048,13 +962,11 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 				err = submissionError
 				// special case: since we never sucessfully submitted the tx, we need to drop it from the pending txs as it is not known to the network
 				wallet.dropPendingTx(tx)
-			} else if options.OnConfirm != nil && receipt != nil {
-				options.OnConfirm(tx, receipt)
+			} else if receipt != nil {
+				options.invokeConfirm(tx, receipt)
 			}
 
-			if options.OnComplete != nil {
-				options.OnComplete(tx, receipt, err)
-			}
+			options.invokeComplete(tx, receipt, err)
 
 			// Track transaction result for metrics
 			walletPools := pool.GetActiveWalletPools()
@@ -1098,8 +1010,8 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 	var submitErr error
 
 	submitTx := func(client *Client) error {
-		if options.OnEncode != nil {
-			txBytes, err := options.OnEncode(tx)
+		if options.hasEncodeFn() {
+			txBytes, err := options.invokeEncode(tx)
 			if err != nil {
 				return fmt.Errorf("failed to encode transaction: %w", err)
 			}
@@ -1185,7 +1097,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 // It uses the wallet's nonce channel system to wait for confirmation and
 // handles cases where the transaction might be replaced or reorged.
 // The wg parameter is signaled when confirmation tracking is set up.
-func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *types.Transaction, options *SendTransactionOptions, wg *sync.WaitGroup) (*types.Receipt, error) {
+func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction, options *SendTransactionOptions, wg *sync.WaitGroup) (*txtypes.Receipt, error) {
 	txHash := tx.Hash()
 	nonceChan, isFirstPendingTx := wallet.getTxNonceChan(tx, options)
 
@@ -1221,7 +1133,7 @@ func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *ty
 // It updates the wallet's nonce state, signals any waiting confirmation channels,
 // and cleans up completed nonce channels. Updates the wallet's confirmation tracking.
 // Also updates the wallet's balance by subtracting the transaction fee and blob fee.
-func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wallet, tx *types.Transaction, receipt *types.Receipt, txFees *utils.TxFees) {
+func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wallet, tx *txtypes.Transaction, receipt *txtypes.Receipt, txFees *utils.TxFees) {
 	totalAmount := new(big.Int).Add(tx.Value(), &txFees.FeeAmount)
 	totalAmount = new(big.Int).Add(totalAmount, &txFees.BlobFeeAmount)
 	wallet.SubBalance(totalAmount)
@@ -1375,7 +1287,7 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 // loadTransactionReceipt attempts to load a transaction receipt from multiple clients.
 // It retries up to 5 times with different clients and includes exponential backoff.
 // Returns nil if the receipt cannot be loaded after all retries.
-func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transaction) *types.Receipt {
+func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Transaction) *txtypes.Receipt {
 	retryCount := uint64(0)
 
 	for {
@@ -1421,7 +1333,6 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *types.Transa
 func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlockWithHash *BlockWithHash, walletMap map[common.Address]*Wallet) error {
 	type newBlockInfo struct {
 		blockWithHash *BlockWithHash
-		txSkipMap     map[uint32]bool
 	}
 
 	newBlockParents := []newBlockInfo{}
@@ -1450,18 +1361,17 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 			break
 		}
 
-		if pool.blocks[blockNumber].Hash == block.Block.ParentHash() {
+		if pool.blocks[blockNumber].Hash == block.Block.ParentHash {
 			break
 		}
 
-		parentBlockBody, txSkipMap := pool.getBlockBody(ctx, client, blockNumber)
+		parentBlockBody := pool.getBlockBody(ctx, client, blockNumber)
 		if parentBlockBody == nil {
 			return fmt.Errorf("could not load block body for new parent block %v", blockNumber)
 		}
 
 		newBlockParents = append(newBlockParents, newBlockInfo{
 			blockWithHash: parentBlockBody,
-			txSkipMap:     txSkipMap,
 		})
 		block = parentBlockBody
 	}
@@ -1509,7 +1419,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 			txOptions := &SendTransactionOptions{
 				Client:      client,
 				Rebroadcast: true,
-				OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 					if err == nil {
 						logrus.Infof("reorged out tx %v confirmed", tx.Hash())
 					}
@@ -1536,7 +1446,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	// re-process the new parent blocks
 	slices.Reverse(newBlockParents)
 	for _, parentBlockInfo := range newBlockParents {
-		pool.processBlockTxs(ctx, client, parentBlockInfo.blockWithHash.Block.NumberU64(), parentBlockInfo.blockWithHash, walletMap, parentBlockInfo.txSkipMap, nil)
+		pool.processBlockTxs(ctx, client, parentBlockInfo.blockWithHash.Block.NumberU64(), parentBlockInfo.blockWithHash, walletMap, nil)
 	}
 
 	return nil
@@ -1611,11 +1521,16 @@ func (pool *TxPool) MinIntrinsicGas() uint64 {
 	return 21_000
 }
 
-// GetCurrentBaseFee returns the current base fee of the chain.
+// GetCurrentBaseFee returns a copy of the current base fee of the chain.
 func (pool *TxPool) GetCurrentBaseFee() *big.Int {
 	pool.blockStatsMutex.RLock()
 	defer pool.blockStatsMutex.RUnlock()
-	return pool.currentBaseFee
+
+	if pool.currentBaseFee == nil {
+		return nil
+	}
+
+	return new(big.Int).Set(pool.currentBaseFee)
 }
 
 // GetRecentBlockGasTotals returns the sum of gas used and gas limits
@@ -1734,9 +1649,8 @@ func (pool *TxPool) tryInitBlockStats(ctx context.Context) error {
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	// Header-only: a full block decode fails on chains with custom tx types
-	// go-ethereum can't decode, and we only need the gas limit and base fee.
-	latestHeader, err := client.client.HeaderByNumber(fetchCtx, nil)
+	// Header-only: we only need the gas limit and base fee here.
+	latestHeader, err := client.GetHeaderByNumber(fetchCtx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to fetch latest header for gas limit: %w", err)
 	}
@@ -1930,10 +1844,10 @@ func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
 
 // rebroadcastTransaction performs the actual rebroadcast of a transaction.
 // This method encapsulates the existing rebroadcast logic for reuse.
-func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *types.Transaction, options *SendTransactionOptions, retryCount uint64) {
+func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Transaction, options *SendTransactionOptions, retryCount uint64) {
 	submitTx := func(client *Client) error {
-		if options.OnEncode != nil {
-			txBytes, err := options.OnEncode(tx)
+		if options.hasEncodeFn() {
+			txBytes, err := options.invokeEncode(tx)
 			if err != nil {
 				return fmt.Errorf("failed to encode transaction: %w", err)
 			}
@@ -2026,7 +1940,7 @@ func (pool *TxPool) fillNonceGaps(ctx context.Context, wallet *Wallet, gaps []ui
 		// Create options for the filler transaction
 		fillerOptions := &SendTransactionOptions{
 			Rebroadcast: true,
-			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 				if err != nil {
 					logrus.WithFields(logrus.Fields{
 						"wallet": wallet.GetAddress().Hex(),

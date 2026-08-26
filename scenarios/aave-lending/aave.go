@@ -7,13 +7,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -284,7 +284,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	})
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
@@ -318,13 +318,13 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+		OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 			receiptChan <- receipt
 		},
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+		OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
 			txFees := utils.GetTransactionFees(tx, receipt)
 			outcome := "ok"
-			if receipt.Status != types.ReceiptStatusSuccessful {
+			if receipt.Status != txtypes.ReceiptStatusSuccessful {
 				outcome = "reverted"
 			}
 			s.logger.WithField("rpc", client.GetName()).Debugf(

@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -18,6 +17,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -222,7 +222,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
+func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, uint8, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
@@ -336,14 +336,14 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 			ClientGroup: s.options.ClientGroup,
 			Rebroadcast: s.options.Rebroadcast > 0,
 			SubmitCount: 1,
-			OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+			OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 				receiptChan <- receipt
 			},
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+			OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
 				s.processTxReceipt(txIdx, tx, receipt, client, "blob")
 			},
 			LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.0", txIdx+1), tx1),
-			OnEncode: func(tx *types.Transaction) ([]byte, error) {
+			OnEncode: func(tx *txtypes.Transaction) ([]byte, error) {
 				sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) && rand.Intn(100) < int(s.options.BlobV1Percent)
 				if sendAsV1 && !isBlobV1 {
 					err := tx.BlobTxSidecar().ToV1()
@@ -369,7 +369,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 			ClientGroup: s.options.ClientGroup,
 			Rebroadcast: s.options.Rebroadcast > 0,
 			SubmitCount: 1,
-			OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+			OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
 				s.processTxReceipt(txIdx, tx, receipt, client, "dynfee")
 			},
 			LogFn: spamoor.GetDefaultLogFn(s.logger, "blob", fmt.Sprintf("%6d.1", txIdx+1), tx2),
@@ -399,7 +399,7 @@ func (s *Scenario) sendBlobTx(ctx context.Context, txIdx uint64) (scenario.Recei
 	return receiptChan, tx1, client, wallet, tx1.BlobTxSidecar().Version, nil
 }
 
-func (s *Scenario) processTxReceipt(txIdx uint64, tx *types.Transaction, receipt *types.Receipt, client *spamoor.Client, txLabel string) {
+func (s *Scenario) processTxReceipt(txIdx uint64, tx *txtypes.Transaction, receipt *txtypes.Receipt, client *spamoor.Client, txLabel string) {
 	txFees := utils.GetTransactionFees(tx, receipt)
 	s.logger.WithField("rpc", client.GetName()).Debugf(
 		" transaction %d/%v confirmed in block #%v. total fee: %v gwei (tx: %v/%v, blob: %v/%v)",

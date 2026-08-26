@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -23,6 +22,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -367,7 +367,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 				// backstop so the goroutine exits even if every replacement also
 				// fails to land.
 				s.confirmWg.Add(1)
-				go func(txIdx uint64, kind string, tx *types.Transaction, logger logrus.FieldLogger) {
+				go func(txIdx uint64, kind string, tx *txtypes.Transaction, logger logrus.FieldLogger) {
 					defer s.confirmWg.Done()
 
 					waitCtx := ctx
@@ -389,7 +389,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 					// Track successfully deployed contracts so later fuzzed txs
 					// can call them and 7702 auths can delegate to them.
 					if tx != nil && tx.To() == nil && receipt != nil &&
-						receipt.Status == types.ReceiptStatusSuccessful &&
+						receipt.Status == txtypes.ReceiptStatusSuccessful &&
 						receipt.ContractAddress != (common.Address{}) {
 						s.recordDeployedContract(receipt.ContractAddress)
 					}
@@ -479,7 +479,7 @@ func (s *Scenario) pickWallet(kind txKind, txIdx uint64) *spamoor.Wallet {
 	return best
 }
 
-func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, string, error) {
+func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, string, error) {
 	ftx := s.fuzzer.generate(txIdx + s.options.TxIdOffset)
 
 	// Blob txs are rate limited separately (chain blob capacity is far lower
@@ -519,7 +519,7 @@ func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.Rec
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+		OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 			confirmed.Store(true)
 			receiptChan <- receipt
 		},
@@ -531,7 +531,7 @@ func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.Rec
 	// sidecar built by txbuilder is used as-is.
 	if ftx.kind == kindBlob {
 		blobV1Converted := false
-		sendOpts.OnEncode = func(tx *types.Transaction) ([]byte, error) {
+		sendOpts.OnEncode = func(tx *txtypes.Transaction) ([]byte, error) {
 			sendAsV1 := uint64(time.Now().Unix()) > uint64(s.options.FuluActivation) &&
 				mathrand.Intn(100) < int(s.options.BlobV1Percent)
 			if sendAsV1 && !blobV1Converted {
@@ -572,7 +572,7 @@ func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.Rec
 // key liveness guarantee for the fuzzer: because a fuzzed tx may be accepted by a
 // node yet never be includable, the only way to keep a wallet usable is to
 // forcibly replace the stuck nonce rather than wait on an outcome that never comes.
-func (s *Scenario) unstuckLoop(ctx context.Context, wallet *spamoor.Wallet, stuckTx *types.Transaction, confirmed *atomic.Bool) {
+func (s *Scenario) unstuckLoop(ctx context.Context, wallet *spamoor.Wallet, stuckTx *txtypes.Transaction, confirmed *atomic.Bool) {
 	nonce := stuckTx.Nonce()
 	for try := 0; try < unstuckMaxTries; try++ {
 		// Wait UnstuckTime before (re)placing, but poll for early confirmation
@@ -610,7 +610,7 @@ func (s *Scenario) unstuckLoop(ctx context.Context, wallet *spamoor.Wallet, stuc
 // mineable transaction carrying aggressively bumped fees. A blob tx can only be
 // replaced by another blob tx (go-ethereum keeps blob and non-blob txs in
 // separate subpools), so the cancel matches the stuck tx's pool class.
-func (s *Scenario) sendCancelTx(ctx context.Context, wallet *spamoor.Wallet, stuckTx *types.Transaction, try int) error {
+func (s *Scenario) sendCancelTx(ctx context.Context, wallet *spamoor.Wallet, stuckTx *txtypes.Transaction, try int) error {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientRandom),
 		spamoor.WithClientGroup(s.options.ClientGroup),
@@ -635,8 +635,8 @@ func (s *Scenario) sendCancelTx(ctx context.Context, wallet *spamoor.Wallet, stu
 	nonce := stuckTx.Nonce()
 	to := wallet.GetAddress()
 
-	var cancelTx *types.Transaction
-	if stuckTx.Type() == types.BlobTxType {
+	var cancelTx *txtypes.Transaction
+	if stuckTx.Type() == txtypes.BlobTxType {
 		meta := &txbuilder.TxMetadata{
 			GasFeeCap:  uint256.MustFromBig(feeCap),
 			GasTipCap:  uint256.MustFromBig(tipCap),
@@ -651,7 +651,7 @@ func (s *Scenario) sendCancelTx(ctx context.Context, wallet *spamoor.Wallet, stu
 		}
 		cancelTx, err = wallet.ReplaceBlobTx(blobTx, nonce)
 	} else {
-		txData := &types.DynamicFeeTx{
+		txData := &txtypes.DynamicFeeTx{
 			GasFeeCap: feeCap,
 			GasTipCap: tipCap,
 			Gas:       21000,
@@ -673,7 +673,7 @@ func (s *Scenario) sendCancelTx(ctx context.Context, wallet *spamoor.Wallet, stu
 
 // buildTx turns a fuzzed envelope into a concrete signed transaction of the
 // matching type using the wallet's managed-nonce build methods.
-func (s *Scenario) buildTx(wallet *spamoor.Wallet, ftx *fuzzedTx, feeCap, tipCap *big.Int) (*types.Transaction, error) {
+func (s *Scenario) buildTx(wallet *spamoor.Wallet, ftx *fuzzedTx, feeCap, tipCap *big.Int) (*txtypes.Transaction, error) {
 	// Use the fuzzed gas value, clamped to the current block gas limit (the
 	// configured --gaslimit already caps it at generation time).
 	gas := ftx.gas

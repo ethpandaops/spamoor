@@ -4,9 +4,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/sirupsen/logrus"
+
+	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // TxPoolMetricsCollector subscribes to TxPool block updates for advanced metrics collection
@@ -142,15 +143,15 @@ func (mc *TxPoolMetricsCollector) handleBulkBlockUpdate(blockNumber uint64, glob
 func (mc *TxPoolMetricsCollector) processBlockForWindow(
 	window *MultiGranularityMetrics,
 	blockNumber uint64,
-	block *types.Block,
+	block *txtypes.Block,
 	allWalletPoolStats map[*spamoor.WalletPool]*spamoor.WalletPoolBlockStats,
-	receipts []*types.Receipt,
+	receipts []*txtypes.Receipt,
 ) *BlockDataPoint {
 	window.mutex.Lock()
 	defer window.mutex.Unlock()
 
 	now := time.Now()
-	totalGasUsed := block.GasUsed()
+	totalGasUsed := block.GasUsed
 
 	// Calculate spammer metrics for this block
 	spammerGasData := make(map[uint64]*SpammerBlockData)
@@ -299,7 +300,7 @@ func (mgm *MultiGranularityMetrics) pruneOldData(now time.Time) {
 }
 
 // calculateGasUsedFromReceipts calculates total gas used from transaction receipts
-func (mc *TxPoolMetricsCollector) calculateGasUsedFromReceipts(receipts []*types.Receipt) uint64 {
+func (mc *TxPoolMetricsCollector) calculateGasUsedFromReceipts(receipts []*txtypes.Receipt) uint64 {
 	totalGas := uint64(0)
 	for _, receipt := range receipts {
 		if receipt != nil {

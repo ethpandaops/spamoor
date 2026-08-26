@@ -11,11 +11,13 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/holiman/uint256"
+
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios/xentoken/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
-	"github.com/holiman/uint256"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // we need to inject a dynamic address for XENCrypto, so we need to use a global mutex to prevent race conditions
@@ -42,7 +44,7 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
 
-	deploymentTxs := map[*spamoor.Wallet][]*types.Transaction{}
+	deploymentTxs := map[*spamoor.Wallet][]*txtypes.Transaction{}
 
 	if xenTokenAddress == nil {
 		deployerWallet := s.walletPool.GetWellKnownWallet("xen-deployer")
@@ -75,7 +77,7 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 
 		// deploy XENCrypto
 		if redeploy || deployerNonce <= contractNonce {
-			buildXenCryptoTx := func() (*types.Transaction, error) {
+			buildXenCryptoTx := func() (*txtypes.Transaction, error) {
 				re := regexp.MustCompile(`__\$[a-f0-9]{34}\$__`)
 
 				xenCryptoDeploymentMutex.Lock()

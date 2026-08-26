@@ -19,6 +19,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/statebloat/erc20_bloater/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -279,7 +280,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 		// Structure to hold transaction data for parallel processing
 		type txBatch struct {
-			tx              *types.Transaction
+			tx              *txtypes.Transaction
 			wallet          *spamoor.Wallet
 			numAddresses    uint64
 			gasLimit        uint64
@@ -360,7 +361,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 
 		// Prepare wallet-to-transactions map for SendMultiTransactionBatch
-		walletTxMap := make(map[*spamoor.Wallet][]*types.Transaction)
+		walletTxMap := make(map[*spamoor.Wallet][]*txtypes.Transaction)
 		for _, batch := range txBatches {
 			walletTxMap[batch.wallet] = append(walletTxMap[batch.wallet], batch.tx)
 
@@ -398,7 +399,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 				}
 
 				receipt := walletReceipts[0] // Each wallet sends only one tx in our case
-				if receipt.Status != types.ReceiptStatusSuccessful {
+				if receipt.Status != txtypes.ReceiptStatusSuccessful {
 					s.logger.Errorf("tx failed: %s (gas used: %d, gas limit: %d)",
 						batch.tx.Hash().Hex(), receipt.GasUsed, batch.tx.Gas())
 					roundSuccess = false
@@ -479,7 +480,7 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 	s.logger.Infof("distributing 10M tokens to each of %d wallets", numWallets-1)
 
 	// Build all transfer transactions upfront
-	var txList []*types.Transaction
+	var txList []*txtypes.Transaction
 	for i := 1; i < numWallets; i++ {
 		recipientWallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, i)
 		recipientAddr := recipientWallet.GetAddress()
@@ -542,7 +543,7 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 
 	// Verify all transfers succeeded
 	for i, receipt := range receipts {
-		if receipt == nil || receipt.Status != types.ReceiptStatusSuccessful {
+		if receipt == nil || receipt.Status != txtypes.ReceiptStatusSuccessful {
 			return fmt.Errorf("token transfer %d failed", i)
 		}
 	}
@@ -551,7 +552,7 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 	return nil
 }
 
-func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.Transaction, error) {
+func (s *Scenario) deployContract(ctx context.Context) (*txtypes.Receipt, *txtypes.Transaction, error) {
 	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
 	if client == nil {
 		return nil, nil, fmt.Errorf("no client available")
@@ -598,7 +599,7 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 		return nil, nil, fmt.Errorf("failed to send/confirm deployment: %w", err)
 	}
 
-	if receipt.Status != types.ReceiptStatusSuccessful {
+	if receipt.Status != txtypes.ReceiptStatusSuccessful {
 		return nil, nil, fmt.Errorf("deployment tx failed")
 	}
 
@@ -607,7 +608,7 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, *types.T
 
 // buildBloatTx builds a bloating transaction without sending it.
 // nextAddressIndex is the starting address index (matching contract's nextStorageSlot semantics).
-func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, startAddressIndex uint64, numAddresses uint64) (*types.Transaction, error) {
+func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, startAddressIndex uint64, numAddresses uint64) (*txtypes.Transaction, error) {
 	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
 	if client == nil {
 		return nil, fmt.Errorf("no client available")
