@@ -133,6 +133,7 @@ func init() {
 		"FrameTx":              reflect.ValueOf((*txtypes.FrameTx)(nil)),
 		"Header":               reflect.ValueOf((*txtypes.Header)(nil)),
 		"JSONTxData":           reflect.ValueOf((*txtypes.JSONTxData)(nil)),
+		"JSONTxEncoder":        reflect.ValueOf((*txtypes.JSONTxEncoder)(nil)),
 		"JSONTxFields":         reflect.ValueOf((*txtypes.JSONTxFields)(nil)),
 		"LegacyTx":             reflect.ValueOf((*txtypes.LegacyTx)(nil)),
 		"Log":                  reflect.ValueOf((*txtypes.Log)(nil)),
@@ -140,6 +141,7 @@ func init() {
 		"Receipt":              reflect.ValueOf((*txtypes.Receipt)(nil)),
 		"ReceiptDecoder":       reflect.ValueOf((*txtypes.ReceiptDecoder)(nil)),
 		"ReceiptExtra":         reflect.ValueOf((*txtypes.ReceiptExtra)(nil)),
+		"ReceiptExtraEncoder":  reflect.ValueOf((*txtypes.ReceiptExtraEncoder)(nil)),
 		"RecentRootReference":  reflect.ValueOf((*txtypes.RecentRootReference)(nil)),
 		"SetCodeAuthorization": reflect.ValueOf((*txtypes.SetCodeAuthorization)(nil)),
 		"SetCodeTx":            reflect.ValueOf((*txtypes.SetCodeTx)(nil)),
@@ -149,16 +151,18 @@ func init() {
 		"UnknownTx":            reflect.ValueOf((*txtypes.UnknownTx)(nil)),
 
 		// interface wrapper definitions
-		"_AccessListTxData": reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_AccessListTxData)(nil)),
-		"_AuthListTxData":   reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_AuthListTxData)(nil)),
-		"_BlobTxData":       reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_BlobTxData)(nil)),
-		"_ECDSASignedTx":    reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ECDSASignedTx)(nil)),
-		"_ExplicitSenderTx": reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ExplicitSenderTx)(nil)),
-		"_JSONTxData":       reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_JSONTxData)(nil)),
-		"_NetworkEncodedTx": reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_NetworkEncodedTx)(nil)),
-		"_ReceiptExtra":     reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ReceiptExtra)(nil)),
-		"_StateGasTxData":   reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_StateGasTxData)(nil)),
-		"_TxData":           reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_TxData)(nil)),
+		"_AccessListTxData":    reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_AccessListTxData)(nil)),
+		"_AuthListTxData":      reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_AuthListTxData)(nil)),
+		"_BlobTxData":          reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_BlobTxData)(nil)),
+		"_ECDSASignedTx":       reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ECDSASignedTx)(nil)),
+		"_ExplicitSenderTx":    reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ExplicitSenderTx)(nil)),
+		"_JSONTxData":          reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_JSONTxData)(nil)),
+		"_JSONTxEncoder":       reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_JSONTxEncoder)(nil)),
+		"_NetworkEncodedTx":    reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_NetworkEncodedTx)(nil)),
+		"_ReceiptExtra":        reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ReceiptExtra)(nil)),
+		"_ReceiptExtraEncoder": reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ReceiptExtraEncoder)(nil)),
+		"_StateGasTxData":      reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_StateGasTxData)(nil)),
+		"_TxData":              reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_TxData)(nil)),
 	}
 }
 
@@ -246,6 +250,16 @@ func (W _github_com_ethpandaops_spamoor_txtypes_JSONTxData) DecodeJSONTx(fields 
 	return W.WDecodeJSONTx(fields)
 }
 
+// _github_com_ethpandaops_spamoor_txtypes_JSONTxEncoder is an interface wrapper for JSONTxEncoder type
+type _github_com_ethpandaops_spamoor_txtypes_JSONTxEncoder struct {
+	IValue        interface{}
+	WEncodeJSONTx func(fields map[string]any)
+}
+
+func (W _github_com_ethpandaops_spamoor_txtypes_JSONTxEncoder) EncodeJSONTx(fields map[string]any) {
+	W.WEncodeJSONTx(fields)
+}
+
 // _github_com_ethpandaops_spamoor_txtypes_NetworkEncodedTx is an interface wrapper for NetworkEncodedTx type
 type _github_com_ethpandaops_spamoor_txtypes_NetworkEncodedTx struct {
 	IValue                interface{}
@@ -264,6 +278,16 @@ type _github_com_ethpandaops_spamoor_txtypes_ReceiptExtra struct {
 
 func (W _github_com_ethpandaops_spamoor_txtypes_ReceiptExtra) ReceiptTxType() byte {
 	return W.WReceiptTxType()
+}
+
+// _github_com_ethpandaops_spamoor_txtypes_ReceiptExtraEncoder is an interface wrapper for ReceiptExtraEncoder type
+type _github_com_ethpandaops_spamoor_txtypes_ReceiptExtraEncoder struct {
+	IValue             interface{}
+	WEncodeReceiptJSON func(fields map[string]any)
+}
+
+func (W _github_com_ethpandaops_spamoor_txtypes_ReceiptExtraEncoder) EncodeReceiptJSON(fields map[string]any) {
+	W.WEncodeReceiptJSON(fields)
 }
 
 // _github_com_ethpandaops_spamoor_txtypes_StateGasTxData is an interface wrapper for StateGasTxData type

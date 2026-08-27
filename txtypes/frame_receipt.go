@@ -258,3 +258,27 @@ func (tx *FrameTx) blobGasCost(blobBaseFee *big.Int) *big.Int {
 
 	return blobGas.Mul(blobGas, blobBaseFee)
 }
+
+// EncodeReceiptJSON adds the frame-specific receipt fields, using the key names the
+// decoder reads back.
+func (e *FrameReceiptExtra) EncodeReceiptJSON(fields map[string]any) {
+	fields["payer"] = e.Payer
+
+	frames := make([]map[string]any, 0, len(e.Frames))
+
+	for _, frame := range e.Frames {
+		logs := frame.Logs
+		if logs == nil {
+			logs = []*Log{}
+		}
+
+		frames = append(frames, map[string]any{
+			"status":       hexutil.Uint64(frame.Status),
+			"gasUsed":      hexutil.Uint64(frame.ExecutionGas),
+			"stateGasUsed": hexutil.Uint64(frame.StateGas),
+			"logs":         logs,
+		})
+	}
+
+	fields["frameReceipts"] = frames
+}

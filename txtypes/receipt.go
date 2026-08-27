@@ -171,3 +171,69 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 func (r *Receipt) Successful() bool {
 	return r != nil && r.Status == ReceiptStatusSuccessful
 }
+
+// ReceiptExtraEncoder is implemented by type-specific receipt content that can render
+// itself back into a JSON-RPC receipt object.
+type ReceiptExtraEncoder interface {
+	// EncodeReceiptJSON adds the type's fields to the object.
+	EncodeReceiptJSON(fields map[string]any)
+}
+
+// MarshalJSON renders the receipt as a JSON-RPC receipt object.
+//
+// This is the inverse of UnmarshalJSON. Without it the default encoder would emit Go
+// field names, which the decoder cannot read back.
+func (r *Receipt) MarshalJSON() ([]byte, error) {
+	fields := map[string]any{
+		"type":              hexutil.Uint64(r.Type),
+		"status":            hexutil.Uint64(r.Status),
+		"cumulativeGasUsed": hexutil.Uint64(r.CumulativeGasUsed),
+		"gasUsed":           hexutil.Uint64(r.GasUsed),
+		"logsBloom":         r.Bloom,
+		"logs":              r.logsOrEmpty(),
+		"transactionHash":   r.TxHash,
+		"transactionIndex":  hexutil.Uint(r.TransactionIndex),
+		"blockHash":         r.BlockHash,
+	}
+
+	if len(r.PostState) > 0 {
+		fields["root"] = hexutil.Bytes(r.PostState)
+	}
+
+	if r.ContractAddress != (common.Address{}) {
+		fields["contractAddress"] = r.ContractAddress
+	} else {
+		fields["contractAddress"] = nil
+	}
+
+	if r.EffectiveGasPrice != nil {
+		fields["effectiveGasPrice"] = (*hexutil.Big)(r.EffectiveGasPrice)
+	}
+
+	if r.BlockNumber != nil {
+		fields["blockNumber"] = (*hexutil.Big)(r.BlockNumber)
+	}
+
+	if r.BlobGasUsed > 0 {
+		fields["blobGasUsed"] = hexutil.Uint64(r.BlobGasUsed)
+	}
+
+	if r.BlobGasPrice != nil {
+		fields["blobGasPrice"] = (*hexutil.Big)(r.BlobGasPrice)
+	}
+
+	if encoder, ok := r.Extra.(ReceiptExtraEncoder); ok {
+		encoder.EncodeReceiptJSON(fields)
+	}
+
+	return json.Marshal(fields)
+}
+
+// logsOrEmpty returns the logs, never nil, so the field encodes as [] rather than null.
+func (r *Receipt) logsOrEmpty() []*Log {
+	if r.Logs == nil {
+		return []*Log{}
+	}
+
+	return r.Logs
+}

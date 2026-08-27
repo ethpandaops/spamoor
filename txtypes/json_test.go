@@ -554,3 +554,155 @@ func TestReceiptBloomAndPostState(t *testing.T) {
 		t.Fatal("absent fields should stay zero")
 	}
 }
+
+// TestTransactionJSONRoundTrip checks that a transaction survives MarshalJSON followed
+// by UnmarshalJSON with its content intact, for every registered type.
+func TestTransactionJSONRoundTrip(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed generating key: %v", err)
+	}
+
+	var (
+		sender  = crypto.PubkeyToAddress(key.PublicKey)
+		chainID = big.NewInt(7088110746)
+		rng     = rand.New(rand.NewSource(7))
+	)
+
+	pairs := generateTxPairs(t, rng, chainID)
+	pairs = append(pairs, txPair{name: "frame", ours: buildTransferTx(t, sender)})
+
+	for _, pair := range pairs {
+		t.Run(pair.name, func(t *testing.T) {
+			signed, err := SignTx(NewTx(pair.ours), chainID, key)
+			if err != nil {
+				t.Fatalf("failed signing: %v", err)
+			}
+
+			encoded, err := json.Marshal(signed)
+			if err != nil {
+				t.Fatalf("failed marshalling: %v", err)
+			}
+
+			var decoded Transaction
+			if err := json.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatalf("failed unmarshalling: %v", err)
+			}
+
+			if decoded.Type() != signed.Type() {
+				t.Fatalf("type changed: 0x%02x != 0x%02x", decoded.Type(), signed.Type())
+			}
+
+			if decoded.Hash() != signed.Hash() {
+				t.Fatalf("hash changed: %s != %s", decoded.Hash(), signed.Hash())
+			}
+
+			if _, isUnknown := decoded.Inner().(*UnknownTx); isUnknown {
+				t.Fatal("round trip lost the transaction type")
+			}
+
+			// The adopted hash is cached, so recompute from the decoded content to
+			// confirm every covered field survived.
+			if rebuilt := NewTx(decoded.Inner()); rebuilt.Hash() != signed.Hash() {
+				t.Fatalf("reconstructed content hashes to %s, want %s", rebuilt.Hash(), signed.Hash())
+			}
+
+			from, err := decoded.From(chainID)
+			if err != nil {
+				t.Fatalf("failed reading sender: %v", err)
+			}
+
+			if from != sender {
+				t.Fatalf("wrong sender: %s", from)
+			}
+		})
+	}
+}
+
+// TestTransactionUnmarshalJSONEmpty checks that decoding a malformed object fails
+// rather than leaving a transaction that panics on first use.
+func TestTransactionUnmarshalJSONEmpty(t *testing.T) {
+	var tx Transaction
+	if err := json.Unmarshal([]byte(`{"type":"0x2"}`), &tx); err == nil {
+		t.Fatal("expected an error decoding a transaction object without a hash")
+	}
+
+	if _, err := json.Marshal(&Transaction{}); err == nil {
+		t.Fatal("expected an error marshalling an empty transaction")
+	}
+}
+
+// TestReceiptJSONRoundTrip checks that MarshalJSON and UnmarshalJSON are inverses,
+// including the frame-specific content.
+func TestReceiptJSONRoundTrip(t *testing.T) {
+	raw := `{
+		"type": "0x6",
+		"status": "0x1",
+		"cumulativeGasUsed": "0x5261",
+		"gasUsed": "0x5261",
+		"effectiveGasPrice": "0x77359407",
+		"blobGasUsed": "0x20000",
+		"blobGasPrice": "0x3",
+		"transactionHash": "0x6c7a2d7d1eb9a754781378632ca05f528c626ea0928efbdbdaf226bef960e172",
+		"transactionIndex": "0x2",
+		"blockHash": "0xd3c53d7b84a70b9398e414eef14e778ae29975e1c126a37f13a22171a1f6ad96",
+		"blockNumber": "0x10b",
+		"payer": "0x6df35438a4dfcdbd25c7a364ab77e3cfdce87fc5",
+		"frameReceipts": [
+			{"status":"0x1","gasUsed":"0x33","stateGasUsed":"0x0","logs":[]},
+			{"status":"0x2","gasUsed":"0x0","stateGasUsed":"0x7","logs":[]}
+		],
+		"logs": [],
+		"logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004"
+	}`
+
+	var first Receipt
+	if err := json.Unmarshal([]byte(raw), &first); err != nil {
+		t.Fatalf("failed decoding: %v", err)
+	}
+
+	encoded, err := json.Marshal(&first)
+	if err != nil {
+		t.Fatalf("failed marshalling: %v", err)
+	}
+
+	var second Receipt
+	if err := json.Unmarshal(encoded, &second); err != nil {
+		t.Fatalf("failed decoding the re-encoded receipt: %v", err)
+	}
+
+	if second.Type != first.Type || second.Status != first.Status ||
+		second.GasUsed != first.GasUsed || second.CumulativeGasUsed != first.CumulativeGasUsed ||
+		second.TxHash != first.TxHash || second.BlockHash != first.BlockHash ||
+		second.TransactionIndex != first.TransactionIndex ||
+		second.BlobGasUsed != first.BlobGasUsed || second.Bloom != first.Bloom {
+		t.Fatal("generic receipt fields did not survive the round trip")
+	}
+
+	if second.BlockNumber.Cmp(first.BlockNumber) != 0 ||
+		second.EffectiveGasPrice.Cmp(first.EffectiveGasPrice) != 0 ||
+		second.BlobGasPrice.Cmp(first.BlobGasPrice) != 0 {
+		t.Fatal("receipt fee fields did not survive the round trip")
+	}
+
+	before, after := first.FrameExtra(), second.FrameExtra()
+	if before == nil || after == nil {
+		t.Fatal("frame content missing")
+	}
+
+	if before.Payer != after.Payer || len(before.Frames) != len(after.Frames) {
+		t.Fatal("frame receipt content did not survive the round trip")
+	}
+
+	for i := range before.Frames {
+		if before.Frames[i].Status != after.Frames[i].Status ||
+			before.Frames[i].ExecutionGas != after.Frames[i].ExecutionGas ||
+			before.Frames[i].StateGas != after.Frames[i].StateGas {
+			t.Fatalf("frame receipt %d changed", i)
+		}
+	}
+
+	if !after.Frames[1].Skipped() {
+		t.Fatal("the skipped status did not survive the round trip")
+	}
+}

@@ -960,3 +960,72 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 
 	return nil
 }
+
+// EncodeJSONTx adds the frame transaction's fields, using the key names its decoder
+// reads back. A frame transaction has no single recipient, so "to" is dropped.
+func (tx *FrameTx) EncodeJSONTx(fields map[string]any) {
+	delete(fields, "to")
+	delete(fields, "nonce")
+
+	fields["sender"] = tx.Sender
+	fields["nonceSeq"] = hexutil.Uint64(tx.NonceSeq)
+	fields["chainId"] = (*hexutil.Big)(tx.GetChainID())
+	fields["maxFeePerGas"] = (*hexutil.Big)(tx.GetGasFeeCap())
+	fields["maxPriorityFeePerGas"] = (*hexutil.Big)(tx.GetGasTipCap())
+	fields["maxFeePerBlobGas"] = (*hexutil.Big)(tx.GetBlobGasFeeCap())
+	fields["blobVersionedHashes"] = tx.BlobHashes
+
+	nonceKeys := make([]*hexutil.Big, 0, len(tx.NonceKeys))
+	for _, key := range tx.NonceKeys {
+		nonceKeys = append(nonceKeys, (*hexutil.Big)(u256ToBig(key)))
+	}
+
+	fields["nonceKeys"] = nonceKeys
+
+	frames := make([]map[string]any, 0, len(tx.Frames))
+
+	for _, frame := range tx.Frames {
+		frames = append(frames, map[string]any{
+			"mode":       hexutil.Uint64(frame.Mode),
+			"flags":      hexutil.Uint64(frame.Flags),
+			"to":         frame.Target,
+			"gasLimit":   hexutil.Uint64(frame.Limits.Execution),
+			"stateLimit": hexutil.Uint64(frame.Limits.State),
+			"value":      (*hexutil.Big)(u256ToBig(frame.Value)),
+			"data":       hexutil.Bytes(frame.Data),
+		})
+	}
+
+	fields["frames"] = frames
+
+	signatures := make([]map[string]any, 0, len(tx.Signatures))
+
+	for _, sig := range tx.Signatures {
+		entry := map[string]any{
+			"scheme":    hexutil.Uint64(sig.Scheme),
+			"msg":       hexutil.Bytes(sig.Msg),
+			"signature": hexutil.Bytes(sig.Signature),
+			"signer":    nil,
+		}
+
+		if len(sig.Signer) == 20 {
+			entry["signer"] = common.BytesToAddress(sig.Signer)
+		}
+
+		signatures = append(signatures, entry)
+	}
+
+	fields["signatures"] = signatures
+
+	roots := make([]map[string]any, 0, len(tx.RecentRoots))
+
+	for _, root := range tx.RecentRoots {
+		roots = append(roots, map[string]any{
+			"sourceId": root.SourceID,
+			"slot":     hexutil.Uint64(root.Slot),
+			"root":     root.Root,
+		})
+	}
+
+	fields["recentRootReferences"] = roots
+}

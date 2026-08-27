@@ -46,20 +46,41 @@ type JSONTxData interface {
 	DecodeJSONTx(fields *JSONTxFields) error
 }
 
+// JSONTxEncoder is implemented by transaction types that can render themselves as a
+// JSON-RPC transaction object. Types that do not implement it marshal with the common
+// fields only.
+type JSONTxEncoder interface {
+	// EncodeJSONTx adds the type's fields to the object.
+	EncodeJSONTx(fields map[string]any)
+}
+
 // UnmarshalJSONTx decodes a transaction from a JSON-RPC transaction object. The hash
 // and sender reported by the node are adopted verbatim, which keeps block processing
 // correct for types this build decodes imperfectly and avoids a signature recovery per
 // transaction.
 func UnmarshalJSONTx(raw json.RawMessage) (*Transaction, error) {
-	var fields JSONTxFields
-	if err := json.Unmarshal(raw, &fields); err != nil {
+	tx := &Transaction{}
+	if err := tx.UnmarshalJSON(raw); err != nil {
 		return nil, err
 	}
 
-	fields.Raw = raw
+	return tx, nil
+}
+
+// UnmarshalJSON decodes a transaction from a JSON-RPC transaction object.
+//
+// Transaction carries only unexported fields, so without this the standard decoder
+// would quietly leave the receiver empty and every later method call would panic.
+func (tx *Transaction) UnmarshalJSON(input []byte) error {
+	var fields JSONTxFields
+	if err := json.Unmarshal(input, &fields); err != nil {
+		return err
+	}
+
+	fields.Raw = input
 
 	if fields.Hash == nil {
-		return nil, errors.New("transaction object is missing hash")
+		return errors.New("transaction object is missing hash")
 	}
 
 	txType := byte(LegacyTxType)
@@ -67,16 +88,56 @@ func UnmarshalJSONTx(raw json.RawMessage) (*Transaction, error) {
 		txType = byte(*fields.Type)
 	}
 
-	inner := decodeJSONInner(txType, &fields)
-
-	tx := NewTx(inner)
+	tx.setDecoded(decodeJSONInner(txType, &fields))
 	tx.hash.Store(fields.Hash)
 
 	if fields.From != nil {
 		tx.SetFrom(*fields.From)
 	}
 
-	return tx, nil
+	return nil
+}
+
+// MarshalJSON renders the transaction as a JSON-RPC transaction object.
+//
+// The common fields are filled from the accessor set; the type contributes the rest
+// through JSONTxEncoder, mirroring how DecodeJSONTx reads them back.
+func (tx *Transaction) MarshalJSON() ([]byte, error) {
+	if tx.inner == nil {
+		return nil, errors.New("cannot marshal an empty transaction")
+	}
+
+	fields := map[string]any{
+		"type":  hexutil.Uint64(tx.Type()),
+		"hash":  tx.Hash(),
+		"nonce": hexutil.Uint64(tx.Nonce()),
+		"gas":   hexutil.Uint64(tx.Gas()),
+		"value": (*hexutil.Big)(tx.Value()),
+		"input": hexutil.Bytes(tx.Data()),
+		"to":    tx.To(),
+	}
+
+	if from := tx.from.Load(); from != nil {
+		fields["from"] = *from
+	}
+
+	if encoder, ok := tx.inner.(JSONTxEncoder); ok {
+		encoder.EncodeJSONTx(fields)
+	}
+
+	return json.Marshal(fields)
+}
+
+// jsonSignatureFields adds the signature values of an ECDSA-signed transaction.
+// Typed transactions report the y-parity bit alongside v, as nodes do.
+func jsonSignatureFields(fields map[string]any, typed bool, v, r, s *big.Int) {
+	fields["v"] = (*hexutil.Big)(v)
+	fields["r"] = (*hexutil.Big)(r)
+	fields["s"] = (*hexutil.Big)(s)
+
+	if typed && v != nil {
+		fields["yParity"] = hexutil.Uint64(v.Uint64())
+	}
 }
 
 // decodeJSONInner builds the type-specific content, falling back to UnknownTx when
@@ -273,4 +334,62 @@ func (tx *SetCodeTx) DecodeJSONTx(fields *JSONTxFields) error {
 	tx.S = uint256.MustFromBig(s)
 
 	return nil
+}
+
+// EncodeJSONTx adds the legacy transaction's fields.
+func (tx *LegacyTx) EncodeJSONTx(fields map[string]any) {
+	fields["gasPrice"] = (*hexutil.Big)(tx.GetGasPrice())
+	jsonSignatureFields(fields, false, tx.V, tx.R, tx.S)
+}
+
+// EncodeJSONTx adds the access list transaction's fields.
+func (tx *AccessListTx) EncodeJSONTx(fields map[string]any) {
+	fields["chainId"] = (*hexutil.Big)(tx.GetChainID())
+	fields["gasPrice"] = (*hexutil.Big)(tx.GetGasPrice())
+	fields["accessList"] = tx.AccessList
+	jsonSignatureFields(fields, true, tx.V, tx.R, tx.S)
+}
+
+// EncodeJSONTx adds the dynamic fee transaction's fields.
+func (tx *DynamicFeeTx) EncodeJSONTx(fields map[string]any) {
+	fields["chainId"] = (*hexutil.Big)(tx.GetChainID())
+	fields["maxFeePerGas"] = (*hexutil.Big)(tx.GetGasFeeCap())
+	fields["maxPriorityFeePerGas"] = (*hexutil.Big)(tx.GetGasTipCap())
+	fields["accessList"] = tx.AccessList
+	jsonSignatureFields(fields, true, tx.V, tx.R, tx.S)
+}
+
+// EncodeJSONTx adds the blob transaction's fields. The sidecar is wire-only and has no
+// JSON-RPC representation.
+func (tx *BlobTx) EncodeJSONTx(fields map[string]any) {
+	v, r, s := tx.GetSignatureValues()
+
+	fields["chainId"] = (*hexutil.Big)(tx.GetChainID())
+	fields["maxFeePerGas"] = (*hexutil.Big)(tx.GetGasFeeCap())
+	fields["maxPriorityFeePerGas"] = (*hexutil.Big)(tx.GetGasTipCap())
+	fields["maxFeePerBlobGas"] = (*hexutil.Big)(tx.GetBlobGasFeeCap())
+	fields["blobVersionedHashes"] = tx.BlobHashes
+	fields["accessList"] = tx.AccessList
+	jsonSignatureFields(fields, true, v, r, s)
+}
+
+// EncodeJSONTx adds the set code transaction's fields.
+func (tx *SetCodeTx) EncodeJSONTx(fields map[string]any) {
+	v, r, s := tx.GetSignatureValues()
+
+	fields["chainId"] = (*hexutil.Big)(tx.GetChainID())
+	fields["maxFeePerGas"] = (*hexutil.Big)(tx.GetGasFeeCap())
+	fields["maxPriorityFeePerGas"] = (*hexutil.Big)(tx.GetGasTipCap())
+	fields["accessList"] = tx.AccessList
+	fields["authorizationList"] = tx.AuthList
+	jsonSignatureFields(fields, true, v, r, s)
+}
+
+// EncodeJSONTx adds the fee fields an unknown type reported. Its type-specific content
+// was never decoded, so nothing else can be rendered.
+func (tx *UnknownTx) EncodeJSONTx(fields map[string]any) {
+	fields["chainId"] = (*hexutil.Big)(tx.GetChainID())
+	fields["gasPrice"] = (*hexutil.Big)(tx.GetGasPrice())
+	fields["maxFeePerGas"] = (*hexutil.Big)(tx.GetGasFeeCap())
+	fields["maxPriorityFeePerGas"] = (*hexutil.Big)(tx.GetGasTipCap())
 }
