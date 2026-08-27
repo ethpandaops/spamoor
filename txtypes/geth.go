@@ -61,8 +61,10 @@ func FromGethReceipt(receipt *types.Receipt) *Receipt {
 
 	return &Receipt{
 		Type:              receipt.Type,
+		PostState:         receipt.PostState,
 		Status:            receipt.Status,
 		CumulativeGasUsed: receipt.CumulativeGasUsed,
+		Bloom:             receipt.Bloom,
 		Logs:              receipt.Logs,
 		TxHash:            receipt.TxHash,
 		ContractAddress:   receipt.ContractAddress,
@@ -90,8 +92,10 @@ func (r *Receipt) ToGethReceipt() *types.Receipt {
 
 	return &types.Receipt{
 		Type:              r.Type,
+		PostState:         r.PostState,
 		Status:            r.Status,
 		CumulativeGasUsed: r.CumulativeGasUsed,
+		Bloom:             r.Bloom,
 		Logs:              r.Logs,
 		TxHash:            r.TxHash,
 		ContractAddress:   r.ContractAddress,

@@ -47,6 +47,9 @@ type (
 	// AccessTuple is a single EIP-2930 access list entry.
 	AccessTuple = types.AccessTuple
 
+	// Bloom is a receipt's 2048-bit log bloom filter.
+	Bloom = types.Bloom
+
 	// BlobSidecar carries the blobs, commitments and proofs of a blob transaction.
 	// It is wire-only data and is not covered by the transaction hash.
 	BlobSidecar = types.BlobTxSidecar

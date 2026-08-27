@@ -117,6 +117,7 @@ func init() {
 		"BlobTx":               reflect.ValueOf((*txtypes.BlobTx)(nil)),
 		"BlobTxData":           reflect.ValueOf((*txtypes.BlobTxData)(nil)),
 		"Block":                reflect.ValueOf((*txtypes.Block)(nil)),
+		"Bloom":                reflect.ValueOf((*txtypes.Bloom)(nil)),
 		"DynamicFeeTx":         reflect.ValueOf((*txtypes.DynamicFeeTx)(nil)),
 		"ECDSASignedTx":        reflect.ValueOf((*txtypes.ECDSASignedTx)(nil)),
 		"ExplicitSenderTx":     reflect.ValueOf((*txtypes.ExplicitSenderTx)(nil)),

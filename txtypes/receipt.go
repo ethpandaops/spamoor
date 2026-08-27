@@ -16,8 +16,10 @@ import (
 // receipt decoder registered for the transaction type.
 type Receipt struct {
 	Type              uint8
+	PostState         []byte
 	Status            uint64
 	CumulativeGasUsed uint64
+	Bloom             Bloom
 	Logs              []*Log
 	TxHash            common.Hash
 	ContractAddress   common.Address
@@ -77,6 +79,7 @@ type jsonReceipt struct {
 	Root              *hexutil.Bytes  `json:"root"`
 	Status            *hexutil.Uint64 `json:"status"`
 	CumulativeGasUsed *hexutil.Uint64 `json:"cumulativeGasUsed"`
+	Bloom             *Bloom          `json:"logsBloom"`
 	Logs              []*Log          `json:"logs"`
 	TxHash            *common.Hash    `json:"transactionHash"`
 	ContractAddress   *common.Address `json:"contractAddress"`
@@ -105,6 +108,14 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 
 	if dec.Type != nil {
 		r.Type = uint8(*dec.Type)
+	}
+
+	if dec.Root != nil {
+		r.PostState = *dec.Root
+	}
+
+	if dec.Bloom != nil {
+		r.Bloom = *dec.Bloom
 	}
 
 	if dec.Status != nil {

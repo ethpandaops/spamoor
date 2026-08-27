@@ -497,3 +497,60 @@ func TestSignAuthorization(t *testing.T) {
 		t.Fatalf("authorization signed by the wrong key: %s", authority)
 	}
 }
+
+// TestReceiptBloomAndPostState checks the two fields an explorer needs that are not
+// part of the gas/status set: the log bloom and the pre-Byzantium state root.
+func TestReceiptBloomAndPostState(t *testing.T) {
+	// A bloom with a couple of bits set, so a zero value cannot pass by accident.
+	var bloom Bloom
+
+	bloom[0] = 0x01
+	bloom[128] = 0xff
+	bloom[len(bloom)-1] = 0x80
+
+	root := common.HexToHash("0x1234567890123456789012345678901234567890123456789012345678901234")
+
+	raw := fmt.Sprintf(`{
+		"type": "0x0",
+		"root": "%s",
+		"cumulativeGasUsed": "0x5208",
+		"gasUsed": "0x5208",
+		"logsBloom": "0x%x",
+		"transactionHash": "0xeeee00000000000000000000000000000000000000000000000000000000000c",
+		"logs": []
+	}`, root.Hex(), bloom)
+
+	var receipt Receipt
+	if err := json.Unmarshal([]byte(raw), &receipt); err != nil {
+		t.Fatalf("failed decoding receipt: %v", err)
+	}
+
+	if receipt.Bloom != bloom {
+		t.Fatalf("bloom did not decode: got %x", receipt.Bloom)
+	}
+
+	if !bytes.Equal(receipt.PostState, root.Bytes()) {
+		t.Fatalf("post state did not decode: got %x", receipt.PostState)
+	}
+
+	// Both directions of the go-ethereum conversion must carry them.
+	gethReceipt := receipt.ToGethReceipt()
+	if gethReceipt.Bloom != bloom || !bytes.Equal(gethReceipt.PostState, root.Bytes()) {
+		t.Fatal("ToGethReceipt dropped the bloom or post state")
+	}
+
+	back := FromGethReceipt(gethReceipt)
+	if back.Bloom != bloom || !bytes.Equal(back.PostState, root.Bytes()) {
+		t.Fatal("FromGethReceipt dropped the bloom or post state")
+	}
+
+	// A receipt without either field stays usable.
+	var bare Receipt
+	if err := json.Unmarshal([]byte(`{"transactionHash":"0xeeee00000000000000000000000000000000000000000000000000000000000d","logs":[]}`), &bare); err != nil {
+		t.Fatalf("failed decoding bare receipt: %v", err)
+	}
+
+	if bare.Bloom != (Bloom{}) || bare.PostState != nil {
+		t.Fatal("absent fields should stay zero")
+	}
+}
