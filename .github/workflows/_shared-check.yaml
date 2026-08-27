@@ -32,8 +32,11 @@ jobs:
     - name: Check go fmt
       run: if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then exit 1; fi
 
+    # Pinned rather than @latest: staticcheck's go directive tracks the current Go
+    # release, so @latest starts requiring a newer toolchain than the one set above
+    # and fails to install under GOTOOLCHAIN=local. Bump this with go-version.
     - name: Install staticcheck
-      run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      run: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
     - name: Run staticcheck
       run: |
         # Get all packages except plugin/symbols (generated code)
