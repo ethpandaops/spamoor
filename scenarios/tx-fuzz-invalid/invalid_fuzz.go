@@ -13,14 +13,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
-
-	"github.com/holiman/uint256"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 const (
@@ -370,7 +369,7 @@ func (s *Scenario) unstuck(ctx context.Context, client *spamoor.Client, wallet *
 			end = latest + unstuckBatch
 		}
 
-		var last *types.Transaction
+		var last *txtypes.Transaction
 		for n := latest; n < end; n++ {
 			raw, signed, err := buildSelfTransfer(wallet, n, feeCap, tip)
 			if err != nil {
@@ -383,9 +382,11 @@ func (s *Scenario) unstuck(ctx context.Context, client *spamoor.Client, wallet *
 		}
 
 		if last != nil {
-			wctx, cancel := context.WithTimeout(ctx, unstuckWait)
-			_, _ = bind.WaitMined(wctx, client.GetEthClient(), last)
-			cancel()
+			if gethTx, err := last.ToGethTx(); err == nil {
+				wctx, cancel := context.WithTimeout(ctx, unstuckWait)
+				_, _ = bind.WaitMined(wctx, client.GetEthClient(), gethTx)
+				cancel()
+			}
 		}
 	}
 
@@ -415,9 +416,9 @@ func (s *Scenario) unstuckFees(ctx context.Context, client *spamoor.Client) (*bi
 
 // buildSelfTransfer builds and signs a minimal 1-wei self-transfer used to fill
 // or replace a stuck nonce.
-func buildSelfTransfer(wallet *spamoor.Wallet, nonce uint64, feeCap, tip *big.Int) ([]byte, *types.Transaction, error) {
+func buildSelfTransfer(wallet *spamoor.Wallet, nonce uint64, feeCap, tip *big.Int) ([]byte, *txtypes.Transaction, error) {
 	to := wallet.GetAddress()
-	tx := types.NewTx(&types.DynamicFeeTx{
+	tx := txtypes.NewTx(&txtypes.DynamicFeeTx{
 		ChainID:   wallet.GetChainId(),
 		Nonce:     nonce,
 		GasTipCap: tip,
@@ -426,11 +427,11 @@ func buildSelfTransfer(wallet *spamoor.Wallet, nonce uint64, feeCap, tip *big.In
 		To:        &to,
 		Value:     big.NewInt(1),
 	})
-	signed, err := types.SignTx(tx, types.LatestSignerForChainID(wallet.GetChainId()), wallet.GetPrivateKey())
+	signed, err := txtypes.SignTx(tx, wallet.GetChainId(), wallet.GetPrivateKey())
 	if err != nil {
 		return nil, nil, err
 	}
-	raw, err := signed.MarshalBinary()
+	raw, err := signed.MarshalNetwork()
 	if err != nil {
 		return nil, nil, err
 	}

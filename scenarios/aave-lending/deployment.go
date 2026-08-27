@@ -18,6 +18,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/aave-lending/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // Library link placeholders for the unlinked @aave/core-v3@1.19.3 creation
@@ -155,7 +156,7 @@ func linkBytecode(bin string, links map[string]common.Address) (string, error) {
 // deployers; non-global contracts mix in the deployer address so every deployer
 // key gets its own isolated Aave market state (Aave is very state heavy, so each
 // run owns a distinct market rather than contending on shared reserve state).
-func (s *Scenario) buildDeployTx(ctx context.Context, client *spamoor.Client, deployerWallet *spamoor.Wallet, feeCap, tipCap *big.Int, metadata *bind.MetaData, links map[string]common.Address, global bool, salt uint32, params ...interface{}) (common.Address, *types.Transaction, error) {
+func (s *Scenario) buildDeployTx(ctx context.Context, client *spamoor.Client, deployerWallet *spamoor.Wallet, feeCap, tipCap *big.Int, metadata *bind.MetaData, links map[string]common.Address, global bool, salt uint32, params ...interface{}) (common.Address, *txtypes.Transaction, error) {
 	parsed, err := metadata.GetAbi()
 	if err != nil {
 		return common.Address{}, nil, err
@@ -250,7 +251,7 @@ func (s *Scenario) DeployAaveMarket(ctx context.Context) (*DeploymentInfo, error
 // address known ahead of mining, so it all fits in a single batch.
 func (s *Scenario) deployImplementations(ctx context.Context, client *spamoor.Client, deployerWallet *spamoor.Wallet, feeCap, tipCap *big.Int, info *DeploymentInfo) error {
 	deployerAddr := deployerWallet.GetAddress()
-	var txs []*types.Transaction
+	var txs []*txtypes.Transaction
 
 	// global marks stateless, shareable contracts (the logic libraries and the
 	// permissionless mock tokens) so they deploy once at a deployer-independent
@@ -393,7 +394,7 @@ func (s *Scenario) wireMarket(ctx context.Context, client *spamoor.Client, deplo
 		return fmt.Errorf("could not bind addresses provider: %w", err)
 	}
 
-	var txs []*types.Transaction
+	var txs []*txtypes.Transaction
 	boundCall := func(what string, gas uint64, build func(*bind.TransactOpts) (*types.Transaction, error)) error {
 		tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
@@ -484,7 +485,7 @@ func (s *Scenario) deployTokenImpls(ctx context.Context, client *spamoor.Client,
 		return fmt.Errorf("pool or configurator proxy not deployed")
 	}
 
-	var txs []*types.Transaction
+	var txs []*txtypes.Transaction
 	// token implementations are deployer-specific (their constructor binds the
 	// per-key pool proxy).
 	deploy := func(what string, metadata *bind.MetaData, salt uint32) (common.Address, error) {
@@ -619,7 +620,7 @@ func (s *Scenario) initReserves(ctx context.Context, client *spamoor.Client, dep
 		return fmt.Errorf("could not build initReserves tx: %w", err)
 	}
 
-	return s.sendBatch(ctx, deployerWallet, client, []*types.Transaction{tx}, "initializing reserves")
+	return s.sendBatch(ctx, deployerWallet, client, []*txtypes.Transaction{tx}, "initializing reserves")
 }
 
 // configureReserves (phase 5) enables each reserve as collateral, enables
@@ -630,7 +631,7 @@ func (s *Scenario) configureReserves(ctx context.Context, client *spamoor.Client
 		return fmt.Errorf("could not bind configurator: %w", err)
 	}
 
-	var txs []*types.Transaction
+	var txs []*txtypes.Transaction
 	boundCall := func(what string, build func(*bind.TransactOpts) (*types.Transaction, error)) error {
 		tx, err := deployerWallet.BuildBoundTxWithEstimate(ctx, client, s.walletPool.GetTxPool(), &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
@@ -686,7 +687,7 @@ func (s *Scenario) seedLiquidity(ctx context.Context, client *spamoor.Client, de
 		}
 	}
 
-	var txs []*types.Transaction
+	var txs []*txtypes.Transaction
 	boundCall := func(what string, gas uint64, build func(*bind.TransactOpts) (*types.Transaction, error)) error {
 		tx, err := deployerWallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),
@@ -751,7 +752,7 @@ func (s *Scenario) FundAndApproveWallets(ctx context.Context, info *DeploymentIn
 	concurrency = min(max(concurrency, 1), 50)
 
 	var (
-		setupTxs     []*types.Transaction
+		setupTxs     []*txtypes.Transaction
 		setupWallets []*spamoor.Wallet
 		mu           sync.Mutex
 		wg           sync.WaitGroup
@@ -849,12 +850,12 @@ func (s *Scenario) FundAndApproveWallets(ctx context.Context, info *DeploymentIn
 		}
 
 		wg.Add(1)
-		go func(tx *types.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
+		go func(tx *txtypes.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
 			s.walletPool.GetTxPool().SendTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
 				Client:      client,
 				ClientGroup: s.options.ClientGroup,
 				Rebroadcast: true,
-				OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 					if err != nil {
 						s.logger.Errorf("funding/approval tx failed: %v", err)
 					}
@@ -871,7 +872,7 @@ func (s *Scenario) FundAndApproveWallets(ctx context.Context, info *DeploymentIn
 
 // sendBatch submits a batch of transactions from a single wallet and waits for
 // them to confirm, logging progress. It is a no-op for an empty batch.
-func (s *Scenario) sendBatch(ctx context.Context, wallet *spamoor.Wallet, client *spamoor.Client, txs []*types.Transaction, action string) error {
+func (s *Scenario) sendBatch(ctx context.Context, wallet *spamoor.Wallet, client *spamoor.Client, txs []*txtypes.Transaction, action string) error {
 	if len(txs) == 0 {
 		return nil
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // healthFactorLiquidate (0.95) is the HF below which the engine attempts a
@@ -29,7 +30,7 @@ var tokenUnit = new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 // chosen for txIdx. It returns the built transaction and a short label naming the
 // action (for logging). Actions are chosen from what is actually feasible for the
 // wallet's current on-chain position so the stream is varied but rarely reverts.
-func (s *Scenario) buildActionTx(ctx context.Context, wallet *spamoor.Wallet, txIdx uint64, feeCap, tipCap *big.Int) (*types.Transaction, string, error) {
+func (s *Scenario) buildActionTx(ctx context.Context, wallet *spamoor.Wallet, txIdx uint64, feeCap, tipCap *big.Int) (*txtypes.Transaction, string, error) {
 	rng := rand.New(rand.NewSource(int64(txIdx)*0x9e3779b1 + 1))
 	walletIdx := txIdx % s.walletCount
 
@@ -101,7 +102,7 @@ const priceRevertFraction = 0.15
 // the price deep into the lower band. The gradual recovery (rather than symmetric
 // jumps) keeps dips coherent so liquidations land. setAnswer is permissionless on
 // the mock aggregator, so any wallet can post the move.
-func (s *Scenario) buildPriceTick(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int, rng *rand.Rand) (*types.Transaction, string, error) {
+func (s *Scenario) buildPriceTick(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int, rng *rand.Rand) (*txtypes.Transaction, string, error) {
 	t := rng.Intn(len(s.deployment.Tokens))
 	baseF := float64(oraclePriceAnswer)
 	vol := float64(s.options.PriceVolatility) / 10000.0
@@ -138,7 +139,7 @@ func (s *Scenario) buildPriceTick(ctx context.Context, wallet *spamoor.Wallet, f
 // liquidationCall against it. It only scans when a collateral price has dipped
 // (so it costs nothing in the common case) and returns ok=false when there is
 // nothing to liquidate.
-func (s *Scenario) tryLiquidation(ctx context.Context, wallet *spamoor.Wallet, walletIdx uint64, feeCap, tipCap *big.Int) (*types.Transaction, string, bool, error) {
+func (s *Scenario) tryLiquidation(ctx context.Context, wallet *spamoor.Wallet, walletIdx uint64, feeCap, tipCap *big.Int) (*txtypes.Transaction, string, bool, error) {
 	base := big.NewInt(oraclePriceAnswer)
 	dip := scaleByFloat(base, 0.97)
 	if s.price(0).Cmp(dip) >= 0 && s.price(1).Cmp(dip) >= 0 {
@@ -219,7 +220,7 @@ func (s *Scenario) nextRiskyVictim() int {
 // collateral and borrows token1 up to its borrowable headroom (which leaves a
 // small collateral buffer, settling the position at HF ~1.15). Such a position
 // becomes liquidatable once cumulative price drift exceeds that buffer.
-func (s *Scenario) buildRiskyAction(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int, rng *rand.Rand) (*types.Transaction, string, error) {
+func (s *Scenario) buildRiskyAction(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int, rng *rand.Rand) (*txtypes.Transaction, string, error) {
 	callOpts := &bind.CallOpts{Context: ctx}
 	acct, err := s.deployment.Pool.GetUserAccountData(callOpts, wallet.GetAddress())
 	if err != nil {
@@ -265,7 +266,7 @@ type actionCandidate struct {
 // buildNormalAction picks a feasible action on a random reserve, weighted across
 // supply/borrow/repay/withdraw, with amounts varied within the configured range
 // and bounded by what the wallet can actually do.
-func (s *Scenario) buildNormalAction(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int, rng *rand.Rand) (*types.Transaction, string, error) {
+func (s *Scenario) buildNormalAction(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int, rng *rand.Rand) (*txtypes.Transaction, string, error) {
 	callOpts := &bind.CallOpts{Context: ctx}
 	addr := wallet.GetAddress()
 	t := rng.Intn(len(s.deployment.Tokens))
@@ -349,7 +350,7 @@ func (s *Scenario) buildNormalAction(ctx context.Context, wallet *spamoor.Wallet
 // no feasible action: it supplies whichever reserve the wallet still holds tokens
 // of, else withdraws a reserve it has collateral in. As a last resort it supplies
 // the minimum on the original reserve.
-func (s *Scenario) buildFallback(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int, rng *rand.Rand, t int) (*types.Transaction, string, error) {
+func (s *Scenario) buildFallback(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int, rng *rand.Rand, t int) (*txtypes.Transaction, string, error) {
 	callOpts := &bind.CallOpts{Context: ctx}
 	addr := wallet.GetAddress()
 

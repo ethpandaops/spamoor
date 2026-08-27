@@ -2,8 +2,9 @@ package txbuilder
 
 import (
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
+
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // TxMetadata contains the common transaction parameters used across different transaction types.
@@ -18,6 +19,6 @@ type TxMetadata struct {
 	To         *common.Address
 	Value      *uint256.Int
 	Data       []byte
-	AccessList types.AccessList
-	AuthList   []types.SetCodeAuthorization
+	AccessList txtypes.AccessList
+	AuthList   []txtypes.SetCodeAuthorization
 }

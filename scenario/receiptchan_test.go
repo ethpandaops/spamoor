@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 func TestReceiptChanWaitNilChannel(t *testing.T) {
@@ -22,7 +22,7 @@ func TestReceiptChanWaitNilChannel(t *testing.T) {
 
 func TestReceiptChanWaitReceivesReceipt(t *testing.T) {
 	rc := make(ReceiptChan, 1)
-	want := &types.Receipt{Status: types.ReceiptStatusSuccessful}
+	want := &txtypes.Receipt{Status: txtypes.ReceiptStatusSuccessful}
 	rc <- want
 
 	got, err := rc.Wait(context.Background())

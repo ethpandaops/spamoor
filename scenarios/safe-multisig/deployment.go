@@ -16,6 +16,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/safe-multisig/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // DeploymentInfo holds the addresses and bound instances of the shared Safe
@@ -69,7 +70,7 @@ func (s *Scenario) DeployContracts(ctx context.Context) (*DeploymentInfo, error)
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
 
-	deploymentTxs := []*types.Transaction{}
+	deploymentTxs := []*txtypes.Transaction{}
 	info := &DeploymentInfo{}
 
 	// All three are no-constructor-arg contracts deployed via the CREATE2 factory
@@ -166,7 +167,7 @@ func (s *Scenario) setupSafes(ctx context.Context) error {
 		return fmt.Errorf("could not get tx fee: %w", err)
 	}
 
-	walletTxs := make(map[*spamoor.Wallet][]*types.Transaction)
+	walletTxs := make(map[*spamoor.Wallet][]*txtypes.Transaction)
 	createdCount := 0
 	for _, spec := range specs {
 		code, err := ethClient.CodeAt(ctx, spec.addr, nil)

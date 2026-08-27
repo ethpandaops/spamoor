@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -19,6 +18,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -255,7 +255,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
@@ -330,10 +330,10 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+		OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 			receiptChan <- receipt
 		},
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+		OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
 			txFees := utils.GetTransactionFees(tx, receipt)
 			s.logger.WithField("rpc", client.GetName()).Debugf(
 				" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v",
@@ -356,8 +356,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	return receiptChan, tx, client, wallet, nil
 }
 
-func (s *Scenario) buildSetCodeAuthorizations(txIdx uint64) []types.SetCodeAuthorization {
-	authorizations := []types.SetCodeAuthorization{}
+func (s *Scenario) buildSetCodeAuthorizations(txIdx uint64) []txtypes.SetCodeAuthorization {
+	authorizations := []txtypes.SetCodeAuthorization{}
 
 	if s.options.MaxAuthorizations == 0 {
 		return authorizations
@@ -399,13 +399,13 @@ func (s *Scenario) buildSetCodeAuthorizations(txIdx uint64) []types.SetCodeAutho
 			codeAddr = s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)).GetAddress()
 		}
 
-		authorization := types.SetCodeAuthorization{
+		authorization := txtypes.SetCodeAuthorization{
 			ChainID: *uint256.NewInt(s.walletPool.GetChainId().Uint64()),
 			Address: codeAddr,
 			Nonce:   delegator.GetNextNonce(),
 		}
 
-		authorization, err := types.SignSetCode(delegator.GetPrivateKey(), authorization)
+		authorization, err := txtypes.SignAuthorization(authorization, delegator.GetPrivateKey())
 		if err != nil {
 			s.logger.Errorf("could not sign set code authorization: %v", err)
 			continue

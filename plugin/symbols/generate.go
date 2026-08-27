@@ -5,6 +5,7 @@ package symbols
 //go:generate go run github.com/traefik/yaegi/cmd/yaegi extract github.com/ethpandaops/spamoor/spamoor
 //go:generate go run github.com/traefik/yaegi/cmd/yaegi extract github.com/ethpandaops/spamoor/scenario
 //go:generate go run github.com/traefik/yaegi/cmd/yaegi extract github.com/ethpandaops/spamoor/txbuilder
+//go:generate go run github.com/traefik/yaegi/cmd/yaegi extract github.com/ethpandaops/spamoor/txtypes
 //go:generate go run github.com/traefik/yaegi/cmd/yaegi extract github.com/ethpandaops/spamoor/utils
 //go:generate go run github.com/traefik/yaegi/cmd/yaegi extract github.com/sirupsen/logrus
 //go:generate go run github.com/traefik/yaegi/cmd/yaegi extract github.com/spf13/pflag

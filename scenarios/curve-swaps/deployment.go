@@ -17,6 +17,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/curve-swaps/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // coinsPerPool is the number of coins in each StableSwap pool. It is fixed at 3
@@ -126,7 +127,7 @@ func (c *Curve) DeployCurvePools() (*CurveDeploymentInfo, error) {
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
 
-	deploymentTxs := []*types.Transaction{}
+	deploymentTxs := []*txtypes.Transaction{}
 	deployContract := func(metadata *bind.MetaData, global bool, salt uint32, params ...interface{}) (common.Address, error) {
 		parsed, err := metadata.GetAbi()
 		if err != nil {
@@ -227,7 +228,7 @@ func (c *Curve) DeployCurvePools() (*CurveDeploymentInfo, error) {
 	c.deployment = info
 
 	// hand LP minting rights to each pool (deployer is the current minter).
-	minterTxs := []*types.Transaction{}
+	minterTxs := []*txtypes.Transaction{}
 	for _, poolInfo := range info.Pools {
 		poolInfo := poolInfo
 		tx, err := deployerWallet.BuildBoundTxWithEstimate(c.ctx, client, c.walletPool.GetTxPool(), &txbuilder.TxMetadata{
@@ -248,7 +249,7 @@ func (c *Curve) DeployCurvePools() (*CurveDeploymentInfo, error) {
 
 	// seed balanced liquidity into every pool (one estimable tx per pool: the
 	// helper mints, approves and adds liquidity atomically).
-	seedTxs := []*types.Transaction{}
+	seedTxs := []*txtypes.Transaction{}
 	seedAmount := c.options.SeedAmount.ToBig()
 	for _, poolInfo := range info.Pools {
 		poolInfo := poolInfo
@@ -338,7 +339,7 @@ func (c *Curve) FundAndApproveWallets() error {
 	}
 
 	var (
-		setupTxs     []*types.Transaction
+		setupTxs     []*txtypes.Transaction
 		setupWallets []*spamoor.Wallet
 		mu           sync.Mutex
 		wg           sync.WaitGroup
@@ -445,12 +446,12 @@ func (c *Curve) FundAndApproveWallets() error {
 		}
 
 		wg.Add(1)
-		go func(tx *types.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
+		go func(tx *txtypes.Transaction, client *spamoor.Client, wallet *spamoor.Wallet) {
 			c.walletPool.GetTxPool().SendTransaction(c.ctx, wallet, tx, &spamoor.SendTransactionOptions{
 				Client:      client,
 				ClientGroup: c.options.ClientGroup,
 				Rebroadcast: true,
-				OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+				OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 					if err != nil {
 						c.logger.Errorf("funding/approval tx failed: %v", err)
 					}
@@ -554,7 +555,7 @@ func (c *Curve) UpdateTokenBalance(walletAddr common.Address, coinAddr common.Ad
 
 // sendBatch submits a batch of transactions from a single wallet and waits for
 // them to confirm, logging progress. It is a no-op for an empty batch.
-func (c *Curve) sendBatch(wallet *spamoor.Wallet, client *spamoor.Client, txs []*types.Transaction, action string) error {
+func (c *Curve) sendBatch(wallet *spamoor.Wallet, client *spamoor.Client, txs []*txtypes.Transaction, action string) error {
 	if len(txs) == 0 {
 		return nil
 	}

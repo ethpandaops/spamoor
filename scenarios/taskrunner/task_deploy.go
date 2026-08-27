@@ -9,11 +9,12 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/holiman/uint256"
+
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
-	"github.com/holiman/uint256"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // DeployTask represents a contract deployment task
@@ -88,7 +89,7 @@ func (t *DeployTask) Validate() error {
 }
 
 // BuildTransaction creates a contract deployment transaction
-func (t *DeployTask) BuildTransaction(ctx context.Context, wallet *spamoor.Wallet, registry *ContractRegistry, execCtx *TaskExecutionContext) (*types.Transaction, error) {
+func (t *DeployTask) BuildTransaction(ctx context.Context, wallet *spamoor.Wallet, registry *ContractRegistry, execCtx *TaskExecutionContext) (*txtypes.Transaction, error) {
 	// Load bytecode from appropriate source (placeholders already processed)
 	bytecode, err := t.loadBytecode()
 	if err != nil {

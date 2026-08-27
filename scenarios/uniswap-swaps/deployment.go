@@ -9,11 +9,13 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/holiman/uint256"
+
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios/uniswap-swaps/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
-	"github.com/holiman/uint256"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 type DeploymentInfo struct {
@@ -72,7 +74,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
 
-	deploymentTxs := []*types.Transaction{}
+	deploymentTxs := []*txtypes.Transaction{}
 	deploymentInfo := &DeploymentInfo{}
 	deployContract := func(metadata *bind.MetaData, global bool, salt uint32, params ...interface{}) (common.Address, error) {
 		parsed, err := metadata.GetAbi()
@@ -252,7 +254,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	// Phase 2: post-deployment setup calls. Built only after the deployment
 	// batch has been mined so eth_estimateGas dispatches into the real
 	// contract code instead of treating the target as an EOA.
-	setupTxs := []*types.Transaction{}
+	setupTxs := []*txtypes.Transaction{}
 	callOpts := &bind.CallOpts{Context: u.ctx}
 
 	for _, pairInfo := range deploymentInfo.Pairs {
@@ -300,7 +302,7 @@ func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	err = rootWallet.WithWalletLock(u.ctx, len(deploymentInfo.Pairs), pairFundingAmount, u.walletPool.GetClientPool(), func(reason string) {
 		u.logger.Infof("root wallet is locked, %s", reason)
 	}, func() error {
-		liquidityTxs := []*types.Transaction{}
+		liquidityTxs := []*txtypes.Transaction{}
 		daiLiquidity := new(big.Int).Mul(u.options.EthLiquidityPerPair.ToBig(), big.NewInt(int64(u.options.DaiLiquidityFactor)))
 
 		for _, pairInfo := range deploymentInfo.Pairs {

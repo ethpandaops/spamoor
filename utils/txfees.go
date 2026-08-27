@@ -3,7 +3,7 @@ package utils
 import (
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // TxFees represents the fees associated with a transaction including
@@ -15,9 +15,9 @@ type TxFees struct {
 	BlobBaseFee   big.Int
 }
 
-func GetTransactionFees(tx *types.Transaction, receipt *types.Receipt) *TxFees {
+func GetTransactionFees(tx *txtypes.Transaction, receipt *txtypes.Receipt) *TxFees {
 	effectiveGasPrice := receipt.EffectiveGasPrice
-	if tx.Type() == types.LegacyTxType {
+	if tx.Type() == txtypes.LegacyTxType {
 		effectiveGasPrice = tx.GasPrice()
 	}
 

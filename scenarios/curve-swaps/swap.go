@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // feeDenominator matches the StableSwap contract's FEE_DENOMINATOR (1e10) and is
@@ -24,7 +25,7 @@ var feeDenominator = big.NewInt(1e10)
 // wallet holds most of, swapping it into a random other coin. Stablecoin output
 // is ~1:1 with input (minus fee), so min_dy is derived locally from the input
 // amount and the configured slippage rather than via an on-chain quote.
-func (s *Scenario) buildSwapTx(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int) (*types.Transaction, error) {
+func (s *Scenario) buildSwapTx(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int) (*txtypes.Transaction, error) {
 	pools := s.deployment.Pools
 	if len(pools) == 0 {
 		return nil, fmt.Errorf("no pools deployed")

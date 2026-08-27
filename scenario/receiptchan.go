@@ -3,12 +3,12 @@ package scenario
 import (
 	"context"
 
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
-type ReceiptChan chan *types.Receipt
+type ReceiptChan chan *txtypes.Receipt
 
-func (rc ReceiptChan) Wait(ctx context.Context) (*types.Receipt, error) {
+func (rc ReceiptChan) Wait(ctx context.Context) (*txtypes.Receipt, error) {
 	if rc == nil {
 		return nil, nil
 	}

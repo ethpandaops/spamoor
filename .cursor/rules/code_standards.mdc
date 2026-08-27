@@ -210,7 +210,7 @@ deployerWallet := s.walletPool.GetWellKnownWallet("deployer")
 err := txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
     Client:      client,
     Rebroadcast: true,
-    OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+    OnComplete: func(tx *txtxtypes.Transaction, receipt *txtxtypes.Receipt, err error) {
         // ALWAYS call onComplete when using RunTransactionScenario
         onComplete()
         
@@ -219,10 +219,10 @@ err := txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOpt
             return
         }
     },
-    OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+    OnConfirm: func(tx *txtxtypes.Transaction, receipt *txtxtypes.Receipt) {
 		txFees := utils.GetTransactionFees(tx, receipt)
         
-        if receipt.Status == types.ReceiptStatusSuccessful {
+        if receipt.Status == txtxtxtxtypes.ReceiptStatusSuccessful {
             s.handleSuccess(tx, receipt, txFees)
         } else {
             s.logger.Warnf("Transaction reverted: %s", tx.Hash().Hex())
@@ -271,7 +271,7 @@ import (
     // Third-party imports second (grouped by organization)
     "github.com/ethereum/go-ethereum/accounts/abi/bind"
     "github.com/ethereum/go-ethereum/common"
-    "github.com/ethereum/go-ethereum/core/types"
+    "github.com/ethpandaops/spamoor/txtypes"
     "github.com/holiman/uint256"
     "github.com/sirupsen/logrus"
     "github.com/spf13/pflag"

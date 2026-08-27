@@ -14,13 +14,14 @@ import (
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethpandaops/spamoor/txbuilder"
-	"github.com/ethpandaops/spamoor/utils"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
+
+	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
+	"github.com/ethpandaops/spamoor/utils"
 )
 
 // WalletSelectionMode defines how wallets are selected from the pool.
@@ -1175,7 +1176,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 			}
 		}
 
-		txList := make([]*types.Transaction, 0, batchTxCount)
+		txList := make([]*txtypes.Transaction, 0, batchTxCount)
 		batchTxMap := map[common.Hash][]*FundingRequest{}
 		if batcher != nil {
 			for _, batch := range batches {
@@ -1212,7 +1213,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 		}
 
 		for _, receipt := range receipts {
-			if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+			if receipt != nil && receipt.Status == txtypes.ReceiptStatusSuccessful {
 				batch, ok := batchTxMap[receipt.TxHash]
 				if ok {
 					for _, req := range batch {
@@ -1230,7 +1231,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 // wallet. The per-tx gas limit is sized via FundingGasFor(req.IsEmpty), so
 // non-empty refills use the cheap 21k path while initial fundings to empty
 // targets reserve enough for the EIP-2780/EIP-8037 state gas charge.
-func (pool *WalletPool) buildWalletFundingTx(req *FundingRequest, client *Client) (*types.Transaction, error) {
+func (pool *WalletPool) buildWalletFundingTx(req *FundingRequest, client *Client) (*txtypes.Transaction, error) {
 	if client == nil {
 		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
 		if client == nil {
@@ -1277,7 +1278,7 @@ func (pool *WalletPool) buildWalletFundingTx(req *FundingRequest, client *Client
 // buildWalletFundingBatchTx creates a transaction to fund multiple wallets using the batcher contract.
 // It calculates the total amount needed, encodes the funding requests as calldata,
 // and builds a transaction to the batcher contract with appropriate gas limits.
-func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, client *Client, batcher *TxBatcher) (*types.Transaction, error) {
+func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, client *Client, batcher *TxBatcher) (*txtypes.Transaction, error) {
 	if client == nil {
 		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
 		if client == nil {
@@ -1336,14 +1337,14 @@ func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, cl
 
 // reclaimTx holds a reclaim transaction and its associated wallet for fund recovery operations.
 type reclaimTx struct {
-	tx     *types.Transaction
+	tx     *txtypes.Transaction
 	wallet *Wallet
 }
 
 // buildWalletReclaimTx creates a transaction to reclaim funds from a child wallet back to the target address.
 // It calculates the maximum amount that can be reclaimed after accounting for transaction fees.
 // Returns nil if the wallet doesn't have enough balance to cover fees.
-func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *Wallet, client *Client, target common.Address) (*types.Transaction, error) {
+func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *Wallet, client *Client, target common.Address) (*txtypes.Transaction, error) {
 	if client == nil {
 		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
 		if client == nil {
@@ -1502,7 +1503,7 @@ func (pool *WalletPool) ReclaimFunds(ctx context.Context, client *Client) error 
 				pool.logger.Infof("sending reclaim tx %v (%v)", tx.tx.Hash().String(), utils.ReadableAmount(uint256.MustFromBig(tx.tx.Value())))
 				pool.txpool.SendTransaction(ctx, tx.wallet, tx.tx, &SendTransactionOptions{
 					Client: client,
-					OnComplete: func(_ *types.Transaction, receipt *types.Receipt, err error) {
+					OnComplete: func(_ *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 						wg.Done()
 						if err != nil {
 							pool.logger.Warnf("reclaim tx %v failed: %v", tx.tx.Hash().String(), err)

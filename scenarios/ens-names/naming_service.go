@@ -16,6 +16,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // namingRetryLimit gives up naming an address after this many reverted
@@ -95,7 +96,7 @@ func (s *Scenario) namingServiceTick(ctx context.Context, nameSvcWallet *spamoor
 		return 0, err
 	}
 
-	txs := make([]*types.Transaction, 0, len(candidates))
+	txs := make([]*txtypes.Transaction, 0, len(candidates))
 	for _, candidate := range candidates {
 		addr := candidate.addr
 		label := candidate.label
@@ -133,7 +134,7 @@ func (s *Scenario) namingServiceTick(ctx context.Context, nameSvcWallet *spamoor
 	named := 0
 	for i, receipt := range receipts {
 		addr := candidates[i].addr
-		if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+		if receipt != nil && receipt.Status == txtypes.ReceiptStatusSuccessful {
 			seen[addr] = true
 			named++
 			s.logger.Debugf("naming service: named %s as %s.eth", addr.Hex(), candidates[i].label)

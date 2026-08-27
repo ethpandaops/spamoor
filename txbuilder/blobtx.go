@@ -11,20 +11,21 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/ethereum/go-ethereum/params"
+
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // BuildBlobTx constructs a blob transaction (EIP-4844) with the specified transaction metadata and blob references.
 // It processes multiple blob references, each containing data that will be committed to the blob sidecar.
 // The transaction must have a valid 'To' address as blob transactions cannot be contract deployments.
 // Returns a complete BlobTx with all blobs, commitments, proofs, and versioned hashes.
-func BuildBlobTx(txData *TxMetadata, blobRefs [][]string) (*types.BlobTx, error) {
+func BuildBlobTx(txData *TxMetadata, blobRefs [][]string) (*txtypes.BlobTx, error) {
 	if txData.To == nil {
 		return nil, fmt.Errorf("to cannot be nil for blob transaction")
 	}
-	tx := types.BlobTx{
+	tx := txtypes.BlobTx{
 		GasTipCap:  txData.GasTipCap,
 		GasFeeCap:  txData.GasFeeCap,
 		BlobFeeCap: txData.BlobFeeCap,
@@ -34,7 +35,7 @@ func BuildBlobTx(txData *TxMetadata, blobRefs [][]string) (*types.BlobTx, error)
 		Data:       txData.Data,
 		AccessList: txData.AccessList,
 		BlobHashes: make([]common.Hash, 0),
-		Sidecar: &types.BlobTxSidecar{
+		Sidecar: &txtypes.BlobSidecar{
 			Blobs:       make([]kzg4844.Blob, 0),
 			Commitments: make([]kzg4844.Commitment, 0),
 			Proofs:      make([]kzg4844.Proof, 0),
@@ -61,7 +62,7 @@ func BuildBlobTx(txData *TxMetadata, blobRefs [][]string) (*types.BlobTx, error)
 //   - "copy:index" - copy data from existing blob at index (only for blob transactions)
 //
 // The tx parameter is used for the "copy" reference type and can be nil for other types.
-func ParseBlobRefsBytes(blobRefs []string, tx *types.BlobTx) ([]byte, error) {
+func ParseBlobRefsBytes(blobRefs []string, tx *txtypes.BlobTx) ([]byte, error) {
 	var err error
 	var blobBytes []byte
 
@@ -147,7 +148,7 @@ func ParseBlobRefsBytes(blobRefs []string, tx *types.BlobTx) ([]byte, error) {
 // parseBlobRefs processes a single blob reference array and adds the resulting blob to the transaction.
 // It parses the blob data using ParseBlobRefsBytes, encodes it into a KZG commitment,
 // and appends the blob, commitment, proof, and versioned hash to the transaction sidecar.
-func parseBlobRefs(tx *types.BlobTx, blobRefs []string) error {
+func parseBlobRefs(tx *txtypes.BlobTx, blobRefs []string) error {
 	blobBytes, err := ParseBlobRefsBytes(blobRefs, tx)
 	if err != nil {
 		return err

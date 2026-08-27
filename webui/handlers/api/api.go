@@ -15,16 +15,17 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
+
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/daemon/configs"
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
-	"github.com/gorilla/mux"
-	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
 )
 
 // CreateSpammerRequest represents the request body for creating a new spammer
@@ -2266,7 +2267,7 @@ func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
 
 	if req.MaxFee != "" || req.MaxTip != "" {
 		// Use provided values - if only one is provided, get the other from network
-		baseFee, err := client.GetEthClient().SuggestGasPrice(ctx)
+		baseFee, _, err := client.GetSuggestedFee(ctx)
 		if err != nil {
 			sendError(w, fmt.Sprintf("failed to get gas price: %v", err), http.StatusInternalServerError)
 			return
@@ -2304,7 +2305,7 @@ func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// Get suggested values from network
-		baseFee, err := client.GetEthClient().SuggestGasPrice(ctx)
+		baseFee, _, err := client.GetSuggestedFee(ctx)
 		if err != nil {
 			sendError(w, fmt.Sprintf("failed to get gas price: %v", err), http.StatusInternalServerError)
 			return
@@ -2320,7 +2321,7 @@ func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build transaction
-	txData := &types.DynamicFeeTx{
+	txData := &txtypes.DynamicFeeTx{
 		To:        &toAddr,
 		Value:     valueWei,
 		Gas:       gasLimit,
