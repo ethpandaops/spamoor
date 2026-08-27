@@ -10,18 +10,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	geas "github.com/fjl/geas/asm"
+	"github.com/holiman/uint256"
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
-
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/holiman/uint256"
-	"github.com/sirupsen/logrus"
-	"github.com/spf13/pflag"
 )
 
 type ScenarioOptions struct {
@@ -270,7 +269,7 @@ func (s *Scenario) trimGeasOpcodes(opcodesGeas string) string {
 	return opcodesGeas
 }
 
-func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*types.Receipt, *spamoor.Client, error) {
+func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*txtypes.Receipt, *spamoor.Client, error) {
 	deployClientGroup := s.options.DeployClientGroup
 	if deployClientGroup == "" {
 		deployClientGroup = s.options.ClientGroup
@@ -375,7 +374,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context, opcodesGeas string) (*t
 	return receipt, client, nil
 }
 
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
@@ -431,10 +430,10 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+		OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 			receiptChan <- receipt
 		},
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+		OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
 			txFees := utils.GetTransactionFees(tx, receipt)
 			s.logger.WithField("rpc", client.GetName()).Debugf(
 				" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v",

@@ -14,13 +14,14 @@ import (
 
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // buildV2SwapTx builds a single uniswap v2 swap against a randomly selected pair
 // and router, deciding buy vs sell from the configured ratio and the wallet's
 // tracked balances. Amounts are DAI-denominated and priced via the router's
 // on-chain getAmountsIn/getAmountsOut helpers.
-func (s *Scenario) buildV2SwapTx(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int) (*types.Transaction, error) {
+func (s *Scenario) buildV2SwapTx(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int) (*txtypes.Transaction, error) {
 	// Select random pair
 	pairIdx := mathrand.Intn(len(s.deploymentInfo.Pairs))
 	pair := s.deploymentInfo.Pairs[pairIdx]
@@ -78,7 +79,7 @@ func (s *Scenario) buildV2SwapTx(ctx context.Context, wallet *spamoor.Wallet, fe
 		router = s.uniswap.RouterB
 	}
 
-	var tx *types.Transaction
+	var tx *txtypes.Transaction
 
 	if isBuy {
 		// Decide whether to use ETH or WETH for buying

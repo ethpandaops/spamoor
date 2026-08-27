@@ -15,6 +15,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/ens-names/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // usdOraclePrice is the static ETH/USD price fed to the DummyOracle ($1600,
@@ -226,7 +227,7 @@ func (d *stackDeployer) deployExecutor(ctx context.Context) error {
 	}
 
 	if tx != nil {
-		if err := d.sendBatch(ctx, []*types.Transaction{tx}, "deploying ens executor"); err != nil {
+		if err := d.sendBatch(ctx, []*txtypes.Transaction{tx}, "deploying ens executor"); err != nil {
 			return err
 		}
 	}
@@ -353,7 +354,7 @@ func (d *stackDeployer) ensureOperator(ctx context.Context) error {
 			return fmt.Errorf("could not build setOperator tx: %w", err)
 		}
 
-		return d.sendBatchFrom(ctx, rootWallet.GetWallet(), []*types.Transaction{tx}, "authorizing ens deployer")
+		return d.sendBatchFrom(ctx, rootWallet.GetWallet(), []*txtypes.Transaction{tx}, "authorizing ens deployer")
 	})
 	if err != nil {
 		return err
@@ -373,7 +374,7 @@ func (d *stackDeployer) ensureOperator(ctx context.Context) error {
 
 // deployTx builds an executor.deploy() tx for one contract if it does not
 // exist yet, ensuring operator rights first.
-func (d *stackDeployer) deployTx(ctx context.Context, name string, addr common.Address, initcode []byte) (*types.Transaction, error) {
+func (d *stackDeployer) deployTx(ctx context.Context, name string, addr common.Address, initcode []byte) (*txtypes.Transaction, error) {
 	if code, err := d.client.GetCodeAt(ctx, addr); err == nil && len(code) > 0 {
 		d.s.logger.Debugf("%s already deployed at %s, reusing", name, addr.Hex())
 		return nil, nil
@@ -398,7 +399,7 @@ func (d *stackDeployer) deployTx(ctx context.Context, name string, addr common.A
 
 // execTx builds an executor.execute() tx performing an owner-gated call,
 // ensuring operator rights first.
-func (d *stackDeployer) execTx(ctx context.Context, what string, target common.Address, data []byte) (*types.Transaction, error) {
+func (d *stackDeployer) execTx(ctx context.Context, what string, target common.Address, data []byte) (*txtypes.Transaction, error) {
 	if err := d.ensureOperator(ctx); err != nil {
 		return nil, err
 	}
@@ -419,7 +420,7 @@ func (d *stackDeployer) execTx(ctx context.Context, what string, target common.A
 // deployContractSet deploys a list of contracts via the executor in one mined
 // batch, skipping the ones that already exist.
 func (d *stackDeployer) deployContractSet(ctx context.Context, action string, contracts []executorDeployment) error {
-	txs := make([]*types.Transaction, 0, len(contracts))
+	txs := make([]*txtypes.Transaction, 0, len(contracts))
 	for _, c := range contracts {
 		initcode, err := buildInitcode(c.metadata, c.params...)
 		if err != nil {
@@ -483,7 +484,7 @@ func (d *stackDeployer) wireRootNodes(ctx context.Context) error {
 	}
 	callOpts := &bind.CallOpts{Context: ctx}
 
-	txs := make([]*types.Transaction, 0, 2)
+	txs := make([]*txtypes.Transaction, 0, 2)
 
 	if owner, err := registry.Owner(callOpts, ethNode); err != nil {
 		return fmt.Errorf("could not read eth node owner: %w", err)
@@ -528,7 +529,7 @@ func (d *stackDeployer) wireRootNodes(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := d.sendBatch(ctx, []*types.Transaction{tx}, "wiring addr.reverse node"); err != nil {
+		if err := d.sendBatch(ctx, []*txtypes.Transaction{tx}, "wiring addr.reverse node"); err != nil {
 			return err
 		}
 	}
@@ -577,7 +578,7 @@ func (d *stackDeployer) wireGrants(ctx context.Context) error {
 		return fmt.Errorf("could not bind DefaultReverseRegistrar: %w", err)
 	}
 
-	txs := make([]*types.Transaction, 0, 7)
+	txs := make([]*txtypes.Transaction, 0, 7)
 
 	for _, grant := range []struct {
 		what       string
@@ -699,13 +700,13 @@ func (d *stackDeployer) bindContracts() error {
 
 // sendBatch submits a batch of deployment txs from the deployer wallet and
 // awaits confirmation.
-func (d *stackDeployer) sendBatch(ctx context.Context, txs []*types.Transaction, action string) error {
+func (d *stackDeployer) sendBatch(ctx context.Context, txs []*txtypes.Transaction, action string) error {
 	return d.sendBatchFrom(ctx, d.wallet, txs, action)
 }
 
 // sendBatchFrom submits a batch of txs from the given wallet and awaits
 // confirmation.
-func (d *stackDeployer) sendBatchFrom(ctx context.Context, wallet *spamoor.Wallet, txs []*types.Transaction, action string) error {
+func (d *stackDeployer) sendBatchFrom(ctx context.Context, wallet *spamoor.Wallet, txs []*txtypes.Transaction, action string) error {
 	if len(txs) == 0 {
 		return nil
 	}

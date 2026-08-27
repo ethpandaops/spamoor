@@ -15,6 +15,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/uniswap-swaps/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // buildV3SwapTx builds a single exact-input swap against a randomly selected
@@ -23,7 +24,7 @@ import (
 // is no quoter deployed, so amountOutMinimum is derived from the pool's current
 // spot price with the configured slippage tolerance applied, while balances are
 // tracked with a conservative estimate to avoid insufficient-input reverts.
-func (s *Scenario) buildV3SwapTx(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int) (*types.Transaction, error) {
+func (s *Scenario) buildV3SwapTx(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int) (*txtypes.Transaction, error) {
 	info := s.uniswap.v3Deployment
 	if info == nil || len(info.Pools) == 0 {
 		return nil, fmt.Errorf("no v3 pools deployed")

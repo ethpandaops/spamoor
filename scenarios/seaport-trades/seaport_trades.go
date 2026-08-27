@@ -8,7 +8,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -16,6 +15,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios/seaport-trades/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -266,7 +266,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 // sendTx builds and submits one fulfillment for the given tx index, wiring the
 // trade's inventory reservations to be committed or rolled back when the tx
 // completes.
-func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
 		spamoor.WithClientGroup(s.options.ClientGroup),
@@ -300,11 +300,11 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
-			onResult(err == nil && receipt != nil && receipt.Status == types.ReceiptStatusSuccessful)
+		OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
+			onResult(err == nil && receipt != nil && receipt.Status == txtypes.ReceiptStatusSuccessful)
 			receiptChan <- receipt
 		},
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+		OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
 			txFees := utils.GetTransactionFees(tx, receipt)
 			s.logger.WithField("rpc", client.GetName()).Debugf(
 				" transaction %d confirmed in block #%v. total fee: %v gwei (base: %v) logs: %v",

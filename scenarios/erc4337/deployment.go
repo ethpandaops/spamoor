@@ -15,6 +15,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/erc4337/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // DeploymentInfo holds the addresses and bound instances of the ERC-4337 stack
@@ -62,7 +63,7 @@ func (s *Scenario) DeployContracts(ctx context.Context, redeploy bool) (*Deploym
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
 
-	deploymentTxs := []*types.Transaction{}
+	deploymentTxs := []*txtypes.Transaction{}
 	deploymentInfo := &DeploymentInfo{}
 	deployContract := func(metadata *bind.MetaData, global bool, salt uint32, params ...interface{}) (common.Address, error) {
 		parsed, err := metadata.GetAbi()

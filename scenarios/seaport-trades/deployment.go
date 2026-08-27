@@ -6,11 +6,11 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios/seaport-trades/contract"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // DeploymentInfo holds the addresses and bound instances of the Seaport stack
@@ -56,7 +56,7 @@ func (s *Scenario) DeployContracts(ctx context.Context) (*DeploymentInfo, error)
 		return nil, fmt.Errorf("could not get tx fee: %w", err)
 	}
 
-	deploymentTxs := []*types.Transaction{}
+	deploymentTxs := []*txtypes.Transaction{}
 	info := &DeploymentInfo{}
 
 	// deploy resolves (or builds the creation tx for) one contract via the CREATE2

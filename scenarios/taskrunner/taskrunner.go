@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 type ScenarioOptions struct {
@@ -319,7 +319,7 @@ func (s *Scenario) executeTaskSequence(ctx context.Context, tasks []Task, baseTa
 
 	} else {
 		// Batch mode: Build all transactions first, then send as batch
-		var transactions []*types.Transaction
+		var transactions []*txtypes.Transaction
 		for i, task := range tasks {
 			tx, err := s.buildTaskTransaction(ctx, task, baseTaskIndex+i, wallet, registry, execCtx, txIdx)
 			if err != nil {
@@ -462,7 +462,7 @@ func (s *Scenario) processExecutionTx(ctx context.Context, params *scenario.Proc
 }
 
 // buildTaskTransaction builds a transaction for a task with proper placeholder processing
-func (s *Scenario) buildTaskTransaction(ctx context.Context, task Task, taskIndex int, wallet *spamoor.Wallet, registry *ContractRegistry, execCtx *TaskExecutionContext, txIdx uint64) (*types.Transaction, error) {
+func (s *Scenario) buildTaskTransaction(ctx context.Context, task Task, taskIndex int, wallet *spamoor.Wallet, registry *ContractRegistry, execCtx *TaskExecutionContext, txIdx uint64) (*txtypes.Transaction, error) {
 	// For call tasks, we need to process placeholders with proper context
 	if callTask, ok := task.(*CallTask); ok {
 		// Create a copy of the task with processed placeholders

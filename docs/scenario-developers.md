@@ -554,7 +554,7 @@ receipts, err := s.walletPool.GetTxPool().SendTransactionBatch(ctx, wallet, tran
 ```go
 // When using multiple wallets, transactions can be distributed
 // because each wallet maintains its own nonce sequence
-walletTxs := make(map[*spamoor.Wallet][]*types.Transaction)
+walletTxs := make(map[*spamoor.Wallet][]*txtypes.Transaction)
 
 // Group transactions by wallet
 for i, tx := range transactions {
@@ -871,6 +871,41 @@ The funding system ensures wallets always have sufficient ETH for transactions w
 
 ## Transaction Building
 
+### Transaction Types
+
+Transactions, receipts and blocks use spamoor's own `txtypes` package rather than
+go-ethereum's `core/types`:
+
+```go
+import "github.com/ethpandaops/spamoor/txtypes"
+
+tx, err := wallet.BuildDynamicFeeTx(&txtypes.DynamicFeeTx{ /* ... */ })
+```
+
+`txtypes.Transaction` provides the same accessors as go-ethereum's (`Hash()`,
+`Nonce()`, `To()`, `Value()`, `Data()`, `Type()`, `BlobTxSidecar()`, ...), and
+`txtypes.Receipt` the same fields (`Status`, `GasUsed`, `Logs`, `BlockNumber`,
+`ContractAddress`, ...). `txtypes.Log` and `txtypes.AccessList` are aliases of the
+go-ethereum types, so abigen event parsing works unchanged.
+
+The one place go-ethereum's transaction type still appears is the `BuildBoundTx`
+callback, because abigen-generated bindings build go-ethereum transactions.
+`BuildBoundTx` converts the result:
+
+```go
+tx, err := wallet.BuildBoundTx(ctx, txData, func(opts *bind.TransactOpts) (*types.Transaction, error) {
+    return contract.Transfer(opts, toAddr, amount)  // go-ethereum type here
+})
+// tx is a *txtypes.Transaction
+```
+
+If you need to hand a transaction or receipt to a go-ethereum API, convert explicitly
+with `tx.ToGethTx()` or `receipt.ToGethReceipt()`. Conversion fails for transaction
+types go-ethereum does not implement.
+
+Adding support for a new transaction type means implementing `txtypes.TxData` and
+calling `txtypes.RegisterTxType` — no change to the engine is required.
+
 ### Using TxBuilder
 
 Always use the `txbuilder` package for transaction construction:
@@ -957,7 +992,7 @@ err := txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOpt
     Rebroadcast: true, // Enable exponential backoff rebroadcast
     
     // Callback functions
-    OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+    OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
         // Called only when transaction is confirmed in a block
         // receipt is guaranteed to be non-nil here
         s.logger.Infof("Transaction confirmed: %s (block %d)", 
@@ -966,7 +1001,7 @@ err := txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOpt
         // Handle successful confirmation
         s.handleConfirmedTransaction(tx, receipt)
     },
-    OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+    OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
         // Always called when processing completes (success or failure)
         // CRITICAL: receipt may be nil if scenario cancelled or replacement confirmed
         if err != nil {
@@ -980,7 +1015,7 @@ err := txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOpt
             return
         }
         
-        if receipt.Status == types.ReceiptStatusSuccessful {
+        if receipt.Status == txtxtypes.ReceiptStatusSuccessful {
             s.logger.Infof("Transaction completed successfully: %s", tx.Hash().Hex())
         } else {
             s.logger.Warnf("Transaction reverted: %s", tx.Hash().Hex())
@@ -989,7 +1024,7 @@ err := txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOpt
         // Call scenario completion callback
         onComplete()
     },
-    OnEncode: func(tx *types.Transaction) ([]byte, error) {
+    OnEncode: func(tx *txtypes.Transaction) ([]byte, error) {
         // Custom transaction encoding (optional)
         // Useful for alternative serialization formats
         return tx.MarshalBinary()
@@ -1006,7 +1041,7 @@ Submits a transaction and waits for confirmation. Returns the receipt or error:
 receipt, err := txpool.SendAndAwaitTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
     Client:      client,
     Rebroadcast: true, // Recommended for important transactions
-    OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+    OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
         // Called when confirmed (tx confirmation go subroutine)
         s.logger.Infof("Deployment confirmed: %s", receipt.ContractAddress.Hex())
     },
@@ -1020,7 +1055,7 @@ if receipt == nil {
     return fmt.Errorf("deployment cancelled or replaced")
 }
 
-if receipt.Status == types.ReceiptStatusSuccessful {
+if receipt.Status == txtxtypes.ReceiptStatusSuccessful {
     contractAddr := receipt.ContractAddress
     s.logger.Infof("Contract deployed at: %s", contractAddr.Hex())
 } else {
@@ -1036,13 +1071,13 @@ Efficiently submits multiple transactions from a single wallet with concurrency 
 
 ```go
 // Prepare batch of transactions from the same wallet
-deploymentTxs := []*types.Transaction{tx1, tx2, tx3}
+deploymentTxs := []*txtypes.Transaction{tx1, tx2, tx3}
 
 receipts, err := txpool.SendTransactionBatch(ctx, wallet, deploymentTxs, &spamoor.BatchOptions{
     SendTransactionOptions: spamoor.SendTransactionOptions{
         Client:      client,
         Rebroadcast: true,
-        OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+        OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
             // Called for each confirmed transaction
             s.logger.Infof("Batch transaction confirmed: %s", tx.Hash().Hex())
         },
@@ -1056,7 +1091,7 @@ if err != nil {
 
 // Process results - receipts array matches input transaction order
 for i, receipt := range receipts {
-    if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+    if receipt != nil && receipt.Status == txtxtypes.ReceiptStatusSuccessful {
         s.logger.Infof("Transaction %d confirmed in block %d", i, receipt.BlockNumber.Uint64())
     } else if receipt != nil {
         s.logger.Warnf("Transaction %d reverted", i)
@@ -1072,7 +1107,7 @@ Efficiently submits multiple transactions across multiple wallets with advanced 
 
 ```go
 // Prepare transactions grouped by wallet
-walletTxs := make(map[*spamoor.Wallet][]*types.Transaction)
+walletTxs := make(map[*spamoor.Wallet][]*txtypes.Transaction)
 for _, tx := range allTransactions {
     wallet := s.getWalletForTransaction(tx)
     walletTxs[wallet] = append(walletTxs[wallet], tx)
@@ -1083,7 +1118,7 @@ receipts, err := txpool.SendMultiTransactionBatch(ctx, walletTxs, &spamoor.Batch
     SendTransactionOptions: spamoor.SendTransactionOptions{
         Client:      client,
         Rebroadcast: true,
-        OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
+        OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
             // Called for each confirmed transaction across all wallets
             s.logger.Infof("Multi-batch transaction confirmed: %s", tx.Hash().Hex())
         },
@@ -1105,7 +1140,7 @@ if err != nil {
 // Process results - receipts map matches input wallet structure
 for wallet, walletReceipts := range receipts {
     for i, receipt := range walletReceipts {
-        if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+        if receipt != nil && receipt.Status == txtxtypes.ReceiptStatusSuccessful {
             s.logger.Infof("Wallet %s transaction %d confirmed in block %d", 
                 wallet.GetAddress().Hex(), i, receipt.BlockNumber.Uint64())
         } else if receipt != nil {
@@ -1129,7 +1164,7 @@ for wallet, walletReceipts := range receipts {
 
 ```go
 // Alternative: Process wallets individually with separate batch calls
-var allReceipts []*types.Receipt
+var allReceipts []*txtypes.Receipt
 for wallet, txs := range walletTxs {
     receipts, err := txpool.SendTransactionBatch(ctx, wallet, txs, &spamoor.BatchOptions{
         SendTransactionOptions: spamoor.SendTransactionOptions{
@@ -1155,7 +1190,7 @@ if err != nil {
     return fmt.Errorf("transaction confirmation failed: %w", err)
 }
 
-if receipt.Status == types.ReceiptStatusSuccessful {
+if receipt.Status == txtxtypes.ReceiptStatusSuccessful {
     s.logger.Infof("Transaction confirmed: %s", tx.Hash().Hex())
 }
 ```
@@ -1196,7 +1231,7 @@ SendTransactionOptions{
   - Transaction permanently failed
 
 ```go
-OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
     if err != nil {
         // Transaction submission or processing error
         s.logger.Warnf("Transaction error: %v", err)
@@ -1211,7 +1246,7 @@ OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
         return
     }
     
-    if receipt.Status == types.ReceiptStatusSuccessful {
+    if receipt.Status == txtxtypes.ReceiptStatusSuccessful {
         // Transaction successfully executed
         s.handleSuccessfulTransaction(tx, receipt)
     } else {
@@ -1237,8 +1272,8 @@ Spamoor automatically manages wallet balances for **regular ETH transfers**:
 Scenarios must manually update wallet balances for internal transfers (contract calls that move tokens/ETH between wallets):
 
 ```go
-OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-    if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
+    if receipt != nil && receipt.Status == txtxtypes.ReceiptStatusSuccessful {
         // Parse logs to determine actual transfers
         for _, log := range receipt.Logs {
             if log.Topics[0] == transferEventHash {
@@ -1420,7 +1455,7 @@ func (s *Scenario) Run(ctx context.Context) error {
     })
 }
 
-func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComplete func()) (*txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
     // Standard wallet and client selection - see Wallet Management section
     wallet := s.walletPool.GetWallet(spamoor.SelectWalletRandom)
     client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
@@ -1433,7 +1468,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
     err = txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
         Client:      client,
         Rebroadcast: true,
-        OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+        OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
             onComplete()  // CRITICAL: Always call this when done
         },
     })
@@ -1553,14 +1588,14 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
     err = s.walletPool.GetTxPool().SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
         Client:      client,
         Rebroadcast: true,
-        OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+        OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
             // This is called when transaction is confirmed or fails
             onComplete() // CRITICAL: Must call this to signal completion
             
             // Optional: Handle transaction result
             if err != nil {
                 s.logger.Warnf("transaction failed: %v", err)
-            } else if receipt != nil && receipt.Status == types.ReceiptStatusSuccessful {
+            } else if receipt != nil && receipt.Status == txtxtypes.ReceiptStatusSuccessful {
                 s.logger.Debugf("transaction confirmed in block %d", receipt.BlockNumber.Uint64())
             }
         },
@@ -1589,7 +1624,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
 1. **In SendTransaction OnComplete callback** (most common):
 ```go
 err := txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
-    OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+    OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
         onComplete() // Called when transaction processing completes
     },
 })
@@ -1684,7 +1719,7 @@ ProcessNextTxFn: func(ctx context.Context, txIdx uint64, onComplete func()) (fun
     // ... build and submit transaction ...
     
     err = txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
-        OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+        OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
             // Custom completion logic
             duration := time.Since(startTime)
             s.recordTransactionMetrics(tx, receipt, duration)
@@ -1843,7 +1878,7 @@ func (s *Scenario) Run(ctx context.Context) error {
     })
 }
 
-func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComplete func()) (*types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComplete func()) (*txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
     // Standard wallet and client selection - see Wallet Management section
     wallet := s.walletPool.GetWallet(spamoor.SelectWalletRandom)
     client := s.walletPool.GetClient(spamoor.SelectClientRandom, 0, s.options.ClientGroup)
@@ -1856,7 +1891,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64, onComp
     err = txpool.SendTransaction(ctx, wallet, signedTx, &spamoor.SendTransactionOptions{
         Client:      client,
         Rebroadcast: true,
-        OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+        OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
             onComplete()  // CRITICAL: Always call this when done
         },
     })
@@ -1941,7 +1976,7 @@ func (s *Scenario) deployContracts(redeploy bool) (*DeploymentInfo, error) {
         return nil, fmt.Errorf("could not get tx fee: %w", err)
     }
     
-    deploymentTxs := []*types.Transaction{}
+    deploymentTxs := []*txtypes.Transaction{}
     deploymentInfo := &DeploymentInfo{}
     
     // Get current deployer nonce to check if deployments already exist

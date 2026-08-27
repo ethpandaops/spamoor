@@ -16,6 +16,7 @@ import (
 
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // Static gas limits for the setup/maintenance txs. These deliberately avoid
@@ -234,7 +235,7 @@ func (m *Market) seedFresh(ctx context.Context, client *spamoor.Client) error {
 	coinSeed := m.coinSeedAmount()
 	marketCoinSeed := new(big.Int).Mul(coinSeed, big.NewInt(int64(m.walletPool.GetConfiguredWalletCount()+10)))
 
-	walletTxs := make(map[*spamoor.Wallet][]*types.Transaction)
+	walletTxs := make(map[*spamoor.Wallet][]*txtypes.Transaction)
 
 	// Market wallet: mint its listing inventory + a large coin float, then approve.
 	marketTxs, err := m.buildSeedTxs(ctx, m.marketWallet, m.idBase, m.options.MarketInventory, marketCoinSeed, feeCap, tipCap)
@@ -289,8 +290,8 @@ func (m *Market) seedFresh(ctx context.Context, client *spamoor.Client) error {
 // buildSeedTxs builds the per-wallet setup transactions: mint an NFT id range,
 // mint a coin balance, grant Seaport the NFT operator approval and the ERC20
 // allowance. count==0 skips the NFT mint (a wallet with no starting inventory).
-func (m *Market) buildSeedTxs(ctx context.Context, wallet *spamoor.Wallet, startID, count uint64, coinAmount *big.Int, feeCap, tipCap *big.Int) ([]*types.Transaction, error) {
-	txs := make([]*types.Transaction, 0, 4)
+func (m *Market) buildSeedTxs(ctx context.Context, wallet *spamoor.Wallet, startID, count uint64, coinAmount *big.Int, feeCap, tipCap *big.Int) ([]*txtypes.Transaction, error) {
+	txs := make([]*txtypes.Transaction, 0, 4)
 	build := func(gas uint64, fn func(*bind.TransactOpts) (*types.Transaction, error)) error {
 		tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
 			GasFeeCap: uint256.MustFromBig(feeCap),

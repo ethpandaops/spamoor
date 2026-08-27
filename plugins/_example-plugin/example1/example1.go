@@ -18,6 +18,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
 )
 
@@ -224,7 +225,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	})
 }
 
-func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, error) {
+func (s *Scenario) deployContract(ctx context.Context) (*txtypes.Receipt, error) {
 	// Use the well-known deployer wallet for consistent deployment address
 	deployerWallet := s.walletPool.GetWellKnownWallet("deployer")
 	if deployerWallet == nil {
@@ -279,14 +280,14 @@ func (s *Scenario) deployContract(ctx context.Context) (*types.Receipt, error) {
 		return nil, fmt.Errorf("deployment transaction failed: %w", err)
 	}
 
-	if receipt.Status != types.ReceiptStatusSuccessful {
+	if receipt.Status != txtypes.ReceiptStatusSuccessful {
 		return nil, fmt.Errorf("deployment transaction reverted")
 	}
 
 	return receipt, nil
 }
 
-func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *types.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
+func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	// Select wallet and client for this transaction
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx))
 	if wallet == nil {
@@ -319,7 +320,7 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64) (scena
 	}
 
 	// Determine which operation to perform (alternating between setValue and increment)
-	var tx *types.Transaction
+	var tx *txtypes.Transaction
 	var opName string
 	if txIdx%3 == 0 {
 		// setValue operation
@@ -377,11 +378,11 @@ func (s *Scenario) sendNextTransaction(ctx context.Context, txIdx uint64) (scena
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
-		OnComplete: func(tx *types.Transaction, receipt *types.Receipt, err error) {
+		OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 			receiptChan <- receipt
 		},
-		OnConfirm: func(tx *types.Transaction, receipt *types.Receipt) {
-			if receipt.Status == types.ReceiptStatusSuccessful {
+		OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
+			if receipt.Status == txtypes.ReceiptStatusSuccessful {
 				// Log successful contract interaction
 				s.logger.WithFields(logrus.Fields{
 					"txHash":    tx.Hash().Hex(),

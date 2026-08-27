@@ -10,11 +10,12 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/holiman/uint256"
+
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txbuilder"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
-	"github.com/holiman/uint256"
 )
 
 // CallTask represents a contract function call task
@@ -114,7 +115,7 @@ func (t *CallTask) Validate() error {
 }
 
 // BuildTransaction creates a contract call transaction
-func (t *CallTask) BuildTransaction(ctx context.Context, wallet *spamoor.Wallet, registry *ContractRegistry, execCtx *TaskExecutionContext) (*types.Transaction, error) {
+func (t *CallTask) BuildTransaction(ctx context.Context, wallet *spamoor.Wallet, registry *ContractRegistry, execCtx *TaskExecutionContext) (*txtypes.Transaction, error) {
 	// Resolve target address (placeholders should already be processed by caller)
 	targetAddr, err := registry.ResolveReference(t.Target)
 	if err != nil {
