@@ -433,6 +433,29 @@ func (wallet *Wallet) BuildSetCodeTx(txData *txtypes.SetCodeTx) (*txtypes.Transa
 	return wallet.signTx(txData)
 }
 
+// BuildFrameTx builds and signs an EIP-8141 frame transaction.
+// It assigns the sender, chain id and next available nonce, then signs every
+// secp256k1 signature entry belonging to this wallet.
+//
+// The nonce is assigned to the sequence of the EIP-8250 key set the caller selected.
+// A transaction left with the default [0] key set uses the wallet's account nonce, so
+// it stays in the pool's ordinary nonce tracking; other key sets are sequenced
+// independently and the caller owns their numbering.
+func (wallet *Wallet) BuildFrameTx(txData *txtypes.FrameTx) (*txtypes.Transaction, error) {
+	txData.ChainID = uint256.MustFromBig(wallet.chainid)
+	txData.Sender = wallet.address
+
+	if len(txData.NonceKeys) == 0 {
+		txData.NonceKeys = []*uint256.Int{new(uint256.Int)}
+	}
+
+	if txData.UsesLegacyNonce() {
+		txData.NonceSeq = wallet.GetNextNonce()
+	}
+
+	return wallet.signTx(txData)
+}
+
 // BuildBoundTx builds a transaction using the go-ethereum bind package.
 // It sets up a TransactOpts with the wallet's credentials and calls the provided
 // buildFn to construct the actual transaction. Useful for contract interactions.
@@ -598,6 +621,21 @@ func (wallet *Wallet) ReplaceAccessListTx(txData *txtypes.AccessListTx, nonce ui
 func (wallet *Wallet) ReplaceSetCodeTx(txData *txtypes.SetCodeTx, nonce uint64) (*txtypes.Transaction, error) {
 	txData.ChainID = uint256.NewInt(wallet.chainid.Uint64())
 	txData.Nonce = nonce
+	return wallet.signTx(txData)
+}
+
+// ReplaceFrameTx builds a replacement frame transaction with a specific nonce.
+// This is useful for replacing stuck transactions with higher gas prices.
+func (wallet *Wallet) ReplaceFrameTx(txData *txtypes.FrameTx, nonce uint64) (*txtypes.Transaction, error) {
+	txData.ChainID = uint256.MustFromBig(wallet.chainid)
+	txData.Sender = wallet.address
+
+	if len(txData.NonceKeys) == 0 {
+		txData.NonceKeys = []*uint256.Int{new(uint256.Int)}
+	}
+
+	txData.NonceSeq = nonce
+
 	return wallet.signTx(txData)
 }
 

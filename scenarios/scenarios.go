@@ -26,6 +26,7 @@ import (
 	"github.com/ethpandaops/spamoor/scenarios/erc721tx"
 	evmfuzz "github.com/ethpandaops/spamoor/scenarios/evm-fuzz"
 	"github.com/ethpandaops/spamoor/scenarios/factorydeploytx"
+	"github.com/ethpandaops/spamoor/scenarios/frametx"
 	"github.com/ethpandaops/spamoor/scenarios/gasburnertx"
 	"github.com/ethpandaops/spamoor/scenarios/geastx"
 	replayeest "github.com/ethpandaops/spamoor/scenarios/replay-eest"
@@ -61,6 +62,7 @@ var nativeScenarioCategories = []*scenario.Category{
 			&deploydestruct.ScenarioDescriptor,
 			&ensnames.ScenarioDescriptor,
 			&eoatx.ScenarioDescriptor,
+			&frametx.ScenarioDescriptor,
 			&erc20tx.ScenarioDescriptor,
 			&erc4337.ScenarioDescriptor,
 			&erc721tx.ScenarioDescriptor,

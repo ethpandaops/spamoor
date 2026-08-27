@@ -3,11 +3,10 @@
 package symbols
 
 import (
+	"github.com/ethpandaops/spamoor/spamoor"
 	"go/constant"
 	"go/token"
 	"reflect"
-
-	"github.com/ethpandaops/spamoor/spamoor"
 )
 
 func init() {
