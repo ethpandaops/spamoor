@@ -104,7 +104,7 @@ func (r *Receipt) FrameExtra() *FrameReceiptExtra {
 type jsonFrameReceipt struct {
 	Status  *hexutil.Uint64 `json:"status"`
 	GasUsed json.RawMessage `json:"gasUsed"`
-	Logs    []*Log          `json:"logs"`
+	Logs    []*jsonLog      `json:"logs"`
 
 	ExecutionGasUsed *hexutil.Uint64 `json:"executionGasUsed"`
 	StateGasUsed     *hexutil.Uint64 `json:"stateGasUsed"`
@@ -152,7 +152,7 @@ func decodeFrameReceipt(receipt *Receipt, raw json.RawMessage) error {
 	}
 
 	for _, frame := range frames {
-		decoded := &FrameReceipt{Logs: frame.Logs}
+		decoded := &FrameReceipt{Logs: toLogs(frame.Logs, receipt)}
 
 		if frame.Status != nil {
 			decoded.Status = uint64(*frame.Status)

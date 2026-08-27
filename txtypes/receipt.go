@@ -71,6 +71,78 @@ func receiptDecoderFor(txType byte) ReceiptDecoder {
 	return receiptRegistry[txType]
 }
 
+// jsonLog decodes a log permissively.
+//
+// go-ethereum's types.Log requires transactionHash, blockHash and logIndex. Logs
+// nested inside a frame receipt carry none of them, since they belong to the receipt
+// that contains them, so decoding them with the strict type fails the whole receipt.
+type jsonLog struct {
+	Address     common.Address  `json:"address"`
+	Topics      []common.Hash   `json:"topics"`
+	Data        hexutil.Bytes   `json:"data"`
+	BlockNumber *hexutil.Uint64 `json:"blockNumber"`
+	TxHash      *common.Hash    `json:"transactionHash"`
+	TxIndex     *hexutil.Uint   `json:"transactionIndex"`
+	BlockHash   *common.Hash    `json:"blockHash"`
+	Index       *hexutil.Uint   `json:"logIndex"`
+	Removed     bool            `json:"removed"`
+}
+
+// toLog builds a Log, taking the position fields from the containing receipt when the
+// log itself does not carry them.
+func (l *jsonLog) toLog(receipt *Receipt) *Log {
+	log := &Log{
+		Address: l.Address,
+		Topics:  l.Topics,
+		Data:    l.Data,
+		Removed: l.Removed,
+	}
+
+	switch {
+	case l.TxHash != nil:
+		log.TxHash = *l.TxHash
+	default:
+		log.TxHash = receipt.TxHash
+	}
+
+	switch {
+	case l.BlockHash != nil:
+		log.BlockHash = *l.BlockHash
+	default:
+		log.BlockHash = receipt.BlockHash
+	}
+
+	switch {
+	case l.BlockNumber != nil:
+		log.BlockNumber = uint64(*l.BlockNumber)
+	case receipt.BlockNumber != nil:
+		log.BlockNumber = receipt.BlockNumber.Uint64()
+	}
+
+	switch {
+	case l.TxIndex != nil:
+		log.TxIndex = uint(*l.TxIndex)
+	default:
+		log.TxIndex = receipt.TransactionIndex
+	}
+
+	if l.Index != nil {
+		log.Index = uint(*l.Index)
+	}
+
+	return log
+}
+
+// toLogs converts a decoded log list.
+func toLogs(logs []*jsonLog, receipt *Receipt) []*Log {
+	converted := make([]*Log, 0, len(logs))
+	for _, log := range logs {
+		converted = append(converted, log.toLog(receipt))
+	}
+
+	return converted
+}
+
 // jsonReceipt is the JSON-RPC representation of a receipt. Every field is optional:
 // clients differ in what they report and unknown transaction types may omit fields.
 // Only the transaction hash is required.
@@ -80,7 +152,7 @@ type jsonReceipt struct {
 	Status            *hexutil.Uint64 `json:"status"`
 	CumulativeGasUsed *hexutil.Uint64 `json:"cumulativeGasUsed"`
 	Bloom             *Bloom          `json:"logsBloom"`
-	Logs              []*Log          `json:"logs"`
+	Logs              []*jsonLog      `json:"logs"`
 	TxHash            *common.Hash    `json:"transactionHash"`
 	ContractAddress   *common.Address `json:"contractAddress"`
 	GasUsed           *hexutil.Uint64 `json:"gasUsed"`
@@ -104,7 +176,6 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 	}
 
 	r.TxHash = *dec.TxHash
-	r.Logs = dec.Logs
 
 	if dec.Type != nil {
 		r.Type = uint8(*dec.Type)
@@ -157,6 +228,9 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 	if dec.TransactionIndex != nil {
 		r.TransactionIndex = uint(*dec.TransactionIndex)
 	}
+
+	// Converted last: a log inherits the receipt's position when it omits its own.
+	r.Logs = toLogs(dec.Logs, r)
 
 	if decoder := receiptDecoderFor(r.Type); decoder != nil {
 		if err := decoder(r, input); err != nil {

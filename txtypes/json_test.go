@@ -706,3 +706,64 @@ func TestReceiptJSONRoundTrip(t *testing.T) {
 		t.Fatal("the skipped status did not survive the round trip")
 	}
 }
+
+// TestReceiptLogsWithoutPosition checks that logs nested in a frame receipt decode
+// even though they carry none of the position fields go-ethereum's Log requires, and
+// that they inherit the receipt's position.
+func TestReceiptLogsWithoutPosition(t *testing.T) {
+	raw := `{
+		"type": "0x6",
+		"status": "0x1",
+		"cumulativeGasUsed": "0x10",
+		"gasUsed": "0x10",
+		"transactionHash": "0xaaaa00000000000000000000000000000000000000000000000000000000000e",
+		"blockHash": "0xbbbb00000000000000000000000000000000000000000000000000000000000f",
+		"blockNumber": "0x2a",
+		"transactionIndex": "0x3",
+		"payer": "0xdddd000000000000000000000000000000000004",
+		"logs": [],
+		"frameReceipts": [
+			{"status":"0x1","gasUsed":"0x0","stateGasUsed":"0x0","logs":[
+				{"address":"0xcccc000000000000000000000000000000000005",
+				 "topics":["0x1111111111111111111111111111111111111111111111111111111111111111"],
+				 "data":"0xdeadbeef"}
+			]}
+		]
+	}`
+
+	var receipt Receipt
+	if err := json.Unmarshal([]byte(raw), &receipt); err != nil {
+		t.Fatalf("a frame log without position fields should decode: %v", err)
+	}
+
+	extra := receipt.FrameExtra()
+	if extra == nil || len(extra.Frames) != 1 || len(extra.Frames[0].Logs) != 1 {
+		t.Fatal("frame log was not decoded")
+	}
+
+	log := extra.Frames[0].Logs[0]
+	if log.TxHash != receipt.TxHash || log.BlockHash != receipt.BlockHash ||
+		log.BlockNumber != 42 || log.TxIndex != 3 {
+		t.Fatalf("log did not inherit the receipt position: %+v", log)
+	}
+
+	if log.Address != common.HexToAddress("0xcccc000000000000000000000000000000000005") ||
+		len(log.Topics) != 1 || !bytes.Equal(log.Data, []byte{0xde, 0xad, 0xbe, 0xef}) {
+		t.Fatal("log content was not decoded")
+	}
+
+	// A receipt-level log keeps its own position when it reports one.
+	withPos := `{"transactionHash":"0xaaaa000000000000000000000000000000000000000000000000000000000010",
+		"blockNumber":"0x1","transactionIndex":"0x0","logs":[
+		{"address":"0xcccc000000000000000000000000000000000005","topics":[],"data":"0x",
+		 "logIndex":"0x7","transactionIndex":"0x9"}]}`
+
+	var second Receipt
+	if err := json.Unmarshal([]byte(withPos), &second); err != nil {
+		t.Fatalf("failed decoding: %v", err)
+	}
+
+	if second.Logs[0].Index != 7 || second.Logs[0].TxIndex != 9 {
+		t.Fatal("log's own position fields should win")
+	}
+}
