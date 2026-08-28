@@ -1,7 +1,9 @@
 package frametx
 
 import (
+	"encoding/binary"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -17,15 +19,18 @@ import (
 type shapeName string
 
 const (
-	shapeSelfVerify shapeName = "self-verify"
-	shapeTransfer   shapeName = "transfer"
-	shapeBatch      shapeName = "batch"
-	shapeAtomic     shapeName = "atomic"
-	shapeAtomicFail shapeName = "atomic-fail"
-	shapeExpiry     shapeName = "expiry"
+	shapeSelfVerify   shapeName = "self-verify"
+	shapeTransfer     shapeName = "transfer"
+	shapeBatch        shapeName = "batch"
+	shapeAtomic       shapeName = "atomic"
+	shapeAtomicFail   shapeName = "atomic-fail"
+	shapeExpiry       shapeName = "expiry"
+	shapePostTx       shapeName = "post-tx"
+	shapePostTxRevert shapeName = "post-tx-revert"
 )
 
-var allShapes = []shapeName{
+// defaultShapes are the shapes "all" enables: everything EIP-8141 defines on its own.
+var defaultShapes = []shapeName{
 	shapeSelfVerify,
 	shapeTransfer,
 	shapeBatch,
@@ -33,6 +38,20 @@ var allShapes = []shapeName{
 	shapeAtomicFail,
 	shapeExpiry,
 }
+
+// optInShapes need an EIP beyond EIP-8141 and are excluded from "all".
+//
+// EIP-7906 installs no predeploy, so unlike the envelope extensions there is no chain
+// state that says whether it is active. Rather than guess, these are selected by name:
+// a chain without EIP-7906 rejects mode 3, and quietly sending transactions that
+// cannot succeed is worse than requiring one word of configuration.
+var optInShapes = []shapeName{
+	shapePostTx,
+	shapePostTxRevert,
+}
+
+// allShapes is every shape the scenario can build, for validation and help text.
+var allShapes = append(append([]shapeName{}, defaultShapes...), optInShapes...)
 
 // shapeParams carries everything a shape needs to build its frames.
 type shapeParams struct {
@@ -53,6 +72,10 @@ type builtShape struct {
 	name           shapeName
 	frames         []*txtypes.Frame
 	expectedStatus []uint64
+
+	// expectBodyReverted marks a shape whose POST_TX frame fails, so everything after
+	// the validation prefix is discarded regardless of the per-frame statuses.
+	expectBodyReverted bool
 }
 
 // buildShape assembles the frames for a shape.
@@ -161,6 +184,50 @@ func buildShape(name shapeName, p shapeParams) (*builtShape, error) {
 			},
 		}, nil
 
+	case shapePostTx:
+		// The expiry verifier predeploy doubles as a deterministic assertion
+		// contract: with an 8-byte deadline in the future it stops successfully, so
+		// no contract has to be deployed to exercise a passing POST_TX frame.
+		deadline := make([]byte, txtypes.ExpiryDataLength)
+		binary.BigEndian.PutUint64(deadline, p.expiryAt)
+
+		return &builtShape{
+			name: name,
+			frames: []*txtypes.Frame{
+				txtypes.SelfVerifyFrame(verifyLimits),
+				userOp(nil, 0),
+				txtypes.PostTxFrame(txtypes.ExpiryVerifier, deadline,
+					txtypes.FrameLimits{Execution: p.verifyGas}),
+			},
+			expectedStatus: []uint64{
+				txtypes.FrameStatusSuccess,
+				txtypes.FrameStatusSuccess,
+				txtypes.FrameStatusSuccess,
+			},
+		}, nil
+
+	case shapePostTxRevert:
+		// The same predeploy reverts on any calldata length other than 8, which makes
+		// a POST_TX failure reproducible without a contract. Its failure reverts the
+		// whole execution body, so the user operation's effects are discarded even
+		// though its receipt still reports success -- the case a consumer reading
+		// statuses alone gets wrong.
+		return &builtShape{
+			name: name,
+			frames: []*txtypes.Frame{
+				txtypes.SelfVerifyFrame(verifyLimits),
+				userOp(nil, 0),
+				txtypes.PostTxFrame(txtypes.ExpiryVerifier, []byte{0x01},
+					txtypes.FrameLimits{Execution: p.verifyGas}),
+			},
+			expectedStatus: []uint64{
+				txtypes.FrameStatusSuccess,
+				txtypes.FrameStatusSuccess, // executed, then discarded with the body
+				txtypes.FrameStatusFailed,
+			},
+			expectBodyReverted: true,
+		}, nil
+
 	case shapeExpiry:
 		// The expiry verifier frame is skipped when matching mempool prefixes, so this
 		// still counts as a self-relayed transaction.
@@ -195,7 +262,7 @@ func parseShapes(spec string) (*weightedShapes, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" || spec == "all" {
 		selection := &weightedShapes{}
-		for _, name := range allShapes {
+		for _, name := range defaultShapes {
 			selection.add(name, 1)
 		}
 
@@ -281,4 +348,62 @@ func shapeNames() []string {
 	}
 
 	return names
+}
+
+// requiresPostTx reports whether a selection includes an EIP-7906 shape.
+func (w *weightedShapes) requiresPostTx() bool {
+	for _, name := range w.names {
+		for _, optIn := range optInShapes {
+			if name == optIn {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// envelopeChoice maps the --envelope option to a set of extensions.
+//
+// The zero-extension "base" shape is EIP-8141 on its own; the others add EIP-8250
+// keyed nonces and EIP-8272 recent roots, which chains activate independently.
+var envelopeChoices = map[string]txtypes.FrameExtensions{
+	"base":  0,
+	"keyed": txtypes.FrameExtKeyedNonces,
+	"roots": txtypes.FrameExtRecentRoots,
+	"full":  txtypes.FrameExtAll,
+}
+
+// envelopeProbeOrder is the order auto-detection tries shapes in: the combination
+// current devnets run first, then the narrower ones.
+var envelopeProbeOrder = []txtypes.FrameExtensions{
+	txtypes.FrameExtAll,
+	txtypes.FrameExtKeyedNonces,
+	txtypes.FrameExtRecentRoots,
+	0,
+}
+
+// parseEnvelope resolves the --envelope option. An empty value or "auto" defers to
+// runtime detection, reported by the second return value.
+func parseEnvelope(spec string) (txtypes.FrameExtensions, bool, error) {
+	spec = strings.ToLower(strings.TrimSpace(spec))
+	if spec == "" || spec == "auto" {
+		return txtypes.FrameExtAll, true, nil
+	}
+
+	extensions, ok := envelopeChoices[spec]
+	if !ok {
+		names := make([]string, 0, len(envelopeChoices)+1)
+		names = append(names, "auto")
+
+		for name := range envelopeChoices {
+			names = append(names, name)
+		}
+
+		sort.Strings(names)
+
+		return 0, false, fmt.Errorf("unknown envelope %q, known: %s", spec, strings.Join(names, ", "))
+	}
+
+	return extensions, false, nil
 }

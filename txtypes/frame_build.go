@@ -97,6 +97,23 @@ func DeployFrame(factory common.Address, data []byte, limits FrameLimits) *Frame
 	}
 }
 
+// PostTxFrame builds an EIP-7906 POST_TX assertion frame.
+//
+// Not to be confused with PostOpFrame: that is a DEFAULT frame a paymaster uses to
+// settle up, this is a STATICCALL-semantics assertion that may not APPROVE and whose
+// failure reverts the whole execution body. POST_TX frames must be a trailing suffix
+// of the frame list.
+func PostTxFrame(target common.Address, data []byte, limits FrameLimits) *Frame {
+	return &Frame{
+		Mode:   FrameModePostTx,
+		Flags:  ApproveNone,
+		Target: &target,
+		Limits: limits,
+		Value:  new(uint256.Int),
+		Data:   data,
+	}
+}
+
 // PostOpFrame builds a DEFAULT frame that runs after the user operations, used by
 // paymasters for settlement.
 func PostOpFrame(target common.Address, data []byte, limits FrameLimits) *Frame {
@@ -156,9 +173,15 @@ func DefaultCodeVerifyLimits(senderExists bool) FrameLimits {
 // NewFrameTx assembles a frame transaction from its parts, filling in the zero values
 // the encoder requires.
 //
-// The nonce selects the sender's ordinary account nonce sequence, which is EIP-8250's
-// [0] key set. Use NonceKeys directly for independent nonce domains.
+// It builds the envelope shape current devnets run, with both extensions active and
+// the nonce in EIP-8250's [0] key set, which is the sender's ordinary account nonce.
+// Use NewFrameTxWithExtensions for a chain running a different combination.
 func NewFrameTx(chainID *uint256.Int, sender common.Address, nonce uint64, fees FrameFees, frames []*Frame, signatures []*FrameSignature) *FrameTx {
+	return NewFrameTxWithExtensions(FrameExtAll, chainID, sender, nonce, fees, frames, signatures)
+}
+
+// NewFrameTxWithExtensions assembles a frame transaction in a chosen envelope shape.
+func NewFrameTxWithExtensions(extensions FrameExtensions, chainID *uint256.Int, sender common.Address, nonce uint64, fees FrameFees, frames []*Frame, signatures []*FrameSignature) *FrameTx {
 	if fees.GasTipCap == nil {
 		fees.GasTipCap = new(uint256.Int)
 	}
@@ -181,13 +204,19 @@ func NewFrameTx(chainID *uint256.Int, sender common.Address, nonce uint64, fees 
 		}
 	}
 
-	return &FrameTx{
+	tx := &FrameTx{
 		ChainID:    chainID,
-		NonceKeys:  []*uint256.Int{new(uint256.Int)},
 		NonceSeq:   nonce,
 		Sender:     sender,
 		Frames:     frames,
 		Signatures: signatures,
 		Fees:       fees,
+		Extensions: extensions,
 	}
+
+	if extensions.Has(FrameExtKeyedNonces) {
+		tx.NonceKeys = []*uint256.Int{new(uint256.Int)}
+	}
+
+	return tx
 }

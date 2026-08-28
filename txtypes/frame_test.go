@@ -11,6 +11,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/holiman/uint256"
 )
 
@@ -250,16 +251,17 @@ func TestFrameIntrinsicGas(t *testing.T) {
 	want += StandardTokenCost * (65 * 4)
 	// The user op carries value to a foreign target.
 	want += TxValueCost
-	// EIP-8250 prices the nonce encoding as transaction data. The default [0] key set
-	// encodes as rlp([0]) || rlp(0) = c1 80 80, three non-zero bytes.
-	nonceTokens := uint64(3 * 4)
-	want += StandardTokenCost * nonceTokens
+	// Both envelope extensions price their own encoding as transaction data. The
+	// default [0] key set encodes as rlp([0]) || rlp(0) = c1 80 80, and the empty
+	// recent root list as c0: four non-zero bytes in total.
+	extensionTokens := uint64(4 * 4)
+	want += StandardTokenCost * extensionTokens
 
 	if got := tx.IntrinsicGas(); got != want {
 		t.Fatalf("intrinsic gas = %d, want %d", got, want)
 	}
 
-	floorTokens := uint64(len(data)+65)*StandardTokenCost + nonceTokens
+	floorTokens := uint64(len(data)+65)*StandardTokenCost + extensionTokens
 	wantFloor := uint64(12_000+2*475+2800) + TxValueCost + TotalCostFloorPerToken*floorTokens
 
 	if got := tx.CalldataFloorGas(); got != wantFloor {
@@ -745,4 +747,322 @@ func TestFrameSignatureBytesValidation(t *testing.T) {
 	if err := tampered.VerifySignatures(); err == nil {
 		t.Fatal("VerifySignatures should reject a transaction signed over different content")
 	}
+}
+
+// TestFrameEnvelopeShapes checks that each of the four payload shapes encodes, decodes
+// back to itself, and is told apart from the others.
+//
+// EIP-8250 and EIP-8272 amend EIP-8141's envelope independently, so a chain may run
+// any combination and the shape has to be read off the payload rather than assumed.
+func TestFrameEnvelopeShapes(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed generating key: %v", err)
+	}
+
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+
+	shapes := []struct {
+		name       string
+		extensions FrameExtensions
+		fields     int
+	}{
+		{"8141", 0, 7},
+		{"8141+8250", FrameExtKeyedNonces, 8},
+		{"8141+8272", FrameExtRecentRoots, 8},
+		{"8141+8250+8272", FrameExtAll, 9},
+	}
+
+	for _, shape := range shapes {
+		t.Run(shape.name, func(t *testing.T) {
+			tx := NewFrameTxWithExtensions(shape.extensions, testChainID, sender, 7,
+				FrameFees{GasTipCap: uint256.NewInt(1e9), GasFeeCap: uint256.NewInt(20e9)},
+				[]*Frame{
+					SelfVerifyFrame(FrameLimits{Execution: 5_000}),
+					UserOpFrame(&testTarget, nil, nil, FrameLimits{Execution: 30_000}),
+				},
+				[]*FrameSignature{SenderSignature()})
+
+			if shape.extensions.Has(FrameExtRecentRoots) {
+				tx.RecentRoots = []*RecentRootReference{
+					{SourceID: common.HexToHash("0x01"), Slot: 9, Root: common.HexToHash("0x02")},
+				}
+			}
+
+			if tx.Extensions.String() != shape.name {
+				t.Fatalf("extension name = %s, want %s", tx.Extensions, shape.name)
+			}
+
+			signed, err := SignTx(NewTx(tx), testChainID.ToBig(), key)
+			if err != nil {
+				t.Fatalf("failed signing: %v", err)
+			}
+
+			inner, _ := signed.Inner().(*FrameTx)
+			if err := inner.ValidatePayload(); err != nil {
+				t.Fatalf("payload should be valid: %v", err)
+			}
+
+			encoded, err := signed.MarshalBinary()
+			if err != nil {
+				t.Fatalf("failed encoding: %v", err)
+			}
+
+			// The payload must carry exactly the field count the shape implies.
+			count, err := countRLPFields(encoded[1:])
+			if err != nil {
+				t.Fatalf("failed counting fields: %v", err)
+			}
+
+			if count != shape.fields {
+				t.Fatalf("payload has %d fields, want %d", count, shape.fields)
+			}
+
+			decoded, err := DecodeTx(encoded)
+			if err != nil {
+				t.Fatalf("failed decoding: %v", err)
+			}
+
+			back, ok := decoded.Inner().(*FrameTx)
+			if !ok {
+				t.Fatalf("decoded to %T", decoded.Inner())
+			}
+
+			if back.Extensions != shape.extensions {
+				t.Fatalf("extensions changed: %s != %s", back.Extensions, shape.extensions)
+			}
+
+			if decoded.Hash() != signed.Hash() {
+				t.Fatalf("hash changed: %s != %s", decoded.Hash(), signed.Hash())
+			}
+
+			if back.NonceSeq != 7 {
+				t.Fatalf("nonce did not survive: %d", back.NonceSeq)
+			}
+
+			if back.HasKeyedNonces() != shape.extensions.Has(FrameExtKeyedNonces) {
+				t.Fatal("keyed nonce flag did not survive")
+			}
+
+			if len(back.RecentRoots) != len(tx.RecentRoots) {
+				t.Fatalf("recent roots did not survive: %d != %d", len(back.RecentRoots), len(tx.RecentRoots))
+			}
+
+			// A scalar-nonce transaction must not claim keys, and vice versa.
+			if !shape.extensions.Has(FrameExtKeyedNonces) && len(back.NonceKeys) != 0 {
+				t.Fatal("scalar nonce shape decoded nonce keys")
+			}
+		})
+	}
+}
+
+// countRLPFields returns the number of top-level elements in an RLP list.
+func countRLPFields(payload []byte) (int, error) {
+	content, _, err := rlp.SplitList(payload)
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+
+	for len(content) > 0 {
+		_, _, rest, err := rlp.Split(content)
+		if err != nil {
+			return 0, err
+		}
+
+		count++
+		content = rest
+	}
+
+	return count, nil
+}
+
+// TestFrameExtensionMismatch checks that fields belonging to an inactive extension are
+// rejected rather than silently dropped at encoding time.
+func TestFrameExtensionMismatch(t *testing.T) {
+	sender := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
+
+	base := func() *FrameTx {
+		return NewFrameTxWithExtensions(0, testChainID, sender, 1,
+			FrameFees{GasFeeCap: uint256.NewInt(1e9)},
+			[]*Frame{SelfVerifyFrame(FrameLimits{Execution: 5_000})},
+			[]*FrameSignature{{Scheme: SigSchemeSecp256k1, Signature: bytes.Repeat([]byte{0x11}, 65)}})
+	}
+
+	withKeys := base()
+	withKeys.NonceKeys = []*uint256.Int{new(uint256.Int)}
+
+	if err := withKeys.ValidatePayload(); err == nil {
+		t.Fatal("nonce keys without the EIP-8250 extension should be rejected")
+	}
+
+	withRoots := base()
+	withRoots.RecentRoots = []*RecentRootReference{{}}
+
+	if err := withRoots.ValidatePayload(); err == nil {
+		t.Fatal("recent roots without the EIP-8272 extension should be rejected")
+	}
+}
+
+// TestFramePostTxMode checks EIP-7906's POST_TX mode: it is a valid mode, it must form
+// a trailing suffix, and it is classified for display.
+func TestFramePostTxMode(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("failed generating key: %v", err)
+	}
+
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	assertions := common.HexToAddress("0xeeee000000000000000000000000000000000006")
+
+	build := func(frames ...*Frame) *FrameTx {
+		tx := NewFrameTx(testChainID, sender, 0,
+			FrameFees{GasFeeCap: uint256.NewInt(1e9)}, frames,
+			[]*FrameSignature{SenderSignature()})
+
+		if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
+			t.Fatalf("failed signing: %v", err)
+		}
+
+		return tx
+	}
+
+	userOp := func() *Frame {
+		return UserOpFrame(&testTarget, nil, nil, FrameLimits{Execution: 30_000})
+	}
+
+	postTx := func() *Frame {
+		return PostTxFrame(assertions, []byte{0x01}, FrameLimits{Execution: 20_000})
+	}
+
+	// A trailing suffix of POST_TX frames is valid.
+	valid := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(), postTx(), postTx())
+	if err := valid.ValidatePayload(); err != nil {
+		t.Fatalf("a trailing POST_TX suffix should be valid: %v", err)
+	}
+
+	if err := valid.ValidateMempoolPrefix(); err != nil {
+		t.Fatalf("POST_TX frames sit outside the validation prefix: %v", err)
+	}
+
+	if species := valid.Frames[2].Species(sender); species != SpeciesPostTx {
+		t.Fatalf("POST_TX frame classified as %s", species)
+	}
+
+	if idx := valid.PostTxIndex(); idx != 2 {
+		t.Fatalf("PostTxIndex = %d, want 2", idx)
+	}
+
+	// A non-POST_TX frame after a POST_TX frame is invalid.
+	interleaved := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), postTx(), userOp())
+	if err := interleaved.ValidatePayload(); err == nil {
+		t.Fatal("a frame following a POST_TX frame should be rejected")
+	}
+
+	// Mode 4 remains unknown.
+	bad := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp())
+	bad.Frames[1].Mode = 4
+
+	if err := bad.ValidatePayload(); err == nil {
+		t.Fatal("mode 4 should be rejected")
+	}
+
+	// A POST_TX frame carrying value is rejected, as for any non-SENDER frame.
+	valued := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), postTx())
+	valued.Frames[1].Value = uint256.NewInt(1)
+
+	if err := valued.ValidatePayload(); err == nil {
+		t.Fatal("a POST_TX frame carrying value should be rejected")
+	}
+}
+
+// TestDurableFrames checks which frames' effects survive, which a frame's own status
+// does not answer: an unrolled atomic batch and a failed POST_TX both discard the
+// effects of frames that report success.
+func TestDurableFrames(t *testing.T) {
+	sender := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
+	assertions := common.HexToAddress("0xeeee000000000000000000000000000000000006")
+
+	userOp := func() *Frame {
+		return UserOpFrame(&testTarget, nil, nil, FrameLimits{Execution: 30_000})
+	}
+
+	build := func(frames ...*Frame) *FrameTx {
+		return NewFrameTx(testChainID, sender, 0,
+			FrameFees{GasFeeCap: uint256.NewInt(1e9)}, frames,
+			[]*FrameSignature{SenderSignature()})
+	}
+
+	statuses := func(codes ...uint64) *FrameReceiptExtra {
+		extra := &FrameReceiptExtra{}
+		for _, code := range codes {
+			extra.Frames = append(extra.Frames, &FrameReceipt{Status: code})
+		}
+
+		return extra
+	}
+
+	t.Run("all succeed", func(t *testing.T) {
+		tx := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(), userOp())
+		got := statuses(1, 1, 1).DurableFrames(tx)
+
+		for i, ok := range got {
+			if !ok {
+				t.Fatalf("frame %d should be durable", i)
+			}
+		}
+	})
+
+	t.Run("atomic batch unrolled", func(t *testing.T) {
+		// Frames 1 and 2 form a batch with frame 3 closing it; frame 2 fails, so all
+		// three lose their effects while frame 1 still reports success.
+		tx := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}),
+			userOp().WithAtomicBatch(), userOp().WithAtomicBatch(), userOp())
+		got := statuses(1, 1, 0, 2).DurableFrames(tx)
+
+		want := []bool{true, false, false, false}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("frame %d durable = %v, want %v (got %v)", i, got[i], want[i], got)
+			}
+		}
+	})
+
+	t.Run("post-tx reverts the body", func(t *testing.T) {
+		// Every frame reports success except the POST_TX one, yet nothing after the
+		// validation prefix survives.
+		tx := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(), userOp(),
+			PostTxFrame(assertions, nil, FrameLimits{Execution: 20_000}))
+		extra := statuses(1, 1, 1, 0)
+
+		if !extra.PostTxReverted(tx) {
+			t.Fatal("a failed POST_TX frame should revert the body")
+		}
+
+		got := extra.DurableFrames(tx)
+
+		want := []bool{true, false, false, false}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("frame %d durable = %v, want %v (got %v)", i, got[i], want[i], got)
+			}
+		}
+	})
+
+	t.Run("post-tx succeeds", func(t *testing.T) {
+		tx := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(),
+			PostTxFrame(assertions, nil, FrameLimits{Execution: 20_000}))
+		extra := statuses(1, 1, 1)
+
+		if extra.PostTxReverted(tx) {
+			t.Fatal("a successful POST_TX frame should not revert the body")
+		}
+
+		for i, ok := range extra.DurableFrames(tx) {
+			if !ok {
+				t.Fatalf("frame %d should be durable", i)
+			}
+		}
+	})
 }
