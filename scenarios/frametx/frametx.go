@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"crypto/ecdsa"
+	"math/big"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
@@ -36,6 +39,7 @@ type ScenarioOptions struct {
 	LogTxs      bool    `yaml:"log_txs"`
 
 	Shapes        string `yaml:"shapes"`
+	Envelope      string `yaml:"envelope"`
 	FramesPerTx   uint64 `yaml:"frames_per_tx"`
 	UserOpGas     uint64 `yaml:"user_op_gas"`
 	VerifyGas     uint64 `yaml:"verify_gas"`
@@ -55,9 +59,13 @@ type Scenario struct {
 	walletPool *spamoor.WalletPool
 	shapes     *weightedShapes
 	callData   []byte
+	extensions txtypes.FrameExtensions
+	autoDetect bool
 
 	// Conformance counters: how many confirmed transactions had frame receipts that
 	// matched the shape's expectation, and how many did not.
+	postTxSupported atomic.Bool
+
 	framesChecked  atomic.Uint64
 	framesMismatch atomic.Uint64
 	missingReceipt atomic.Uint64
@@ -76,6 +84,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	LogTxs:      false,
 
 	Shapes:       "all",
+	Envelope:     "auto",
 	FramesPerTx:  4,
 	UserOpGas:    30000,
 	VerifyGas:    5000,
@@ -116,6 +125,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 
 	flags.StringVar(&s.options.Shapes, "shapes", ScenarioDefaultOptions.Shapes,
 		fmt.Sprintf("Frame shapes to send as a weighted list, e.g. 'self-verify:10,atomic:2'. Known shapes: %s", strings.Join(shapeNames(), ", ")))
+	flags.StringVar(&s.options.Envelope, "envelope", ScenarioDefaultOptions.Envelope,
+		"Envelope shape to encode: auto, full (8141+8250+8272), keyed (8141+8250), roots (8141+8272), base (8141)")
 	flags.Uint64Var(&s.options.FramesPerTx, "frames-per-tx", ScenarioDefaultOptions.FramesPerTx, "Number of user operation frames for the 'batch' shape")
 	flags.Uint64Var(&s.options.UserOpGas, "user-op-gas", ScenarioDefaultOptions.UserOpGas, "Execution gas limit per user operation frame")
 	flags.Uint64Var(&s.options.VerifyGas, "verify-gas", ScenarioDefaultOptions.VerifyGas, "Execution gas limit for validation frames")
@@ -147,6 +158,14 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	}
 
 	s.shapes = shapes
+
+	extensions, autoDetect, err := parseEnvelope(s.options.Envelope)
+	if err != nil {
+		return err
+	}
+
+	s.extensions = extensions
+	s.autoDetect = autoDetect
 
 	if s.options.Data != "" {
 		callData, err := txbuilder.ParseBlobRefsBytes(strings.Split(s.options.Data, ","), nil)
@@ -261,13 +280,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-// checkFrameTxSupport probes whether the chain implements EIP-8141 before the scenario
-// starts sending.
+// checkFrameTxSupport probes the chain before the scenario starts sending.
 //
-// It submits a frame transaction from a throwaway key that holds no funds. A chain
-// that implements the type rejects it for a reason of its own (unknown account, fee or
-// balance); one that does not rejects the type itself. Failing here beats emitting a
-// stream of rejections that look like a scenario bug.
+// It establishes two things a frame transaction cannot be built without: that the
+// chain processes type 0x06 at all, and which envelope shape it decodes. EIP-8250 and
+// EIP-8272 amend EIP-8141's payload independently, so a chain may run any of four
+// shapes and the wrong one fails to decode entirely.
+//
+// The probe submits from a throwaway key that holds no funds. A chain that understands
+// the shape rejects it for a reason of its own -- unknown account, balance, or the
+// validation prefix reverting because the sender cannot pay -- while one that does not
+// fails while decoding.
 func (s *Scenario) checkFrameTxSupport(ctx context.Context) error {
 	txpool := s.walletPool.GetTxPool()
 	if txpool == nil {
@@ -293,7 +316,93 @@ func (s *Scenario) checkFrameTxSupport(ctx context.Context) error {
 		return err
 	}
 
-	probe := txtypes.NewFrameTx(
+	candidates := []txtypes.FrameExtensions{s.extensions}
+	if s.autoDetect {
+		candidates = envelopeProbeOrder
+	}
+
+	var lastErr error
+
+	for _, extensions := range candidates {
+		err := s.probeEnvelope(ctx, client, chainID, key, extensions)
+		if err == nil || !isDecodeError(err) {
+			// The chain parsed this shape. Anything it says afterwards is about this
+			// particular transaction, not the layout.
+			s.extensions = extensions
+
+			if s.autoDetect {
+				s.logger.Infof("detected frame transaction envelope: %s", extensions)
+			}
+
+			s.checkPostTxSupport(ctx, client, chainID, key)
+
+			return nil
+		}
+
+		lastErr = err
+	}
+
+	if lastErr != nil && isUnsupportedTypeError(lastErr) {
+		return fmt.Errorf("%s rejected an EIP-8141 frame transaction (%v): this chain does not implement frame transactions",
+			client.GetName(), lastErr)
+	}
+
+	return fmt.Errorf("%s could not decode any known frame transaction envelope shape (last error: %v)",
+		client.GetName(), lastErr)
+}
+
+// checkPostTxSupport probes whether the chain implements EIP-7906's POST_TX mode. A
+// chain without it rejects mode 3 while decoding or validating, so the POST_TX shapes
+// are skipped rather than producing a stream of rejections.
+func (s *Scenario) checkPostTxSupport(ctx context.Context, client *spamoor.Client, chainID *big.Int, key *ecdsa.PrivateKey) {
+	probe := txtypes.NewFrameTxWithExtensions(s.extensions,
+		uint256.MustFromBig(chainID),
+		crypto.PubkeyToAddress(key.PublicKey), 0,
+		txtypes.FrameFees{GasTipCap: uint256.NewInt(1), GasFeeCap: uint256.NewInt(1e9)},
+		[]*txtypes.Frame{
+			txtypes.SelfVerifyFrame(txtypes.FrameLimits{Execution: s.options.VerifyGas}),
+			txtypes.PostTxFrame(txtypes.ExpiryVerifier, make([]byte, txtypes.ExpiryDataLength),
+				txtypes.FrameLimits{Execution: s.options.VerifyGas}),
+		},
+		[]*txtypes.FrameSignature{txtypes.SenderSignature()},
+	)
+
+	signed, err := txtypes.SignTx(txtypes.NewTx(probe), chainID, key)
+	if err != nil {
+		return
+	}
+
+	err = client.SendTransaction(ctx, signed)
+
+	// The throwaway key cannot pay, so a chain that understands mode 3 still rejects
+	// this. Only a decode or mode error means POST_TX is unavailable.
+	supported := err == nil || !(isDecodeError(err) || isUnknownModeError(err))
+	s.postTxSupported.Store(supported)
+
+	if supported {
+		s.logger.Infof("chain accepts EIP-7906 POST_TX frames")
+	} else {
+		s.logger.Infof("chain does not implement EIP-7906 POST_TX frames (%v); those shapes are skipped", err)
+	}
+}
+
+// isUnknownModeError reports whether the client rejected the frame mode itself.
+func isUnknownModeError(err error) bool {
+	message := strings.ToLower(err.Error())
+
+	for _, marker := range []string{"mode", "post_tx", "post-tx"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// probeEnvelope submits one throwaway frame transaction in the given shape and returns
+// the client's response.
+func (s *Scenario) probeEnvelope(ctx context.Context, client *spamoor.Client, chainID *big.Int, key *ecdsa.PrivateKey, extensions txtypes.FrameExtensions) error {
+	probe := txtypes.NewFrameTxWithExtensions(extensions,
 		uint256.MustFromBig(chainID),
 		crypto.PubkeyToAddress(key.PublicKey), 0,
 		txtypes.FrameFees{GasTipCap: uint256.NewInt(1), GasFeeCap: uint256.NewInt(1e9)},
@@ -309,12 +418,28 @@ func (s *Scenario) checkFrameTxSupport(ctx context.Context) error {
 		return fmt.Errorf("failed building the frame transaction probe: %w", err)
 	}
 
-	err = client.SendTransaction(ctx, signed)
-	if err != nil && isUnsupportedTypeError(err) {
-		return fmt.Errorf("%s rejected an EIP-8141 frame transaction (%v): this chain does not implement frame transactions", client.GetName(), err)
+	return client.SendTransaction(ctx, signed)
+}
+
+// isDecodeError reports whether an RPC error means the client could not parse the
+// payload, as opposed to rejecting a transaction it understood.
+func isDecodeError(err error) bool {
+	message := strings.ToLower(err.Error())
+
+	for _, marker := range []string{
+		"decoding",
+		"invalid rlp",
+		"malformed",
+		"rlp:",
+		"unexpectedlist",
+		"typed transaction too short",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
 	}
 
-	return nil
+	return false
 }
 
 // isUnsupportedTypeError reports whether an RPC error means the client cannot process
@@ -389,7 +514,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, wallet, err
 	}
 
-	frameTx := txtypes.NewFrameTx(nil, wallet.GetAddress(), 0,
+	frameTx := txtypes.NewFrameTxWithExtensions(s.extensions, nil, wallet.GetAddress(), 0,
 		txtypes.FrameFees{
 			GasTipCap: uint256.MustFromBig(tipCap),
 			GasFeeCap: uint256.MustFromBig(feeCap),
@@ -467,7 +592,14 @@ func (s *Scenario) buildShapeFor(txIdx uint64, wallet *spamoor.Wallet) (*builtSh
 		}
 	}
 
-	return buildShape(s.shapes.pick(txIdx), shapeParams{
+	name := s.shapes.pick(txIdx)
+	if postTxShapes[name] && !s.postTxSupported.Load() {
+		// EIP-7906 is optional; fall back to the shape that exercises the same
+		// prefix without a POST_TX frame.
+		name = shapeSelfVerify
+	}
+
+	return buildShape(name, shapeParams{
 		sender:      wallet.GetAddress(),
 		target:      target,
 		amount:      amount,
@@ -514,9 +646,17 @@ func (s *Scenario) onConfirm(client *spamoor.Client, shape *builtShape, txIdx ui
 		return
 	}
 
-	logger.Debugf(" frame tx %d (%s) confirmed in block #%v. payer: %v, frames: %v, exec gas: %v, state gas: %v, total fee: %v gwei",
+	frameTx, _ := tx.Inner().(*txtypes.FrameTx)
+
+	bodyReverted := false
+	if frameTx != nil {
+		bodyReverted = extra.PostTxReverted(frameTx)
+	}
+
+	logger.Debugf(" frame tx %d (%s) confirmed in block #%v. payer: %v, frames: %v, durable: %v, exec gas: %v, state gas: %v, total fee: %v gwei",
 		txIdx+1, shape.name, receipt.BlockNumber.String(), extra.Payer.Hex(),
-		formatStatuses(extra), extra.TotalExecutionGas(), extra.TotalStateGas(),
+		formatStatuses(extra), formatDurable(extra, frameTx),
+		extra.TotalExecutionGas(), extra.TotalStateGas(),
 		txFees.TotalFeeGweiString())
 
 	if !s.options.VerifyFrames {
@@ -528,5 +668,15 @@ func (s *Scenario) onConfirm(client *spamoor.Client, shape *builtShape, txIdx ui
 	if mismatch := compareStatuses(shape.expectedStatus, extra); mismatch != "" {
 		s.framesMismatch.Add(1)
 		logger.Warnf("frame receipt mismatch for %s tx %v: %s", shape.name, tx.Hash().Hex(), mismatch)
+
+		return
+	}
+
+	// A POST_TX failure must revert the whole execution body, which the per-frame
+	// statuses alone do not show.
+	if bodyReverted != shape.expectBodyReverted {
+		s.framesMismatch.Add(1)
+		logger.Warnf("frame body revert mismatch for %s tx %v: body reverted = %v, expected %v",
+			shape.name, tx.Hash().Hex(), bodyReverted, shape.expectBodyReverted)
 	}
 }
