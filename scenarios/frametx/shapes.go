@@ -29,22 +29,29 @@ const (
 	shapePostTxRevert shapeName = "post-tx-revert"
 )
 
-var allShapes = []shapeName{
+// defaultShapes are the shapes "all" enables: everything EIP-8141 defines on its own.
+var defaultShapes = []shapeName{
 	shapeSelfVerify,
 	shapeTransfer,
 	shapeBatch,
 	shapeAtomic,
 	shapeAtomicFail,
 	shapeExpiry,
+}
+
+// optInShapes need an EIP beyond EIP-8141 and are excluded from "all".
+//
+// EIP-7906 installs no predeploy, so unlike the envelope extensions there is no chain
+// state that says whether it is active. Rather than guess, these are selected by name:
+// a chain without EIP-7906 rejects mode 3, and quietly sending transactions that
+// cannot succeed is worse than requiring one word of configuration.
+var optInShapes = []shapeName{
 	shapePostTx,
 	shapePostTxRevert,
 }
 
-// postTxShapes are the EIP-7906 shapes, skipped when the chain does not implement it.
-var postTxShapes = map[shapeName]bool{
-	shapePostTx:       true,
-	shapePostTxRevert: true,
-}
+// allShapes is every shape the scenario can build, for validation and help text.
+var allShapes = append(append([]shapeName{}, defaultShapes...), optInShapes...)
 
 // shapeParams carries everything a shape needs to build its frames.
 type shapeParams struct {
@@ -255,7 +262,7 @@ func parseShapes(spec string) (*weightedShapes, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" || spec == "all" {
 		selection := &weightedShapes{}
-		for _, name := range allShapes {
+		for _, name := range defaultShapes {
 			selection.add(name, 1)
 		}
 
@@ -341,6 +348,19 @@ func shapeNames() []string {
 	}
 
 	return names
+}
+
+// requiresPostTx reports whether a selection includes an EIP-7906 shape.
+func (w *weightedShapes) requiresPostTx() bool {
+	for _, name := range w.names {
+		for _, optIn := range optInShapes {
+			if name == optIn {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // envelopeChoice maps the --envelope option to a set of extensions.

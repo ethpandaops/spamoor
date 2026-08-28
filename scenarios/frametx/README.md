@@ -19,7 +19,8 @@ spamoor frametx [flags]
 ## Frame shapes
 
 `--shapes` takes a weighted list, e.g. `--shapes self-verify:10,atomic:2`. The default, `all`,
-enables every shape with equal weight.
+enables every shape that EIP-8141 defines on its own, with equal weight. The `post-tx` shapes need
+EIP-7906 and are selected by name.
 
 | Shape | Frames | What it exercises |
 |---|---|---|
@@ -34,7 +35,9 @@ enables every shape with equal weight.
 
 The `post-tx` shapes use the expiry verifier predeploy as their assertion contract, so they need
 nothing deployed: with an 8-byte future deadline it succeeds, and with any other calldata length it
-reverts. They are skipped automatically on a chain that does not implement EIP-7906.
+reverts. EIP-7906 installs no predeploy, so there is no chain state saying whether it is active;
+these shapes are therefore excluded from `all` and must be named explicitly. A chain without
+EIP-7906 rejects frame mode 3.
 
 Each shape declares the frame statuses a correct client must report. Confirmed transactions are
 checked against that and any disagreement is logged as a warning, with a summary at the end of the

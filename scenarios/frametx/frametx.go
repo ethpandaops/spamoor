@@ -8,11 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"crypto/ecdsa"
-	"math/big"
-
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -64,8 +60,6 @@ type Scenario struct {
 
 	// Conformance counters: how many confirmed transactions had frame receipts that
 	// matched the shape's expectation, and how many did not.
-	postTxSupported atomic.Bool
-
 	framesChecked  atomic.Uint64
 	framesMismatch atomic.Uint64
 	missingReceipt atomic.Uint64
@@ -210,7 +204,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 		return err
 	}
 
-	s.logger.Infof("starting frame transaction scenario with shapes: %s", strings.Join(shapeNames(), ", "))
+	if s.shapes.requiresPostTx() {
+		s.logger.Warnf("EIP-7906 POST_TX shapes were selected; a chain without EIP-7906 rejects frame mode 3")
+	}
 
 	maxPending := s.options.MaxPending
 	if maxPending == 0 {
@@ -280,17 +276,21 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
-// checkFrameTxSupport probes the chain before the scenario starts sending.
+// checkFrameTxSupport establishes what the chain supports before the scenario sends
+// anything.
 //
-// It establishes two things a frame transaction cannot be built without: that the
-// chain processes type 0x06 at all, and which envelope shape it decodes. EIP-8250 and
-// EIP-8272 amend EIP-8141's payload independently, so a chain may run any of four
-// shapes and the wrong one fails to decode entirely.
+// Everything here is read from chain state rather than inferred from error text. Each
+// of these EIPs installs a predeploy at activation and requires the address to be
+// empty beforehand, so the presence of that account is an exact, client-independent
+// signal:
 //
-// The probe submits from a throwaway key that holds no funds. A chain that understands
-// the shape rejects it for a reason of its own -- unknown account, balance, or the
-// validation prefix reverting because the sender cannot pay -- while one that does not
-// fails while decoding.
+//	EIP-8141  EXPIRY_VERIFIER      0x…8141
+//	EIP-8250  NONCE_MANAGER        0x…8250
+//	EIP-8272  RECENT_ROOT_ADDRESS  0x…8272
+//
+// The envelope shape follows from which of the two extensions are active, which is
+// what makes it safe to encode: a wrong guess would fail to decode on every
+// transaction rather than once at startup.
 func (s *Scenario) checkFrameTxSupport(ctx context.Context) error {
 	txpool := s.walletPool.GetTxPool()
 	if txpool == nil {
@@ -306,166 +306,81 @@ func (s *Scenario) checkFrameTxSupport(ctx context.Context) error {
 		return scenario.ErrNoClients
 	}
 
-	chainID, err := client.GetChainId(ctx)
+	frames, err := predeployActive(ctx, client, txtypes.ExpiryVerifier)
 	if err != nil {
-		return fmt.Errorf("failed reading the chain id: %w", err)
+		return fmt.Errorf("failed reading the expiry verifier predeploy: %w", err)
 	}
 
-	key, err := crypto.GenerateKey()
+	if !frames {
+		return fmt.Errorf("%s has no code at the EIP-8141 expiry verifier predeploy %s: this chain does not implement frame transactions",
+			client.GetName(), txtypes.ExpiryVerifier)
+	}
+
+	if !s.autoDetect {
+		s.logger.Infof("using pinned frame transaction envelope: %s", s.extensions)
+
+		return nil
+	}
+
+	extensions, err := detectEnvelope(ctx, client)
 	if err != nil {
 		return err
 	}
 
-	candidates := []txtypes.FrameExtensions{s.extensions}
-	if s.autoDetect {
-		candidates = envelopeProbeOrder
-	}
+	s.extensions = extensions
+	s.logger.Infof("detected frame transaction envelope: %s", extensions)
 
-	var lastErr error
-
-	for _, extensions := range candidates {
-		err := s.probeEnvelope(ctx, client, chainID, key, extensions)
-		if err == nil || !isDecodeError(err) {
-			// The chain parsed this shape. Anything it says afterwards is about this
-			// particular transaction, not the layout.
-			s.extensions = extensions
-
-			if s.autoDetect {
-				s.logger.Infof("detected frame transaction envelope: %s", extensions)
-			}
-
-			s.checkPostTxSupport(ctx, client, chainID, key)
-
-			return nil
-		}
-
-		lastErr = err
-	}
-
-	if lastErr != nil && isUnsupportedTypeError(lastErr) {
-		return fmt.Errorf("%s rejected an EIP-8141 frame transaction (%v): this chain does not implement frame transactions",
-			client.GetName(), lastErr)
-	}
-
-	return fmt.Errorf("%s could not decode any known frame transaction envelope shape (last error: %v)",
-		client.GetName(), lastErr)
+	return nil
 }
 
-// checkPostTxSupport probes whether the chain implements EIP-7906's POST_TX mode. A
-// chain without it rejects mode 3 while decoding or validating, so the POST_TX shapes
-// are skipped rather than producing a stream of rejections.
-func (s *Scenario) checkPostTxSupport(ctx context.Context, client *spamoor.Client, chainID *big.Int, key *ecdsa.PrivateKey) {
-	probe := txtypes.NewFrameTxWithExtensions(s.extensions,
-		uint256.MustFromBig(chainID),
-		crypto.PubkeyToAddress(key.PublicKey), 0,
-		txtypes.FrameFees{GasTipCap: uint256.NewInt(1), GasFeeCap: uint256.NewInt(1e9)},
-		[]*txtypes.Frame{
-			txtypes.SelfVerifyFrame(txtypes.FrameLimits{Execution: s.options.VerifyGas}),
-			txtypes.PostTxFrame(txtypes.ExpiryVerifier, make([]byte, txtypes.ExpiryDataLength),
-				txtypes.FrameLimits{Execution: s.options.VerifyGas}),
-		},
-		[]*txtypes.FrameSignature{txtypes.SenderSignature()},
-	)
+// detectEnvelope reads the active envelope extensions from the predeploys each one
+// installs at activation.
+func detectEnvelope(ctx context.Context, client *spamoor.Client) (txtypes.FrameExtensions, error) {
+	var extensions txtypes.FrameExtensions
 
-	signed, err := txtypes.SignTx(txtypes.NewTx(probe), chainID, key)
+	keyed, err := predeployActive(ctx, client, txtypes.NonceManager)
 	if err != nil {
-		return
+		return 0, fmt.Errorf("failed reading the EIP-8250 nonce manager predeploy: %w", err)
 	}
 
-	err = client.SendTransaction(ctx, signed)
-
-	// The throwaway key cannot pay, so a chain that understands mode 3 still rejects
-	// this. Only a decode or mode error means POST_TX is unavailable.
-	supported := err == nil || !(isDecodeError(err) || isUnknownModeError(err))
-	s.postTxSupported.Store(supported)
-
-	if supported {
-		s.logger.Infof("chain accepts EIP-7906 POST_TX frames")
-	} else {
-		s.logger.Infof("chain does not implement EIP-7906 POST_TX frames (%v); those shapes are skipped", err)
-	}
-}
-
-// isUnknownModeError reports whether the client rejected the frame mode itself.
-func isUnknownModeError(err error) bool {
-	message := strings.ToLower(err.Error())
-
-	for _, marker := range []string{"mode", "post_tx", "post-tx"} {
-		if strings.Contains(message, marker) {
-			return true
-		}
+	if keyed {
+		extensions |= txtypes.FrameExtKeyedNonces
 	}
 
-	return false
-}
-
-// probeEnvelope submits one throwaway frame transaction in the given shape and returns
-// the client's response.
-func (s *Scenario) probeEnvelope(ctx context.Context, client *spamoor.Client, chainID *big.Int, key *ecdsa.PrivateKey, extensions txtypes.FrameExtensions) error {
-	probe := txtypes.NewFrameTxWithExtensions(extensions,
-		uint256.MustFromBig(chainID),
-		crypto.PubkeyToAddress(key.PublicKey), 0,
-		txtypes.FrameFees{GasTipCap: uint256.NewInt(1), GasFeeCap: uint256.NewInt(1e9)},
-		[]*txtypes.Frame{
-			txtypes.SelfVerifyFrame(txtypes.FrameLimits{Execution: s.options.VerifyGas}),
-			txtypes.UserOpFrame(&txtypes.EntryPoint, nil, nil, txtypes.FrameLimits{Execution: 21000}),
-		},
-		[]*txtypes.FrameSignature{txtypes.SenderSignature()},
-	)
-
-	signed, err := txtypes.SignTx(txtypes.NewTx(probe), chainID, key)
+	roots, err := predeployActive(ctx, client, txtypes.RecentRootAddress)
 	if err != nil {
-		return fmt.Errorf("failed building the frame transaction probe: %w", err)
+		return 0, fmt.Errorf("failed reading the EIP-8272 recent root predeploy: %w", err)
 	}
 
-	return client.SendTransaction(ctx, signed)
-}
-
-// isDecodeError reports whether an RPC error means the client could not parse the
-// payload, as opposed to rejecting a transaction it understood.
-func isDecodeError(err error) bool {
-	message := strings.ToLower(err.Error())
-
-	for _, marker := range []string{
-		"decoding",
-		"invalid rlp",
-		"malformed",
-		"rlp:",
-		"unexpectedlist",
-		"typed transaction too short",
-	} {
-		if strings.Contains(message, marker) {
-			return true
-		}
+	if roots {
+		extensions |= txtypes.FrameExtRecentRoots
 	}
 
-	return false
+	return extensions, nil
 }
 
-// isUnsupportedTypeError reports whether an RPC error means the client cannot process
-// the transaction type at all, as opposed to rejecting this particular transaction.
+// predeployActive reports whether a predeploy account has been installed.
 //
-// The markers are deliberately narrow. An error raised once the client is simulating
-// the validation prefix means the type is understood, and the probe's throwaway key
-// draws exactly that: an unfunded sender makes APPROVE revert for want of balance.
-func isUnsupportedTypeError(err error) bool {
-	message := strings.ToLower(err.Error())
-
-	for _, marker := range []string{
-		"transaction type not supported",
-		"unsupported transaction type",
-		"unknown transaction type",
-		"typed transaction too short",
-		"not supported before", // fork gate: the type exists but is not yet active
-		"invalid rlp",
-		"error decoding",
-	} {
-		if strings.Contains(message, marker) {
-			return true
-		}
+// Activation sets both code and nonce 1, and the fork configuration must pick an
+// address that is empty beforehand. Nonce is checked as well as code because one of
+// these codes is still TBD in its EIP, and an account with nonce 1 is unambiguous
+// either way.
+func predeployActive(ctx context.Context, client *spamoor.Client, address common.Address) (bool, error) {
+	code, err := client.GetCodeAt(ctx, address)
+	if err != nil {
+		return false, err
 	}
 
-	return false
+	if len(code) > 0 {
+		return true, nil
+	}
+
+	nonce, err := client.GetNonceAt(ctx, address, nil)
+	if err != nil {
+		return false, err
+	}
+
+	return nonce > 0, nil
 }
 
 func (s *Scenario) parseTimeout() time.Duration {
@@ -592,14 +507,7 @@ func (s *Scenario) buildShapeFor(txIdx uint64, wallet *spamoor.Wallet) (*builtSh
 		}
 	}
 
-	name := s.shapes.pick(txIdx)
-	if postTxShapes[name] && !s.postTxSupported.Load() {
-		// EIP-7906 is optional; fall back to the shape that exercises the same
-		// prefix without a POST_TX frame.
-		name = shapeSelfVerify
-	}
-
-	return buildShape(name, shapeParams{
+	return buildShape(s.shapes.pick(txIdx), shapeParams{
 		sender:      wallet.GetAddress(),
 		target:      target,
 		amount:      amount,
