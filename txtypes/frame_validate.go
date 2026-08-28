@@ -21,6 +21,7 @@ const (
 	SpeciesDeploy       FrameSpecies = "deploy"        // DEFAULT, flags 0x0
 	SpeciesUserOp       FrameSpecies = "user_op"       // SENDER
 	SpeciesPostOp       FrameSpecies = "post_op"       // DEFAULT with flags
+	SpeciesPostTx       FrameSpecies = "post_tx"       // POST_TX (EIP-7906)
 	SpeciesOther        FrameSpecies = "other"
 )
 
@@ -52,6 +53,9 @@ func (f *Frame) Species(sender common.Address) FrameSpecies {
 
 	case FrameModeSender:
 		return SpeciesUserOp
+
+	case FrameModePostTx:
+		return SpeciesPostTx
 	}
 
 	return SpeciesOther
@@ -76,6 +80,10 @@ func (tx *FrameTx) ValidatePayload() error {
 
 	if err := tx.validateNonce(); err != nil {
 		return err
+	}
+
+	if !tx.Extensions.Has(FrameExtRecentRoots) && len(tx.RecentRoots) > 0 {
+		return fmt.Errorf("%w: recent root references set without the EIP-8272 extension", ErrInvalidFrameTx)
 	}
 
 	if len(tx.RecentRoots) > MaxRecentRootReferences {
@@ -135,6 +143,16 @@ func (tx *FrameTx) validateExpiryFrames() error {
 // non-empty, bounded, strictly increasing, and the zero key may only appear alone
 // because it aliases the sender's ordinary account nonce.
 func (tx *FrameTx) validateNonce() error {
+	if !tx.HasKeyedNonces() {
+		// EIP-8141's scalar nonce: there are no keys to check, and carrying any
+		// would not survive encoding.
+		if len(tx.NonceKeys) > 0 {
+			return fmt.Errorf("%w: nonce keys set without the EIP-8250 extension", ErrInvalidFrameTx)
+		}
+
+		return nil
+	}
+
 	if len(tx.NonceKeys) < 1 || len(tx.NonceKeys) > MaxNonceKeys {
 		return fmt.Errorf("%w: nonce key count %d must be between 1 and %d",
 			ErrInvalidFrameTx, len(tx.NonceKeys), MaxNonceKeys)
@@ -255,7 +273,7 @@ func (tx *FrameTx) validateFrames() error {
 	totalGas := uint64(0)
 
 	for i, frame := range tx.Frames {
-		if frame.Mode > FrameModeSender {
+		if frame.Mode > FrameModePostTx {
 			return fmt.Errorf("%w: frame %d has unknown mode %d", ErrInvalidFrameTx, i, frame.Mode)
 		}
 
@@ -300,12 +318,46 @@ func (tx *FrameTx) validateFrames() error {
 		}
 	}
 
+	if err := tx.validatePostTxSuffix(); err != nil {
+		return err
+	}
+
 	if executionGas := tx.ExecutionGas(); executionGas > TxMaxGasLimit {
 		return fmt.Errorf("%w: execution gas %d exceeds the per-transaction cap %d",
 			ErrInvalidFrameTx, executionGas, TxMaxGasLimit)
 	}
 
 	return nil
+}
+
+// validatePostTxSuffix checks EIP-7906's placement rule: once a frame has mode
+// POST_TX, every later frame must too.
+func (tx *FrameTx) validatePostTxSuffix() error {
+	seen := false
+
+	for i, frame := range tx.Frames {
+		switch {
+		case frame.Mode == FrameModePostTx:
+			seen = true
+		case seen:
+			return fmt.Errorf("%w: frame %d follows a POST_TX frame but is mode %d; POST_TX frames must be a trailing suffix",
+				ErrInvalidFrameTx, i, frame.Mode)
+		}
+	}
+
+	return nil
+}
+
+// PostTxIndex returns the index of the first POST_TX frame, or -1 when the
+// transaction has none.
+func (tx *FrameTx) PostTxIndex() int {
+	for i, frame := range tx.Frames {
+		if frame.Mode == FrameModePostTx {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // ValidationPrefixLength returns the number of leading frames that make up the

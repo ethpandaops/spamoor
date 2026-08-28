@@ -445,7 +445,7 @@ func (wallet *Wallet) BuildFrameTx(txData *txtypes.FrameTx) (*txtypes.Transactio
 	txData.ChainID = uint256.MustFromBig(wallet.chainid)
 	txData.Sender = wallet.address
 
-	if len(txData.NonceKeys) == 0 {
+	if txData.HasKeyedNonces() && len(txData.NonceKeys) == 0 {
 		txData.NonceKeys = []*uint256.Int{new(uint256.Int)}
 	}
 
@@ -630,7 +630,7 @@ func (wallet *Wallet) ReplaceFrameTx(txData *txtypes.FrameTx, nonce uint64) (*tx
 	txData.ChainID = uint256.MustFromBig(wallet.chainid)
 	txData.Sender = wallet.address
 
-	if len(txData.NonceKeys) == 0 {
+	if txData.HasKeyedNonces() && len(txData.NonceKeys) == 0 {
 		txData.NonceKeys = []*uint256.Int{new(uint256.Int)}
 	}
 
