@@ -142,6 +142,13 @@ type TxPool struct {
 	subscriptions      map[uint64]*BlockSubscription
 	bulkSubscriptions  map[uint64]*BulkBlockSubscription
 	nextSubscriptionID atomic.Uint64
+
+	// Hash watches for transactions whose sender the pool does not track, keyed by
+	// transaction hash. hashWatcherCount lets block processing skip the lock entirely
+	// in the common case of no watches.
+	hashWatchersMutex sync.Mutex
+	hashWatchers      map[common.Hash]func(*txtypes.Transaction, *txtypes.Receipt)
+	hashWatcherCount  atomic.Int64
 }
 
 type txPoolWalletRegistration struct {
@@ -217,6 +224,56 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 // registration is auto-removed only once ALL of its contexts have been cancelled. This
 // ensures a restarted spammer's re-registration keeps the wallet alive instead of it
 // being evicted when the old, cancelled context's cleanup fires.
+// WatchTransaction registers a one-shot callback fired when a transaction with the given
+// hash is included in a processed block.
+//
+// It is for transactions whose sender the pool does not track through a wallet, such as a
+// keyless EIP-8141 contract sender: block processing matches confirmations to wallets by
+// their from-address, so a transaction from an unregistered address would otherwise be
+// invisible. The watch is removed when it fires or when ctx is cancelled, so callers pass
+// a bounded context to keep an unincluded transaction from lingering.
+func (pool *TxPool) WatchTransaction(ctx context.Context, txHash common.Hash, callback func(*txtypes.Transaction, *txtypes.Receipt)) {
+	pool.hashWatchersMutex.Lock()
+	if pool.hashWatchers == nil {
+		pool.hashWatchers = make(map[common.Hash]func(*txtypes.Transaction, *txtypes.Receipt))
+	}
+
+	if _, exists := pool.hashWatchers[txHash]; !exists {
+		pool.hashWatcherCount.Add(1)
+	}
+
+	pool.hashWatchers[txHash] = callback
+	pool.hashWatchersMutex.Unlock()
+
+	context.AfterFunc(ctx, func() {
+		pool.hashWatchersMutex.Lock()
+		if _, ok := pool.hashWatchers[txHash]; ok {
+			delete(pool.hashWatchers, txHash)
+			pool.hashWatcherCount.Add(-1)
+		}
+		pool.hashWatchersMutex.Unlock()
+	})
+}
+
+// fireHashWatcher invokes and removes the watch for a transaction hash, if one is set.
+func (pool *TxPool) fireHashWatcher(txHash common.Hash, tx *txtypes.Transaction, receipt *txtypes.Receipt) {
+	if pool.hashWatcherCount.Load() == 0 {
+		return
+	}
+
+	pool.hashWatchersMutex.Lock()
+	callback := pool.hashWatchers[txHash]
+	if callback != nil {
+		delete(pool.hashWatchers, txHash)
+		pool.hashWatcherCount.Add(-1)
+	}
+	pool.hashWatchersMutex.Unlock()
+
+	if callback != nil {
+		callback(tx, receipt)
+	}
+}
+
 func (pool *TxPool) RegisterWallet(wallet *Wallet, ctx context.Context) *Wallet {
 	if ctx.Err() != nil {
 		return nil
@@ -552,6 +609,8 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		}
 
 		txHash := tx.Hash()
+		pool.fireHashWatcher(txHash, tx, receipt)
+
 		txFees := utils.GetTransactionFees(tx, receipt)
 		fromWallet := walletMap[txFrom]
 		toAddr := tx.To()
