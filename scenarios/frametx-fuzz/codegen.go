@@ -136,33 +136,85 @@ func GenerateContractCode(seed string, txID uint64, frameIndex int, maxSize int,
 	return generator.Generate()
 }
 
-// approveEpilogue reads the approval scope from the frame's first calldata word and
-// approves it, which exits the frame.
-var approveEpilogue = []byte{
+// accountCodeSize bounds the fuzzed part of an account contract.
+//
+// Small on purpose. The code runs inside the validation prefix, which is capped at
+// MaxVerifyGas across every frame in it, and the longer the prologue the less often it
+// falls through to the APPROVE that lets the transaction land at all.
+const accountCodeSize = 48
+
+// approveTail reads the approval scope from the first calldata word and approves it,
+// which exits the frame. It runs after the fuzzed prologue on the role path.
+var approveTail = []byte{
 	0x60, 0x00, 0x35, // PUSH1 0x00, CALLDATALOAD -- scope
 	0x60, 0x00, // PUSH1 0x00 -- length
 	0x60, 0x00, // PUSH1 0x00 -- offset
 	opcodeApprove,
+	0x00, // STOP -- unreachable after APPROVE, guards against fall-through
 }
 
-// accountCodeSize bounds the fuzzed part of an account contract.
-//
-// It is small on purpose: the generated code runs before the epilogue, so the longer it
-// is the less often it falls through to the APPROVE that lets the transaction land at
-// all. Both outcomes are worth reaching, and a short prologue keeps the balance.
-const accountCodeSize = 64
+// stopTail ends the role path for an account that does not approve.
+var stopTail = []byte{0x00}
 
-// GenerateAccountCode returns runtime code for an account that runs fuzzed code in its
-// validation frame and then approves.
+// GenerateAccountCode returns runtime code for an account that plays the sender or
+// paymaster role and can be swept afterwards.
 //
-// It is what puts generated code inside the validation prefix, where EIP-8141's
-// banned-opcode and storage rules apply and a public mempool node has to simulate it.
-func GenerateAccountCode(seed string, variant int, gasLimit uint64) []byte {
-	prologue := GenerateContractCode(seed+"-account", uint64(variant), 0, accountCodeSize, gasLimit)
+// Its calldata's first word selects the behaviour: a non-zero scope runs the fuzzed
+// prologue and then, unless approves is false, APPROVEs that scope; a zero scope jumps
+// straight to a tail that sends the account's whole balance to CALLER. The role path is
+// what puts generated code inside the validation prefix, where EIP-8141's banned-opcode
+// and storage rules apply; the wipe path is how the funding deployed with the account is
+// reclaimed once it has been used -- a later SENDER-mode frame calls it, so CALLER is that
+// transaction's sender and the funds return to a tracked wallet.
+func GenerateAccountCode(seed string, txID uint64, frameIndex int, gasLimit uint64, approves bool) []byte {
+	prologue := GenerateContractCode(seed+"-account", txID, frameIndex, accountCodeSize, gasLimit)
 
-	code := make([]byte, 0, len(prologue)+len(approveEpilogue))
+	roleTail := approveTail
+	if !approves {
+		roleTail = stopTail
+	}
+
+	// The wipe JUMPDEST sits after the dispatch, the prologue and the role tail.
+	wipePC := len(accountDispatch) + len(prologue) + len(roleTail)
+
+	code := make([]byte, 0, wipePC+len(wipeTail))
+	code = append(code, accountDispatch...)
 	code = append(code, prologue...)
-	code = append(code, approveEpilogue...)
+	code = append(code, roleTail...)
+	code = append(code, wipeTail...)
+
+	// Patch the dispatch's PUSH2 with the wipe JUMPDEST offset.
+	code[dispatchSweepPCOffset] = byte(wipePC >> 8)
+	code[dispatchSweepPCOffset+1] = byte(wipePC)
 
 	return code
+}
+
+// accountDispatch reads the scope word and jumps to the wipe tail when it is zero,
+// leaving the scope on the stack for the role path otherwise.
+var accountDispatch = []byte{
+	0x60, 0x00, 0x35, // PUSH1 0x00, CALLDATALOAD -- scope
+	0x80,       // DUP1
+	0x15,       // ISZERO
+	0x61, 0, 0, // PUSH2 <sweepPC> (patched)
+	0x57, // JUMPI
+}
+
+// dispatchSweepPCOffset is where accountDispatch carries the PUSH2 wipe offset.
+const dispatchSweepPCOffset = 6
+
+// wipeTail sends the account's whole balance to CALLER with an empty call, then stops.
+// CALLER is the wiping transaction's sender, so the funding returns to a tracked wallet.
+var wipeTail = []byte{
+	0x5b,       // JUMPDEST
+	0x60, 0x00, // PUSH1 0 -- retLength
+	0x60, 0x00, // PUSH1 0 -- retOffset
+	0x60, 0x00, // PUSH1 0 -- argsLength
+	0x60, 0x00, // PUSH1 0 -- argsOffset
+	0x47, // SELFBALANCE -- value
+	0x33, // CALLER -- destination
+	0x5a, // GAS
+	0xf1, // CALL
+	0x50, // POP
+	0x00, // STOP
 }

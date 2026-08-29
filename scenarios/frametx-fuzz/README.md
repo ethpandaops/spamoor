@@ -101,14 +101,33 @@ CREATE2 address is a function of the code, it is known before the transaction is
 a frame can name a contract the transaction has not created yet. Frames also call
 contracts earlier transactions deployed, which the run keeps in a bounded registry.
 
-**Fuzzed accounts**, for the sender and paymaster roles themselves. A few wallets are
-delegated to generated code ending in an `APPROVE` that reads its scope from calldata, so
-their validation frames run arbitrary code before they can approve anything. This is the
-only thing that puts generated code inside the validation prefix, where EIP-8141's
-banned-opcode and storage rules apply and a public mempool node has to simulate it.
+**Fuzzed account contracts**, for the sender and paymaster roles themselves. Body frames
+deploy them — generated code ending in an `APPROVE` that reads its scope from calldata,
+though one in ten is generated without one so the role can fail outright — and later
+transactions use them. A small ring keeps only the most recent, so the code behind those
+roles keeps turning over instead of being a fixed set installed once.
 
-They are drawn rarely — a fuzzed prologue often halts before reaching the `APPROVE`, and
-such a transaction never lands — so the fixed contract plays both roles most of the time.
+Deployment carries value in the same frame: the CREATE2 factory forwards `CALLVALUE`, and
+a paymaster is charged the transaction's maximum cost up front, so it has to hold one. A
+separate funding transfer would not do, because transferring to the contract *calls* it and
+its trailing `APPROVE` reverts outside a validation frame.
+
+This is the only thing that puts generated code inside the validation prefix, where
+EIP-8141's banned-opcode and storage rules apply and a public mempool node has to simulate
+what it finds. A contract sender also carries **no signature at all** — its code approves,
+so there is nothing to sign — and its nonce, which starts at one for a created contract, is
+tracked through a keyless wallet registered with the transaction pool.
+
+Both are drawn rarely: a fuzzed prologue often halts before reaching the `APPROVE`, and
+such a transaction never lands, so the fixed contract plays both roles most of the time.
+
+> A *fresh* sender per transaction would be possible through EIP-8141's
+> `[deploy, only_verify, pay]` prefix, where the deploy frame installs code at `tx.sender`
+> because `tx.sender` is the CREATE2 address. It is not reachable on the client tested
+> here: a deploy frame's code cost lands in the **execution** dimension (~1,530/byte, with
+> `stateGasUsed` reported as zero), so even a small contract needs roughly 500k execution
+> against a `MAX_VERIFY_GAS` of 100k. On a client charging it to state it would fit inside
+> both caps.
 
 ## Invalid combinations
 

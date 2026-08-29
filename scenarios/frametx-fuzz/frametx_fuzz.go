@@ -407,7 +407,7 @@ func (s *Scenario) recipeFor(txIdx uint64) *Recipe {
 		AllowKeyed:         s.env.nonces != nil,
 		AllowProbe:         s.env.probe != nil,
 		AllowCode:          s.env.factory != (common.Address{}),
-		AllowFuzzedAccount: s.env.fuzzedCount > 0,
+		AllowFuzzedAccount: s.env.accounts.available(),
 
 		InvalidChance: s.options.InvalidRatio,
 		Violations:    violationNames(),
@@ -436,11 +436,20 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		return nil, nil, client, err
 	}
 
+	s.coverage.record(result.coverage)
+
+	// A contract sender has no key: its fields are assigned directly, its transaction
+	// carries no signature, and it is submitted out of the pool and tracked by hash,
+	// since the pool has no wallet to match its inclusion through.
+	if result.keyless {
+		prepareKeylessFrameTx(result.tx, result.senderAddr, uint256.MustFromBig(s.walletPool.GetChainId()))
+
+		return nil, result, client, s.sendKeyless(ctx, client, result)
+	}
+
 	if err := result.sender.ResetNoncesIfNeeded(ctx, client); err != nil {
 		return nil, result, client, err
 	}
-
-	s.coverage.record(result.coverage)
 
 	if recipe.Invalid != "" {
 		if err := result.sender.PrepareFrameTx(result.tx); err != nil {
@@ -502,6 +511,44 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	return receiptChan, result, client, nil
 }
 
+// keylessWatchTimeout bounds how long a contract sender's transaction is watched for
+// inclusion before the watch is dropped. A transaction that never lands is simply not
+// recorded as confirmed.
+const keylessWatchTimeout = 2 * time.Minute
+
+// sendKeyless submits a contract sender's transaction and tracks its inclusion by hash.
+//
+// The transaction has no wallet and no signature, so the pool cannot match its inclusion
+// through a sender. It is submitted raw and a hash watch records the outcome when the
+// transaction appears in a block; nothing is awaited, and a transaction that never lands
+// just stays unconfirmed.
+func (s *Scenario) sendKeyless(ctx context.Context, client *spamoor.Client, result *build) error {
+	tx := txtypes.NewTx(result.tx)
+
+	raw, err := tx.MarshalNetwork()
+	if err != nil {
+		return err
+	}
+
+	if err := client.SendRawTransaction(ctx, raw); err != nil {
+		s.coverage.refusedOne(result.recipe, err.Error())
+
+		return nil
+	}
+
+	s.submitted.Add(1)
+
+	watchCtx, cancel := context.WithTimeout(ctx, keylessWatchTimeout)
+
+	s.walletPool.GetTxPool().WatchTransaction(watchCtx, tx.Hash(), func(_ *txtypes.Transaction, receipt *txtypes.Receipt) {
+		defer cancel()
+
+		s.onConfirm(result, result.tx, receipt)
+	})
+
+	return nil
+}
+
 // onConfirm records what a landed transaction produced. The per-frame result is logged,
 // not judged.
 func (s *Scenario) onConfirm(result *build, tx *txtypes.FrameTx, receipt *txtypes.Receipt) {
@@ -511,6 +558,7 @@ func (s *Scenario) onConfirm(result *build, tx *txtypes.FrameTx, receipt *txtype
 
 	s.coverage.confirmedOne()
 	s.env.rememberContracts(result.deployed)
+	s.env.accounts.remember(result.accounts)
 
 	if !s.options.LogFrames {
 		return

@@ -22,6 +22,10 @@ var identityPrecompile = common.BytesToAddress([]byte{0x04})
 // copy, the CREATE2 and the code deposit.
 const deployGasPerCodeByte = 1_600
 
+// wipeFrameGas covers the account's dispatch and the value-bearing call it makes back to
+// the wiping transaction's sender.
+const wipeFrameGas = 40_000
+
 // fuzzedVerifyGas is what a validation frame running fuzzed account code may spend.
 //
 // It has to leave room: the whole validation prefix, signature verification included,
@@ -54,16 +58,45 @@ type build struct {
 	// order. A CREATE2 address is known before the transaction is sent, so a later
 	// frame can call code the transaction has not deployed yet.
 	deployed []common.Address
+
+	// accounts are the account contracts this transaction's frames deploy, which later
+	// transactions use as their sender or paymaster.
+	accounts []accountContract
+
+	// keyless marks a transaction whose sender is a contract that approves in its own
+	// code, so it carries no signature and nothing signs it.
+	keyless bool
+
+	// senderAddr is the transaction's sender, a wallet or a one-shot contract.
+	senderAddr common.Address
+
+	// feeCap is what the transaction pays, and what a deployed account is funded
+	// against.
+	feeCap *big.Int
 }
 
 // buildRecipe assembles the transaction a recipe describes.
 func (s *Scenario) buildRecipe(ctx context.Context, client *spamoor.Client, env *environment, recipe *Recipe, feeCap, tipCap *big.Int) (*build, error) {
-	sender := env.senderFor(recipe, int(recipe.Index))
-	if sender == nil {
-		return nil, fmt.Errorf("no wallet available")
+	result := &build{recipe: recipe, mempoolLegal: true, feeCap: feeCap}
+
+	if recipe.Sender == SenderFuzzedContract && recipe.Invalid == "" {
+		if address, ok := env.accounts.take(int(recipe.Index)); ok {
+			result.keyless = true
+			result.senderAddr = address.Address
+
+			result.cover("fuzzed-sender")
+		}
 	}
 
-	result := &build{recipe: recipe, sender: sender, mempoolLegal: true}
+	if !result.keyless {
+		sender := env.senderFor(recipe, int(recipe.Index))
+		if sender == nil {
+			return nil, fmt.Errorf("no wallet available")
+		}
+
+		result.sender = sender
+		result.senderAddr = sender.GetAddress()
+	}
 
 	if recipe.Reads {
 		result.cover("introspection-reads")
@@ -86,7 +119,7 @@ func (s *Scenario) buildRecipe(ctx context.Context, client *spamoor.Client, env 
 		return nil, err
 	}
 
-	result.tx = txtypes.NewFrameTxWithExtensions(env.extensions, nil, sender.GetAddress(), 0,
+	result.tx = txtypes.NewFrameTxWithExtensions(env.extensions, nil, result.senderAddr, 0,
 		txtypes.FrameFees{
 			GasTipCap: uint256.MustFromBig(tipCap),
 			GasFeeCap: uint256.MustFromBig(feeCap),
@@ -118,7 +151,7 @@ func (s *Scenario) buildPrefix(env *environment, recipe *Recipe, result *build) 
 	}
 
 	contractSender := recipe.Sender == SenderContract && env.probe != nil && env.contractCount > 0
-	fuzzedSender := recipe.Sender == SenderFuzzedContract && env.fuzzedCount > 0
+	fuzzedSender := result.keyless
 
 	result.cover("prefix:" + string(recipe.Prefix))
 
@@ -146,12 +179,12 @@ func (s *Scenario) buildPrefix(env *environment, recipe *Recipe, result *build) 
 		verify := txtypes.OnlyVerifyFrame(txtypes.FrameLimits{Execution: s.options.VerifyGas})
 		s.applySenderCode(verify, txtypes.ApproveExecution, contractSender, fuzzedSender)
 
-		paymaster := env.paymasterFor(int(recipe.Index), result.sender.GetAddress(), recipe.FuzzedPaymaster)
+		paymaster, fuzzedPaymaster := env.paymasterFor(int(recipe.Index), result.senderAddr, recipe.FuzzedPaymaster)
 		payFrame := txtypes.PayFrame(paymaster, nil, txtypes.FrameLimits{})
 
-		s.applySenderCode(payFrame, txtypes.ApprovePayment, true, recipe.FuzzedPaymaster)
+		s.applySenderCode(payFrame, txtypes.ApprovePayment, true, fuzzedPaymaster)
 
-		if recipe.FuzzedPaymaster {
+		if fuzzedPaymaster {
 			result.cover("fuzzed-paymaster")
 		}
 
@@ -236,13 +269,92 @@ func (s *Scenario) buildBody(env *environment, recipe *Recipe, result *build) er
 		}))
 	}
 
+	s.appendAccountDeploys(env, recipe, result)
+	s.appendWipeFrame(env, result)
+
 	return nil
+}
+
+// accountReadyTarget is the number of account contracts the buffer is kept topped up to,
+// so a transaction that needs a fresh sender and paymaster at once usually finds two.
+const accountReadyTarget = 6
+
+// accountDeploysPerTx caps how many account contracts one transaction deploys, so a low
+// pool is refilled over a few transactions rather than in one heavy one.
+const accountDeploysPerTx = 2
+
+// accountDeployIndexBase keeps appended account deployments in a frame-index range of
+// their own, so their CREATE2 salts never collide with the body's code deployments.
+const accountDeployIndexBase = 240
+
+// appendAccountDeploys tops the account pool up toward accountReadyTarget, deploying more
+// when it is lower.
+//
+// The account contracts sender and paymaster roles draw from are consumed one-shot, so
+// the pool has to be replenished. These deployments are appended rather than drawn as body
+// frames, so they add supply without displacing fuzz frames -- a transaction is far under
+// the frame limit either way -- and their rate follows how depleted the pool is rather
+// than the seed, since availability is chain state.
+func (s *Scenario) appendAccountDeploys(env *environment, recipe *Recipe, result *build) {
+	if result.keyless || recipe.Invalid != "" || env.factory == (common.Address{}) {
+		return
+	}
+
+	want := accountReadyTarget - env.accounts.readyCount()
+	if want <= 0 {
+		return
+	}
+
+	if want > accountDeploysPerTx {
+		want = accountDeploysPerTx
+	}
+
+	funding := new(uint256.Int).Mul(uint256.MustFromBig(result.feeCap), uint256.NewInt(accountFundingGas))
+
+	for k := 0; k < want; k++ {
+		index := accountDeployIndexBase + k
+		approves := (recipe.Index+uint64(k))%10 != 0
+
+		runtime := GenerateAccountCode(s.seed, recipe.Index, index, s.options.CodeGas, approves)
+
+		frame, address, err := s.deployFrame(env, recipe.Index, index, runtime, new(uint256.Int).Set(funding))
+		if err != nil {
+			return
+		}
+
+		result.append(frame)
+		result.accounts = append(result.accounts, accountContract{Address: address, Approves: approves})
+		result.cover("deploy-account")
+	}
+}
+
+// appendWipeFrame reclaims one queued account contract by calling it with an empty
+// preamble, which its zero-scope dispatch answers by sending its whole balance to CALLER.
+//
+// The frame is SENDER mode, so CALLER is this transaction's sender and the funding returns
+// to a tracked wallet rather than being stranded. It rides along on an ordinary
+// transaction rather than costing one of its own, and only after enough contracts are
+// queued behind it that a used contract's transaction has settled. A keyless transaction
+// is skipped: its body is not extended past the frames that make it a contract-sender
+// case.
+func (s *Scenario) appendWipeFrame(env *environment, result *build) {
+	if result.keyless {
+		return
+	}
+
+	address, ok := env.accounts.takeWipe()
+	if !ok {
+		return
+	}
+
+	result.append(txtypes.UserOpFrame(&address, nil, nil, txtypes.FrameLimits{Execution: wipeFrameGas}))
+	result.cover("wipe-account")
 }
 
 // buildBodyFrame assembles one body frame and says what it is built to do.
 func (s *Scenario) buildBodyFrame(env *environment, recipe *Recipe, result *build, spec BodyFrame, index int) (*txtypes.Frame, error) {
 	if spec.Kind == KindDeployCode {
-		return s.buildDeployFrame(env, recipe, result, index)
+		return s.buildCodeDeployFrame(env, recipe, result, index)
 	}
 
 	target, targetEmpty := s.resolveTarget(env, recipe, result, spec, index)
@@ -302,35 +414,49 @@ func (s *Scenario) buildBodyFrame(env *environment, recipe *Recipe, result *buil
 	}
 }
 
-// buildDeployFrame assembles a frame that deploys generated contract code.
+// buildCodeDeployFrame assembles a body frame that deploys fuzzed contract code.
 //
 // The frame calls the CREATE2 factory, whose calldata is a salt followed by init code, so
 // the address is a function of the code and is known here rather than after the fact. That
 // is what lets a later frame in the same transaction call a contract this one has not
 // created yet.
-func (s *Scenario) buildDeployFrame(env *environment, recipe *Recipe, result *build, index int) (*txtypes.Frame, error) {
+func (s *Scenario) buildCodeDeployFrame(env *environment, recipe *Recipe, result *build, index int) (*txtypes.Frame, error) {
 	runtime := GenerateContractCode(s.seed, recipe.Index, index, int(s.options.MaxCodeSize), s.options.CodeGas)
 
-	initcode, err := DeploymentInitCode(runtime)
+	frame, address, err := s.deployFrame(env, recipe.Index, index, runtime, new(uint256.Int))
 	if err != nil {
 		return nil, err
 	}
 
-	salt := deploySalt(recipe.Index, index)
+	result.deployed = append(result.deployed, address)
+	result.cover("deploy-code")
+
+	return frame, nil
+}
+
+// deployFrame builds a factory-call frame that deploys runtime with the given value, and
+// returns the frame together with the CREATE2 address the deployment will land at.
+func (s *Scenario) deployFrame(env *environment, txID uint64, index int, runtime []byte, value *uint256.Int) (*txtypes.Frame, common.Address, error) {
+	initcode, err := DeploymentInitCode(runtime)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+
+	salt := deploySalt(txID, index)
 
 	data := make([]byte, 0, len(salt)+len(initcode))
 	data = append(data, salt[:]...)
 	data = append(data, initcode...)
 
-	result.deployed = append(result.deployed, crypto.CreateAddress2(env.factory, salt, crypto.Keccak256(initcode)))
-	result.cover("deploy-code")
-
+	address := crypto.CreateAddress2(env.factory, salt, crypto.Keccak256(initcode))
 	factory := env.factory
 
-	return txtypes.UserOpFrame(&factory, nil, data, txtypes.FrameLimits{
+	frame := txtypes.UserOpFrame(&factory, value, data, txtypes.FrameLimits{
 		Execution: deployExecutionGas(s.options.CodeGas, len(initcode)),
 		State:     deployStateGas(len(initcode)),
-	}), nil
+	})
+
+	return frame, address, nil
 }
 
 // deployExecutionGas budgets a deployment's execution gas, which scales with the code
@@ -381,7 +507,7 @@ func (s *Scenario) resolveTarget(env *environment, recipe *Recipe, result *build
 			return address, false
 		}
 	case TargetSender:
-		return env.senderFor(recipe, int(recipe.Index)).GetAddress(), false
+		return result.senderAddr, false
 	case TargetProbe:
 		if env.probe != nil {
 			return env.probe.Address, false
@@ -434,6 +560,11 @@ func (s *Scenario) buildScript(env *environment, recipe *Recipe, spec BodyFrame,
 
 // buildSignatures assembles the signature list.
 func (s *Scenario) buildSignatures(recipe *Recipe, result *build) ([]*txtypes.FrameSignature, error) {
+	// A contract sender approves in its own code and carries no signature at all.
+	if result.keyless {
+		return nil, nil
+	}
+
 	signatures := []*txtypes.FrameSignature{txtypes.SenderSignature()}
 
 	if recipe.Witness {
@@ -466,7 +597,7 @@ func (s *Scenario) applyNonceKeys(ctx context.Context, client *spamoor.Client, e
 	// prefix already costs. Deriving the headroom rather than assuming a fixed budget
 	// is what keeps a transaction that also carries a P256 entry or a sponsored prefix
 	// from tipping over the cap.
-	sel, err := env.nonces.selectKeys(ctx, client, result.sender.GetAddress(), recipe.NonceKeys,
+	sel, err := env.nonces.selectKeys(ctx, client, result.senderAddr, recipe.NonceKeys,
 		s.firstUseHeadroom(result))
 	if err != nil {
 		return err

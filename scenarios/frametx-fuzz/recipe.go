@@ -85,9 +85,10 @@ const (
 	// deployed code rather than from the protocol's default code.
 	SenderContract SenderKind = "contract"
 
-	// SenderFuzzedContract is an account delegated to generated code, so the validation
-	// frame runs arbitrary code before it can approve anything. Drawn rarely: most such
-	// transactions never land.
+	// SenderFuzzedContract is a generated account contract an earlier transaction
+	// deployed, so the validation frame runs arbitrary code before it can approve
+	// anything and the transaction carries no signature at all. Drawn rarely: a fuzzed
+	// prologue often halts before it reaches the approval.
 	SenderFuzzedContract SenderKind = "fuzzed_contract"
 )
 
@@ -171,6 +172,10 @@ type BodyFrame struct {
 
 	// StateGas budgets state gas for a frame that creates state.
 	StateGas bool `json:"stateGas"`
+
+	// NoApprove leaves the APPROVE off a deployed account's code, so it can never play
+	// the sender or paymaster role successfully.
+	NoApprove bool `json:"noApprove,omitempty"`
 }
 
 // recentRootEdgeNames are the awkward reference cases worth reaching.
@@ -498,6 +503,18 @@ func (r *Recipe) normalize(opts DrawOptions) {
 		r.FuzzedPaymaster = false
 	}
 
+	// An account contract is funded for a transaction of ordinary size, and it is
+	// charged the maximum cost up front. Deploy frames are what make a transaction
+	// expensive, so a recipe leaning on one keeps its body cheap.
+	if r.Sender == SenderFuzzedContract || r.FuzzedPaymaster {
+		for i := range r.Body {
+			if r.Body[i].Kind == KindDeployCode {
+				r.Body[i].Kind = KindCall
+				r.Body[i].Target = TargetWallet
+			}
+		}
+	}
+
 	if !opts.AllowProbe {
 		for i := range r.Body {
 			if r.Body[i].Kind == KindProbe {
@@ -551,6 +568,10 @@ func (r *Recipe) refusalKey() string {
 		return "prefix:" + string(r.Prefix)
 	case r.Sender == SenderContract:
 		return "contract-sender"
+	case r.Sender == SenderFuzzedContract:
+		return "fuzzed-sender"
+	case r.FuzzedPaymaster:
+		return "fuzzed-paymaster"
 	default:
 		return "well-formed"
 	}
