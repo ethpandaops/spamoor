@@ -70,7 +70,7 @@ axis with equal weight. An axis whose EIP the chain does not run is disabled aut
 | `roots` | EIP-8272 references, including the window edges and the cases that must be refused |
 | `posttx` | EIP-7906 assertion frames, passing and failing |
 | `probe` | Calls into the fixed probe contract, including the introspection sweep |
-| `code` | Deploying fuzzed contracts from one frame and calling them from another |
+| `code` | Deploying fuzzed contracts from one frame and calling them from another, and the fuzzed sender and paymaster roles |
 
 ### Generated contracts
 
@@ -100,6 +100,15 @@ One frame deploys through the factory and a later frame calls the result. Becaus
 CREATE2 address is a function of the code, it is known before the transaction is sent, so
 a frame can name a contract the transaction has not created yet. Frames also call
 contracts earlier transactions deployed, which the run keeps in a bounded registry.
+
+**Fuzzed accounts**, for the sender and paymaster roles themselves. A few wallets are
+delegated to generated code ending in an `APPROVE` that reads its scope from calldata, so
+their validation frames run arbitrary code before they can approve anything. This is the
+only thing that puts generated code inside the validation prefix, where EIP-8141's
+banned-opcode and storage rules apply and a public mempool node has to simulate it.
+
+They are drawn rarely — a fuzzed prologue often halts before reaching the `APPROVE`, and
+such a transaction never lands — so the fixed contract plays both roles most of the time.
 
 ## Invalid combinations
 

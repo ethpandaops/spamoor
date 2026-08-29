@@ -135,3 +135,34 @@ func GenerateContractCode(seed string, txID uint64, frameIndex int, maxSize int,
 
 	return generator.Generate()
 }
+
+// approveEpilogue reads the approval scope from the frame's first calldata word and
+// approves it, which exits the frame.
+var approveEpilogue = []byte{
+	0x60, 0x00, 0x35, // PUSH1 0x00, CALLDATALOAD -- scope
+	0x60, 0x00, // PUSH1 0x00 -- length
+	0x60, 0x00, // PUSH1 0x00 -- offset
+	opcodeApprove,
+}
+
+// accountCodeSize bounds the fuzzed part of an account contract.
+//
+// It is small on purpose: the generated code runs before the epilogue, so the longer it
+// is the less often it falls through to the APPROVE that lets the transaction land at
+// all. Both outcomes are worth reaching, and a short prologue keeps the balance.
+const accountCodeSize = 64
+
+// GenerateAccountCode returns runtime code for an account that runs fuzzed code in its
+// validation frame and then approves.
+//
+// It is what puts generated code inside the validation prefix, where EIP-8141's
+// banned-opcode and storage rules apply and a public mempool node has to simulate it.
+func GenerateAccountCode(seed string, variant int, gasLimit uint64) []byte {
+	prologue := GenerateContractCode(seed+"-account", uint64(variant), 0, accountCodeSize, gasLimit)
+
+	code := make([]byte, 0, len(prologue)+len(approveEpilogue))
+	code = append(code, prologue...)
+	code = append(code, approveEpilogue...)
+
+	return code
+}

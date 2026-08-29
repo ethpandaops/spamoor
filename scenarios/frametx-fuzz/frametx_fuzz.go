@@ -399,14 +399,15 @@ func (s *Scenario) recipeFor(txIdx uint64) *Recipe {
 	rng := utils.NewDeterministicRNGWithSeed(index, s.seed)
 
 	return Draw(rng, index, DrawOptions{
-		Axes:          s.axes,
-		MaxBodyFrames: int(s.options.MaxFrames),
-		AllowPostTx:   s.env.allowPostTx,
-		AllowContract: s.env.contractCount > 0,
-		AllowRoots:    s.env.roots != nil,
-		AllowKeyed:    s.env.nonces != nil,
-		AllowProbe:    s.env.probe != nil,
-		AllowCode:     s.env.factory != (common.Address{}),
+		Axes:               s.axes,
+		MaxBodyFrames:      int(s.options.MaxFrames),
+		AllowPostTx:        s.env.allowPostTx,
+		AllowContract:      s.env.contractCount > 0,
+		AllowRoots:         s.env.roots != nil,
+		AllowKeyed:         s.env.nonces != nil,
+		AllowProbe:         s.env.probe != nil,
+		AllowCode:          s.env.factory != (common.Address{}),
+		AllowFuzzedAccount: s.env.fuzzedCount > 0,
 
 		InvalidChance: s.options.InvalidRatio,
 		Violations:    violationNames(),

@@ -29,10 +29,12 @@ type environment struct {
 	// probe is the deployed probe contract, or nil when probe axes are disabled.
 	probe *ProbeDeployment
 
-	// The wallet pool is split in two. A wallet carrying the probe delegation has code,
-	// so its validation frame runs that code instead of the protocol's default code.
+	// The wallet pool is split three ways: wallets with no code, wallets delegated to
+	// the probe contract, and wallets delegated to fuzzed account code. A delegated
+	// wallet's validation frame runs that code instead of the protocol's default code.
 	plainCount    int
 	contractCount int
+	fuzzedCount   int
 
 	// nonces tracks the EIP-8250 keyed nonce sequences this run has consumed.
 	nonces *nonceLedger
@@ -76,11 +78,24 @@ func (e *environment) contractWallet(index int) *spamoor.Wallet {
 	return e.walletPool.GetWallet(spamoor.SelectWalletByIndex, e.plainCount+index%e.contractCount)
 }
 
+// fuzzedWallet returns a wallet delegated to fuzzed account code.
+func (e *environment) fuzzedWallet(index int) *spamoor.Wallet {
+	if e.fuzzedCount == 0 {
+		return nil
+	}
+
+	return e.walletPool.GetWallet(spamoor.SelectWalletByIndex, e.plainCount+e.contractCount+index%e.fuzzedCount)
+}
+
 // senderFor picks the wallet a recipe calls for. A recipe carrying a deliberate
 // violation goes to the burner, since it never lands and would stall a real wallet.
 func (e *environment) senderFor(recipe *Recipe, index int) *spamoor.Wallet {
 	if recipe.Invalid != "" && e.burner != nil {
 		return e.burner
+	}
+
+	if recipe.Sender == SenderFuzzedContract && e.fuzzedCount > 0 {
+		return e.fuzzedWallet(index)
 	}
 
 	if recipe.Sender == SenderContract && e.contractCount > 0 {
@@ -126,9 +141,18 @@ func (e *environment) pickContract(index int) (common.Address, bool) {
 // The public mempool caps how many pending transactions one non-canonical paymaster may
 // sponsor, so a single paymaster refuses almost everything behind the first few. The
 // sender is skipped: a transaction sponsoring itself is the self-relayed shape.
-func (e *environment) paymasterFor(index int, sender common.Address) common.Address {
+func (e *environment) paymasterFor(index int, sender common.Address, fuzzed bool) common.Address {
 	if e.probe == nil {
 		return common.Address{}
+	}
+
+	if fuzzed {
+		for offset := 0; offset < e.fuzzedCount; offset++ {
+			wallet := e.fuzzedWallet(index + offset)
+			if wallet != nil && wallet.GetAddress() != sender {
+				return wallet.GetAddress()
+			}
+		}
 	}
 
 	for offset := 0; offset < e.contractCount; offset++ {
@@ -259,7 +283,91 @@ func (s *Scenario) setupProbe(ctx context.Context, env *environment, total int, 
 		wallets = append(wallets, s.walletPool.GetWallet(spamoor.SelectWalletByIndex, env.plainCount+i))
 	}
 
-	return DelegateProbe(ctx, s.logger, s.walletPool, s.options.ClientGroup, deployment.Address, wallets, feeCap, tipCap)
+	if err := DelegateProbe(ctx, s.logger, s.walletPool, s.options.ClientGroup, deployment.Address, wallets, feeCap, tipCap); err != nil {
+		return err
+	}
+
+	return s.setupFuzzedAccounts(ctx, env, feeCap, tipCap)
+}
+
+// setupFuzzedAccounts carves a slice of the delegated wallets over to fuzzed account
+// code, so the sender and paymaster roles are not always played by the fixed contract.
+//
+// Their validation frames run generated code, which mostly halts before it reaches the
+// APPROVE that would let the transaction land. That is the point: the validation prefix
+// is where EIP-8141's banned-opcode and storage rules apply, and nothing else in the
+// scenario puts arbitrary code in front of them.
+func (s *Scenario) setupFuzzedAccounts(ctx context.Context, env *environment, feeCap, tipCap *big.Int) error {
+	if env.contractCount < 2 {
+		return nil
+	}
+
+	env.fuzzedCount = max(env.contractCount/4, 1)
+	env.contractCount -= env.fuzzedCount
+
+	// No point deploying a variant no wallet is delegated to.
+	variants := min(fuzzedAccountVariants, env.fuzzedCount)
+
+	client := s.walletPool.GetClient(spamoor.WithClientGroup(s.options.ClientGroup))
+	if client == nil {
+		return scenario.ErrNoClients
+	}
+
+	deployer := s.walletPool.GetWellKnownWallet(ProbeDeployerWalletName)
+
+	for variant := 0; variant < variants; variant++ {
+		address, err := s.deployFuzzedAccount(ctx, client, deployer, variant, feeCap, tipCap)
+		if err != nil {
+			return err
+		}
+
+		wallets := []*spamoor.Wallet{}
+		for i := variant; i < env.fuzzedCount; i += variants {
+			wallets = append(wallets, env.fuzzedWallet(i))
+		}
+
+		if err := DelegateProbe(ctx, s.logger, s.walletPool, s.options.ClientGroup, address, wallets, feeCap, tipCap); err != nil {
+			return err
+		}
+	}
+
+	s.logger.Infof("delegated %v wallets to %v fuzzed account variants", env.fuzzedCount, variants)
+
+	return nil
+}
+
+// fuzzedAccountVariants is how many distinct fuzzed account contracts a run deploys.
+const fuzzedAccountVariants = 4
+
+// deployFuzzedAccount deploys one fuzzed account contract, reusing it when a previous run
+// already put it at its deterministic address.
+func (s *Scenario) deployFuzzedAccount(ctx context.Context, client *spamoor.Client, deployer *spamoor.Wallet, variant int, feeCap, tipCap *big.Int) (common.Address, error) {
+	initcode, err := DeploymentInitCode(GenerateAccountCode(s.seed, variant, s.options.CodeGas))
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	// A negative frame index marks an account variant rather than a deploy frame.
+	salt := deploySalt(uint64(variant), -1)
+
+	address, tx, err := s.walletPool.GetDeploymentFactory().GetContractDeployment(ctx, initcode, salt, client, deployer, feeCap, tipCap, false)
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	if tx == nil {
+		return address, nil
+	}
+
+	if _, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, deployer, tx, &spamoor.SendTransactionOptions{
+		Client:      client,
+		ClientGroup: s.options.ClientGroup,
+		Rebroadcast: true,
+	}); err != nil {
+		return common.Address{}, fmt.Errorf("could not deploy fuzzed account variant %d: %w", variant, err)
+	}
+
+	return address, nil
 }
 
 // fees resolves the configured fee caps.

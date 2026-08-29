@@ -22,6 +22,12 @@ var identityPrecompile = common.BytesToAddress([]byte{0x04})
 // copy, the CREATE2 and the code deposit.
 const deployGasPerCodeByte = 1_600
 
+// fuzzedVerifyGas is what a validation frame running fuzzed account code may spend.
+//
+// It has to leave room: the whole validation prefix, signature verification included,
+// must stay under MaxVerifyGas, and the sponsored prefix has two such frames.
+const fuzzedVerifyGas = 40_000
+
 // build is a recipe turned into a transaction, together with the dimensions it covers.
 type build struct {
 	recipe *Recipe
@@ -112,6 +118,7 @@ func (s *Scenario) buildPrefix(env *environment, recipe *Recipe, result *build) 
 	}
 
 	contractSender := recipe.Sender == SenderContract && env.probe != nil && env.contractCount > 0
+	fuzzedSender := recipe.Sender == SenderFuzzedContract && env.fuzzedCount > 0
 
 	result.cover("prefix:" + string(recipe.Prefix))
 
@@ -123,32 +130,36 @@ func (s *Scenario) buildPrefix(env *environment, recipe *Recipe, result *build) 
 		result.cover("contract-sender")
 	}
 
+	if fuzzedSender {
+		result.cover("fuzzed-sender")
+	}
+
 	switch recipe.Prefix {
 	case PrefixPaymaster:
 		if env.probe == nil {
 			// Without the probe contract there is nothing to play the paymaster, so
 			// the recipe falls back to the self-relayed shape rather than building a
 			// transaction that cannot validate.
-			return s.buildSelfVerifyPrefix(env, contractSender, result)
+			return s.buildSelfVerifyPrefix(contractSender, fuzzedSender, result)
 		}
 
 		verify := txtypes.OnlyVerifyFrame(txtypes.FrameLimits{Execution: s.options.VerifyGas})
-		if contractSender {
-			script := NewProbeScript().Approve(txtypes.ApproveExecution)
-			verify.Data = script.Bytes()
-			verify.Limits.Execution = script.ExecutionGas() + probeEntryGas
+		s.applySenderCode(verify, txtypes.ApproveExecution, contractSender, fuzzedSender)
+
+		paymaster := env.paymasterFor(int(recipe.Index), result.sender.GetAddress(), recipe.FuzzedPaymaster)
+		payFrame := txtypes.PayFrame(paymaster, nil, txtypes.FrameLimits{})
+
+		s.applySenderCode(payFrame, txtypes.ApprovePayment, true, recipe.FuzzedPaymaster)
+
+		if recipe.FuzzedPaymaster {
+			result.cover("fuzzed-paymaster")
 		}
 
-		payScript := NewProbeScript().Approve(txtypes.ApprovePayment)
-
 		result.append(verify)
-		result.append(txtypes.PayFrame(env.paymasterFor(int(recipe.Index), result.sender.GetAddress()),
-			payScript.Bytes(), txtypes.FrameLimits{
-				Execution: payScript.ExecutionGas() + probeEntryGas,
-			}))
+		result.append(payFrame)
 
 	default:
-		return s.buildSelfVerifyPrefix(env, contractSender, result)
+		return s.buildSelfVerifyPrefix(contractSender, fuzzedSender, result)
 	}
 
 	result.prefixLen = len(result.frames)
@@ -157,19 +168,39 @@ func (s *Scenario) buildPrefix(env *environment, recipe *Recipe, result *build) 
 }
 
 // buildSelfVerifyPrefix appends the single-frame validation prefix.
-func (s *Scenario) buildSelfVerifyPrefix(env *environment, contractSender bool, result *build) error {
+func (s *Scenario) buildSelfVerifyPrefix(contractSender, fuzzedSender bool, result *build) error {
 	verify := txtypes.SelfVerifyFrame(txtypes.FrameLimits{Execution: s.options.VerifyGas})
-
-	if contractSender {
-		script := NewProbeScript().Approve(txtypes.ApproveExecutionAndPayment)
-		verify.Data = script.Bytes()
-		verify.Limits.Execution = script.ExecutionGas() + probeEntryGas
-	}
+	s.applySenderCode(verify, txtypes.ApproveExecutionAndPayment, contractSender, fuzzedSender)
 
 	result.append(verify)
 	result.prefixLen = len(result.frames)
 
 	return nil
+}
+
+// applySenderCode gives a validation frame the data its target's code expects.
+//
+// An account with no code is validated by the protocol's default code and needs none. The
+// probe contract takes a script; fuzzed account code reads the approval scope from the
+// first calldata word after whatever generated code precedes it.
+func (s *Scenario) applySenderCode(frame *txtypes.Frame, scope uint8, contract, fuzzed bool) {
+	switch {
+	case fuzzed:
+		frame.Data = approveScopeWord(scope)
+		frame.Limits.Execution = fuzzedVerifyGas
+	case contract:
+		script := NewProbeScript().Approve(scope)
+		frame.Data = script.Bytes()
+		frame.Limits.Execution = script.ExecutionGas() + probeEntryGas
+	}
+}
+
+// approveScopeWord renders the approval scope as the word fuzzed account code reads.
+func approveScopeWord(scope uint8) []byte {
+	word := make([]byte, 32)
+	word[31] = scope
+
+	return word
 }
 
 // buildBody assembles the frames after the validation prefix.

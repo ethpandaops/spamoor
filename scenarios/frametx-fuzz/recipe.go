@@ -23,9 +23,12 @@ type Recipe struct {
 	// matching the prefix against the recognized shapes.
 	Expiry bool `json:"expiry"`
 
-	// Sender selects whether the sender is an account without code, running the
-	// protocol's default code, or one carrying the probe delegation.
+	// Sender selects what code the sender's validation frame runs.
 	Sender SenderKind `json:"sender"`
+
+	// FuzzedPaymaster sponsors through an account delegated to generated code instead
+	// of the fixed one.
+	FuzzedPaymaster bool `json:"fuzzedPaymaster,omitempty"`
 
 	// Body is the frame list after the validation prefix.
 	Body []BodyFrame `json:"body"`
@@ -81,6 +84,11 @@ const (
 	// SenderContract is an account carrying the probe delegation, so APPROVE runs from
 	// deployed code rather than from the protocol's default code.
 	SenderContract SenderKind = "contract"
+
+	// SenderFuzzedContract is an account delegated to generated code, so the validation
+	// frame runs arbitrary code before it can approve anything. Drawn rarely: most such
+	// transactions never land.
+	SenderFuzzedContract SenderKind = "fuzzed_contract"
 )
 
 // FrameKind is what a body frame does.
@@ -263,14 +271,15 @@ func (w axisWeights) draws(rng *utils.DeterministicRNG, name axis) bool {
 
 // DrawOptions bounds what a draw may produce.
 type DrawOptions struct {
-	Axes          axisWeights
-	MaxBodyFrames int
-	AllowPostTx   bool
-	AllowContract bool
-	AllowRoots    bool
-	AllowKeyed    bool
-	AllowProbe    bool
-	AllowCode     bool
+	Axes               axisWeights
+	MaxBodyFrames      int
+	AllowPostTx        bool
+	AllowContract      bool
+	AllowRoots         bool
+	AllowKeyed         bool
+	AllowProbe         bool
+	AllowCode          bool
+	AllowFuzzedAccount bool
 	// InvalidChance is how often a drawn recipe carries a deliberate violation.
 	InvalidChance float64
 
@@ -287,6 +296,7 @@ func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 	recipe := &Recipe{Index: index}
 
 	prefixDraw := rng.Float64()
+	paymasterDraw := rng.Float64()
 	expiryDraw := rng.Float64()
 	senderDraw := rng.Float64()
 	witnessDraw := rng.Float64()
@@ -322,10 +332,18 @@ func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 
 	recipe.Expiry = opts.Axes.enabled(axisPrefix) && expiryDraw < 0.25
 
+	// One draw, split into bands: the fixed contract sender is common and the fuzzed one
+	// is rare, since a validation frame running generated code rarely approves.
 	recipe.Sender = SenderDefaultCode
-	if opts.AllowContract && senderDraw < 0.25 {
+
+	switch {
+	case opts.AllowFuzzedAccount && senderDraw < 0.05:
+		recipe.Sender = SenderFuzzedContract
+	case opts.AllowContract && senderDraw < 0.25:
 		recipe.Sender = SenderContract
 	}
+
+	recipe.FuzzedPaymaster = opts.AllowFuzzedAccount && recipe.Prefix == PrefixPaymaster && paymasterDraw < 0.1
 
 	recipe.Witness = opts.Axes.enabled(axisSignature) && witnessDraw < 0.4*opts.Axes.chance(axisSignature)
 	recipe.P256 = opts.Axes.enabled(axisSignature) && p256Draw < 0.2*opts.Axes.chance(axisSignature)
@@ -470,6 +488,14 @@ func (r *Recipe) normalize(opts DrawOptions) {
 			r.Body[i].Script = ScriptNone
 			r.Body[i].StateGas = false
 		}
+	}
+
+	if !opts.AllowFuzzedAccount {
+		if r.Sender == SenderFuzzedContract {
+			r.Sender = SenderDefaultCode
+		}
+
+		r.FuzzedPaymaster = false
 	}
 
 	if !opts.AllowProbe {
