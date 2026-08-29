@@ -60,6 +60,7 @@ func init() {
 		"ExternalBlockEvent":     reflect.ValueOf((*spamoor.ExternalBlockEvent)(nil)),
 		"ExternalBlockSource":    reflect.ValueOf((*spamoor.ExternalBlockSource)(nil)),
 		"ExternalClientOptions":  reflect.ValueOf((*spamoor.ExternalClientOptions)(nil)),
+		"FrameSupport":           reflect.ValueOf((*spamoor.FrameSupport)(nil)),
 		"FundingRequest":         reflect.ValueOf((*spamoor.FundingRequest)(nil)),
 		"GethTxCompleteFn":       reflect.ValueOf((*spamoor.GethTxCompleteFn)(nil)),
 		"GethTxConfirmFn":        reflect.ValueOf((*spamoor.GethTxConfirmFn)(nil)),

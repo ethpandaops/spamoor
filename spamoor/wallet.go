@@ -43,7 +43,14 @@ type Wallet struct {
 	balance          *big.Int
 	protected        bool // When true, GetPrivateKey() returns nil to prevent key extraction
 
-	txNonceChans     map[uint64]*nonceStatus
+	txNonceChans map[uint64]*nonceStatus
+
+	// txHashChans tracks transactions that are not sequenced by the account nonce, so
+	// their confirmation cannot be keyed by one. EIP-8250 keyed nonces are the only
+	// current case: their sequence lives in protocol storage under NONCE_MANAGER and
+	// says nothing about the account nonce. Guarded by txNonceMutex like txNonceChans.
+	txHashChans map[common.Hash]*nonceStatus
+
 	txNonceMutex     sync.Mutex
 	lastConfirmation uint64
 
@@ -74,6 +81,7 @@ func NewWallet(privkey *ecdsa.PrivateKey, address common.Address) *Wallet {
 		privkey:      privkey,
 		address:      address,
 		txNonceChans: map[uint64]*nonceStatus{},
+		txHashChans:  map[common.Hash]*nonceStatus{},
 	}
 
 	return wallet
@@ -442,6 +450,42 @@ func (wallet *Wallet) BuildSetCodeTx(txData *txtypes.SetCodeTx) (*txtypes.Transa
 // it stays in the pool's ordinary nonce tracking; other key sets are sequenced
 // independently and the caller owns their numbering.
 func (wallet *Wallet) BuildFrameTx(txData *txtypes.FrameTx) (*txtypes.Transaction, error) {
+	return wallet.BuildFrameTxWithSigners(txData)
+}
+
+// BuildFrameTxWithSigners builds and signs a frame transaction whose signature list
+// carries entries from more than one party.
+//
+// A paymaster establishes itself as payer through a signature entry rather than through
+// its contract code, so a sponsored transaction needs the paymaster's key alongside the
+// sender's. Every entry is signed over the canonical signature hash, which covers the
+// sender, chain id and nonce, so those must be final before anyone signs. This assigns
+// them, lets each extra signer sign the entries naming it, then signs the sender's own
+// entries and wraps the result.
+//
+// Each signer must own at least one unsigned entry; a signer with nothing to sign is an
+// error rather than a silent no-op, because it almost always means the entry's signer
+// address was set wrong.
+func (wallet *Wallet) BuildFrameTxWithSigners(txData *txtypes.FrameTx, signers ...*Wallet) (*txtypes.Transaction, error) {
+	if err := wallet.PrepareFrameTx(txData); err != nil {
+		return nil, err
+	}
+
+	return wallet.SignFrameTx(txData, signers...)
+}
+
+// PrepareFrameTx fills in the fields the canonical signature hash covers -- chain id,
+// sender and nonce -- without signing.
+//
+// Callers that need the transaction's own contents before signing use this: a frame
+// whose data asserts what the transaction carries has to be written after the nonce is
+// assigned and before any entry is signed. A caller that abandons a prepared
+// transaction must return its nonce with MarkSkippedNonce.
+func (wallet *Wallet) PrepareFrameTx(txData *txtypes.FrameTx) error {
+	if wallet.privkey == nil {
+		return errors.New("wallet has no private key")
+	}
+
 	txData.ChainID = uint256.MustFromBig(wallet.chainid)
 	txData.Sender = wallet.address
 
@@ -453,7 +497,46 @@ func (wallet *Wallet) BuildFrameTx(txData *txtypes.FrameTx) (*txtypes.Transactio
 		txData.NonceSeq = wallet.GetNextNonce()
 	}
 
-	return wallet.signTx(txData)
+	return nil
+}
+
+// SignFrameTx signs a prepared frame transaction, letting each extra signer sign the
+// entries naming it before the sender signs its own.
+func (wallet *Wallet) SignFrameTx(txData *txtypes.FrameTx, signers ...*Wallet) (*txtypes.Transaction, error) {
+	if wallet.privkey == nil {
+		return nil, errors.New("wallet has no private key")
+	}
+
+	usesAccountNonce := txData.UsesLegacyNonce()
+
+	fail := func(err error) (*txtypes.Transaction, error) {
+		if usesAccountNonce {
+			wallet.MarkSkippedNonce(txData.NonceSeq)
+		}
+
+		return nil, err
+	}
+
+	for _, signer := range signers {
+		if signer == nil || signer == wallet {
+			continue
+		}
+
+		if signer.privkey == nil {
+			return fail(fmt.Errorf("frame signer %v has no private key", signer.address))
+		}
+
+		if err := txData.SignPayload(wallet.chainid, signer.privkey); err != nil {
+			return fail(fmt.Errorf("failed to sign frame entries for %v: %w", signer.address, err))
+		}
+	}
+
+	tx, err := wallet.signTx(txData)
+	if err != nil {
+		return fail(err)
+	}
+
+	return tx, nil
 }
 
 // BuildBoundTx builds a transaction using the go-ethereum bind package.
@@ -704,6 +787,10 @@ func (wallet *Wallet) getTxNonceChan(tx *txtypes.Transaction, options *SendTrans
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
+	if !tx.UsesAccountNonce() {
+		return wallet.getTxHashChan(tx, options)
+	}
+
 	targetNonce := tx.Nonce()
 
 	if wallet.confirmedTxCount > targetNonce {
@@ -744,9 +831,99 @@ func (wallet *Wallet) getTxNonceChan(tx *txtypes.Transaction, options *SendTrans
 	return nonceChan, len(wallet.txNonceChans) == 1
 }
 
+// getTxHashChan returns or creates a confirmation channel for a transaction that is not
+// sequenced by the account nonce, keyed by its hash.
+//
+// Such a transaction has no nonce ordering to exploit: it cannot be replaced by another
+// transaction at the same nonce, and no later confirmation implies it landed. It is
+// therefore tracked on its own and removed when its own receipt arrives.
+// Must be called with txNonceMutex held.
+func (wallet *Wallet) getTxHashChan(tx *txtypes.Transaction, options *SendTransactionOptions) (*nonceStatus, bool) {
+	txHash := tx.Hash()
+
+	hashChan := wallet.txHashChans[txHash]
+	if hashChan != nil {
+		for _, existingTx := range hashChan.txs {
+			if existingTx.Options == nil && options != nil {
+				existingTx.Options = options
+			}
+		}
+
+		return hashChan, false
+	}
+
+	hashChan = &nonceStatus{
+		txs: []*PendingTx{
+			{
+				Tx:        tx,
+				Submitted: time.Now(),
+				Options:   options,
+			},
+		},
+		channel: make(chan bool),
+	}
+	wallet.txHashChans[txHash] = hashChan
+
+	return hashChan, len(wallet.txHashChans)+len(wallet.txNonceChans) == 1
+}
+
+// confirmTxByHash completes a hash-tracked transaction and releases its waiters. It is
+// the counterpart of the nonce sweep in processTransactionInclusion, which cannot apply
+// to a transaction whose nonce belongs to another domain.
+func (wallet *Wallet) confirmTxByHash(blockNumber uint64, tx *txtypes.Transaction, receipt *txtypes.Receipt) {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	if blockNumber > wallet.lastConfirmation {
+		wallet.lastConfirmation = blockNumber
+	}
+
+	txHash := tx.Hash()
+
+	hashChan := wallet.txHashChans[txHash]
+	if hashChan == nil {
+		return
+	}
+
+	hashChan.receipt = receipt
+	close(hashChan.channel)
+	delete(wallet.txHashChans, txHash)
+}
+
+// getPendingHashTxs returns the hash-tracked transactions still awaiting confirmation.
+func (wallet *Wallet) getPendingHashTxs() []*PendingTx {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	pendingTxs := make([]*PendingTx, 0, len(wallet.txHashChans))
+	for _, hashChan := range wallet.txHashChans {
+		pendingTxs = append(pendingTxs, hashChan.txs...)
+	}
+
+	sort.Slice(pendingTxs, func(i, j int) bool {
+		return pendingTxs[i].Submitted.Before(pendingTxs[j].Submitted)
+	})
+
+	return pendingTxs
+}
+
+// hasPendingHashTxs reports whether any hash-tracked transaction is outstanding.
+func (wallet *Wallet) hasPendingHashTxs() bool {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	return len(wallet.txHashChans) > 0
+}
+
 func (wallet *Wallet) dropPendingTx(tx *txtypes.Transaction) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
+
+	if !tx.UsesAccountNonce() {
+		delete(wallet.txHashChans, tx.Hash())
+
+		return
+	}
 
 	nonceChan := wallet.txNonceChans[tx.Nonce()]
 	if nonceChan == nil {
@@ -767,6 +944,10 @@ func (wallet *Wallet) GetPendingTx(tx *txtypes.Transaction) *PendingTx {
 	defer wallet.txNonceMutex.Unlock()
 
 	nonceChan := wallet.txNonceChans[tx.Nonce()]
+	if !tx.UsesAccountNonce() {
+		nonceChan = wallet.txHashChans[tx.Hash()]
+	}
+
 	if nonceChan == nil {
 		return nil
 	}
@@ -796,6 +977,10 @@ func (wallet *Wallet) GetPendingTxs() []*PendingTx {
 	pendingTxs := []*PendingTx{}
 	for _, nonce := range pendingNonces {
 		pendingTxs = append(pendingTxs, wallet.txNonceChans[nonce].txs...)
+	}
+
+	for _, hashChan := range wallet.txHashChans {
+		pendingTxs = append(pendingTxs, hashChan.txs...)
 	}
 
 	return pendingTxs

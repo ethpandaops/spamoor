@@ -412,6 +412,20 @@ func (client *Client) GetCodeAt(ctx context.Context, address common.Address) ([]
 	return result, nil
 }
 
+// GetStorageAt returns the value of a contract storage slot at the latest block.
+//
+// Protocol-managed storage is how the extension EIPs expose their state: EIP-8250 keeps
+// keyed nonce sequences under NonceManager and EIP-8272 keeps committed roots under
+// RecentRootAddress, and neither contract exposes a read call.
+func (client *Client) GetStorageAt(ctx context.Context, address common.Address, key common.Hash) (common.Hash, error) {
+	var result hexutil.Bytes
+	if err := client.callRPC(ctx, false, &result, "eth_getStorageAt", address, key, "latest"); err != nil {
+		return common.Hash{}, err
+	}
+
+	return common.BytesToHash(result), nil
+}
+
 // EstimateGas runs eth_estimateGas against the chain for the provided call
 // message and returns the suggested gas limit. Used by deploy paths that need
 // an accurate pre-send estimate under EIP-8037 where static guesses tend to
