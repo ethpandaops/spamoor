@@ -12,21 +12,13 @@ import (
 	"github.com/ethpandaops/spamoor/txtypes"
 )
 
-// nonceLedger tracks the EIP-8250 keyed nonce sequences a run has consumed.
+// nonceLedger tracks the EIP-8250 keyed nonce sequences a run has consumed. They live in
+// protocol storage under NONCE_MANAGER, so nothing in the engine tracks them.
 //
-// A keyed nonce lives in protocol storage under NONCE_MANAGER rather than in the account
-// nonce, so nothing in the engine tracks it. Two properties of the EIP shape this:
-//
-//   - every key a transaction selects must currently sit at the same nonce_seq, and a
-//     successful payment approval moves all of them to nonce_seq + 1 together, so keys
-//     can only be combined while their sequences agree;
-//   - a key's first use costs KEYED_NONCE_FIRST_USE_GAS out of the frame executing
-//     APPROVE, and the whole validation prefix must stay under MaxVerifyGas, so at most
-//     four keys can see their first use in one publicly propagated transaction.
-//
-// The ledger therefore groups keys by sequence and hands out subsets that share one, and
-// the caller budgets the first-use surcharge from the ledger's own view of which keys are
-// new.
+// Two rules shape it: every key a transaction selects must sit at the same nonce_seq, and
+// a key's first use costs KeyedNonceFirstUseGas out of the frame executing APPROVE. The
+// ledger therefore hands out subsets that share a sequence, and reports how many of them
+// are new so the caller can budget the surcharge.
 type nonceLedger struct {
 	mutex sync.Mutex
 
@@ -38,12 +30,6 @@ type nonceLedger struct {
 	known map[common.Address]map[uint64]bool
 }
 
-// maxFirstUseKeys is how many never-before-used keys fit in a mempool-legal transaction.
-//
-// MaxVerifyGas covers the whole validation prefix including signature verification, and
-// each first use costs KeyedNonceFirstUseGas out of the approving frame.
-const maxFirstUseKeys = (txtypes.MaxVerifyGas - 10_000) / txtypes.KeyedNonceFirstUseGas
-
 // newNonceLedger returns an empty ledger.
 func newNonceLedger() *nonceLedger {
 	return &nonceLedger{
@@ -52,11 +38,9 @@ func newNonceLedger() *nonceLedger {
 	}
 }
 
-// nonceKey derives the key a sender uses for one of its key slots.
-//
-// Keys are derived rather than random so that a rerun addresses the same domains, and
-// they are salted with the sender so that two wallets never share one: overlapping key
-// sets across senders would make the sequences depend on each other's ordering.
+// nonceKey derives the key a sender uses for one of its slots. Salting with the sender
+// keeps two wallets from sharing a key, whose sequences would then depend on each other's
+// ordering.
 func nonceKey(sender common.Address, slot int) *uint256.Int {
 	var buf [32]byte
 
@@ -74,12 +58,13 @@ type selection struct {
 	firstUses int
 }
 
-// selectKeys returns up to count keys for a sender that all sit at the same sequence.
+// selectKeys returns up to count keys for a sender that all sit at the same sequence,
+// with no more than maxFirstUses of them seeing their first use.
 //
 // Reading the current sequence from the chain rather than assuming zero is what lets a
 // second run against the same chain work at all: the protocol never writes zero, so an
 // absent slot and a first use are the same observation.
-func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, sender common.Address, count int) (*selection, error) {
+func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, sender common.Address, count, maxFirstUses int) (*selection, error) {
 	if count > txtypes.MaxNonceKeys {
 		count = txtypes.MaxNonceKeys
 	}
@@ -150,12 +135,16 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 	// guarantee once they are hashed into the key space.
 	sortKeys(result.keys)
 
-	if result.firstUses > maxFirstUseKeys {
+	if result.firstUses > maxFirstUses {
 		// Trimming keeps the transaction inside the public mempool's verification gas
-		// cap. Generating one that exceeds it is the negative tier's job, not an
-		// accident of how many fresh keys a wallet happened to have.
-		result.keys = result.keys[:maxFirstUseKeys]
-		result.firstUses = maxFirstUseKeys
+		// cap. Generating one that exceeds it is a job for a deliberate violation, not
+		// an accident of how many fresh keys a wallet happened to have.
+		if maxFirstUses <= 0 {
+			return nil, nil
+		}
+
+		result.keys = result.keys[:maxFirstUses]
+		result.firstUses = maxFirstUses
 	}
 
 	result.slots = bestSlots[:len(result.keys)]

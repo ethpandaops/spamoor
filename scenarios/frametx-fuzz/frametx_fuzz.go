@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -47,6 +48,9 @@ type ScenarioOptions struct {
 	InvalidRatio float64 `yaml:"invalid_ratio"`
 	LogFrames    bool    `yaml:"log_frames"`
 	Data         string  `yaml:"data"`
+
+	MaxCodeSize uint64 `yaml:"max_code_size"`
+	CodeGas     uint64 `yaml:"code_gas"`
 
 	UserOpGas uint64 `yaml:"user_op_gas"`
 	VerifyGas uint64 `yaml:"verify_gas"`
@@ -96,6 +100,9 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	InvalidRatio: 0.05,
 	LogFrames:    false,
 
+	MaxCodeSize: 256,
+	CodeGas:     400000,
+
 	UserOpGas: 60000,
 	VerifyGas: 5000,
 	StateGas:  0,
@@ -144,6 +151,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.BoolVar(&s.options.LogFrames, "log-frames", ScenarioDefaultOptions.LogFrames, "Log the per-frame result of every landed transaction")
 	flags.StringVar(&s.options.Data, "data", ScenarioDefaultOptions.Data, "Call data for frames that do not carry a generated script")
 
+	flags.Uint64Var(&s.options.MaxCodeSize, "max-code-size", ScenarioDefaultOptions.MaxCodeSize, "Maximum size of a generated contract's runtime code")
+	flags.Uint64Var(&s.options.CodeGas, "code-gas", ScenarioDefaultOptions.CodeGas, "Execution gas limit for frames that deploy or call generated code")
 	flags.Uint64Var(&s.options.UserOpGas, "user-op-gas", ScenarioDefaultOptions.UserOpGas, "Execution gas limit per body frame")
 	flags.Uint64Var(&s.options.VerifyGas, "verify-gas", ScenarioDefaultOptions.VerifyGas, "Execution gas limit for validation frames")
 	flags.Uint64Var(&s.options.StateGas, "state-gas", ScenarioDefaultOptions.StateGas, "Additional state gas budget per body frame")
@@ -208,10 +217,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	}
 
 	if s.options.InvalidRatio > 0 {
-		// A deliberately invalid transaction never lands, so it consumes no nonce and
-		// one wallet can fire them all. Keeping them off the generating wallets keeps
-		// the managed pool, which assumes every transaction eventually confirms, out
-		// of it entirely.
+		// Invalid transactions never land, so one wallet can fire them all without
+		// consuming a nonce.
 		s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
 			Name:          BurnerWalletName,
 			RefillAmount:  uint256.NewInt(200000000000000000),
@@ -220,9 +227,8 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	}
 
 	if s.axes.enabled(axisRoots) {
-		// The root source is a wallet of its own: a source is identified by the address
-		// that wrote it, so keeping it fixed lets a rerun reference roots an earlier run
-		// committed.
+		// A root source is identified by the address that wrote it, so a fixed wallet
+		// lets a rerun reference roots an earlier run committed.
 		s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
 			Name:          RootSourceWalletName,
 			RefillAmount:  uint256.NewInt(500000000000000000),
@@ -231,17 +237,16 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	}
 
 	if s.axes.enabled(axisProbe) {
-		// The probe contract's deployer also plays the paymaster, so it needs enough
-		// balance to cover a sponsored transaction's maximum cost.
+		// Also plays the paymaster, so it needs enough balance for a sponsored
+		// transaction's maximum cost.
 		s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
 			Name:          ProbeDeployerWalletName,
 			RefillAmount:  uint256.NewInt(2000000000000000000),
 			RefillBalance: uint256.NewInt(1000000000000000000),
 		})
 
-		// Delegations are carried by a separate wallet: an EIP-7702 authorization
-		// signed by the transaction's own sender needs the nonce after the
-		// transaction's, and keeping both sequences in one wallet leaves a nonce gap.
+		// Delegations need their own sender: an EIP-7702 authorization signed by the
+		// transaction's sender needs the nonce after the transaction's.
 		s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
 			Name:          ProbeDelegatorWalletName,
 			RefillAmount:  uint256.NewInt(500000000000000000),
@@ -255,9 +260,7 @@ func (s *Scenario) Init(options *scenario.Options) error {
 // setWalletCount sizes the wallet pool.
 //
 // The public mempool keeps one pending frame transaction per sender, so throughput is
-// wallets divided by confirmation latency rather than a function of pending depth. A
-// pool sized like an ordinary scenario's starves the generator at a few transactions per
-// block regardless of the configured throughput.
+// wallets divided by confirmation latency rather than a function of pending depth.
 func (s *Scenario) setWalletCount() {
 	if s.options.MaxWallets > 0 {
 		s.walletPool.SetWalletCount(s.options.MaxWallets)
@@ -403,6 +406,7 @@ func (s *Scenario) recipeFor(txIdx uint64) *Recipe {
 		AllowRoots:    s.env.roots != nil,
 		AllowKeyed:    s.env.nonces != nil,
 		AllowProbe:    s.env.probe != nil,
+		AllowCode:     s.env.factory != (common.Address{}),
 
 		InvalidChance: s.options.InvalidRatio,
 		Violations:    violationNames(),
@@ -497,16 +501,15 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	return receiptChan, result, client, nil
 }
 
-// onConfirm records what a landed transaction produced.
-//
-// The per-frame result is logged rather than judged: a status vector this scenario
-// disagreed with would say more about the reading baked in here than about the client.
+// onConfirm records what a landed transaction produced. The per-frame result is logged,
+// not judged.
 func (s *Scenario) onConfirm(result *build, tx *txtypes.FrameTx, receipt *txtypes.Receipt) {
 	if result.nonces != nil {
 		s.env.nonces.consumed(result.sender.GetAddress(), result.nonces)
 	}
 
 	s.coverage.confirmedOne()
+	s.env.rememberContracts(result.deployed)
 
 	if !s.options.LogFrames {
 		return

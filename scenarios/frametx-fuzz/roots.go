@@ -17,16 +17,13 @@ import (
 	"github.com/ethpandaops/spamoor/txtypes"
 )
 
-// rootRing tracks the EIP-8272 roots a run has committed, and the clock that turns a
-// block into the consensus slot a reference names.
+// rootRing tracks the EIP-8272 roots a run has committed, and the clock that maps a block
+// to the consensus slot a reference names.
 //
-// The slot is the awkward part. A reference names the consensus slot its root was
-// written in, and clients must take the current slot from the EIP-7843 slotNumber field
-// rather than derive it from a timestamp -- but spamoor has no consensus client to ask.
-// So the slot is derived from block timestamps and then confirmed against the chain: a
-// committed entry's storage key and value are both functions of the slot, so reading the
-// storage back proves which slot the write landed in. The confirmed offset is cached and
-// every later derivation uses it.
+// spamoor has no consensus client to ask for the slot, so it is derived from block
+// timestamps and then confirmed against the chain: a committed entry's storage key and
+// value are both functions of the slot, so reading the storage back proves which slot the
+// write landed in. The confirmed offset is cached.
 type rootRing struct {
 	mutex sync.Mutex
 
@@ -127,12 +124,8 @@ func (r *rootRing) slotFor(timestamp uint64) uint64 {
 	return (timestamp - r.genesisTime) / r.slotSeconds
 }
 
-// record confirms which slot a committed root landed in and remembers it.
-//
-// The candidate slot comes from the block's timestamp; the confirmation comes from the
-// chain. Because the storage key is derived from the slot's ring index and the value from
-// the slot itself, a matching read is proof, and a small scan around the candidate
-// absorbs an off-by-one in the timestamp mapping without guessing.
+// record confirms which slot a committed root landed in and remembers it. A small scan
+// around the timestamp-derived candidate absorbs an off-by-one in the mapping.
 func (r *rootRing) record(ctx context.Context, client *spamoor.Client, source common.Address, salt, root common.Hash, blockTime uint64) error {
 	sourceID := txtypes.RecentRootSourceID(source, salt)
 	candidate := r.slotFor(blockTime)
@@ -204,12 +197,8 @@ func (r *rootRing) calibratedClock() bool {
 	return r.calibrated
 }
 
-// references builds the declared references a recipe asks for.
-//
-// It returns whether the result is expected to be accepted: the edge cases deliberately
-// name a slot that is too new, too old, never written, or attributed to the wrong
-// source, and those must be refused. Generating them is the point -- a decoder that
-// accepts one has a gap -- but the oracle has to know which is which.
+// references builds the declared references a recipe asks for, reporting whether the
+// result is a plain reference or one of the edge cases that is refused by design.
 func (r *rootRing) references(recipe *Recipe, currentSlot uint64) ([]*txtypes.RecentRootReference, bool) {
 	entries := r.usable(currentSlot)
 	if len(entries) == 0 {
@@ -278,22 +267,17 @@ func (r *rootRing) references(recipe *Recipe, currentSlot uint64) ([]*txtypes.Re
 	return references, true
 }
 
-// RootSourceWalletName is the wallet whose address identifies the run's root source.
-//
-// A source is keyed by the address that wrote it, so keeping it in a well-known wallet
-// lets a later run reference roots an earlier one committed.
+// RootSourceWalletName is the wallet whose address identifies the run's root source. A
+// source is keyed by the address that wrote it, so a later run can reference roots an
+// earlier one committed.
 const RootSourceWalletName = "frametx-fuzz-roots"
 
 // rootWriteGas covers the recent root contract's call and the state gas a new entry
-// costs. The ring reuses a source's slots after RecentRootLength slots, so most writes
-// are cheaper than this, but budgeting for the new-slot case keeps the write from
-// failing the first time each ring index is touched.
+// costs. Most writes are cheaper, since the ring reuses a source's slots.
 const rootWriteGas = 60_000 + txtypes.StateBytesPerStorageSet*txtypes.CostPerStateByte
 
-// writeRoot commits one root and records which slot it landed in.
-//
-// The write is an ordinary transaction: the recent root contract takes exactly 64 bytes
-// of calldata and zero value, and refuses anything else, a delegate call included.
+// writeRoot commits one root and records which slot it landed in. The recent root
+// contract takes exactly 64 bytes of calldata and zero value, and refuses anything else.
 func (s *Scenario) writeRoot(ctx context.Context, client *spamoor.Client, feeCap, tipCap *big.Int) error {
 	wallet := s.walletPool.GetWellKnownWallet(RootSourceWalletName)
 	if wallet == nil {
@@ -347,11 +331,8 @@ func (s *Scenario) writeRoot(ctx context.Context, client *spamoor.Client, feeCap
 	return s.env.roots.record(ctx, client, wallet.GetAddress(), salt, root, header.Timestamp)
 }
 
-// maintainRoots keeps committed roots available for reference.
-//
-// A root becomes referenceable only in the slot after it was written and stays usable
-// for RecentRootUsableWindow slots, so one write at startup calibrates the slot clock
-// and a slow trickle afterwards keeps the ring from going stale on a long run.
+// maintainRoots keeps committed roots available for reference. The first write
+// calibrates the slot clock; the trickle afterwards keeps a long run from going stale.
 func (s *Scenario) maintainRoots(ctx context.Context) {
 	client := s.walletPool.GetClient(spamoor.WithClientGroup(s.options.ClientGroup))
 	if client == nil {

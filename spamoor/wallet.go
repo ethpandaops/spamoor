@@ -454,18 +454,12 @@ func (wallet *Wallet) BuildFrameTx(txData *txtypes.FrameTx) (*txtypes.Transactio
 }
 
 // BuildFrameTxWithSigners builds and signs a frame transaction whose signature list
-// carries entries from more than one party.
+// carries entries from more than one party, such as a paymaster establishing itself as
+// payer through its own entry.
 //
-// A paymaster establishes itself as payer through a signature entry rather than through
-// its contract code, so a sponsored transaction needs the paymaster's key alongside the
-// sender's. Every entry is signed over the canonical signature hash, which covers the
-// sender, chain id and nonce, so those must be final before anyone signs. This assigns
-// them, lets each extra signer sign the entries naming it, then signs the sender's own
-// entries and wraps the result.
-//
-// Each signer must own at least one unsigned entry; a signer with nothing to sign is an
-// error rather than a silent no-op, because it almost always means the entry's signer
-// address was set wrong.
+// Every entry is signed over the canonical signature hash, which covers the sender, chain
+// id and nonce, so those are assigned first. A signer with nothing to sign is an error,
+// since it almost always means an entry's signer address was set wrong.
 func (wallet *Wallet) BuildFrameTxWithSigners(txData *txtypes.FrameTx, signers ...*Wallet) (*txtypes.Transaction, error) {
 	if err := wallet.PrepareFrameTx(txData); err != nil {
 		return nil, err
@@ -475,12 +469,9 @@ func (wallet *Wallet) BuildFrameTxWithSigners(txData *txtypes.FrameTx, signers .
 }
 
 // PrepareFrameTx fills in the fields the canonical signature hash covers -- chain id,
-// sender and nonce -- without signing.
-//
-// Callers that need the transaction's own contents before signing use this: a frame
-// whose data asserts what the transaction carries has to be written after the nonce is
-// assigned and before any entry is signed. A caller that abandons a prepared
-// transaction must return its nonce with MarkSkippedNonce.
+// sender and nonce -- without signing, for callers that need the transaction's contents
+// before any entry is signed. A caller that abandons a prepared transaction must return
+// its nonce with MarkSkippedNonce.
 func (wallet *Wallet) PrepareFrameTx(txData *txtypes.FrameTx) error {
 	if wallet.privkey == nil {
 		return errors.New("wallet has no private key")
@@ -832,11 +823,8 @@ func (wallet *Wallet) getTxNonceChan(tx *txtypes.Transaction, options *SendTrans
 }
 
 // getTxHashChan returns or creates a confirmation channel for a transaction that is not
-// sequenced by the account nonce, keyed by its hash.
-//
-// Such a transaction has no nonce ordering to exploit: it cannot be replaced by another
-// transaction at the same nonce, and no later confirmation implies it landed. It is
-// therefore tracked on its own and removed when its own receipt arrives.
+// sequenced by the account nonce, keyed by its hash. Such a transaction has no nonce
+// ordering to exploit, so it is tracked on its own and removed when its receipt arrives.
 // Must be called with txNonceMutex held.
 func (wallet *Wallet) getTxHashChan(tx *txtypes.Transaction, options *SendTransactionOptions) (*nonceStatus, bool) {
 	txHash := tx.Hash()
@@ -867,9 +855,7 @@ func (wallet *Wallet) getTxHashChan(tx *txtypes.Transaction, options *SendTransa
 	return hashChan, len(wallet.txHashChans)+len(wallet.txNonceChans) == 1
 }
 
-// confirmTxByHash completes a hash-tracked transaction and releases its waiters. It is
-// the counterpart of the nonce sweep in processTransactionInclusion, which cannot apply
-// to a transaction whose nonce belongs to another domain.
+// confirmTxByHash completes a hash-tracked transaction and releases its waiters.
 func (wallet *Wallet) confirmTxByHash(blockNumber uint64, tx *txtypes.Transaction, receipt *txtypes.Receipt) {
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()

@@ -117,13 +117,9 @@ type StateGasTxData interface {
 	GetStateGas() uint64
 }
 
-// IndependentNonceTx is implemented by transaction types whose nonce does not address
-// the sender's account nonce sequence.
-//
-// EIP-8250 keyed nonces are the first such case: a frame transaction selecting a
-// non-zero key set is sequenced in protocol storage under NONCE_MANAGER and leaves the
-// sender's account nonce untouched. Anything tracking transactions by account nonce has
-// to ask before assuming.
+// IndependentNonceTx is implemented by transaction types whose nonce does not address the
+// sender's account nonce sequence, such as a frame transaction on a non-zero EIP-8250 key
+// set. Anything tracking transactions by account nonce has to ask before assuming.
 type IndependentNonceTx interface {
 	// UsesAccountNonce reports whether GetNonce addresses the sender's account nonce.
 	UsesAccountNonce() bool
@@ -308,12 +304,8 @@ func (tx *Transaction) StateGas() uint64 {
 }
 
 // UsesAccountNonce reports whether the transaction is sequenced by its sender's account
-// nonce, which is true for every transaction type except a frame transaction on a
-// non-zero EIP-8250 key set.
-//
-// Callers that track transactions by nonce must check this: for a transaction that
-// answers false, Nonce returns a sequence number from an unrelated domain and comparing
-// it against the account nonce is meaningless.
+// nonce. When it is false, Nonce returns a sequence number from an unrelated domain and
+// comparing it against the account nonce is meaningless.
 func (tx *Transaction) UsesAccountNonce() bool {
 	if inner, ok := tx.inner.(IndependentNonceTx); ok {
 		return inner.UsesAccountNonce()

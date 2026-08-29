@@ -205,6 +205,23 @@ func NewOpcodeGenerator(txID uint64, baseSeed string, maxSize int, maxGas uint64
 	return g
 }
 
+// AddOpcodes registers additional opcodes with the generator.
+//
+// It exists so that a scenario can fuzz instructions that only exist inside its own
+// transaction type: the frame transaction EIPs add several that are undefined anywhere
+// else, and there is no reason for this package to know about them. The supplied
+// templates are responsible for their own operands, so the stack tracking works the same
+// way it does for the built-in table.
+func (g *OpcodeGenerator) AddOpcodes(ops []*OpcodeInfo) {
+	for _, op := range ops {
+		g.opcodeInfos[op.Opcode] = op
+	}
+
+	g.buildValidOpcodeList()
+	g.buildInvalidOpcodeList()
+	g.buildStackBuildingOpcodeList()
+}
+
 // SetFuzzMode sets the fuzzing mode for the generator
 func (g *OpcodeGenerator) SetFuzzMode(mode string) {
 	g.fuzzMode = mode

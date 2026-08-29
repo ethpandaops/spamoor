@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"sync"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
@@ -14,12 +16,8 @@ import (
 	"github.com/ethpandaops/spamoor/txtypes"
 )
 
-// environment is everything the generator needs from the chain.
-//
-// It is assembled once, before any transaction is generated, so that generation itself
-// stays a pure function of the recipe. Anything discovered here -- which extensions the
-// chain runs, where the probe contract lives, which wallets carry the delegation, what
-// the current slot is -- is applied to a recipe rather than drawn from it.
+// environment is everything the generator needs from the chain. It is assembled once,
+// before any transaction is generated, so generation stays a function of the recipe.
 type environment struct {
 	logger      logrus.FieldLogger
 	walletPool  *spamoor.WalletPool
@@ -31,10 +29,8 @@ type environment struct {
 	// probe is the deployed probe contract, or nil when probe axes are disabled.
 	probe *ProbeDeployment
 
-	// plainFrom and contractFrom bound the two halves of the wallet pool. A wallet
-	// carrying the probe delegation has code, so its validation frame runs the probe
-	// contract instead of the protocol's default code; mixing the two would silently
-	// change what a default-code recipe tests.
+	// The wallet pool is split in two. A wallet carrying the probe delegation has code,
+	// so its validation frame runs that code instead of the protocol's default code.
 	plainCount    int
 	contractCount int
 
@@ -47,9 +43,17 @@ type environment struct {
 	// burner sends the transactions that are not meant to land.
 	burner *spamoor.Wallet
 
-	// allowPostTx and allowBlobs record what the chain accepted during the startup
-	// probes, so a recipe asking for something the chain refuses is downgraded rather
-	// than reported as a finding on every transaction.
+	// factory is the CREATE2 factory a deploy frame calls, with a salt followed by init
+	// code. The address is computable before sending, so a later frame can name it.
+	factory common.Address
+
+	// contracts are the generated contracts earlier transactions deployed, so a frame
+	// can call code that some other transaction's frame created.
+	contractsMutex sync.Mutex
+	contracts      []common.Address
+
+	// allowPostTx and allowBlobs record what the startup probes found, so a recipe
+	// asking for something the chain refuses is downgraded rather than sent.
 	allowPostTx bool
 	allowBlobs  bool
 }
@@ -72,11 +76,8 @@ func (e *environment) contractWallet(index int) *spamoor.Wallet {
 	return e.walletPool.GetWallet(spamoor.SelectWalletByIndex, e.plainCount+index%e.contractCount)
 }
 
-// senderFor picks the wallet a recipe calls for.
-//
-// A recipe carrying a deliberate violation is sent from the burner: it will never land,
-// and drawing a nonce from a generating wallet for a transaction that never confirms
-// would stall everything that wallet sends afterwards.
+// senderFor picks the wallet a recipe calls for. A recipe carrying a deliberate
+// violation goes to the burner, since it never lands and would stall a real wallet.
 func (e *environment) senderFor(recipe *Recipe, index int) *spamoor.Wallet {
 	if recipe.Invalid != "" && e.burner != nil {
 		return e.burner
@@ -87,6 +88,57 @@ func (e *environment) senderFor(recipe *Recipe, index int) *spamoor.Wallet {
 	}
 
 	return e.plainWallet(index)
+}
+
+// rememberContracts records generated contracts a landed transaction deployed, keeping
+// the most recent ones.
+func (e *environment) rememberContracts(addresses []common.Address) {
+	const keep = 256
+
+	if len(addresses) == 0 {
+		return
+	}
+
+	e.contractsMutex.Lock()
+	defer e.contractsMutex.Unlock()
+
+	e.contracts = append(e.contracts, addresses...)
+	if len(e.contracts) > keep {
+		e.contracts = e.contracts[len(e.contracts)-keep:]
+	}
+}
+
+// pickContract returns a previously deployed generated contract, if there is one.
+func (e *environment) pickContract(index int) (common.Address, bool) {
+	e.contractsMutex.Lock()
+	defer e.contractsMutex.Unlock()
+
+	if len(e.contracts) == 0 {
+		return common.Address{}, false
+	}
+
+	return e.contracts[index%len(e.contracts)], true
+}
+
+// paymasterFor picks the account that sponsors a transaction, spread across every wallet
+// carrying the probe delegation.
+//
+// The public mempool caps how many pending transactions one non-canonical paymaster may
+// sponsor, so a single paymaster refuses almost everything behind the first few. The
+// sender is skipped: a transaction sponsoring itself is the self-relayed shape.
+func (e *environment) paymasterFor(index int, sender common.Address) common.Address {
+	if e.probe == nil {
+		return common.Address{}
+	}
+
+	for offset := 0; offset < e.contractCount; offset++ {
+		wallet := e.contractWallet(index + offset)
+		if wallet != nil && wallet.GetAddress() != sender {
+			return wallet.GetAddress()
+		}
+	}
+
+	return e.probe.Paymaster
 }
 
 // targetWallet returns a funded wallet to address, which is never the sender.
@@ -154,6 +206,13 @@ func (s *Scenario) setupEnvironment(ctx context.Context) (*environment, error) {
 		}
 	}
 
+	if s.axes.enabled(axisCode) {
+		env.factory, err = s.walletPool.GetDeploymentFactory().GetFactoryAddress(ctx)
+		if err != nil {
+			s.logger.Warnf("generated contract axis disabled: %v", err)
+		}
+	}
+
 	if env.extensions.Has(txtypes.FrameExtKeyedNonces) && s.axes.enabled(axisNonces) {
 		env.nonces = newNonceLedger()
 	}
@@ -179,8 +238,7 @@ func (s *Scenario) setupProbe(ctx context.Context, env *environment, total int, 
 
 	env.probe = deployment
 
-	// The paymaster approves payment from its own code, so it needs the probe contract
-	// delegated to it exactly as a contract sender does.
+	// The paymaster approves payment from its own code, so it needs the delegation too.
 	paymaster := s.walletPool.GetWellKnownWallet(ProbeDeployerWalletName)
 	if err := DelegateProbe(ctx, s.logger, s.walletPool, s.options.ClientGroup, deployment.Address,
 		[]*spamoor.Wallet{paymaster}, feeCap, tipCap); err != nil {
@@ -211,13 +269,9 @@ func (s *Scenario) fees(client *spamoor.Client) (*big.Int, *big.Int, error) {
 	return s.walletPool.GetSuggestedFees(client, baseFeeWei, tipFeeWei)
 }
 
-// probeCapabilities runs the A/B probes for the features no predeploy announces.
-//
-// EIP-7906 installs nothing, and a frame transaction carrying blobs is refused outright
-// by at least one client build. Both are settled by sending two transactions that differ
-// only in the feature under test: if the plain one lands and the other does not, the
-// feature is unsupported. The signal is the accept/reject of a controlled pair, never
-// the text of an error.
+// probeCapabilities settles the features no predeploy announces by sending two
+// transactions that differ only in the feature: if the plain one lands and the other does
+// not, the feature is unsupported. The signal is accept/reject, never error text.
 func (s *Scenario) probeCapabilities(ctx context.Context, env *environment) {
 	if s.options.PostTx == "off" || !s.axes.enabled(axisPostTx) {
 		env.allowPostTx = false

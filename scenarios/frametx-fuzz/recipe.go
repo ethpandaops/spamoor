@@ -9,12 +9,9 @@ import (
 
 // Recipe is the abstract description of one generated transaction.
 //
-// It is drawn from the seeded generator in a single pass and contains no chain state:
-// which wallet ends up sending it, what nonce it gets and where the probe contract
-// lives are all applied afterwards. That separation is what makes a run reproducible.
-// If a draw depended on chain state, the same seed would produce different transactions
-// on a chain in a different state and the reproduction line printed with a finding
-// would be a lie.
+// It is drawn in a single pass and holds no chain state: the sending wallet, the nonce
+// and the probe contract's address are applied afterwards. That is what makes a seed and
+// index reproduce the same transaction on any chain.
 type Recipe struct {
 	// Index is the transaction index the recipe was drawn for.
 	Index uint64 `json:"index"`
@@ -55,23 +52,18 @@ type Recipe struct {
 	// instruction the frame transaction EIPs introduce execute inside a probe frame.
 	Reads bool `json:"reads"`
 
-	// Invalid names a deliberate violation the transaction carries, if any.
-	//
-	// Malformed transactions are drawn from the same stream as well-formed ones rather
-	// than living in a separate mode: the edge cases worth reaching are combinations,
-	// and a combination that happens to be illegal is one of them. They are sent from
-	// a burner wallet outside the managed pool, because a transaction that never lands
-	// would otherwise stall its sender's nonce.
+	// Invalid names a deliberate violation the transaction carries, if any. Such a
+	// transaction is sent from a burner wallet outside the managed pool, since one that
+	// never lands would stall its sender's nonce.
 	Invalid string `json:"invalid,omitempty"`
 }
 
 // PrefixShape is one of the validation prefixes the public mempool recognizes.
 type PrefixShape string
 
-// The recognized prefixes. The two deploy-led shapes are absent on purpose: a CREATE2
-// account deployment costs far more than the prefix's execution cap allows, and the
-// sender of such a transaction has no key, which the managed transaction pool cannot
-// represent. They belong to the raw negative tier.
+// The recognized prefixes. The two deploy-led shapes are absent: a CREATE2 account
+// deployment costs far more than the prefix's execution cap allows, and such a
+// transaction's sender has no key for the pool to track.
 const (
 	PrefixSelfVerify PrefixShape = "self_verify"
 	PrefixPaymaster  PrefixShape = "only_verify+pay"
@@ -87,8 +79,7 @@ const (
 	SenderDefaultCode SenderKind = "default_code"
 
 	// SenderContract is an account carrying the probe delegation, so APPROVE runs from
-	// deployed code. One client build accepts this and another reverts the prefix, so
-	// it is tracked as a known divergence rather than a finding.
+	// deployed code rather than from the protocol's default code.
 	SenderContract SenderKind = "contract"
 )
 
@@ -111,6 +102,10 @@ const (
 
 	// KindPostTx is an EIP-7906 assertion frame, restricted to a trailing suffix.
 	KindPostTx FrameKind = "post_tx"
+
+	// KindDeployCode is a SENDER frame that deploys generated contract code through
+	// the CREATE2 factory, so a later frame in the same transaction can call it.
+	KindDeployCode FrameKind = "deploy_code"
 )
 
 // FrameBudget selects how much execution gas a frame is given relative to what it needs.
@@ -148,6 +143,10 @@ const (
 	TargetProbe      TargetKind = "probe"
 	TargetEmpty      TargetKind = "empty"
 	TargetPrecompile TargetKind = "precompile"
+
+	// TargetDeployed is a contract a frame deployed: one from this transaction when it
+	// has one, otherwise one an earlier transaction left behind.
+	TargetDeployed TargetKind = "deployed"
 )
 
 // BodyFrame describes one frame after the validation prefix.
@@ -166,10 +165,12 @@ type BodyFrame struct {
 	StateGas bool `json:"stateGas"`
 }
 
-// recentRootEdgeNames are the awkward reference cases worth generating. Each is
-// expected to be refused except the plain one, which must be accepted.
+// recentRootEdgeNames are the awkward reference cases worth reaching.
+//
+// All but "duplicate" are refused by design, so they are drawn rarely: a recipe with no
+// edge names a root the run committed a slot or more ago, which is the case that has to
+// keep landing for the rest of the reference machinery to be exercised at all.
 var recentRootEdgeNames = []string{
-	"",             // a reference to a root written a slot ago: must be accepted
 	"same_slot",    // current_slot - slot == 0
 	"future_slot",  // slot ahead of the current one
 	"unwritten",    // a slot the source never wrote
@@ -177,6 +178,10 @@ var recentRootEdgeNames = []string{
 	"duplicate",    // the same reference twice, which is valid and charged twice
 	"outside_window",
 }
+
+// recentRootEdgeChance is how often a recent-root recipe carries one of the awkward
+// cases rather than a plain, landable reference.
+const recentRootEdgeChance = 0.2
 
 // String renders the recipe as the compact JSON a finding reports.
 func (r *Recipe) String() string {
@@ -212,12 +217,13 @@ const (
 	axisRoots     axis = "roots"
 	axisPostTx    axis = "posttx"
 	axisProbe     axis = "probe"
+	axisCode      axis = "code"
 )
 
 // axisNames lists the axes in a stable order for help text and validation.
 var axisNames = []axis{
 	axisPrefix, axisBatches, axisFailures, axisSignature,
-	axisNonces, axisRoots, axisPostTx, axisProbe,
+	axisNonces, axisRoots, axisPostTx, axisProbe, axisCode,
 }
 
 // axisWeights is a validated axis selection.
@@ -264,6 +270,7 @@ type DrawOptions struct {
 	AllowRoots    bool
 	AllowKeyed    bool
 	AllowProbe    bool
+	AllowCode     bool
 	// InvalidChance is how often a drawn recipe carries a deliberate violation.
 	InvalidChance float64
 
@@ -273,10 +280,9 @@ type DrawOptions struct {
 
 // Draw produces the recipe for one transaction index.
 //
-// Every field is drawn unconditionally and only then gated by the options. Drawing
-// inside a conditional would make the stream position depend on the configuration, so
-// two runs that differ in one flag would disagree about every later transaction rather
-// than about the one axis that changed.
+// Every field is drawn unconditionally and only then gated by the options, so the stream
+// position does not depend on the configuration: two runs differing in one flag disagree
+// about that axis rather than about every later transaction.
 func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 	recipe := &Recipe{Index: index}
 
@@ -291,7 +297,8 @@ func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 	nonceDraw := rng.Float64()
 
 	rootCountDraw := rng.Intn(3) + 1
-	rootEdgeDraw := rng.Intn(len(recentRootEdgeNames))
+	rootEdgePick := rng.Intn(len(recentRootEdgeNames))
+	rootEdgeDraw := rng.Float64()
 	rootDraw := rng.Float64()
 
 	bodyCount := rng.Intn(opts.MaxBodyFrames) + 1
@@ -329,7 +336,10 @@ func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 
 	if opts.AllowRoots && opts.Axes.draws(rng, axisRoots) && rootDraw < 0.6 {
 		recipe.RecentRoots = rootCountDraw
-		recipe.RecentRootEdge = recentRootEdgeNames[rootEdgeDraw]
+
+		if rootEdgeDraw < recentRootEdgeChance {
+			recipe.RecentRootEdge = recentRootEdgeNames[rootEdgePick]
+		}
 	}
 
 	recipe.Body = body
@@ -367,16 +377,18 @@ func drawBodyFrame(rng *utils.DeterministicRNG, opts DrawOptions) BodyFrame {
 	frame := BodyFrame{Kind: KindCall, Target: TargetWallet, Budget: BudgetAmple, Script: ScriptNone}
 
 	switch {
-	case kindDraw < 0.30:
+	case kindDraw < 0.24:
 		frame.Kind = KindTransfer
-	case kindDraw < 0.60 && opts.AllowProbe && opts.Axes.enabled(axisProbe):
+	case kindDraw < 0.48 && opts.AllowProbe && opts.Axes.enabled(axisProbe):
 		frame.Kind = KindProbe
 		frame.Target = TargetProbe
+	case kindDraw < 0.62 && opts.AllowCode && opts.Axes.enabled(axisCode):
+		frame.Kind = KindDeployCode
 	case kindDraw < 0.70:
 		frame.Kind = KindPostOp
 	}
 
-	if frame.Kind != KindProbe {
+	if frame.Kind != KindProbe && frame.Kind != KindDeployCode {
 		switch {
 		case targetDraw < 0.15:
 			frame.Target = TargetSender
@@ -385,6 +397,10 @@ func drawBodyFrame(rng *utils.DeterministicRNG, opts DrawOptions) BodyFrame {
 			frame.StateGas = true
 		case targetDraw < 0.38:
 			frame.Target = TargetPrecompile
+		case targetDraw < 0.62 && opts.AllowCode && opts.Axes.enabled(axisCode):
+			// Calling generated code is the point of deploying it, so it takes a
+			// substantial share of the targets rather than a token one.
+			frame.Target = TargetDeployed
 		}
 	}
 
@@ -467,14 +483,36 @@ func (r *Recipe) normalize(opts DrawOptions) {
 
 		r.Reads = false
 	}
+
+	if !opts.AllowCode {
+		for i := range r.Body {
+			if r.Body[i].Kind == KindDeployCode {
+				r.Body[i].Kind = KindCall
+			}
+
+			if r.Body[i].Target == TargetDeployed {
+				r.Body[i].Target = TargetWallet
+			}
+		}
+	}
+
+	// A deploy frame writes code, so it cannot be a static POST_TX frame, and a frame
+	// that deploys has nothing to say about a value transfer.
+	for i := range r.Body {
+		if r.Body[i].Kind == KindDeployCode {
+			r.Body[i].Target = TargetWallet
+			r.Body[i].Script = ScriptNone
+			r.Body[i].StateGas = false
+		}
+	}
+
+	if opts.AllowCode {
+		r.pairDeployWithCall()
+	}
 }
 
-// refusalKey names the aspect of a recipe a refusal is most likely about, so the
-// recorded reasons are grouped by something meaningful rather than lumped together.
-//
-// It is a label, not a claim: several of these shapes are refused by design, and which
-// ones a chain ought to refuse is exactly the question this scenario declines to answer
-// on its own.
+// refusalKey names the aspect of a recipe a refusal is most likely about, so recorded
+// reasons are grouped rather than lumped together. It is a label, not a claim.
 func (r *Recipe) refusalKey() string {
 	switch {
 	case r.Invalid != "":
@@ -489,5 +527,40 @@ func (r *Recipe) refusalKey() string {
 		return "contract-sender"
 	default:
 		return "well-formed"
+	}
+}
+
+// pairDeployWithCall promotes the first frame to a deployment when a later frame calls
+// generated code without one, so both halves land in the same frame list.
+//
+// A call in the very first frame is left alone: there is nowhere to put a deployment
+// ahead of it, and it falls back to an earlier transaction's contract.
+func (r *Recipe) pairDeployWithCall() {
+	deployIndex := -1
+
+	for i := range r.Body {
+		if r.Body[i].Kind == KindDeployCode {
+			deployIndex = i
+
+			break
+		}
+	}
+
+	for i := range r.Body {
+		if r.Body[i].Target != TargetDeployed || i == 0 {
+			continue
+		}
+
+		if deployIndex >= 0 && deployIndex < i {
+			return
+		}
+
+		r.Body[0].Kind = KindDeployCode
+		r.Body[0].Target = TargetWallet
+		r.Body[0].Script = ScriptNone
+		r.Body[0].StateGas = false
+		r.Body[0].Batch = false
+
+		return
 	}
 }

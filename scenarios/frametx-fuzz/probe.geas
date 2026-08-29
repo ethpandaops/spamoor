@@ -1,21 +1,16 @@
 ;;; Frame probe contract
 ;;;
-;;; One deployed contract that frames call to reach the instructions EIP-8141 and its
-;;; extensions introduce. Its calldata is a script, so a single deployment covers every
-;;; behaviour a scenario needs without redeploying: revert on demand, write storage,
-;;; emit logs, burn gas, APPROVE on behalf of a sender or a paymaster, and assert what
-;;; each introspection instruction returns.
+;;; One contract that frames call to reach the instructions EIP-8141 and its extensions
+;;; introduce. Its calldata is a script, so one deployment covers every behaviour a
+;;; scenario needs: revert, write storage, emit a log, burn gas, APPROVE, and execute each
+;;; introspection instruction.
 ;;;
-;;; The read operations exist to make the new instructions execute inside a frame. They
-;;; discard what they read: checking the value against an expected one would bake a single
-;;; reading of the spec into every transaction, and a client that disagreed with that
-;;; reading would show up as a failing frame instead of as a disagreement. Disagreement
-;;; between clients is what a multi-node network surfaces on its own.
+;;; The read operations discard what they read. Checking a value against an expected one
+;;; would bake a single reading of the spec into every transaction.
 ;;;
-;;; Script encoding: a sequence of fixed-width 128-byte records, each four 32-byte
-;;; words [op, a, b, c]. Fixed width keeps the interpreter small enough to verify by
-;;; reading it. Unknown selectors revert, so a script this contract does not understand
-;;; fails loudly instead of being skipped.
+;;; Script encoding: fixed-width 128-byte records, each four 32-byte words [op, a, b, c].
+;;; Fixed width keeps the interpreter small enough to verify by reading it. Unknown
+;;; selectors revert, so a script this contract does not understand fails loudly.
 ;;;
 ;;; Instructions the assembler does not know are emitted with #bytes:
 ;;;   0xaa APPROVE  0xb0 TXPARAM  0xb1 FRAMEDATALOAD  0xb3 FRAMEPARAM
@@ -197,12 +192,6 @@ op_approve:
 	#bytes 0xaa
 
 ;;; 0x07 READ_TXPARAM(param): execute TXPARAM and drop the result
-;;;
-;;; The introspection operations read a value and discard it. They exist to make the
-;;; instruction execute inside a frame, not to check what it returns: a script that
-;;; reverted on a mismatch would bake one reading of the spec into every transaction, and
-;;; a client disagreeing with that reading would look like a failing frame rather than a
-;;; disagreement.
 op_read_txparam:
 	pop
 	dup1
@@ -281,9 +270,7 @@ op_read_sigdata:
 
 ;;; 0x0c READ_ROOTREF(index, field): RECENTROOTREFLOAD
 ;;;
-;;; Emits the same 0xb5 byte as READ_SIGDATA: EIP-8141 assigns SIGDATACOPY to 0xb5 and
-;;; EIP-8272 assigns RECENTROOTREFLOAD to it as well. Executing both in one transaction is
-;;; what puts a chain running both EIPs in front of that collision.
+;;; Emits the same 0xb5 byte as READ_SIGDATA, which both EIPs assign.
 op_read_rootref:
 	pop
 	dup1

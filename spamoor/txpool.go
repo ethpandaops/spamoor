@@ -1307,11 +1307,8 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 }
 
 // processStaleHashTxs recovers hash-tracked transactions, which the nonce-based recovery
-// above cannot see.
-//
-// There is no on-chain nonce that would prove such a transaction landed, so the only
-// recovery available is to ask for its receipt directly, and the only remedy if it did
-// not land is to rebroadcast it.
+// above cannot see: there is no on-chain nonce that would prove one landed, so its
+// receipt is asked for directly and it is rebroadcast if it is missing.
 func (pool *TxPool) processStaleHashTxs(wallet *Wallet) {
 	pendingTxs := wallet.getPendingHashTxs()
 	if len(pendingTxs) == 0 {

@@ -36,7 +36,7 @@ const initcodeSource = `
 var (
 	compileOnce    sync.Once
 	compiledCode   []byte
-	compiledInit   []byte
+	compiledPrefix []byte
 	compileFailure error
 )
 
@@ -53,9 +53,32 @@ func ProbeRuntimeCode() ([]byte, error) {
 // factory, so the same source always yields the same address and a run that finds the
 // contract already there can skip deployment.
 func ProbeInitCode() ([]byte, error) {
+	runtime, err := ProbeRuntimeCode()
+	if err != nil {
+		return nil, err
+	}
+
+	return DeploymentInitCode(runtime)
+}
+
+// DeploymentInitCode wraps runtime code in the constructor that returns it.
+//
+// The constructor is generic -- it copies everything after itself and returns it -- so
+// generated contracts reuse the same wrapper as the probe. Deployment then succeeds
+// whatever the runtime code does, which is what puts fuzzed code in a frame's call
+// rather than in a constructor that may never finish.
+func DeploymentInitCode(runtime []byte) ([]byte, error) {
 	compileOnce.Do(compileContract)
 
-	return compiledInit, compileFailure
+	if compileFailure != nil {
+		return nil, compileFailure
+	}
+
+	initcode := make([]byte, 0, len(compiledPrefix)+len(runtime))
+	initcode = append(initcode, compiledPrefix...)
+	initcode = append(initcode, runtime...)
+
+	return initcode, nil
 }
 
 // compileContract assembles the embedded source once.
@@ -79,5 +102,5 @@ func compileContract() {
 	}
 
 	compiledCode = runtime
-	compiledInit = append(append([]byte{}, prefix...), runtime...)
+	compiledPrefix = prefix
 }

@@ -38,16 +38,14 @@ const ProbeRecordSize = 128
 const probeEntryGas = 5_000
 
 // interpreterGasPerRecord covers the loop's bounds check, the calldata loads and the
-// dispatch chain. It is an over-estimate for early selectors and about right for late
-// ones, which is the direction a frame's gas budget should err in.
+// dispatch chain, erring high.
 const interpreterGasPerRecord = 250
 
 // ErrNotPrefixSafe is returned when a script would run an operation that EIP-8141's
 // validation trace rules forbid inside the validation prefix.
 var ErrNotPrefixSafe = fmt.Errorf("script operation is not allowed in the validation prefix")
 
-// record is one encoded script operation together with what it costs and where it may
-// run.
+// record is one encoded script operation.
 type record struct {
 	op         byte
 	a, b, c    common.Hash
@@ -57,11 +55,8 @@ type record struct {
 	stateGas   uint64
 }
 
-// ProbeScript is a program for the probe contract, built op by op.
-//
-// The builder is chainable and never fails: an operation that cannot be expressed is
-// rejected by Validate rather than by a constructor, so a caller assembling a script
-// from generated parameters has one place to check.
+// ProbeScript is a program for the probe contract, built op by op. The builder never
+// fails; Validate is the one place a caller checks.
 type ProbeScript struct {
 	records []record
 }
@@ -107,12 +102,8 @@ func (s *ProbeScript) PrefixSafe() bool {
 	return true
 }
 
-// Validate checks the script against where it is going to run.
-//
-// EIP-8141 bans a list of opcodes during validation-prefix execution and restricts
-// storage access to the sender's own, so a script that would be refused by a public
-// mempool node is caught here rather than as an opaque rejection. Frames outside the
-// prefix have no such restriction.
+// Validate checks the script against where it is going to run. EIP-8141 bans a list of
+// opcodes during validation-prefix execution; frames outside the prefix are unrestricted.
 func (s *ProbeScript) Validate(inPrefix bool) error {
 	if !inPrefix {
 		return nil
@@ -162,11 +153,8 @@ func (s *ProbeScript) Revert() *ProbeScript {
 	return s.add(record{op: opRevert, name: "revert", prefixSafe: true})
 }
 
-// SStore writes a storage slot.
-//
-// Not prefix-safe: EIP-8141 bans SSTORE during the validation prefix outside the first
-// deploy frame. A new slot costs STATE_BYTES_PER_STORAGE_SET state gas, which is the
-// dominant cost of the operation under EIP-8037.
+// SStore writes a storage slot. Not prefix-safe: EIP-8141 bans SSTORE during the
+// validation prefix outside the first deploy frame.
 func (s *ProbeScript) SStore(slot, value common.Hash) *ProbeScript {
 	return s.add(record{
 		op:       opSStore,
@@ -203,11 +191,9 @@ func (s *ProbeScript) Burn(gasTarget uint64) *ProbeScript {
 	})
 }
 
-// Approve calls APPROVE with the given scope and exits the frame, so anything after it
-// in the script is unreachable.
-//
-// This is what makes the contract usable as a sender account or as a paymaster: the
-// protocol's default code approves only for an account with no code of its own.
+// Approve calls APPROVE with the given scope and exits the frame, so anything after it in
+// the script is unreachable. It is what makes the contract usable as a sender account or
+// as a paymaster.
 func (s *ProbeScript) Approve(scope uint8) *ProbeScript {
 	return s.add(record{
 		op:         opApprove,
@@ -218,12 +204,8 @@ func (s *ProbeScript) Approve(scope uint8) *ProbeScript {
 	})
 }
 
-// ReadTxParam executes TXPARAM and discards the result.
-//
-// The introspection operations exist to make the instruction run inside a frame, not to
-// check what it returns. Comparing against an expected value would bake one reading of
-// the spec into every transaction, and a client that disagreed with that reading would
-// show up as a failing frame rather than as a disagreement.
+// ReadTxParam executes TXPARAM and discards the result. The introspection operations
+// exist to make the instruction run inside a frame, not to check what it returns.
 func (s *ProbeScript) ReadTxParam(param uint8) *ProbeScript {
 	return s.add(record{
 		op:         opReadTxParam,

@@ -3,6 +3,7 @@ package frametxfuzz
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
@@ -14,9 +15,12 @@ import (
 	"github.com/ethpandaops/spamoor/txtypes"
 )
 
-// identityPrecompile is a target every chain has, used when a recipe wants a frame
-// addressing something that is neither a wallet nor the probe contract.
+// identityPrecompile is a target every chain has.
 var identityPrecompile = common.BytesToAddress([]byte{0x04})
+
+// deployGasPerCodeByte is the execution gas budgeted per byte of init code, covering the
+// copy, the CREATE2 and the code deposit.
+const deployGasPerCodeByte = 1_600
 
 // build is a recipe turned into a transaction, together with the dimensions it covers.
 type build struct {
@@ -39,6 +43,11 @@ type build struct {
 	// coverage names the dimensions this transaction exercises, which is what the run
 	// reports: the point is to trigger combinations, not to predict their outcome.
 	coverage []string
+
+	// deployed are the generated contracts this transaction's frames create, in frame
+	// order. A CREATE2 address is known before the transaction is sent, so a later
+	// frame can call code the transaction has not deployed yet.
+	deployed []common.Address
 }
 
 // buildRecipe assembles the transaction a recipe describes.
@@ -133,9 +142,10 @@ func (s *Scenario) buildPrefix(env *environment, recipe *Recipe, result *build) 
 		payScript := NewProbeScript().Approve(txtypes.ApprovePayment)
 
 		result.append(verify)
-		result.append(txtypes.PayFrame(env.probe.Paymaster, payScript.Bytes(), txtypes.FrameLimits{
-			Execution: payScript.ExecutionGas() + probeEntryGas,
-		}))
+		result.append(txtypes.PayFrame(env.paymasterFor(int(recipe.Index), result.sender.GetAddress()),
+			payScript.Bytes(), txtypes.FrameLimits{
+				Execution: payScript.ExecutionGas() + probeEntryGas,
+			}))
 
 	default:
 		return s.buildSelfVerifyPrefix(env, contractSender, result)
@@ -165,7 +175,7 @@ func (s *Scenario) buildSelfVerifyPrefix(env *environment, contractSender bool, 
 // buildBody assembles the frames after the validation prefix.
 func (s *Scenario) buildBody(env *environment, recipe *Recipe, result *build) error {
 	for i, spec := range recipe.Body {
-		frame, err := s.buildBodyFrame(env, recipe, spec, i)
+		frame, err := s.buildBodyFrame(env, recipe, result, spec, i)
 		if err != nil {
 			return err
 		}
@@ -199,8 +209,12 @@ func (s *Scenario) buildBody(env *environment, recipe *Recipe, result *build) er
 }
 
 // buildBodyFrame assembles one body frame and says what it is built to do.
-func (s *Scenario) buildBodyFrame(env *environment, recipe *Recipe, spec BodyFrame, index int) (*txtypes.Frame, error) {
-	target, targetEmpty := s.resolveTarget(env, recipe, spec, index)
+func (s *Scenario) buildBodyFrame(env *environment, recipe *Recipe, result *build, spec BodyFrame, index int) (*txtypes.Frame, error) {
+	if spec.Kind == KindDeployCode {
+		return s.buildDeployFrame(env, recipe, result, index)
+	}
+
+	target, targetEmpty := s.resolveTarget(env, recipe, result, spec, index)
 
 	script, err := s.buildScript(env, recipe, spec, index)
 	if err != nil {
@@ -208,6 +222,12 @@ func (s *Scenario) buildBodyFrame(env *environment, recipe *Recipe, spec BodyFra
 	}
 
 	limits := txtypes.FrameLimits{Execution: s.options.UserOpGas}
+	if spec.Target == TargetDeployed {
+		// Generated code is worth giving room to run: at the ordinary per-frame budget
+		// almost every call would end on gas before it reached anything interesting.
+		limits.Execution = s.options.CodeGas
+	}
+
 	if script != nil {
 		limits.Execution = script.ExecutionGas() + probeEntryGas
 		limits.State = script.StateGas()
@@ -251,10 +271,84 @@ func (s *Scenario) buildBodyFrame(env *environment, recipe *Recipe, spec BodyFra
 	}
 }
 
+// buildDeployFrame assembles a frame that deploys generated contract code.
+//
+// The frame calls the CREATE2 factory, whose calldata is a salt followed by init code, so
+// the address is a function of the code and is known here rather than after the fact. That
+// is what lets a later frame in the same transaction call a contract this one has not
+// created yet.
+func (s *Scenario) buildDeployFrame(env *environment, recipe *Recipe, result *build, index int) (*txtypes.Frame, error) {
+	runtime := GenerateContractCode(s.seed, recipe.Index, index, int(s.options.MaxCodeSize), s.options.CodeGas)
+
+	initcode, err := DeploymentInitCode(runtime)
+	if err != nil {
+		return nil, err
+	}
+
+	salt := deploySalt(recipe.Index, index)
+
+	data := make([]byte, 0, len(salt)+len(initcode))
+	data = append(data, salt[:]...)
+	data = append(data, initcode...)
+
+	result.deployed = append(result.deployed, crypto.CreateAddress2(env.factory, salt, crypto.Keccak256(initcode)))
+	result.cover("deploy-code")
+
+	factory := env.factory
+
+	return txtypes.UserOpFrame(&factory, nil, data, txtypes.FrameLimits{
+		Execution: deployExecutionGas(s.options.CodeGas, len(initcode)),
+		State:     deployStateGas(len(initcode)),
+	}), nil
+}
+
+// deployExecutionGas budgets a deployment's execution gas, which scales with the code
+// being deployed rather than being flat.
+func deployExecutionGas(base uint64, codeSize int) uint64 {
+	return base + uint64(codeSize)*deployGasPerCodeByte
+}
+
+// deployStateGas budgets a deployment's EIP-8037 state gas: an account leaf plus a byte
+// per byte of code.
+//
+// Sized against the init code, which is longer than the deployed runtime, with headroom.
+// A deploy frame that cannot cover the state charge fails invisibly -- CREATE2 returns
+// zero and the factory reverts -- taking everything downstream of the deployment with it.
+func deployStateGas(codeSize int) uint64 {
+	return uint64(txtypes.StateBytesPerNewAccount+codeSize) * txtypes.CostPerStateByte * 5 / 4
+}
+
+// deploySalt derives the CREATE2 salt for one deploy frame, so a replayed recipe deploys
+// to the same address.
+func deploySalt(txIndex uint64, frameIndex int) [32]byte {
+	var salt [32]byte
+
+	copy(salt[:], []byte("frametx-fuzz-code"))
+	binary.BigEndian.PutUint64(salt[20:28], txIndex)
+	binary.BigEndian.PutUint32(salt[28:32], uint32(frameIndex))
+
+	return salt
+}
+
 // resolveTarget turns a recipe's target kind into an address, reporting whether it is
 // an account that does not exist yet.
-func (s *Scenario) resolveTarget(env *environment, recipe *Recipe, spec BodyFrame, index int) (common.Address, bool) {
+func (s *Scenario) resolveTarget(env *environment, recipe *Recipe, result *build, spec BodyFrame, index int) (common.Address, bool) {
 	switch spec.Target {
+	case TargetDeployed:
+		// Prefer code this transaction is deploying, so the call and the deployment sit
+		// in the same frame list; otherwise reach for something an earlier transaction
+		// left behind.
+		if len(result.deployed) > 0 {
+			result.cover("call-own-deployed")
+
+			return result.deployed[index%len(result.deployed)], false
+		}
+
+		if address, ok := env.pickContract(index); ok {
+			result.cover("call-foreign-deployed")
+
+			return address, false
+		}
 	case TargetSender:
 		return env.senderFor(recipe, int(recipe.Index)).GetAddress(), false
 	case TargetProbe:
@@ -336,7 +430,13 @@ func (s *Scenario) applyNonceKeys(ctx context.Context, client *spamoor.Client, e
 		return nil
 	}
 
-	sel, err := env.nonces.selectKeys(ctx, client, result.sender.GetAddress(), recipe.NonceKeys)
+	// A key's first use is charged out of the frame executing APPROVE, and that frame
+	// is inside the validation prefix, so what fits depends on what the rest of the
+	// prefix already costs. Deriving the headroom rather than assuming a fixed budget
+	// is what keeps a transaction that also carries a P256 entry or a sponsored prefix
+	// from tipping over the cap.
+	sel, err := env.nonces.selectKeys(ctx, client, result.sender.GetAddress(), recipe.NonceKeys,
+		s.firstUseHeadroom(result))
 	if err != nil {
 		return err
 	}
@@ -353,13 +453,33 @@ func (s *Scenario) applyNonceKeys(ctx context.Context, client *spamoor.Client, e
 		result.cover("keyed-nonce-first-use")
 	}
 
-	// A key's first use is charged out of the frame executing APPROVE, so the frame has
-	// to budget for it or the approval halts out of gas.
+	// The frame executing APPROVE has to budget for the surcharge, or the approval
+	// halts out of gas.
 	if sel.firstUses > 0 {
 		result.frames[result.prefixLen-1].Limits.Execution += uint64(sel.firstUses) * txtypes.KeyedNonceFirstUseGas
 	}
 
 	return nil
+}
+
+// firstUseHeadroom returns how many never-before-used nonce keys still fit inside the
+// public mempool's verification gas cap, given what this transaction's validation prefix
+// and signature list already cost.
+func (s *Scenario) firstUseHeadroom(result *build) int {
+	used, err := result.tx.SignatureVerificationGas()
+	if err != nil {
+		return 0
+	}
+
+	for i := 0; i < result.prefixLen && i < len(result.frames); i++ {
+		used += result.frames[i].Limits.Execution
+	}
+
+	if used >= txtypes.MaxVerifyGas {
+		return 0
+	}
+
+	return int((txtypes.MaxVerifyGas - used) / txtypes.KeyedNonceFirstUseGas)
 }
 
 // applyRecentRoots declares EIP-8272 references on the transaction.

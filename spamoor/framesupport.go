@@ -17,19 +17,15 @@ import (
 // retried.
 const frameSupportRetryInterval = 30 * time.Second
 
-// FrameSupport describes a chain's EIP-8141 frame transaction capability.
-//
-// It is derived from the predeploys the three EIPs install at activation, not from what
-// a client says about a rejected transaction. Each EIP requires its address to be empty
-// beforehand and installs code and nonce 1 at the fork, so the presence of that account
-// is an exact and client-independent signal:
+// FrameSupport describes a chain's EIP-8141 frame transaction capability, derived from
+// the predeploys the three EIPs install at activation:
 //
 //	EIP-8141  EXPIRY_VERIFIER      0x…8141
 //	EIP-8250  NONCE_MANAGER        0x…8250
 //	EIP-8272  RECENT_ROOT_ADDRESS  0x…8272
 //
-// The extension set decides the envelope's wire layout, which is why it has to be known
-// before a transaction can be encoded at all.
+// The extension set decides the envelope's wire layout, so it has to be known before a
+// transaction can be encoded.
 type FrameSupport struct {
 	// Active reports whether the chain implements frame transactions.
 	Active bool
@@ -55,14 +51,12 @@ func (pool *TxPool) GetFrameSupport() FrameSupport {
 	return pool.frameSupport.support
 }
 
-// GetFrameSupportWithInit returns the chain's frame transaction capability, probing it
-// on first use.
+// GetFrameSupportWithInit returns the chain's frame transaction capability, probing it on
+// first use.
 //
-// A positive result is cached for the process lifetime. A negative one is re-probed at
-// most every frameSupportRetryInterval, because the predeploys appear at the fork rather
-// than at genesis: a spammer started before activation would otherwise be stuck reading
-// an inactive chain forever, and a transaction encoded on that reading is rejected on
-// every send rather than once at startup.
+// A positive result is cached for the process lifetime; a negative one is re-probed,
+// because the predeploys appear at the fork rather than at genesis and a spammer started
+// before activation would otherwise be stuck reading an inactive chain.
 func (pool *TxPool) GetFrameSupportWithInit(ctx context.Context) (FrameSupport, error) {
 	pool.frameSupport.mutex.Lock()
 	defer pool.frameSupport.mutex.Unlock()
@@ -132,11 +126,8 @@ func probeFrameSupport(ctx context.Context, client *Client) (FrameSupport, error
 	return support, nil
 }
 
-// predeployActive reports whether a predeploy account has been installed.
-//
-// Activation sets both code and nonce 1. Nonce is checked as well as code because one of
-// these codes is still TBD in its EIP, and an account with a non-zero nonce at an address
-// the fork configuration required to be empty is unambiguous either way.
+// predeployActive reports whether a predeploy account has been installed. Nonce is
+// checked as well as code because one of these codes is still TBD in its EIP.
 func predeployActive(ctx context.Context, client *Client, address common.Address) (bool, error) {
 	code, err := client.GetCodeAt(ctx, address)
 	if err != nil {

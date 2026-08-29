@@ -69,30 +69,37 @@ axis with equal weight. An axis whose EIP the chain does not run is disabled aut
 | `nonces` | EIP-8250 keyed nonce domains, including how many see their first use |
 | `roots` | EIP-8272 references, including the window edges and the cases that must be refused |
 | `posttx` | EIP-7906 assertion frames, passing and failing |
-| `probe` | Calls into the probe contract, with the introspection assertions |
+| `probe` | Calls into the fixed probe contract, including the introspection sweep |
+| `code` | Deploying fuzzed contracts from one frame and calling them from another |
 
-### The probe contract
+### Generated contracts
 
-Frames that only address wallets never reach code, so none of the instructions EIP-8141 introduces
-would ever execute. The scenario deploys a small contract whose calldata is a script — revert,
-write storage, emit a log, burn gas, `APPROVE`, and execute each introspection instruction. It is
-deployed once through the CREATE2 factory at a fixed salt, so a rerun finds it.
+Frames that only address wallets never reach code, so none of the instructions EIP-8141
+introduces would ever execute. Two contracts do that work.
 
-The introspection operations **discard what they read**. They exist to make the instruction run
-inside a frame; comparing the result against an expected value would be the same enshrining the
-scenario avoids everywhere else. One consequence worth noting: a script that reads both
-`SIGDATACOPY` and `RECENTROOTREFLOAD` emits the byte `0xb5` twice, because EIP-8141 and EIP-8272
-both assign it — which is exactly the sort of thing worth putting in front of a chain running
-both.
+**A fixed probe contract**, deployed once through the CREATE2 factory, whose calldata is a
+script: revert, write storage, emit a log, burn gas, `APPROVE`, and execute each
+introspection instruction. The read operations discard their results — the point is to
+reach the instruction, not to decide what it should have returned. One consequence worth
+noting: a script that reads both `SIGDATACOPY` and `RECENTROOTREFLOAD` emits the byte
+`0xb5` twice, because EIP-8141 and EIP-8272 both assign it.
 
-The same code plays three roles: the target a frame calls, the paymaster whose own code approves
-payment, and the sender's code. For the last two it is installed with an EIP-7702 delegation rather
-than a deploy frame: a CREATE2 account deployment costs about 224,000 gas against the 100,000
-execution cap on the whole validation prefix, so the deploy-led prefixes cannot propagate.
+The same code plays paymaster and contract sender through an EIP-7702 delegation, because
+EIP-8141's own answer (a deploy frame) costs ~224k gas against the 100k execution cap on
+the whole validation prefix. Since a delegated wallet is no longer an account without
+code, the pool is split: the last quarter carries the delegation, the rest keep exercising
+the protocol's default code. Sponsorship spreads across all of them, since the mempool
+caps how many pending transactions one non-canonical paymaster may sponsor.
 
-Because a delegated wallet is no longer an account without code, the pool is split — the last
-quarter carries the delegation and serves the contract-sender recipes, the rest keep exercising the
-protocol's default code.
+**Fuzzed contracts**, generated per transaction by the same stack-aware generator
+`evm-fuzz` uses, with the frame instructions added to its table. A fixed contract can only
+execute the sequences someone wrote into it; the interesting space is the instructions in
+combination — with each other, with ordinary EVM, and at depth inside nested calls.
+
+One frame deploys through the factory and a later frame calls the result. Because the
+CREATE2 address is a function of the code, it is known before the transaction is sent, so
+a frame can name a contract the transaction has not created yet. Frames also call
+contracts earlier transactions deployed, which the run keeps in a bounded registry.
 
 ## Invalid combinations
 
@@ -135,6 +142,8 @@ spamoor frametx-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -t 10
 - `--max-frames` — Maximum body frames per transaction (default: 6)
 - `--invalid-ratio` — Share of the stream carrying a deliberate violation (default: 0.05)
 - `--log-frames` — Log the per-frame result of every landed transaction
+- `--max-code-size` — Maximum size of a generated contract's runtime code (default: 256)
+- `--code-gas` — Base execution gas for frames that deploy or call generated code
 
 ### Frame settings
 - `--envelope` — Pin the payload shape: `auto` (default), `base`, `keyed`, `roots`, `full`

@@ -13,20 +13,15 @@ import (
 	"github.com/ethpandaops/spamoor/txtypes"
 )
 
-// BurnerWalletName is the wallet the negative tier fires from.
-//
-// A deliberately invalid transaction is never mined, so it consumes no nonce and one
-// wallet can send them indefinitely. Keeping them off the generating wallets also keeps
-// the managed pool out of it: the pool assumes every submitted transaction is
-// well-formed and will eventually confirm, which is exactly what these are not.
+// BurnerWalletName is the wallet deliberately invalid transactions are fired from. They
+// are never mined, so they consume no nonce and one wallet can send them indefinitely.
 const BurnerWalletName = "frametx-fuzz-burner"
 
 // violation is a deliberate corruption of a well-formed transaction.
 //
-// Structural mutations are applied before signing, so the signature covers the mutated
-// payload: applying one afterwards would make every case fail on the signature instead
-// of on the thing being tested. Byte-level corruption is applied to the encoded
-// transaction, where there is nothing left to sign.
+// Structural violations are applied before signing so the signature covers them, or every
+// case would fail on the signature rather than on the thing being exercised. Byte-level
+// corruption is applied to the encoded transaction.
 type violation struct {
 	name string
 
@@ -362,24 +357,16 @@ func findViolation(name string) *violation {
 	return nil
 }
 
-// sendInvalid submits a transaction carrying a deliberate violation.
-//
-// It bypasses the managed pool entirely: the RPC's accept or reject is the whole result,
-// no receipt is awaited and no nonce is tracked. The pool assumes every transaction it
-// carries eventually confirms, which is exactly what these do not do.
-//
-// Whether the chain was right to accept or refuse one is not decided here. What is
-// recorded is what happened, and what the chain said when it refused -- a reason that
-// changes between runs or between clients is worth seeing even when neither answer is
-// known to be wrong.
+// sendInvalid submits a transaction carrying a deliberate violation, out of pool: the
+// RPC's accept or reject is the whole result. What happened is recorded, not judged.
 func (s *Scenario) sendInvalid(ctx context.Context, client *spamoor.Client, result *build) error {
 	violator := findViolation(result.recipe.Invalid)
 	if violator == nil {
 		return fmt.Errorf("unknown violation %q", result.recipe.Invalid)
 	}
 
-	// An invalid transaction never lands, so its nonce comes from the chain rather than
-	// from the pool's sequence, which would otherwise run away from the account's.
+	// The nonce comes from the chain, since an invalid transaction never lands and the
+	// pool's sequence would run away from the account's.
 	nonce, err := client.GetPendingNonceAt(ctx, result.sender.GetAddress())
 	if err != nil {
 		return err

@@ -1,19 +1,12 @@
 package frametxfuzz
 
-// The introspection sweep: the operations that make every instruction EIP-8141 and its
-// extensions introduce execute inside a frame.
+// The introspection sweep: operations that make each instruction EIP-8141 and its
+// extensions introduce execute inside a frame. Returned values are discarded.
 //
-// Nothing here checks a returned value. A frame whose script reverted on a mismatch
-// would bake one reading of the spec into every transaction, and a client that read the
-// spec differently would surface as a failing frame rather than as a disagreement. On a
-// multi-node network a genuine disagreement splits the chain on its own, which is a far
-// stronger signal than a comparison made here.
+// What the sweep respects is where an instruction halts by definition, since a frame that
+// halts stops exercising anything after it:
 //
-// What the sweep does have to respect is where an instruction halts by definition, since
-// a frame that halts for an uninteresting reason stops exercising anything after it:
-//
-//   - FRAMEPARAM's status and gas-used parameters halt for the current or a later frame,
-//     so they are only read for frames that have already completed;
+//   - FRAMEPARAM's status and gas-used parameters halt for the current or a later frame;
 //   - SIGPARAM's resolved signer halts on an ARBITRARY entry and its raw length halts on
 //     every other scheme;
 //   - SIGDATACOPY is defined for ARBITRARY entries only.
@@ -40,8 +33,7 @@ func appendTxParamReads(script *ProbeScript, recipe *Recipe) {
 
 	if recipe.NonceKeys > 0 {
 		// EIP-8250's indices. TxParamLegacyNonce shares 0x0C with EIP-8141's
-		// state_gas_left: the two EIPs both claim it, which is worth putting in front
-		// of a chain running both rather than deciding here which one wins.
+		// state_gas_left, which both EIPs claim.
 		for _, param := range []uint8{TxParamNonceKeyCount, TxParamNonceKeysHash, TxParamNonceKey0} {
 			script.ReadTxParam(param)
 		}
@@ -76,11 +68,9 @@ func appendFrameParamReads(script *ProbeScript, frameIndex int) {
 	}
 }
 
-// appendSigParamReads sweeps the signature-scoped parameters.
-//
-// The sender's entry is always at index 0 and is protocol-validated; an ARBITRARY
-// witness, when the recipe carries one, follows it and is the only entry whose raw bytes
-// the EVM may read.
+// appendSigParamReads sweeps the signature-scoped parameters. The sender's entry is at
+// index 0; an ARBITRARY witness, when present, follows it and is the only entry whose raw
+// bytes the EVM may read.
 func appendSigParamReads(script *ProbeScript, recipe *Recipe) {
 	script.ReadSigParam(SigParamScheme, 0)
 	script.ReadSigParam(SigParamMsg, 0)

@@ -9,18 +9,14 @@ import (
 )
 
 // Protocol state derivations for the two EIPs that extend the frame transaction
-// envelope. Everything here is a pure function of the transaction fields and the
-// constants above it: reading the resulting slots is the caller's business.
+// envelope. Reading the resulting slots is the caller's business.
 
 // EIP-8250 keyed nonce constants.
 const (
 	// KeyedNonceFirstUseGas is charged per never-before-used nonce key, deducted from
-	// the frame executing the payment-scoped APPROVE and counted in that frame's
-	// gas_used.
-	//
-	// It is what bounds how many fresh keys fit in a mempool-legal transaction: the
-	// whole validation prefix must stay under MaxVerifyGas, so at most four keys can
-	// see their first use in one publicly propagated transaction.
+	// the frame executing the payment-scoped APPROVE and counted in its gas_used. With
+	// the whole validation prefix bounded by MaxVerifyGas, it is what limits how many
+	// fresh keys fit in a mempool-legal transaction.
 	KeyedNonceFirstUseGas = 20_000
 
 	// MaxNonceSeq is EIP-8250's exclusive bound on nonce_seq.
@@ -98,8 +94,8 @@ func NonceKeysHash(keys []*uint256.Int) common.Hash {
 // WithNonceKeys selects an EIP-8250 key set and its shared sequence number.
 //
 // Every selected key must currently sit at seq, and a successful payment approval moves
-// all of them to seq+1 together. The keys must be strictly increasing, and the zero key
-// may only appear alone; ValidatePayload rejects anything else.
+// all of them to seq+1 together. Keys must be strictly increasing and the zero key may
+// only appear alone.
 func (tx *FrameTx) WithNonceKeys(keys []*uint256.Int, seq uint64) *FrameTx {
 	tx.Extensions |= FrameExtKeyedNonces
 	tx.NonceKeys = keys
