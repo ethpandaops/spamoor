@@ -120,6 +120,9 @@ type TxPool struct {
 	currentBaseFee  *big.Int
 	blockStatsMutex sync.RWMutex
 
+	// Frame transaction capability, probed from the predeploys the EIPs install.
+	frameSupport frameSupportState
+
 	// preAmsterdamFeeModel selects the legacy (pre-EIP-8037) gas/fee model
 	// when true. Defaults to false: the Amsterdam fee model is active.
 	preAmsterdamFeeModel bool
@@ -139,6 +142,13 @@ type TxPool struct {
 	subscriptions      map[uint64]*BlockSubscription
 	bulkSubscriptions  map[uint64]*BulkBlockSubscription
 	nextSubscriptionID atomic.Uint64
+
+	// Hash watches for transactions whose sender the pool does not track, keyed by
+	// transaction hash. hashWatcherCount lets block processing skip the lock entirely
+	// in the common case of no watches.
+	hashWatchersMutex sync.Mutex
+	hashWatchers      map[common.Hash]func(*txtypes.Transaction, *txtypes.Receipt)
+	hashWatcherCount  atomic.Int64
 }
 
 type txPoolWalletRegistration struct {
@@ -214,6 +224,56 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 // registration is auto-removed only once ALL of its contexts have been cancelled. This
 // ensures a restarted spammer's re-registration keeps the wallet alive instead of it
 // being evicted when the old, cancelled context's cleanup fires.
+// WatchTransaction registers a one-shot callback fired when a transaction with the given
+// hash is included in a processed block.
+//
+// It is for transactions whose sender the pool does not track through a wallet, such as a
+// keyless EIP-8141 contract sender: block processing matches confirmations to wallets by
+// their from-address, so a transaction from an unregistered address would otherwise be
+// invisible. The watch is removed when it fires or when ctx is cancelled, so callers pass
+// a bounded context to keep an unincluded transaction from lingering.
+func (pool *TxPool) WatchTransaction(ctx context.Context, txHash common.Hash, callback func(*txtypes.Transaction, *txtypes.Receipt)) {
+	pool.hashWatchersMutex.Lock()
+	if pool.hashWatchers == nil {
+		pool.hashWatchers = make(map[common.Hash]func(*txtypes.Transaction, *txtypes.Receipt))
+	}
+
+	if _, exists := pool.hashWatchers[txHash]; !exists {
+		pool.hashWatcherCount.Add(1)
+	}
+
+	pool.hashWatchers[txHash] = callback
+	pool.hashWatchersMutex.Unlock()
+
+	context.AfterFunc(ctx, func() {
+		pool.hashWatchersMutex.Lock()
+		if _, ok := pool.hashWatchers[txHash]; ok {
+			delete(pool.hashWatchers, txHash)
+			pool.hashWatcherCount.Add(-1)
+		}
+		pool.hashWatchersMutex.Unlock()
+	})
+}
+
+// fireHashWatcher invokes and removes the watch for a transaction hash, if one is set.
+func (pool *TxPool) fireHashWatcher(txHash common.Hash, tx *txtypes.Transaction, receipt *txtypes.Receipt) {
+	if pool.hashWatcherCount.Load() == 0 {
+		return
+	}
+
+	pool.hashWatchersMutex.Lock()
+	callback := pool.hashWatchers[txHash]
+	if callback != nil {
+		delete(pool.hashWatchers, txHash)
+		pool.hashWatcherCount.Add(-1)
+	}
+	pool.hashWatchersMutex.Unlock()
+
+	if callback != nil {
+		callback(tx, receipt)
+	}
+}
+
 func (pool *TxPool) RegisterWallet(wallet *Wallet, ctx context.Context) *Wallet {
 	if ctx.Err() != nil {
 		return nil
@@ -549,6 +609,8 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		}
 
 		txHash := tx.Hash()
+		pool.fireHashWatcher(txHash, tx, receipt)
+
 		txFees := utils.GetTransactionFees(tx, receipt)
 		fromWallet := walletMap[txFrom]
 		toAddr := tx.To()
@@ -1138,6 +1200,15 @@ func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wall
 	totalAmount = new(big.Int).Add(totalAmount, &txFees.BlobFeeAmount)
 	wallet.SubBalance(totalAmount)
 
+	if !tx.UsesAccountNonce() {
+		// The transaction's nonce belongs to another sequence domain (EIP-8250 keyed
+		// nonces), so none of the bookkeeping below applies: comparing it against the
+		// account nonce would corrupt every other transaction on this wallet.
+		wallet.confirmTxByHash(blockNumber, tx, receipt)
+
+		return
+	}
+
 	wallet.txNonceMutex.Lock()
 	defer wallet.txNonceMutex.Unlock()
 
@@ -1169,11 +1240,21 @@ func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wall
 // queries the current nonce from the blockchain, recovers any confirmed transactions
 // that weren't properly tracked, and rebroadcasts pending transactions if enabled.
 func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet) {
-	if len(wallet.txNonceChans) == 0 || blockNumber <= wallet.lastConfirmation+10 {
+	if blockNumber <= wallet.lastConfirmation+10 {
+		return
+	}
+
+	if len(wallet.txNonceChans) == 0 && !wallet.hasPendingHashTxs() {
 		return
 	}
 
 	wallet.lastConfirmation = blockNumber
+
+	pool.processStaleHashTxs(wallet)
+
+	if len(wallet.txNonceChans) == 0 {
+		return
+	}
 
 	// Query on-chain nonce
 	var onChainNonce uint64
@@ -1280,6 +1361,44 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 
 		pendingTx.LastRebroadcast = time.Now()
 		pendingTx.RebroadcastCount++
+		go pool.rebroadcastTransaction(pool.options.Context, pendingTx.Tx, pendingTx.Options, pendingTx.RebroadcastCount)
+	}
+}
+
+// processStaleHashTxs recovers hash-tracked transactions, which the nonce-based recovery
+// above cannot see: there is no on-chain nonce that would prove one landed, so its
+// receipt is asked for directly and it is rebroadcast if it is missing.
+func (pool *TxPool) processStaleHashTxs(wallet *Wallet) {
+	pendingTxs := wallet.getPendingHashTxs()
+	if len(pendingTxs) == 0 {
+		return
+	}
+
+	for _, pendingTx := range pendingTxs {
+		if receipt := pool.loadTransactionReceipt(pool.options.Context, pendingTx.Tx); receipt != nil {
+			logrus.Debugf("recovering stale confirmed transaction for %v (hash %v)",
+				wallet.GetAddress().String(), pendingTx.Tx.Hash().Hex())
+			wallet.confirmTxByHash(receipt.BlockNumber.Uint64(), pendingTx.Tx, receipt)
+
+			continue
+		}
+
+		if pendingTx.Options == nil || !pendingTx.Options.Rebroadcast {
+			continue
+		}
+
+		if time.Since(pendingTx.LastRebroadcast) < pool.calculateBackoffDelay(pendingTx.RebroadcastCount) {
+			continue
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"wallet": wallet.GetAddress().Hex(),
+			"txhash": pendingTx.Tx.Hash().Hex(),
+		}).Debugf("rebroadcasting stale transaction")
+
+		pendingTx.LastRebroadcast = time.Now()
+		pendingTx.RebroadcastCount++
+
 		go pool.rebroadcastTransaction(pool.options.Context, pendingTx.Tx, pendingTx.Options, pendingTx.RebroadcastCount)
 	}
 }
@@ -1403,7 +1522,9 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	resetWallets := map[common.Address]bool{}
 	for _, tx := range reorgedOutTxs {
 		if tx.FromWallet != nil {
-			if !resetWallets[tx.From] {
+			// A transaction outside the account nonce sequence carries no information
+			// about where that sequence should be rewound to.
+			if !resetWallets[tx.From] && tx.Tx.UsesAccountNonce() {
 				resetWallets[tx.From] = true
 
 				tx.FromWallet.txNonceMutex.Lock()

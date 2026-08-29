@@ -53,6 +53,7 @@ const (
 	TxValueCost              = 6_000      // EIP-2780
 	CostPerStateByte         = 1_530      // EIP-8037
 	StateBytesPerNewAccount  = 120        // EIP-8037
+	StateBytesPerStorageSet  = 64         // EIP-8037
 	StandardTokenCost        = 4          // EIP-7976
 	TotalCostFloorPerToken   = 16         // EIP-7976
 	GasPerBlob               = 131_072    // EIP-4844
@@ -244,11 +245,12 @@ type FrameTx struct {
 }
 
 var (
-	_ TxData           = (*FrameTx)(nil)
-	_ ExplicitSenderTx = (*FrameTx)(nil)
-	_ NetworkEncodedTx = (*FrameTx)(nil)
-	_ BlobTxData       = (*FrameTx)(nil)
-	_ StateGasTxData   = (*FrameTx)(nil)
+	_ TxData             = (*FrameTx)(nil)
+	_ ExplicitSenderTx   = (*FrameTx)(nil)
+	_ NetworkEncodedTx   = (*FrameTx)(nil)
+	_ BlobTxData         = (*FrameTx)(nil)
+	_ StateGasTxData     = (*FrameTx)(nil)
+	_ IndependentNonceTx = (*FrameTx)(nil)
 )
 
 // frameTxWithSidecar is the EIP-7594 wrapper used for blob-carrying frame
@@ -602,6 +604,10 @@ func (tx *FrameTx) UsesLegacyNonce() bool {
 	return len(tx.NonceKeys) == 1 && tx.NonceKeys[0] != nil && tx.NonceKeys[0].IsZero()
 }
 
+// UsesAccountNonce reports whether NonceSeq addresses the sender's account nonce, which
+// implements IndependentNonceTx for the engine's nonce tracking.
+func (tx *FrameTx) UsesAccountNonce() bool { return tx.UsesLegacyNonce() }
+
 // GetGas returns the maximum gas the transaction can consume, which is the budget the
 // payer is charged against.
 func (tx *FrameTx) GetGas() uint64 { return tx.MaxGas() }
@@ -880,6 +886,11 @@ func (tx *FrameTx) SignEntryP256(index int, key *ecdsa.PrivateKey) error {
 		return errors.New("key is not on the P-256 curve")
 	}
 
+	// The signer is part of the canonical signature hash, so it has to be in place
+	// before the digest is computed: filling it in afterwards would leave the entry
+	// signed over a hash the transaction no longer has.
+	sig.Signer = P256Signer(key.X, key.Y).Bytes()
+
 	digest, err := tx.entryDigest(sig)
 	if err != nil {
 		return err
@@ -903,7 +914,6 @@ func (tx *FrameTx) SignEntryP256(index int, key *ecdsa.PrivateKey) error {
 	key.Y.FillBytes(raw[96:128])
 
 	sig.Signature = raw
-	sig.Signer = P256Signer(key.X, key.Y).Bytes()
 
 	return nil
 }
@@ -1108,14 +1118,28 @@ func weightedTokens(data []byte) uint64 {
 // jsonFrame is a frame as reported by JSON-RPC. EIP-8141 does not specify a JSON
 // encoding; these key names follow ethrex, the first client to ship the type.
 type jsonFrame struct {
-	Mode       *hexutil.Uint64 `json:"mode"`
-	Flags      *hexutil.Uint64 `json:"flags"`
-	To         *common.Address `json:"to"`
-	Target     *common.Address `json:"target"`
-	GasLimit   *hexutil.Uint64 `json:"gasLimit"`
-	StateLimit *hexutil.Uint64 `json:"stateLimit"`
-	Value      *hexutil.Big    `json:"value"`
-	Data       *hexutil.Bytes  `json:"data"`
+	Mode     *hexutil.Uint64 `json:"mode"`
+	Flags    *hexutil.Uint64 `json:"flags"`
+	To       *common.Address `json:"to"`
+	Target   *common.Address `json:"target"`
+	GasLimit *hexutil.Uint64 `json:"gasLimit"`
+	Value    *hexutil.Big    `json:"value"`
+	Data     *hexutil.Bytes  `json:"data"`
+
+	// ethrex has shipped both spellings of the state gas limit. Reading only one of
+	// them decodes every frame from the other build with a state limit of zero and
+	// nothing says so, which changes the transaction's hash on re-encoding.
+	StateLimit    *hexutil.Uint64 `json:"stateLimit"`
+	StateGasLimit *hexutil.Uint64 `json:"stateGasLimit"`
+}
+
+// stateLimit returns whichever spelling the client used.
+func (f *jsonFrame) stateLimit() uint64 {
+	if f.StateLimit != nil {
+		return uint64(*f.StateLimit)
+	}
+
+	return jsonUint64(f.StateGasLimit)
 }
 
 // jsonFrameSignature is a signature entry as reported by JSON-RPC.
@@ -1215,7 +1239,7 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 			Target: copyAddressPtr(target),
 			Limits: FrameLimits{
 				Execution: jsonUint64(frame.GasLimit),
-				State:     jsonUint64(frame.StateLimit),
+				State:     frame.stateLimit(),
 			},
 			Value: jsonU256(frame.Value),
 			Data:  jsonBytes(frame.Data),

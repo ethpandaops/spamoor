@@ -279,18 +279,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 // checkFrameTxSupport establishes what the chain supports before the scenario sends
 // anything.
 //
-// Everything here is read from chain state rather than inferred from error text. Each
-// of these EIPs installs a predeploy at activation and requires the address to be
-// empty beforehand, so the presence of that account is an exact, client-independent
-// signal:
-//
-//	EIP-8141  EXPIRY_VERIFIER      0x…8141
-//	EIP-8250  NONCE_MANAGER        0x…8250
-//	EIP-8272  RECENT_ROOT_ADDRESS  0x…8272
-//
-// The envelope shape follows from which of the two extensions are active, which is
-// what makes it safe to encode: a wrong guess would fail to decode on every
-// transaction rather than once at startup.
+// The capability itself is the txpool's business: it is a property of the chain, read
+// from the predeploys each of these EIPs installs at activation rather than inferred
+// from a client's error text, and it is shared with every other scenario that needs it.
 func (s *Scenario) checkFrameTxSupport(ctx context.Context) error {
 	txpool := s.walletPool.GetTxPool()
 	if txpool == nil {
@@ -301,19 +292,14 @@ func (s *Scenario) checkFrameTxSupport(ctx context.Context) error {
 		return fmt.Errorf("frame transactions need the Amsterdam (EIP-8037) gas model, but --pre-amsterdam-fee-model is set")
 	}
 
-	client := s.walletPool.GetClient(spamoor.WithClientGroup(s.options.ClientGroup))
-	if client == nil {
-		return scenario.ErrNoClients
-	}
-
-	frames, err := predeployActive(ctx, client, txtypes.ExpiryVerifier)
+	support, err := txpool.GetFrameSupportWithInit(ctx)
 	if err != nil {
-		return fmt.Errorf("failed reading the expiry verifier predeploy: %w", err)
+		return err
 	}
 
-	if !frames {
-		return fmt.Errorf("%s has no code at the EIP-8141 expiry verifier predeploy %s: this chain does not implement frame transactions",
-			client.GetName(), txtypes.ExpiryVerifier)
+	if !support.Active {
+		return fmt.Errorf("no account at the EIP-8141 expiry verifier predeploy %s: this chain does not implement frame transactions",
+			txtypes.ExpiryVerifier)
 	}
 
 	if !s.autoDetect {
@@ -322,65 +308,10 @@ func (s *Scenario) checkFrameTxSupport(ctx context.Context) error {
 		return nil
 	}
 
-	extensions, err := detectEnvelope(ctx, client)
-	if err != nil {
-		return err
-	}
-
-	s.extensions = extensions
-	s.logger.Infof("detected frame transaction envelope: %s", extensions)
+	s.extensions = support.Extensions
+	s.logger.Infof("detected frame transaction envelope: %s", support.Extensions)
 
 	return nil
-}
-
-// detectEnvelope reads the active envelope extensions from the predeploys each one
-// installs at activation.
-func detectEnvelope(ctx context.Context, client *spamoor.Client) (txtypes.FrameExtensions, error) {
-	var extensions txtypes.FrameExtensions
-
-	keyed, err := predeployActive(ctx, client, txtypes.NonceManager)
-	if err != nil {
-		return 0, fmt.Errorf("failed reading the EIP-8250 nonce manager predeploy: %w", err)
-	}
-
-	if keyed {
-		extensions |= txtypes.FrameExtKeyedNonces
-	}
-
-	roots, err := predeployActive(ctx, client, txtypes.RecentRootAddress)
-	if err != nil {
-		return 0, fmt.Errorf("failed reading the EIP-8272 recent root predeploy: %w", err)
-	}
-
-	if roots {
-		extensions |= txtypes.FrameExtRecentRoots
-	}
-
-	return extensions, nil
-}
-
-// predeployActive reports whether a predeploy account has been installed.
-//
-// Activation sets both code and nonce 1, and the fork configuration must pick an
-// address that is empty beforehand. Nonce is checked as well as code because one of
-// these codes is still TBD in its EIP, and an account with nonce 1 is unambiguous
-// either way.
-func predeployActive(ctx context.Context, client *spamoor.Client, address common.Address) (bool, error) {
-	code, err := client.GetCodeAt(ctx, address)
-	if err != nil {
-		return false, err
-	}
-
-	if len(code) > 0 {
-		return true, nil
-	}
-
-	nonce, err := client.GetNonceAt(ctx, address, nil)
-	if err != nil {
-		return false, err
-	}
-
-	return nonce > 0, nil
 }
 
 func (s *Scenario) parseTimeout() time.Duration {

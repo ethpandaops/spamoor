@@ -226,6 +226,17 @@ func TestFrameP256Signature(t *testing.T) {
 	if signer != P256Signer(key.X, key.Y) {
 		t.Fatal("P256 signer address does not match the public key")
 	}
+
+	// The signer is part of the canonical signature hash, so the entry has to verify
+	// against the hash the finished transaction has rather than the one it had while
+	// the signer field was still empty.
+	digest := tx.SigHash()
+	r := new(big.Int).SetBytes(tx.Signatures[1].Signature[0:32])
+	s := new(big.Int).SetBytes(tx.Signatures[1].Signature[32:64])
+
+	if !ecdsa.Verify(&key.PublicKey, digest[:], r, s) {
+		t.Fatal("P256 signature does not verify against the transaction's signature hash")
+	}
 }
 
 // TestFrameIntrinsicGas checks the intrinsic and floor gas formulas against values
@@ -1065,4 +1076,25 @@ func TestDurableFrames(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestFrameJSONStateLimitSpellings checks that both spellings ethrex has shipped for a
+// frame's state gas limit decode to the same value. Reading only one of them leaves
+// every frame from the other build with a state limit of zero, which changes the
+// transaction's hash on re-encoding and is invisible in a round trip against ourselves.
+func TestFrameJSONStateLimitSpellings(t *testing.T) {
+	for _, key := range []string{"stateLimit", "stateGasLimit"} {
+		t.Run(key, func(t *testing.T) {
+			raw := []byte(`{"mode":"0x2","flags":"0x0","gasLimit":"0x3d090","` + key + `":"0x2710","value":"0x0","data":"0x"}`)
+
+			var frame jsonFrame
+			if err := json.Unmarshal(raw, &frame); err != nil {
+				t.Fatalf("failed to decode frame: %v", err)
+			}
+
+			if got := frame.stateLimit(); got != 0x2710 {
+				t.Errorf("state limit read as %d, want %d", got, 0x2710)
+			}
+		})
+	}
 }

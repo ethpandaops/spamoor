@@ -1,0 +1,383 @@
+;;; Frame probe contract
+;;;
+;;; One contract that frames call to reach the instructions EIP-8141 and its extensions
+;;; introduce. Its calldata is a script, so one deployment covers every behaviour a
+;;; scenario needs: revert, write storage, emit a log, burn gas, APPROVE, and execute each
+;;; introspection instruction.
+;;;
+;;; The read operations discard what they read. Checking a value against an expected one
+;;; would bake a single reading of the spec into every transaction.
+;;;
+;;; Script encoding: fixed-width 128-byte records, each four 32-byte words [op, a, b, c].
+;;; Fixed width keeps the interpreter small enough to verify by reading it. Unknown
+;;; selectors revert, so a script this contract does not understand fails loudly.
+;;;
+;;; Instructions the assembler does not know are emitted with #bytes:
+;;;   0xaa APPROVE  0xb0 TXPARAM  0xb1 FRAMEDATALOAD  0xb3 FRAMEPARAM
+;;;   0xb4 SIGPARAM  0xb5 SIGDATACOPY / RECENTROOTREFLOAD (both EIPs claim 0xb5)
+
+;; cursor = 0
+push 0
+
+loop:
+	;; stop once the script is consumed
+	calldatasize
+	dup2
+	lt
+	iszero
+	push @done
+	jumpi
+
+	;; op = calldataload(cursor) & 0xff
+	dup1
+	calldataload
+	push 0xff
+	and
+
+	;; dispatch on the selector, leaving [op, cursor] for the handler
+	dup1
+	push 0x01
+	eq
+	push @op_stop
+	jumpi
+	dup1
+	push 0x02
+	eq
+	push @op_revert
+	jumpi
+	dup1
+	push 0x03
+	eq
+	push @op_sstore
+	jumpi
+	dup1
+	push 0x04
+	eq
+	push @op_log
+	jumpi
+	dup1
+	push 0x05
+	eq
+	push @op_burn
+	jumpi
+	dup1
+	push 0x06
+	eq
+	push @op_approve
+	jumpi
+	dup1
+	push 0x07
+	eq
+	push @op_read_txparam
+	jumpi
+	dup1
+	push 0x08
+	eq
+	push @op_read_frameparam
+	jumpi
+	dup1
+	push 0x09
+	eq
+	push @op_read_sigparam
+	jumpi
+	dup1
+	push 0x0a
+	eq
+	push @op_read_framedata
+	jumpi
+	dup1
+	push 0x0b
+	eq
+	push @op_read_sigdata
+	jumpi
+	dup1
+	push 0x0c
+	eq
+	push @op_read_rootref
+	jumpi
+	dup1
+	push 0x0d
+	eq
+	push @op_call
+	jumpi
+	dup1
+	push 0x0e
+	eq
+	push @op_write_root
+	jumpi
+	dup1
+	push 0x0f
+	eq
+	push @op_store_txparam
+	jumpi
+	dup1
+	push 0x10
+	eq
+	push @op_read_sload
+	jumpi
+
+	;; an unknown selector is a caller bug, not something to skip
+	push 0
+	push 0
+	revert
+
+;;; 0x01 STOP: end the script successfully
+op_stop:
+	push @done
+	jump
+
+;;; 0x02 REVERT: fail the frame deterministically
+op_revert:
+	push 0
+	push 0
+	revert
+
+;;; 0x03 SSTORE(slot, value)
+op_sstore:
+	pop
+	dup1
+	push 64
+	add
+	calldataload
+	dup2
+	push 32
+	add
+	calldataload
+	sstore
+	push @next
+	jump
+
+;;; 0x04 LOG(topic, dataLength): one topic, zero-filled data of the given length
+op_log:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	dup2
+	push 64
+	add
+	calldataload
+	push 0x100
+	log1
+	push @next
+	jump
+
+;;; 0x05 BURN(gasTarget): spin until the remaining gas drops to the target
+op_burn:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+burn_loop:
+	dup1
+	gas
+	gt
+	push @burn_loop
+	jumpi
+	pop
+	push @next
+	jump
+
+;;; 0x06 APPROVE(scope): exits the frame, so nothing after it runs
+op_approve:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	push 0
+	push 0
+	#bytes 0xaa
+
+;;; 0x07 READ_TXPARAM(param): execute TXPARAM and drop the result
+op_read_txparam:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	#bytes 0xb0
+	pop
+	push @next
+	jump
+
+;;; 0x08 READ_FRAMEPARAM(param, frameIndex)
+op_read_frameparam:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	dup2
+	push 64
+	add
+	calldataload
+	#bytes 0xb3
+	pop
+	push @next
+	jump
+
+;;; 0x09 READ_SIGPARAM(param, signatureIndex)
+op_read_sigparam:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	dup2
+	push 64
+	add
+	calldataload
+	#bytes 0xb4
+	pop
+	push @next
+	jump
+
+;;; 0x0a READ_FRAMEDATA(frameIndex, offset): FRAMEDATALOAD
+op_read_framedata:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	dup2
+	push 64
+	add
+	calldataload
+	#bytes 0xb1
+	pop
+	push @next
+	jump
+
+;;; 0x0b READ_SIGDATA(signatureIndex, offset): SIGDATACOPY of an ARBITRARY entry
+op_read_sigdata:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	push 32
+	dup3
+	push 64
+	add
+	calldataload
+	push 0x20
+	#bytes 0xb5
+	push @next
+	jump
+
+;;; 0x0c READ_ROOTREF(index, field): RECENTROOTREFLOAD
+;;;
+;;; Emits the same 0xb5 byte as READ_SIGDATA, which both EIPs assign.
+op_read_rootref:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	dup2
+	push 64
+	add
+	calldataload
+	#bytes 0xb5
+	pop
+	push @next
+	jump
+
+;;; 0x0d CALL(address, gas): no value, no data, reverts if the call fails
+op_call:
+	pop
+	push 0
+	push 0
+	push 0
+	push 0
+	push 0
+	dup6
+	push 32
+	add
+	calldataload
+	dup7
+	push 64
+	add
+	calldataload
+	call
+	iszero
+	push @op_failed
+	jumpi
+	push @next
+	jump
+
+;;; 0x0e WRITE_ROOT(salt, root): the 64-byte write that makes this contract a root source
+op_write_root:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	push 0x40
+	mstore
+	dup1
+	push 64
+	add
+	calldataload
+	push 0x60
+	mstore
+	push 0
+	push 0
+	push 64
+	push 0x40
+	push 0
+	push 0x8272
+	gas
+	call
+	iszero
+	push @op_failed
+	jumpi
+	push @next
+	jump
+
+;;; 0x0f STORE_TXPARAM(param, slot): record a value instead of asserting it
+op_store_txparam:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	#bytes 0xb0
+	dup2
+	push 64
+	add
+	calldataload
+	sstore
+	push @next
+	jump
+
+;;; 0x10 READ_SLOAD(slot): read a storage slot and drop the value
+op_read_sload:
+	pop
+	dup1
+	push 32
+	add
+	calldataload
+	sload
+	pop
+	push @next
+	jump
+
+op_failed:
+	push 0
+	push 0
+	revert
+
+next:
+	push 128
+	add
+	push @loop
+	jump
+
+done:
+	push 0
+	push 0
+	return

@@ -374,15 +374,6 @@ var envelopeChoices = map[string]txtypes.FrameExtensions{
 	"full":  txtypes.FrameExtAll,
 }
 
-// envelopeProbeOrder is the order auto-detection tries shapes in: the combination
-// current devnets run first, then the narrower ones.
-var envelopeProbeOrder = []txtypes.FrameExtensions{
-	txtypes.FrameExtAll,
-	txtypes.FrameExtKeyedNonces,
-	txtypes.FrameExtRecentRoots,
-	0,
-}
-
 // parseEnvelope resolves the --envelope option. An empty value or "auto" defers to
 // runtime detection, reported by the second return value.
 func parseEnvelope(spec string) (txtypes.FrameExtensions, bool, error) {

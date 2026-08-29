@@ -117,6 +117,14 @@ type StateGasTxData interface {
 	GetStateGas() uint64
 }
 
+// IndependentNonceTx is implemented by transaction types whose nonce does not address the
+// sender's account nonce sequence, such as a frame transaction on a non-zero EIP-8250 key
+// set. Anything tracking transactions by account nonce has to ask before assuming.
+type IndependentNonceTx interface {
+	// UsesAccountNonce reports whether GetNonce addresses the sender's account nonce.
+	UsesAccountNonce() bool
+}
+
 // txRegistry maps EIP-2718 type bytes to constructors. Guarded by a mutex because
 // plugins may register types after startup.
 var (
@@ -293,6 +301,17 @@ func (tx *Transaction) StateGas() uint64 {
 	}
 
 	return 0
+}
+
+// UsesAccountNonce reports whether the transaction is sequenced by its sender's account
+// nonce. When it is false, Nonce returns a sequence number from an unrelated domain and
+// comparing it against the account nonce is meaningless.
+func (tx *Transaction) UsesAccountNonce() bool {
+	if inner, ok := tx.inner.(IndependentNonceTx); ok {
+		return inner.UsesAccountNonce()
+	}
+
+	return true
 }
 
 // RawSignatureValues returns the signature values of an ECDSA-signed transaction.
