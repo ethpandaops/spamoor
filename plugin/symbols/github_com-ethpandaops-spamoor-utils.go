@@ -12,21 +12,24 @@ import (
 func init() {
 	Symbols["github.com/ethpandaops/spamoor/utils/utils"] = map[string]reflect.Value{
 		// function, constant and variable definitions
-		"BuildRelease":          reflect.ValueOf(&utils.BuildRelease).Elem(),
-		"BuildTime":             reflect.ValueOf(&utils.BuildTime).Elem(),
-		"BuildVersion":          reflect.ValueOf(&utils.BuildVersion).Elem(),
-		"EtherToWei":            reflect.ValueOf(utils.EtherToWei),
-		"GetBuildVersion":       reflect.ValueOf(utils.GetBuildVersion),
-		"GetTransactionFees":    reflect.ValueOf(utils.GetTransactionFees),
-		"MaxGasLimitPerTx":      reflect.ValueOf(constant.MakeFromLiteral("16777216", token.INT, 0)),
-		"NewABICallDataBuilder": reflect.ValueOf(utils.NewABICallDataBuilder),
-		"ReadFileLinesTrimmed":  reflect.ValueOf(utils.ReadFileLinesTrimmed),
-		"ReadableAmount":        reflect.ValueOf(utils.ReadableAmount),
-		"RecoverPanic":          reflect.ValueOf(utils.RecoverPanic),
-		"WeiToEther":            reflect.ValueOf(utils.WeiToEther),
+		"BuildRelease":                reflect.ValueOf(&utils.BuildRelease).Elem(),
+		"BuildTime":                   reflect.ValueOf(&utils.BuildTime).Elem(),
+		"BuildVersion":                reflect.ValueOf(&utils.BuildVersion).Elem(),
+		"EtherToWei":                  reflect.ValueOf(utils.EtherToWei),
+		"GetBuildVersion":             reflect.ValueOf(utils.GetBuildVersion),
+		"GetTransactionFees":          reflect.ValueOf(utils.GetTransactionFees),
+		"MaxGasLimitPerTx":            reflect.ValueOf(constant.MakeFromLiteral("16777216", token.INT, 0)),
+		"NewABICallDataBuilder":       reflect.ValueOf(utils.NewABICallDataBuilder),
+		"NewDeterministicRNGWithSeed": reflect.ValueOf(utils.NewDeterministicRNGWithSeed),
+		"ParseHexSeed":                reflect.ValueOf(utils.ParseHexSeed),
+		"ReadFileLinesTrimmed":        reflect.ValueOf(utils.ReadFileLinesTrimmed),
+		"ReadableAmount":              reflect.ValueOf(utils.ReadableAmount),
+		"RecoverPanic":                reflect.ValueOf(utils.RecoverPanic),
+		"WeiToEther":                  reflect.ValueOf(utils.WeiToEther),
 
 		// type definitions
 		"ABICallDataBuilder": reflect.ValueOf((*utils.ABICallDataBuilder)(nil)),
+		"DeterministicRNG":   reflect.ValueOf((*utils.DeterministicRNG)(nil)),
 		"FlexibleJsonUInt64": reflect.ValueOf((*utils.FlexibleJsonUInt64)(nil)),
 		"TxFees":             reflect.ValueOf((*utils.TxFees)(nil)),
 	}

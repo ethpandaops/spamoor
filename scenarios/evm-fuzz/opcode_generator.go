@@ -1,12 +1,11 @@
 package evmfuzz
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"sort"
-	"strings"
+
+	"github.com/ethpandaops/spamoor/utils"
 )
 
 // StackItem represents an item on the EVM stack
@@ -15,89 +14,15 @@ type StackItem struct {
 	Known bool   // Whether the value is known/deterministic
 }
 
-// DeterministicRNG provides deterministic randomness based on transaction ID
-type DeterministicRNG struct {
-	state   uint64
-	counter uint64
-}
-
-// parseHexSeed parses a hex string seed, supporting 0x prefix
-func parseHexSeed(seed string) ([]byte, error) {
-	// Remove 0x prefix if present
-	seed = strings.TrimPrefix(seed, "0x")
-
-	// Ensure even length for proper hex decoding
-	if len(seed)%2 == 1 {
-		seed = "0" + seed
-	}
-
-	return hex.DecodeString(seed)
-}
+// DeterministicRNG is the shared seeded generator; see utils.DeterministicRNG. Aliased
+// here so the frame transaction fuzzer draws from exactly the same stream.
+type DeterministicRNG = utils.DeterministicRNG
 
 // NewDeterministicRNGWithSeed creates a new deterministic RNG with custom base seed
-func NewDeterministicRNGWithSeed(txID uint64, baseSeed string) *DeterministicRNG {
-	h := sha256.New()
+var NewDeterministicRNGWithSeed = utils.NewDeterministicRNGWithSeed
 
-	// If custom seed provided, use it; otherwise use a fixed fallback
-	if baseSeed != "" {
-		// Expect hex seed, decode it
-		seedBytes, err := parseHexSeed(baseSeed)
-		if err != nil {
-			// Fallback to seed as bytes if not valid hex
-			h.Write([]byte(baseSeed))
-		} else {
-			h.Write(seedBytes)
-		}
-	} else {
-		// Use fixed fallback for deterministic behavior when no seed provided
-		binary.Write(h, binary.LittleEndian, uint64(42))
-	}
-
-	// Hash seed+txID for better randomness while maintaining reproducibility
-	binary.Write(h, binary.LittleEndian, txID)
-	binary.Write(h, binary.LittleEndian, uint64(0x1337DEADBEEF))
-
-	seed := binary.LittleEndian.Uint64(h.Sum(nil)[:8])
-	if seed == 0 {
-		seed = 1
-	}
-
-	return &DeterministicRNG{
-		state:   seed,
-		counter: 0,
-	}
-}
-
-func (r *DeterministicRNG) Uint64() uint64 {
-	r.counter++
-	// Use xorshift64* algorithm for deterministic pseudo-randomness
-	r.state ^= r.state >> 12
-	r.state ^= r.state << 25
-	r.state ^= r.state >> 27
-	return r.state * 0x2545F4914F6CDD1D
-}
-
-func (r *DeterministicRNG) Intn(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	return int(r.Uint64() % uint64(n))
-}
-
-func (r *DeterministicRNG) Float64() float64 {
-	return float64(r.Uint64()) / float64(^uint64(0))
-}
-
-func (r *DeterministicRNG) Bytes(n int) []byte {
-	result := make([]byte, n)
-	for i := 0; i < n; i += 8 {
-		val := r.Uint64()
-		for j := 0; j < 8 && i+j < n; j++ {
-			result[i+j] = byte(val >> (j * 8))
-		}
-	}
-	return result
-}
+// parseHexSeed parses a hex string seed, supporting 0x prefix
+var parseHexSeed = utils.ParseHexSeed
 
 // encodeSingle encodes an n value (17-235) for DUPN/SWAPN opcodes
 func encodeSingle(n int) int {
