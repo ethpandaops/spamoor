@@ -56,6 +56,11 @@ spamoor eoatx --privkey="0x..." \
 # With authentication
 spamoor eoatx --privkey="0x..." \
   --rpchost="headers(Authorization:Bearer token)http://node:8545"
+
+# Reserve an endpoint for one scenario: clients are in "default" unless
+# removed from it, and group-less selections (funding, deploys) use "default"
+spamoor eoatx --privkey="0x..." --client-group=private \
+  --rpchost="group(private,-default)http://intake:8080/rpc"
 ```
 
 💡 **See the [App User Guide](./docs/app-users.md) for advanced RPC configuration options**

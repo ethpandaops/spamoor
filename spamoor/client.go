@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -108,12 +109,18 @@ type ExternalClientOptions struct {
 //   - headers(key:value|key2:value2) - sets custom HTTP headers
 //   - group(name) - assigns the client to a named group (can be used multiple times)
 //   - group(name1,name2,name3) - assigns the client to multiple groups (comma-separated)
+//   - group(-name) - removes the client from a group. Every client starts in
+//     "default", which is the group used by selections that name no group
+//     (wallet funding, deployments, scenarios without --client-group), so
+//     "group(mygroup,-default)" is how a client is reserved for scenarios
+//     that ask for "mygroup" and reached by nothing else.
 //   - name(custom_name) - sets a custom display name override
 //   - type(client_type) - sets the client type (e.g., "builder" for builder clients)
 //
 // Example: "headers(Authorization:Bearer token|User-Agent:MyApp)group(mainnet)group(primary)name(My Custom Node)http://localhost:8545"
 // Example: "group(mainnet,primary,backup)name(MainNet Primary)http://localhost:8545"
 // Example: "type(builder)group(builders)name(Builder Node)http://localhost:8545"
+// Example: "group(private,-default)name(Private Intake)http://localhost:8080/rpc"
 func NewClient(options *ClientOptions) (*Client, error) {
 	headers := map[string]string{}
 	clientGroups := []string{"default"}
@@ -137,21 +144,29 @@ func NewClient(options *ClientOptions) (*Client, error) {
 			groupStr := rpchost[6:groupEnd]
 			rpchost = rpchost[groupEnd+1:]
 
-			// Parse comma-separated groups
+			// Parse comma-separated groups. A "-" prefix removes a group
+			// instead of adding it, which is the only way to take a client
+			// out of the implicit "default" group.
 			for _, group := range strings.Split(groupStr, ",") {
 				group = strings.TrimSpace(group)
-				if group != "" {
-					// Check if group already exists to avoid duplicates
-					exists := false
-					for _, existing := range clientGroups {
-						if existing == group {
-							exists = true
-							break
-						}
+				if group == "" {
+					continue
+				}
+
+				if remove, found := strings.CutPrefix(group, "-"); found {
+					if remove == "" {
+						return nil, fmt.Errorf("invalid client group \"-\": expected a group name after the '-'")
 					}
-					if !exists {
-						clientGroups = append(clientGroups, group)
-					}
+
+					clientGroups = slices.DeleteFunc(clientGroups, func(existing string) bool {
+						return existing == remove
+					})
+
+					continue
+				}
+
+				if !slices.Contains(clientGroups, group) {
+					clientGroups = append(clientGroups, group)
 				}
 			}
 		} else if strings.HasPrefix(rpchost, "name(") {
@@ -187,6 +202,13 @@ func NewClient(options *ClientOptions) (*Client, error) {
 
 	for hKey, hVal := range headers {
 		rpcClient.SetHeader(hKey, hVal)
+	}
+
+	// An empty group set makes the client unselectable by every code path
+	// while GetClientGroups still reports "default", so refuse it rather than
+	// silently shipping a client nothing can ever reach.
+	if len(clientGroups) == 0 {
+		return nil, fmt.Errorf("client %s has no client groups left: the group(...) prefix removed every group", rpchost)
 	}
 
 	return &Client{
