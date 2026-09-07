@@ -265,19 +265,48 @@ var violations = []violation{
 		},
 	},
 	{
-		name:          "too-many-recent-roots",
-		alwaysInvalid: true,
+		// Seventeen tuples: the recent root contract reverts, and a reverting VERIFY
+		// frame invalidates the transaction. Without EIP-8272 the frame runs the
+		// default code with no approval scope, which reverts as well. The payload
+		// itself is well-formed, so this is refused by execution rather than by format.
+		name: "recent-root-frame-too-many-tuples",
 		apply: func(tx *txtypes.FrameTx) error {
-			if !tx.Extensions.Has(txtypes.FrameExtRecentRoots) {
+			frame := txtypes.RecentRootVerifyFrame(nil, txtypes.RecentRootVerifyGas(txtypes.MaxRecentRootReferences+1))
+			frame.Data = make([]byte, (txtypes.MaxRecentRootReferences+1)*txtypes.RecentRootTupleBytes)
+			tx.Frames = append([]*txtypes.Frame{frame}, tx.Frames...)
+
+			return nil
+		},
+	},
+	{
+		// One byte past a whole tuple, which the contract refuses before reading any.
+		name: "recent-root-frame-misaligned-data",
+		apply: func(tx *txtypes.FrameTx) error {
+			frame := txtypes.RecentRootVerifyFrame(nil, txtypes.RecentRootVerifyGas(1))
+			frame.Data = make([]byte, txtypes.RecentRootTupleBytes+1)
+			tx.Frames = append([]*txtypes.Frame{frame}, tx.Frames...)
+
+			return nil
+		},
+	},
+	{
+		// A well-shaped recent root frame placed after account validation. The frame
+		// executes normally in a block, but the public mempool only recognizes it
+		// directly behind the optional expiry frame.
+		name: "recent-root-frame-after-validation",
+		apply: func(tx *txtypes.FrameTx) error {
+			prefixLen := tx.ValidationPrefixLength()
+			if prefixLen == 0 {
 				return errViolationNotApplicable
 			}
 
-			references := make([]*txtypes.RecentRootReference, 0, txtypes.MaxRecentRootReferences+1)
-			for i := 0; i <= txtypes.MaxRecentRootReferences; i++ {
-				references = append(references, &txtypes.RecentRootReference{Slot: uint64(i)})
-			}
+			frame := txtypes.RecentRootVerifyFrame([]*txtypes.RecentRootReference{{}}, txtypes.RecentRootVerifyGas(1))
 
-			tx.RecentRoots = references
+			frames := make([]*txtypes.Frame, 0, len(tx.Frames)+1)
+			frames = append(frames, tx.Frames[:prefixLen]...)
+			frames = append(frames, frame)
+			frames = append(frames, tx.Frames[prefixLen:]...)
+			tx.Frames = frames
 
 			return nil
 		},

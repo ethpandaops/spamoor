@@ -365,12 +365,12 @@ func (w *weightedShapes) requiresPostTx() bool {
 
 // envelopeChoice maps the --envelope option to a set of extensions.
 //
-// The zero-extension "base" shape is EIP-8141 on its own; the others add EIP-8250
-// keyed nonces and EIP-8272 recent roots, which chains activate independently.
+// The zero-extension "base" shape is EIP-8141 on its own; "keyed" adds EIP-8250 keyed
+// nonces. "full" is kept as the name for every extension there is, which is currently
+// the same thing. EIP-8272 is not an envelope choice: its verifier is an ordinary frame.
 var envelopeChoices = map[string]txtypes.FrameExtensions{
 	"base":  0,
 	"keyed": txtypes.FrameExtKeyedNonces,
-	"roots": txtypes.FrameExtRecentRoots,
 	"full":  txtypes.FrameExtAll,
 }
 

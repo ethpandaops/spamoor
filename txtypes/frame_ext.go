@@ -2,22 +2,26 @@ package txtypes
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 )
 
-// Protocol state derivations for the two EIPs that extend the frame transaction
-// envelope. Reading the resulting slots is the caller's business.
+// Protocol state derivations for the two EIPs stacked on the frame transaction:
+// EIP-8250 keyed nonces and EIP-8272 recent roots. Reading the resulting slots is the
+// caller's business.
 
 // EIP-8250 keyed nonce constants.
 const (
-	// KeyedNonceFirstUseGas is charged per never-before-used nonce key, deducted from
-	// the frame executing the payment-scoped APPROVE and counted in its gas_used. With
-	// the whole validation prefix bounded by MaxVerifyGas, it is what limits how many
-	// fresh keys fit in a mempool-legal transaction.
-	KeyedNonceFirstUseGas = 20_000
+	// KeyedNonceFirstUseStateGas is the state gas a never-before-used nonce key costs:
+	// one fresh storage slot under NONCE_MANAGER. It is charged from the limits.state
+	// of the frame executing the payment-scoped APPROVE and attributed to that frame's
+	// receipt. It does not count toward MaxVerifyGas, but the prefix's summed state
+	// budgets stay under MaxVerifyStateGas, which is what bounds how many fresh keys a
+	// mempool-legal transaction may open.
+	KeyedNonceFirstUseStateGas = StateBytesPerStorageSet * CostPerStateByte
 
 	// MaxNonceSeq is EIP-8250's exclusive bound on nonce_seq.
 	MaxNonceSeq = uint64(1<<64 - 1)
@@ -67,7 +71,7 @@ func NonceManagerSlot(sender common.Address, key *uint256.Int) common.Hash {
 	return crypto.Keccak256Hash(buf[:])
 }
 
-// NonceKeysHash returns EIP-8250's nonce_keys_hash, the value TXPARAM 0x0E reports.
+// NonceKeysHash returns EIP-8250's nonce_keys_hash, the value TXPARAM 0x0F reports.
 //
 // Valid key sets are strictly increasing, so the hash has one canonical form per
 // selected key set.
@@ -102,6 +106,66 @@ func (tx *FrameTx) WithNonceKeys(keys []*uint256.Int, seq uint64) *FrameTx {
 	tx.NonceSeq = seq
 
 	return tx
+}
+
+// RecentRootReference is one tuple of an EIP-8272 recent root verifier frame: a root a
+// source committed during a slot.
+type RecentRootReference struct {
+	SourceID common.Hash
+	Slot     uint64
+	Root     common.Hash
+}
+
+// Copy returns a copy of the reference.
+func (r *RecentRootReference) Copy() *RecentRootReference {
+	cpy := *r
+
+	return &cpy
+}
+
+// RecentRootVerifyData packs references as the recent root contract's validation
+// calldata: the concatenation of source_id || uint64_be(slot) || root, with no selector
+// or length prefix. Its length is never 64 bytes, so it cannot be mistaken for a write.
+func RecentRootVerifyData(references []*RecentRootReference) []byte {
+	data := make([]byte, 0, len(references)*RecentRootTupleBytes)
+
+	for _, ref := range references {
+		data = append(data, ref.SourceID.Bytes()...)
+		data = binary.BigEndian.AppendUint64(data, ref.Slot)
+		data = append(data, ref.Root.Bytes()...)
+	}
+
+	return data
+}
+
+// ParseRecentRootVerifyData unpacks validation calldata into its references. It
+// rejects what the contract rejects: empty data, a length that is not whole tuples, or
+// more than MaxRecentRootReferences of them.
+func ParseRecentRootVerifyData(data []byte) ([]*RecentRootReference, error) {
+	if len(data) == 0 || len(data)%RecentRootTupleBytes != 0 {
+		return nil, fmt.Errorf("%w: recent root data of %d bytes is not whole %d-byte tuples",
+			ErrInvalidFrameTx, len(data), RecentRootTupleBytes)
+	}
+
+	count := len(data) / RecentRootTupleBytes
+	if count > MaxRecentRootReferences {
+		return nil, fmt.Errorf("%w: %d recent root references exceeds the cap of %d",
+			ErrInvalidFrameTx, count, MaxRecentRootReferences)
+	}
+
+	references := make([]*RecentRootReference, 0, count)
+
+	for i := 0; i < count; i++ {
+		tuple := data[i*RecentRootTupleBytes : (i+1)*RecentRootTupleBytes]
+
+		references = append(references, &RecentRootReference{
+			SourceID: common.BytesToHash(tuple[:32]),
+			Slot:     binary.BigEndian.Uint64(tuple[32:40]),
+			Root:     common.BytesToHash(tuple[40:72]),
+		})
+	}
+
+	return references, nil
 }
 
 // RecentRootSourceID returns the identifier of a root source, keccak256(address || salt).

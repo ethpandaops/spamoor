@@ -143,7 +143,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.Recipe, "recipe", ScenarioDefaultOptions.Recipe, "Replay a single recipe, as reported with a finding")
 	flags.StringVar(&s.options.Axes, "axes", ScenarioDefaultOptions.Axes,
 		fmt.Sprintf("Weighted list of dimensions to fuzz, e.g. 'nonces:5,roots:2'. Known axes: %s", strings.Join(axisNamesText(), ", ")))
-	flags.StringVar(&s.options.Envelope, "envelope", ScenarioDefaultOptions.Envelope, "Envelope shape to encode: auto, full, keyed, roots, base")
+	flags.StringVar(&s.options.Envelope, "envelope", ScenarioDefaultOptions.Envelope, "Envelope shape to encode: auto, full, keyed, base")
 	flags.StringVar(&s.options.PostTx, "post-tx", ScenarioDefaultOptions.PostTx, "EIP-7906 POST_TX frames: auto (probe the chain), on, off")
 	flags.Uint64Var(&s.options.MaxFrames, "max-frames", ScenarioDefaultOptions.MaxFrames, "Maximum number of body frames per transaction")
 	flags.Float64Var(&s.options.InvalidRatio, "invalid-ratio", ScenarioDefaultOptions.InvalidRatio,
@@ -288,7 +288,6 @@ func (s *Scenario) parseEnvelope() error {
 	choices := map[string]txtypes.FrameExtensions{
 		"base":  0,
 		"keyed": txtypes.FrameExtKeyedNonces,
-		"roots": txtypes.FrameExtRecentRoots,
 		"full":  txtypes.FrameExtAll,
 	}
 
@@ -299,7 +298,7 @@ func (s *Scenario) parseEnvelope() error {
 
 	extensions, ok := choices[spec]
 	if !ok {
-		return fmt.Errorf("unknown envelope %q, known: auto, base, keyed, roots, full", spec)
+		return fmt.Errorf("unknown envelope %q, known: auto, base, keyed, full", spec)
 	}
 
 	s.pinnedExtensions = &extensions

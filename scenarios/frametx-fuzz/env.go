@@ -26,6 +26,10 @@ type environment struct {
 	// extensions is the envelope shape the chain expects.
 	extensions txtypes.FrameExtensions
 
+	// recentRoots reports whether the chain runs EIP-8272, whose verifier is a frame
+	// rather than an envelope field.
+	recentRoots bool
+
 	// probe is the deployed probe contract, or nil when probe axes are disabled.
 	probe *ProbeDeployment
 
@@ -188,6 +192,7 @@ func (s *Scenario) setupEnvironment(ctx context.Context) (*environment, error) {
 		walletPool:  s.walletPool,
 		clientGroup: s.options.ClientGroup,
 		extensions:  support.Extensions,
+		recentRoots: support.RecentRoots,
 	}
 
 	if s.pinnedExtensions != nil {
@@ -229,7 +234,7 @@ func (s *Scenario) setupEnvironment(ctx context.Context) (*environment, error) {
 		env.nonces = newNonceLedger()
 	}
 
-	if env.extensions.Has(txtypes.FrameExtRecentRoots) && s.axes.enabled(axisRoots) {
+	if env.recentRoots && s.axes.enabled(axisRoots) {
 		env.roots, err = newRootRing(ctx, s.logger, client)
 		if err != nil {
 			s.logger.Warnf("recent root axis disabled: %v", err)

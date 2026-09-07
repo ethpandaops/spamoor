@@ -35,16 +35,10 @@ const (
 	// EIP-8250 keyed nonces.
 	MaxNonceKeys = 16
 
-	// EIP-8272 recent root references.
+	// EIP-8272 recent root verifier frames: each tuple in the frame's data is
+	// source_id || uint64 slot || root, and a frame carries at most this many.
 	MaxRecentRootReferences = 16
-
-	// RecentRootReferenceAddressGas is EIP-2930's ACCESS_LIST_ADDRESS_COST, charged
-	// once when a transaction declares any recent root reference.
-	RecentRootReferenceAddressGas = 2400
-
-	// RecentRootReferenceGas is charged per reference: one declared storage key plus
-	// the two keccak computations deriving its storage key and entry hash.
-	RecentRootReferenceGas = 1900 + 2*30 + 7*6
+	RecentRootTupleBytes    = 72
 )
 
 // Constants defined by the EIPs frame transactions build on.
@@ -96,23 +90,22 @@ const (
 
 // FrameExtensions records which envelope extensions a frame transaction uses.
 //
-// EIP-8250 and EIP-8272 each amend EIP-8141's payload independently, so a chain may
-// activate either, both or neither and all four payload shapes occur. The set has to
+// EIP-8250 amends EIP-8141's payload, so a chain may run either shape. The set has to
 // travel with the transaction: it decides the wire layout, and it distinguishes a
 // chain without keyed nonces from one whose transaction happened to use key zero.
+//
+// EIP-8272 is not an envelope extension: it verifies recent roots through a canonical
+// VERIFY frame, so a chain running it changes nothing about the payload layout.
 type FrameExtensions uint8
 
 // Envelope extensions.
 const (
 	// FrameExtKeyedNonces is EIP-8250: nonce becomes nonce_keys, nonce_seq.
 	FrameExtKeyedNonces FrameExtensions = 1 << iota
-
-	// FrameExtRecentRoots is EIP-8272: recent_root_references is appended.
-	FrameExtRecentRoots
 )
 
 // FrameExtAll enables every envelope extension, the shape current devnets run.
-const FrameExtAll = FrameExtKeyedNonces | FrameExtRecentRoots
+const FrameExtAll = FrameExtKeyedNonces
 
 // Has reports whether every extension in want is present.
 func (e FrameExtensions) Has(want FrameExtensions) bool { return e&want == want }
@@ -124,10 +117,6 @@ func (e FrameExtensions) String() string {
 		return "8141"
 	case FrameExtKeyedNonces:
 		return "8141+8250"
-	case FrameExtRecentRoots:
-		return "8141+8272"
-	case FrameExtAll:
-		return "8141+8250+8272"
 	default:
 		return fmt.Sprintf("8141+unknown(0x%02x)", uint8(e))
 	}
@@ -202,23 +191,8 @@ type FrameFees struct {
 	BlobFeeCap *uint256.Int
 }
 
-// RecentRootReference is an EIP-8272 declared recent root, identified by its source
-// and slot.
-type RecentRootReference struct {
-	SourceID common.Hash
-	Slot     uint64
-	Root     common.Hash
-}
-
-// Copy returns a copy of the reference.
-func (r *RecentRootReference) Copy() *RecentRootReference {
-	cpy := *r
-
-	return &cpy
-}
-
-// FrameTx is an EIP-8141 frame transaction, with the envelope extensions of EIP-8250
-// (keyed nonces) and EIP-8272 (recent root references).
+// FrameTx is an EIP-8141 frame transaction, with the envelope extension of EIP-8250
+// (keyed nonces).
 //
 // Its sender is an explicit field rather than something recovered from a signature,
 // and its signature list is validated by the protocol before any frame executes.
@@ -227,15 +201,14 @@ func (r *RecentRootReference) Copy() *RecentRootReference {
 // exactly [0] selects the sender's ordinary account nonce, which is what a transaction
 // that does not use independent nonce domains carries.
 type FrameTx struct {
-	ChainID     *uint256.Int
-	NonceKeys   []*uint256.Int
-	NonceSeq    uint64
-	Sender      common.Address
-	Frames      []*Frame
-	Signatures  []*FrameSignature
-	Fees        FrameFees
-	BlobHashes  []common.Hash
-	RecentRoots []*RecentRootReference
+	ChainID    *uint256.Int
+	NonceKeys  []*uint256.Int
+	NonceSeq   uint64
+	Sender     common.Address
+	Frames     []*Frame
+	Signatures []*FrameSignature
+	Fees       FrameFees
+	BlobHashes []common.Hash
 
 	// Extensions selects the envelope shape. It is not itself encoded.
 	Extensions FrameExtensions `rlp:"-"`
@@ -264,9 +237,8 @@ type frameTxWithSidecar struct {
 	Proofs      []kzg4844.Proof
 }
 
-// The four envelope shapes. EIP-8141 defines the base; EIP-8250 replaces nonce with
-// nonce_keys and nonce_seq; EIP-8272 appends recent_root_references. The two are
-// independent, so each combination is its own layout.
+// The two envelope shapes. EIP-8141 defines the base; EIP-8250 replaces nonce with
+// nonce_keys and nonce_seq.
 
 type frameEnvelope struct {
 	ChainID    *uint256.Int
@@ -289,49 +261,14 @@ type frameEnvelopeKeyed struct {
 	BlobHashes []common.Hash
 }
 
-type frameEnvelopeRoots struct {
-	ChainID     *uint256.Int
-	Nonce       uint64
-	Sender      common.Address
-	Frames      []*Frame
-	Signatures  []*FrameSignature
-	Fees        FrameFees
-	BlobHashes  []common.Hash
-	RecentRoots []*RecentRootReference
-}
-
-type frameEnvelopeKeyedRoots struct {
-	ChainID     *uint256.Int
-	NonceKeys   []*uint256.Int
-	NonceSeq    uint64
-	Sender      common.Address
-	Frames      []*Frame
-	Signatures  []*FrameSignature
-	Fees        FrameFees
-	BlobHashes  []common.Hash
-	RecentRoots []*RecentRootReference
-}
-
 // envelope returns the transaction in the layout its extensions select.
 func (tx *FrameTx) envelope() any {
 	switch tx.Extensions {
-	case FrameExtAll:
-		return &frameEnvelopeKeyedRoots{
-			ChainID: tx.ChainID, NonceKeys: tx.NonceKeys, NonceSeq: tx.NonceSeq,
-			Sender: tx.Sender, Frames: tx.Frames, Signatures: tx.Signatures,
-			Fees: tx.Fees, BlobHashes: tx.BlobHashes, RecentRoots: tx.RecentRoots,
-		}
 	case FrameExtKeyedNonces:
 		return &frameEnvelopeKeyed{
 			ChainID: tx.ChainID, NonceKeys: tx.NonceKeys, NonceSeq: tx.NonceSeq,
 			Sender: tx.Sender, Frames: tx.Frames, Signatures: tx.Signatures,
 			Fees: tx.Fees, BlobHashes: tx.BlobHashes,
-		}
-	case FrameExtRecentRoots:
-		return &frameEnvelopeRoots{
-			ChainID: tx.ChainID, Nonce: tx.NonceSeq,
-			Sender: tx.Sender, Frames: tx.Frames, Signatures: tx.Signatures,
-			Fees: tx.Fees, BlobHashes: tx.BlobHashes, RecentRoots: tx.RecentRoots,
 		}
 	default:
 		return &frameEnvelope{
@@ -351,16 +288,6 @@ func (tx *FrameTx) decodeEnvelope(b []byte) error {
 	}
 
 	switch extensions {
-	case FrameExtAll:
-		var env frameEnvelopeKeyedRoots
-		if err := rlp.DecodeBytes(b, &env); err != nil {
-			return err
-		}
-
-		tx.ChainID, tx.NonceKeys, tx.NonceSeq = env.ChainID, env.NonceKeys, env.NonceSeq
-		tx.Sender, tx.Frames, tx.Signatures = env.Sender, env.Frames, env.Signatures
-		tx.Fees, tx.BlobHashes, tx.RecentRoots = env.Fees, env.BlobHashes, env.RecentRoots
-
 	case FrameExtKeyedNonces:
 		var env frameEnvelopeKeyed
 		if err := rlp.DecodeBytes(b, &env); err != nil {
@@ -369,17 +296,7 @@ func (tx *FrameTx) decodeEnvelope(b []byte) error {
 
 		tx.ChainID, tx.NonceKeys, tx.NonceSeq = env.ChainID, env.NonceKeys, env.NonceSeq
 		tx.Sender, tx.Frames, tx.Signatures = env.Sender, env.Frames, env.Signatures
-		tx.Fees, tx.BlobHashes, tx.RecentRoots = env.Fees, env.BlobHashes, nil
-
-	case FrameExtRecentRoots:
-		var env frameEnvelopeRoots
-		if err := rlp.DecodeBytes(b, &env); err != nil {
-			return err
-		}
-
-		tx.ChainID, tx.NonceKeys, tx.NonceSeq = env.ChainID, nil, env.Nonce
-		tx.Sender, tx.Frames, tx.Signatures = env.Sender, env.Frames, env.Signatures
-		tx.Fees, tx.BlobHashes, tx.RecentRoots = env.Fees, env.BlobHashes, env.RecentRoots
+		tx.Fees, tx.BlobHashes = env.Fees, env.BlobHashes
 
 	default:
 		var env frameEnvelope
@@ -389,7 +306,7 @@ func (tx *FrameTx) decodeEnvelope(b []byte) error {
 
 		tx.ChainID, tx.NonceKeys, tx.NonceSeq = env.ChainID, nil, env.Nonce
 		tx.Sender, tx.Frames, tx.Signatures = env.Sender, env.Frames, env.Signatures
-		tx.Fees, tx.BlobHashes, tx.RecentRoots = env.Fees, env.BlobHashes, nil
+		tx.Fees, tx.BlobHashes = env.Fees, env.BlobHashes
 	}
 
 	tx.Extensions = extensions
@@ -399,9 +316,8 @@ func (tx *FrameTx) decodeEnvelope(b []byte) error {
 
 // detectFrameExtensions reads the envelope shape off the payload.
 //
-// The field count separates three of the four cases. The remaining pair, both eight
-// fields, differ in their second element: EIP-8250's nonce_keys is an RLP list where
-// EIP-8141's nonce is an integer.
+// The field count tells the two shapes apart, and the second element confirms it:
+// EIP-8250's nonce_keys is an RLP list where EIP-8141's nonce is an integer.
 func detectFrameExtensions(b []byte) (FrameExtensions, error) {
 	content, _, err := rlp.SplitList(b)
 	if err != nil {
@@ -429,16 +345,14 @@ func detectFrameExtensions(b []byte) (FrameExtensions, error) {
 	switch count {
 	case 7:
 		return 0, nil
-	case 9:
-		return FrameExtAll, nil
 	case 8:
-		if secondKind == rlp.List {
-			return FrameExtKeyedNonces, nil
+		if secondKind != rlp.List {
+			return 0, fmt.Errorf("%w: eight-field envelope whose second element is not a nonce key list", ErrInvalidFrameTx)
 		}
 
-		return FrameExtRecentRoots, nil
+		return FrameExtKeyedNonces, nil
 	default:
-		return 0, fmt.Errorf("%w: envelope has %d fields, expected 7 to 9", ErrInvalidFrameTx, count)
+		return 0, fmt.Errorf("%w: envelope has %d fields, expected 7 or 8", ErrInvalidFrameTx, count)
 	}
 }
 
@@ -475,6 +389,27 @@ func (f *Frame) ExpiryDeadline() (uint64, bool) {
 	}
 
 	return binary.BigEndian.Uint64(f.Data), true
+}
+
+// IsRecentRootVerifier reports whether the frame is an EIP-8272 recent root verifier
+// frame: a VERIFY frame targeting RECENT_ROOT_ADDRESS with zero flags, value and state
+// budget, whose data is one to MaxRecentRootReferences whole tuples.
+//
+// A VERIFY frame at that target which misses one of the conditions is still a valid
+// frame; it merely is not the canonical one, so the public mempool does not treat it
+// as a protocol verifier.
+func (f *Frame) IsRecentRootVerifier() bool {
+	if f.Mode != FrameModeVerify || f.Target == nil || *f.Target != RecentRootAddress {
+		return false
+	}
+
+	if f.Flags != 0 || f.Limits.State != 0 || (f.Value != nil && !f.Value.IsZero()) {
+		return false
+	}
+
+	return len(f.Data) >= RecentRootTupleBytes &&
+		len(f.Data) <= MaxRecentRootReferences*RecentRootTupleBytes &&
+		len(f.Data)%RecentRootTupleBytes == 0
 }
 
 // Copy returns a deep copy of the frame.
@@ -538,16 +473,15 @@ func (tx *FrameTx) TxType() byte { return FrameTxType }
 // for blob transactions.
 func (tx *FrameTx) CopyTx() TxData {
 	cpy := &FrameTx{
-		NonceSeq:    tx.NonceSeq,
-		Sender:      tx.Sender,
-		NonceKeys:   make([]*uint256.Int, len(tx.NonceKeys)),
-		Frames:      make([]*Frame, len(tx.Frames)),
-		Signatures:  make([]*FrameSignature, len(tx.Signatures)),
-		BlobHashes:  make([]common.Hash, len(tx.BlobHashes)),
-		RecentRoots: make([]*RecentRootReference, len(tx.RecentRoots)),
-		Extensions:  tx.Extensions,
-		Sidecar:     tx.Sidecar,
-		ChainID:     new(uint256.Int),
+		NonceSeq:   tx.NonceSeq,
+		Sender:     tx.Sender,
+		NonceKeys:  make([]*uint256.Int, len(tx.NonceKeys)),
+		Frames:     make([]*Frame, len(tx.Frames)),
+		Signatures: make([]*FrameSignature, len(tx.Signatures)),
+		BlobHashes: make([]common.Hash, len(tx.BlobHashes)),
+		Extensions: tx.Extensions,
+		Sidecar:    tx.Sidecar,
+		ChainID:    new(uint256.Int),
 		Fees: FrameFees{
 			GasTipCap:  new(uint256.Int),
 			GasFeeCap:  new(uint256.Int),
@@ -562,10 +496,6 @@ func (tx *FrameTx) CopyTx() TxData {
 
 	for i, frame := range tx.Frames {
 		cpy.Frames[i] = frame.Copy()
-	}
-
-	for i, root := range tx.RecentRoots {
-		cpy.RecentRoots[i] = root.Copy()
 	}
 
 	for i, sig := range tx.Signatures {
@@ -765,16 +695,15 @@ func (tx *FrameTx) DecodePayload(b []byte) error {
 // from the preimage; entries carrying an explicit digest keep theirs.
 func (tx *FrameTx) SigHash() common.Hash {
 	elided := &FrameTx{
-		ChainID:     tx.ChainID,
-		NonceKeys:   tx.NonceKeys,
-		NonceSeq:    tx.NonceSeq,
-		Sender:      tx.Sender,
-		Frames:      tx.Frames,
-		Signatures:  make([]*FrameSignature, len(tx.Signatures)),
-		Fees:        tx.Fees,
-		BlobHashes:  tx.BlobHashes,
-		RecentRoots: tx.RecentRoots,
-		Extensions:  tx.Extensions,
+		ChainID:    tx.ChainID,
+		NonceKeys:  tx.NonceKeys,
+		NonceSeq:   tx.NonceSeq,
+		Sender:     tx.Sender,
+		Frames:     tx.Frames,
+		Signatures: make([]*FrameSignature, len(tx.Signatures)),
+		Fees:       tx.Fees,
+		BlobHashes: tx.BlobHashes,
+		Extensions: tx.Extensions,
 	}
 
 	for i, sig := range tx.Signatures {
@@ -974,38 +903,24 @@ func (tx *FrameTx) IntrinsicGas() uint64 {
 		gas += calldataCost(sig.Signer) + calldataCost(sig.Msg) + calldataCost(sig.Signature)
 	}
 
-	return gas + calldataCost(tx.extensionCalldata()) + tx.recentRootIntrinsicGas()
+	return gas + calldataCost(tx.extensionCalldata())
 }
 
-// recentRootIntrinsicGas returns EIP-8272's per-reference intrinsic charge, zero when
-// the transaction declares none.
-func (tx *FrameTx) recentRootIntrinsicGas() uint64 {
-	if len(tx.RecentRoots) == 0 {
-		return 0
+// extensionCalldata returns the encoding the envelope extension prices as transaction
+// data: EIP-8250's nonce fields, rlp(nonce_keys) || rlp(nonce_seq).
+func (tx *FrameTx) extensionCalldata() []byte {
+	if !tx.Extensions.Has(FrameExtKeyedNonces) {
+		return nil
 	}
 
-	return RecentRootReferenceAddressGas + uint64(len(tx.RecentRoots))*RecentRootReferenceGas
-}
-
-// extensionCalldata returns the encodings the envelope extensions price as
-// transaction data: EIP-8250's nonce fields and EIP-8272's references.
-func (tx *FrameTx) extensionCalldata() []byte {
 	var buf bytes.Buffer
 
-	if tx.Extensions.Has(FrameExtKeyedNonces) {
-		if err := rlp.Encode(&buf, tx.NonceKeys); err != nil {
-			return nil
-		}
-
-		if err := rlp.Encode(&buf, tx.NonceSeq); err != nil {
-			return nil
-		}
+	if err := rlp.Encode(&buf, tx.NonceKeys); err != nil {
+		return nil
 	}
 
-	if tx.Extensions.Has(FrameExtRecentRoots) {
-		if err := rlp.Encode(&buf, tx.RecentRoots); err != nil {
-			return nil
-		}
+	if err := rlp.Encode(&buf, tx.NonceSeq); err != nil {
+		return nil
 	}
 
 	return buf.Bytes()
@@ -1028,8 +943,8 @@ func (tx *FrameTx) CalldataFloorGas() uint64 {
 		tokens += uint64(len(sig.Signer)+len(sig.Msg)+len(sig.Signature)) * StandardTokenCost
 	}
 
-	// Both envelope extensions price their own encoding alongside the other
-	// transaction data, contributing their weighted token count.
+	// The envelope extension prices its own encoding alongside the other transaction
+	// data, contributing its weighted token count.
 	tokens += weightedTokens(tx.extensionCalldata())
 
 	gas := uint64(FrameTxIntrinsicCost) + uint64(len(tx.Frames))*FrameTxPerFrameCost + sigGas
@@ -1038,7 +953,7 @@ func (tx *FrameTx) CalldataFloorGas() uint64 {
 		gas += tx.valueCost(frame)
 	}
 
-	return gas + tx.recentRootIntrinsicGas() + TotalCostFloorPerToken*tokens
+	return gas + TotalCostFloorPerToken*tokens
 }
 
 // ExecutionGas returns the intrinsic cost plus the declared frame execution budgets,
@@ -1150,21 +1065,13 @@ type jsonFrameSignature struct {
 	Signature *hexutil.Bytes  `json:"signature"`
 }
 
-// jsonRecentRootReference is a recent root reference as reported by JSON-RPC.
-type jsonRecentRootReference struct {
-	SourceID common.Hash     `json:"sourceId"`
-	Slot     *hexutil.Uint64 `json:"slot"`
-	Root     common.Hash     `json:"root"`
-}
-
 // jsonFrameTx holds the frame-specific fields of a JSON-RPC transaction object.
 type jsonFrameTx struct {
-	Sender     *common.Address            `json:"sender"`
-	NonceKeys  []*hexutil.Big             `json:"nonceKeys"`
-	NonceSeq   *hexutil.Uint64            `json:"nonceSeq"`
-	Frames     []*jsonFrame               `json:"frames"`
-	Signatures []*jsonFrameSignature      `json:"signatures"`
-	Roots      []*jsonRecentRootReference `json:"recentRootReferences"`
+	Sender     *common.Address       `json:"sender"`
+	NonceKeys  []*hexutil.Big        `json:"nonceKeys"`
+	NonceSeq   *hexutil.Uint64       `json:"nonceSeq"`
+	Frames     []*jsonFrame          `json:"frames"`
+	Signatures []*jsonFrameSignature `json:"signatures"`
 }
 
 // DecodeJSONTx populates a frame transaction from a JSON-RPC transaction object.
@@ -1185,10 +1092,6 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 	tx.Extensions = 0
 	if hasJSONField(fields.Raw, "nonceKeys") {
 		tx.Extensions |= FrameExtKeyedNonces
-	}
-
-	if hasJSONField(fields.Raw, "recentRootReferences") {
-		tx.Extensions |= FrameExtRecentRoots
 	}
 
 	tx.ChainID = jsonU256(fields.ChainID)
@@ -1262,21 +1165,6 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 		tx.Signatures = append(tx.Signatures, entry)
 	}
 
-	if !tx.Extensions.Has(FrameExtRecentRoots) {
-		tx.RecentRoots = nil
-
-		return nil
-	}
-
-	tx.RecentRoots = make([]*RecentRootReference, 0, len(dec.Roots))
-	for _, root := range dec.Roots {
-		tx.RecentRoots = append(tx.RecentRoots, &RecentRootReference{
-			SourceID: root.SourceID,
-			Slot:     jsonUint64(root.Slot),
-			Root:     root.Root,
-		})
-	}
-
 	return nil
 }
 
@@ -1339,20 +1227,4 @@ func (tx *FrameTx) EncodeJSONTx(fields map[string]any) {
 	}
 
 	fields["signatures"] = signatures
-
-	if !tx.Extensions.Has(FrameExtRecentRoots) {
-		return
-	}
-
-	roots := make([]map[string]any, 0, len(tx.RecentRoots))
-
-	for _, root := range tx.RecentRoots {
-		roots = append(roots, map[string]any{
-			"sourceId": root.SourceID,
-			"slot":     hexutil.Uint64(root.Slot),
-			"root":     root.Root,
-		})
-	}
-
-	fields["recentRootReferences"] = roots
 }

@@ -1,5 +1,7 @@
 package frametxfuzz
 
+import "github.com/ethereum/go-ethereum/common"
+
 // The introspection sweep: operations that make each instruction EIP-8141 and its
 // extensions introduce execute inside a frame. Returned values are discarded.
 //
@@ -9,14 +11,15 @@ package frametxfuzz
 //   - FRAMEPARAM's status and gas-used parameters halt for the current or a later frame;
 //   - SIGPARAM's resolved signer halts on an ARBITRARY entry and its raw length halts on
 //     every other scheme;
-//   - SIGDATACOPY is defined for ARBITRARY entries only.
+//   - SIGDATACOPY is defined for ARBITRARY entries only;
+//   - TXTRACE, TXDIFF and EVENTDATACOPY exist only inside a POST_TX frame, and their
+//     indexed parameters halt past the end of the table they index.
 
 // appendReads adds the introspection sweep for a frame at the given index.
 func appendReads(script *ProbeScript, recipe *Recipe, frameIndex int) {
 	appendTxParamReads(script, recipe)
 	appendFrameParamReads(script, frameIndex)
 	appendSigParamReads(script, recipe)
-	appendRootRefReads(script, recipe)
 }
 
 // appendTxParamReads sweeps the transaction-scoped parameters.
@@ -32,15 +35,10 @@ func appendTxParamReads(script *ProbeScript, recipe *Recipe) {
 	}
 
 	if recipe.NonceKeys > 0 {
-		// EIP-8250's indices. TxParamLegacyNonce shares 0x0C with EIP-8141's
-		// state_gas_left, which both EIPs claim.
-		for _, param := range []uint8{TxParamNonceKeyCount, TxParamNonceKeysHash, TxParamNonceKey0} {
+		// EIP-8250's indices, defined whatever key set the transaction selects.
+		for _, param := range []uint8{TxParamLegacyNonce, TxParamNonceKeyCount, TxParamNonceKeysHash, TxParamNonceKey0} {
 			script.ReadTxParam(param)
 		}
-	}
-
-	if recipe.RecentRoots > 0 {
-		script.ReadTxParam(TxParamRecentRootReferenceCount)
 	}
 }
 
@@ -87,13 +85,43 @@ func appendSigParamReads(script *ProbeScript, recipe *Recipe) {
 	script.ReadSigData(witnessIndex, 0)
 }
 
-// appendRootRefReads sweeps the declared recent root references.
-func appendRootRefReads(script *ProbeScript, recipe *Recipe) {
-	if recipe.RecentRoots == 0 {
+// appendPostTxReads sweeps EIP-7906's assertion instructions from inside a POST_TX
+// frame, against the transaction's own sender.
+//
+// The count parameters and the per-address lookups are defined for any transaction. The
+// balance table always has an entry, since the payer's pre-charge is a balance change,
+// so its index 0 is safe to read. The event table is only read when an earlier probe
+// frame emitted a log, and even then a batch unroll can have discarded it: a halt there
+// is the whole-body revert EIP-7906 specifies, which is as much a case as the read.
+func appendPostTxReads(script *ProbeScript, recipe *Recipe, sender common.Address) {
+	for _, param := range []uint8{
+		TxTraceBalancesChanged, TxTraceSlotsChanged, TxTraceContractsDeployed,
+		TxTraceEventCount, TxTraceGasPreCharge, TxTraceGasPayer,
+	} {
+		script.ReadTxTrace(param, 0)
+	}
+
+	for _, param := range []uint8{TxTraceBalanceAddress, TxTraceBalanceBefore, TxTraceBalanceAfter} {
+		script.ReadTxTrace(param, 0)
+	}
+
+	for _, param := range []uint8{
+		TxDiffBalanceBefore, TxDiffBalanceAfter, TxDiffCodeHashBefore, TxDiffCodeHashAfter,
+		TxDiffSlotCount, TxDiffEventCount, TxDiffChangeFlags,
+	} {
+		script.ReadTxDiff(param, sender, common.Hash{})
+	}
+
+	script.ReadTxDiff(TxDiffSlotBefore, sender, common.HexToHash("0x01"))
+	script.ReadTxDiff(TxDiffSlotAfter, sender, common.HexToHash("0x01"))
+
+	if !recipe.emitsLog() {
 		return
 	}
 
-	for _, field := range []uint8{RecentRootFieldSourceID, RecentRootFieldSlot, RecentRootFieldRoot} {
-		script.ReadRootRef(0, field)
+	for _, param := range []uint8{TxTraceEventAddress, TxTraceEventTopicCount, TxTraceEventTopic0, TxTraceEventDataLength} {
+		script.ReadTxTrace(param, 0)
 	}
+
+	script.ReadEventData(0, 0, 32)
 }

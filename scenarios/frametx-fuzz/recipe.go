@@ -44,7 +44,8 @@ type Recipe struct {
 	// legacy account nonce.
 	NonceKeys int `json:"nonceKeys"`
 
-	// RecentRoots is how many EIP-8272 references the transaction declares.
+	// RecentRoots is how many references the transaction's EIP-8272 recent root
+	// verifier frame carries. Zero means no such frame.
 	RecentRoots int `json:"recentRoots"`
 
 	// RecentRootEdge picks a deliberately awkward reference, named by
@@ -195,6 +196,18 @@ var recentRootEdgeNames = []string{
 // recentRootEdgeChance is how often a recent-root recipe carries one of the awkward
 // cases rather than a plain, landable reference.
 const recentRootEdgeChance = 0.2
+
+// emitsLog reports whether a body frame before the POST_TX suffix runs the probe's log
+// script with a budget that lets it complete, so a POST_TX sweep may expect an event.
+func (r *Recipe) emitsLog() bool {
+	for _, frame := range r.Body {
+		if frame.Kind == KindProbe && frame.Script == ScriptLog && frame.Budget != BudgetStarved {
+			return true
+		}
+	}
+
+	return false
+}
 
 // String renders the recipe as the compact JSON a finding reports.
 func (r *Recipe) String() string {

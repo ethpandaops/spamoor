@@ -5,6 +5,10 @@ package frametxfuzz
 // They live here rather than in txtypes because they describe the EVM, not the
 // transaction: only code written to run inside a frame encodes them. The probe contract
 // emits these bytes, and the assertion helpers name these indices.
+//
+// The opcode bytes follow the frame-transaction family registry EIP-8141 carries for
+// its dependents: 0xB0-0xBF is reserved for the family, and a byte in it that no
+// enabled EIP allocates is an invalid instruction.
 
 // Instruction opcodes.
 const (
@@ -30,14 +34,17 @@ const (
 	// OpSigDataCopy is EIP-8141's SIGDATACOPY, valid only for ARBITRARY entries.
 	OpSigDataCopy = 0xb5
 
-	// OpRecentRootRefLoad is EIP-8272's RECENTROOTREFLOAD.
-	//
-	// It collides with OpSigDataCopy. EIP-8272 justifies 0xB5 with "EIP-8141 assigns
-	// opcode 0xB4 to SIGPARAM. RECENTROOTREFLOAD uses 0xB5 to avoid that collision",
-	// which was written before EIP-8141 grew SIGDATACOPY at 0xB5. On a chain running
-	// both EIPs the opcode is assigned twice; the constants are kept distinct so a
-	// consumer can say which one it meant.
-	OpRecentRootRefLoad = 0xb5
+	// OpTxTrace is EIP-7906's TXTRACE: the transaction's state diff, enumerated. Valid
+	// only inside a POST_TX frame.
+	OpTxTrace = 0xb7
+
+	// OpTxDiff is EIP-7906's TXDIFF: the state diff looked up by address and slot.
+	// Valid only inside a POST_TX frame.
+	OpTxDiff = 0xb8
+
+	// OpEventDataCopy is EIP-7906's EVENTDATACOPY: an emitted event's data, copied to
+	// memory. Valid only inside a POST_TX frame.
+	OpEventDataCopy = 0xb9
 )
 
 // TXPARAM parameter indices (EIP-8141).
@@ -57,24 +64,17 @@ const (
 	TxParamStateGasLeft   = 0x0c
 )
 
-// TXPARAM parameter indices added by the extension EIPs.
-//
-// TxParamLegacyNonce collides with EIP-8141's TxParamStateGasLeft: EIP-8250 claims 0x0C
-// on the premise that "EIP-8141 assigns TXPARAM indices through 0x0B", which stopped
-// being true when EIP-8141 added state_gas_left at 0x0C. Both names are defined so a
-// consumer can be explicit about which reading it is testing.
+// TXPARAM parameter indices added by EIP-8250, allocated from the family registry
+// directly above EIP-8141's range.
 const (
 	// TxParamLegacyNonce is EIP-8250's pre-state sender account nonce.
-	TxParamLegacyNonce = 0x0c
+	TxParamLegacyNonce = 0x0d
 
 	// TxParamNonceKeyCount is EIP-8250's len(nonce_keys).
-	TxParamNonceKeyCount = 0x0d
+	TxParamNonceKeyCount = 0x0e
 
 	// TxParamNonceKeysHash is EIP-8250's nonce_keys_hash.
-	TxParamNonceKeysHash = 0x0e
-
-	// TxParamRecentRootReferenceCount is EIP-8272's len(recent_root_references).
-	TxParamRecentRootReferenceCount = 0x0f
+	TxParamNonceKeysHash = 0x0f
 
 	// TxParamNonceKey0 is EIP-8250's nonce_keys[0].
 	TxParamNonceKey0 = 0x10
@@ -104,9 +104,42 @@ const (
 	SigParamSignatureLength = 0x03
 )
 
-// RECENTROOTREFLOAD field selectors (EIP-8272).
+// TXTRACE parameters (EIP-7906). The count parameters take a zero second operand; the
+// others take an index into the table the count describes.
 const (
-	RecentRootFieldSourceID = 0
-	RecentRootFieldSlot     = 1
-	RecentRootFieldRoot     = 2
+	TxTraceBalancesChanged   = 0x00
+	TxTraceSlotsChanged      = 0x01
+	TxTraceContractsDeployed = 0x02
+	TxTraceBalanceAddress    = 0x03
+	TxTraceBalanceBefore     = 0x04
+	TxTraceBalanceAfter      = 0x05
+	TxTraceSlotAddress       = 0x06
+	TxTraceSlotKey           = 0x07
+	TxTraceSlotBefore        = 0x08
+	TxTraceSlotAfter         = 0x09
+	TxTraceDeployedAddress   = 0x0a
+	TxTraceDeployedCodeHash  = 0x0b
+	TxTraceEventCount        = 0x0c
+	TxTraceEventAddress      = 0x0d
+	TxTraceEventTopicCount   = 0x0e
+	TxTraceEventTopic0       = 0x0f
+	TxTraceEventDataLength   = 0x13
+	TxTraceGasPreCharge      = 0x14
+	TxTraceGasPayer          = 0x15
+)
+
+// TXDIFF parameters (EIP-7906), keyed by address and, for the slot parameters, a slot
+// key or a per-address index.
+const (
+	TxDiffSlotBefore     = 0x00
+	TxDiffSlotAfter      = 0x01
+	TxDiffBalanceBefore  = 0x02
+	TxDiffBalanceAfter   = 0x03
+	TxDiffCodeHashBefore = 0x04
+	TxDiffCodeHashAfter  = 0x05
+	TxDiffSlotCount      = 0x06
+	TxDiffSlotIndex      = 0x07
+	TxDiffEventCount     = 0x08
+	TxDiffEventIndex     = 0x09
+	TxDiffChangeFlags    = 0x0a
 )

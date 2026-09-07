@@ -65,7 +65,10 @@ func TestGeneratedCodeCarriesFrameInstructions(t *testing.T) {
 		opcodeFrameDataCopy: "FRAMEDATACOPY",
 		opcodeFrameParam:    "FRAMEPARAM",
 		opcodeSigParam:      "SIGPARAM",
-		opcodeSigDataCopy:   "SIGDATACOPY / RECENTROOTREFLOAD",
+		opcodeSigDataCopy:   "SIGDATACOPY",
+		opcodeTxTrace:       "TXTRACE",
+		opcodeTxDiff:        "TXDIFF",
+		opcodeEventDataCopy: "EVENTDATACOPY",
 		opcodeApprove:       "APPROVE",
 	}
 

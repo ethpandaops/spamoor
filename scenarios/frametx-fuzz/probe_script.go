@@ -22,11 +22,13 @@ const (
 	opReadSigParam   = 0x09
 	opReadFrameData  = 0x0a
 	opReadSigData    = 0x0b
-	opReadRootRef    = 0x0c
+	opReadTxTrace    = 0x0c
 	opCall           = 0x0d
 	opWriteRoot      = 0x0e
 	opStoreTxParam   = 0x0f
 	opReadSLoad      = 0x10
+	opReadTxDiff     = 0x11
+	opReadEventData  = 0x12
 )
 
 // ProbeRecordSize is the width of one script record: the selector and three arguments, one
@@ -272,18 +274,50 @@ func (s *ProbeScript) ReadSigData(sigIndex int, offset uint64) *ProbeScript {
 	})
 }
 
-// ReadRootRef executes RECENTROOTREFLOAD against a declared reference.
+// ReadTxTrace executes EIP-7906's TXTRACE and discards the result.
 //
-// Its opcode byte is the one EIP-8272 shares with EIP-8141's SIGDATACOPY, so a script
-// using both operations puts a chain running both EIPs in front of that collision.
-func (s *ProbeScript) ReadRootRef(index int, field uint8) *ProbeScript {
+// Defined only inside a POST_TX frame, so never prefix-safe: anywhere else it is an
+// exceptional halt. The index is the position in the table the parameter enumerates, and
+// must be zero for the count parameters.
+func (s *ProbeScript) ReadTxTrace(param uint8, index uint64) *ProbeScript {
 	return s.add(record{
-		op:         opReadRootRef,
-		a:          hashFromUint64(uint64(index)),
-		b:          hashFromUint64(uint64(field)),
-		name:       "read_rootref",
-		prefixSafe: true,
-		execGas:    50,
+		op:      opReadTxTrace,
+		a:       hashFromUint64(uint64(param)),
+		b:       hashFromUint64(index),
+		name:    "read_txtrace",
+		execGas: 100,
+	})
+}
+
+// ReadTxDiff executes EIP-7906's TXDIFF for one address and discards the result. The
+// key is the storage slot for the slot parameters, a per-address index for the index
+// parameters, and must be zero otherwise.
+//
+// Defined only inside a POST_TX frame. The live-state parameters cost a cold access
+// when the address or slot has not been touched, so the budget assumes cold.
+func (s *ProbeScript) ReadTxDiff(param uint8, address common.Address, key common.Hash) *ProbeScript {
+	return s.add(record{
+		op:      opReadTxDiff,
+		a:       hashFromUint64(uint64(param)),
+		b:       common.BytesToHash(address.Bytes()),
+		c:       key,
+		name:    "read_txdiff",
+		execGas: 2_700,
+	})
+}
+
+// ReadEventData executes EIP-7906's EVENTDATACOPY against one emitted event. It halts
+// when the event does not exist or the range runs past its data.
+//
+// Defined only inside a POST_TX frame.
+func (s *ProbeScript) ReadEventData(eventIndex, dataOffset, length uint64) *ProbeScript {
+	return s.add(record{
+		op:      opReadEventData,
+		a:       hashFromUint64(eventIndex),
+		b:       hashFromUint64(dataOffset),
+		c:       hashFromUint64(length),
+		name:    "read_eventdata",
+		execGas: 60 + 3*((length+31)/32) + memoryGas(0x20+length),
 	})
 }
 

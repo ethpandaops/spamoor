@@ -8,22 +8,21 @@ import (
 // Generated contracts: fuzzed EVM code that one frame deploys and another calls, built
 // by evm-fuzz's stack-aware generator with the frame instructions added to its table.
 
-// Frame instruction opcodes. RECENTROOTREFLOAD gets a synthetic key because EIP-8141 and
-// EIP-8272 both assign it the byte 0xb5 and the generator's table is keyed by opcode; the
-// template still emits the real byte.
+// Frame instruction opcodes, as the frame-transaction family registry in EIP-8141
+// allocates them. The EIP-7906 instructions only exist inside a POST_TX frame; generated
+// code runs in SENDER frames, so they halt there, which is one more thing the generator
+// reaches.
 const (
-	opcodeApprove           = 0xaa
-	opcodeTxParam           = 0xb0
-	opcodeFrameDataLoad     = 0xb1
-	opcodeFrameDataCopy     = 0xb2
-	opcodeFrameParam        = 0xb3
-	opcodeSigParam          = 0xb4
-	opcodeSigDataCopy       = 0xb5
-	opcodeRecentRootRefLoad = 0x1b5
-
-	// recentRootRefLoadByte is what RECENTROOTREFLOAD actually assembles to. It is the
-	// same byte as SIGDATACOPY on purpose.
-	recentRootRefLoadByte = 0xb5
+	opcodeApprove       = 0xaa
+	opcodeTxParam       = 0xb0
+	opcodeFrameDataLoad = 0xb1
+	opcodeFrameDataCopy = 0xb2
+	opcodeFrameParam    = 0xb3
+	opcodeSigParam      = 0xb4
+	opcodeSigDataCopy   = 0xb5
+	opcodeTxTrace       = 0xb7
+	opcodeTxDiff        = 0xb8
+	opcodeEventDataCopy = 0xb9
 )
 
 // push1 emits a single-byte push.
@@ -56,8 +55,8 @@ func frameOpcodeDefinitions(rng *utils.DeterministicRNG) []*evmfuzz.OpcodeInfo {
 			Name: "TXPARAM", Opcode: opcodeTxParam, StackInput: 0, StackOutput: 1, GasCost: 2,
 			Probability: 1.5,
 			Template: func() []byte {
-				// 0x00-0x10 spans EIP-8141's indices and those EIP-8250 and EIP-8272
-				// add, plus one past the end.
+				// 0x00-0x10 spans EIP-8141's indices and those EIP-8250 adds, plus
+				// one past the end.
 				return concat(push1(byte(rng.Intn(0x12))), []byte{opcodeTxParam})
 			},
 		},
@@ -102,12 +101,30 @@ func frameOpcodeDefinitions(rng *utils.DeterministicRNG) []*evmfuzz.OpcodeInfo {
 			},
 		},
 		{
-			Name: "RECENTROOTREFLOAD", Opcode: opcodeRecentRootRefLoad, StackInput: 0, StackOutput: 1, GasCost: 3,
+			Name: "TXTRACE", Opcode: opcodeTxTrace, StackInput: 0, StackOutput: 1, GasCost: 3,
+			Probability: 0.4,
+			Template: func() []byte {
+				// param is second from top, index on top; 0x16 is one past the end.
+				return concat(push1(byte(rng.Intn(0x17))), push1(byte(rng.Intn(4))), []byte{opcodeTxTrace})
+			},
+		},
+		{
+			Name: "TXDIFF", Opcode: opcodeTxDiff, StackInput: 0, StackOutput: 1, GasCost: 3,
+			Probability: 0.4,
+			Template: func() []byte {
+				// Deepest first: param, address, key. Small addresses are the precompiles
+				// and the family's predeploys, which is as good a lookup as any.
+				return concat(push1(byte(rng.Intn(0x0c))), push1(byte(rng.Intn(0x10))), push1(byte(rng.Intn(4))),
+					[]byte{opcodeTxDiff})
+			},
+		},
+		{
+			Name: "EVENTDATACOPY", Opcode: opcodeEventDataCopy, StackInput: 0, StackOutput: 0, GasCost: 6,
 			Probability: 0.8,
 			Template: func() []byte {
-				// index is second from top, field on top; field > 2 halts.
-				return concat(push1(byte(rng.Intn(4))), push1(byte(rng.Intn(4))),
-					[]byte{recentRootRefLoadByte})
+				// Deepest first: length, dataOffset, memOffset, eventIndex.
+				return concat(length(), push1(byte(rng.Intn(0x40))), memOffset(), push1(byte(rng.Intn(4))),
+					[]byte{opcodeEventDataCopy})
 			},
 		},
 		{

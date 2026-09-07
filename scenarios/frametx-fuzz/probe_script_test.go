@@ -151,7 +151,9 @@ func TestScriptFrameInstructionsAreReached(t *testing.T) {
 		{"sigparam", NewProbeScript().ReadSigParam(SigParamScheme, 0)},
 		{"framedata", NewProbeScript().ReadFrameData(0, 0)},
 		{"sigdata", NewProbeScript().ReadSigData(0, 0)},
-		{"rootref", NewProbeScript().ReadRootRef(0, RecentRootFieldRoot)},
+		{"txtrace", NewProbeScript().ReadTxTrace(TxTraceBalancesChanged, 0)},
+		{"txdiff", NewProbeScript().ReadTxDiff(TxDiffChangeFlags, common.Address{}, common.Hash{})},
+		{"eventdata", NewProbeScript().ReadEventData(0, 0, 32)},
 		{"approve", NewProbeScript().Approve(txtypes.ApproveExecutionAndPayment)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

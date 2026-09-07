@@ -56,7 +56,7 @@ run. Use `--verify-frames=false` to send load without checking.
 
 ### Frame Settings
 - `--shapes` - Weighted list of frame shapes to send (default: `all`)
-- `--envelope` - Envelope shape to encode: `auto` (default), `full`, `keyed`, `roots`, `base`
+- `--envelope` - Envelope shape to encode: `auto` (default), `full`, `keyed`, `base`
 - `--frames-per-tx` - Number of user operation frames for the `batch` shape (default: 4)
 - `--user-op-gas` - Execution gas limit per user operation frame (default: 30000)
 - `--verify-gas` - Execution gas limit for validation frames (default: 5000)
@@ -90,18 +90,19 @@ run. Use `--verify-frames=false` to send load without checking.
 
 ## Envelope shapes
 
-EIP-8141's payload is amended independently by two further EIPs, so a chain may run any of four
-shapes and encoding the wrong one fails to decode entirely:
+EIP-8141's payload is amended by EIP-8250, so a chain may run either shape and encoding the
+wrong one fails to decode entirely:
 
 | `--envelope` | payload | fields |
 |---|---|---|
 | `base` | EIP-8141 alone, scalar nonce | 7 |
 | `keyed` | + EIP-8250 keyed nonces | 8 |
-| `roots` | + EIP-8272 recent roots | 8 |
-| `full` | both | 9 |
+| `full` | every extension, currently the same as `keyed` | 8 |
 
 `auto`, the default, probes the chain at startup and reports which shape it found. Set it
-explicitly to exercise a shape the chain would not otherwise receive.
+explicitly to exercise a shape the chain would not otherwise receive. EIP-8272 recent roots do
+not change the envelope: they are verified by an ordinary `VERIFY` frame calling the recent root
+contract, which `frametx-fuzz` exercises.
 
 ## Gas budgets
 

@@ -67,6 +67,42 @@ func ExpiryFrame(deadline uint64, executionGas uint64) *Frame {
 	}
 }
 
+// RecentRootVerifyFrame builds an EIP-8272 recent root verifier frame: a VERIFY frame
+// calling the recent root contract with the packed references, which reverts unless
+// every one is a root its source committed within the usable window.
+//
+// In a public-mempool transaction it sits directly after the optional expiry frame and
+// before everything else; its execution budget is excluded from the MaxVerifyGas cap.
+func RecentRootVerifyFrame(references []*RecentRootReference, executionGas uint64) *Frame {
+	target := RecentRootAddress
+
+	return &Frame{
+		Mode:   FrameModeVerify,
+		Flags:  ApproveNone,
+		Target: &target,
+		Limits: FrameLimits{Execution: executionGas},
+		Value:  new(uint256.Int),
+		Data:   RecentRootVerifyData(references),
+	}
+}
+
+// RecentRootVerifyGas returns an execution budget for a recent root verifier frame
+// checking count references.
+//
+// RECENT_ROOT_CODE is still TBD in the EIP, so this prices what the validation
+// operation must do rather than a known bytecode: the cold target access at frame
+// entry, then per tuple a cold SLOAD, two keccaks and the arithmetic around them, with
+// headroom. The mempool does not count it, so erring high only raises the up-front
+// max cost.
+func RecentRootVerifyGas(count int) uint64 {
+	const (
+		entryGas    = 2_600 + 2_000
+		perTupleGas = 2_100 + 2*(30+6*4) + 600
+	)
+
+	return entryGas + uint64(count)*perTupleGas
+}
+
 // UserOpFrame builds a SENDER frame: the user operation, executed with tx.sender as
 // the caller. A nil target resolves to the sender itself.
 func UserOpFrame(target *common.Address, value *uint256.Int, data []byte, limits FrameLimits) *Frame {

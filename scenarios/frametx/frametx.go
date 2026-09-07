@@ -120,7 +120,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.Shapes, "shapes", ScenarioDefaultOptions.Shapes,
 		fmt.Sprintf("Frame shapes to send as a weighted list, e.g. 'self-verify:10,atomic:2'. Known shapes: %s", strings.Join(shapeNames(), ", ")))
 	flags.StringVar(&s.options.Envelope, "envelope", ScenarioDefaultOptions.Envelope,
-		"Envelope shape to encode: auto, full (8141+8250+8272), keyed (8141+8250), roots (8141+8272), base (8141)")
+		"Envelope shape to encode: auto, full (every extension), keyed (8141+8250), base (8141)")
 	flags.Uint64Var(&s.options.FramesPerTx, "frames-per-tx", ScenarioDefaultOptions.FramesPerTx, "Number of user operation frames for the 'batch' shape")
 	flags.Uint64Var(&s.options.UserOpGas, "user-op-gas", ScenarioDefaultOptions.UserOpGas, "Execution gas limit per user operation frame")
 	flags.Uint64Var(&s.options.VerifyGas, "verify-gas", ScenarioDefaultOptions.VerifyGas, "Execution gas limit for validation frames")

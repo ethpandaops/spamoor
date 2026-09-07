@@ -23,6 +23,10 @@ const (
 	SpeciesPostOp       FrameSpecies = "post_op"       // DEFAULT with flags
 	SpeciesPostTx       FrameSpecies = "post_tx"       // POST_TX (EIP-7906)
 	SpeciesOther        FrameSpecies = "other"
+
+	// SpeciesRecentRootVerify is EIP-8272's canonical frame: VERIFY, flags 0x0, target
+	// RECENT_ROOT_ADDRESS, whole tuples as data.
+	SpeciesRecentRootVerify FrameSpecies = "recent_root_verify"
 )
 
 // Species classifies the frame for mempool prefix matching.
@@ -31,6 +35,10 @@ func (f *Frame) Species(sender common.Address) FrameSpecies {
 	case FrameModeVerify:
 		if f.IsExpiryVerifier() {
 			return SpeciesExpiryVerify
+		}
+
+		if f.IsRecentRootVerifier() {
+			return SpeciesRecentRootVerify
 		}
 
 		switch f.Flags {
@@ -80,15 +88,6 @@ func (tx *FrameTx) ValidatePayload() error {
 
 	if err := tx.validateNonce(); err != nil {
 		return err
-	}
-
-	if !tx.Extensions.Has(FrameExtRecentRoots) && len(tx.RecentRoots) > 0 {
-		return fmt.Errorf("%w: recent root references set without the EIP-8272 extension", ErrInvalidFrameTx)
-	}
-
-	if len(tx.RecentRoots) > MaxRecentRootReferences {
-		return fmt.Errorf("%w: %d recent root references exceeds the cap of %d",
-			ErrInvalidFrameTx, len(tx.RecentRoots), MaxRecentRootReferences)
 	}
 
 	if err := tx.validateSignatures(); err != nil {
@@ -373,9 +372,9 @@ func (tx *FrameTx) ValidationPrefixLength() int {
 	return 0
 }
 
-// ValidateMempoolPrefix checks the public mempool policy of EIP-8141: the validation
-// prefix must match one of the four recognized shapes and stay within the verification
-// gas caps.
+// ValidateMempoolPrefix checks the public mempool policy of EIP-8141 and EIP-8272: the
+// validation prefix, after the optional leading protocol verifier frames, must match
+// one of the four recognized shapes and stay within the verification gas caps.
 //
 // A transaction failing this check may still be valid in a block; it just will not
 // propagate through the public mempool.
@@ -390,24 +389,24 @@ func (tx *FrameTx) ValidateMempoolPrefix() error {
 		species[i] = tx.Frames[i].Species(tx.Sender)
 	}
 
-	// An expiry verifier frame may lead the prefix and is skipped when matching.
+	// The protocol verifier frames lead the frame list in a fixed order, an expiry
+	// frame then a recent root frame, each at most once, and are skipped when the
+	// prefix is matched against the recognized shapes.
+	if err := tx.validateProtocolVerifierPlacement(); err != nil {
+		return err
+	}
+
 	shape := species
-	if shape[0] == SpeciesExpiryVerify {
+	if len(shape) > 0 && shape[0] == SpeciesExpiryVerify {
 		shape = shape[1:]
 	}
 
-	// The expiry frame may lead the frame list and nothing else.
-	for i, frame := range tx.Frames {
-		if frame.IsExpiryVerifier() && i != 0 {
-			return fmt.Errorf("%w: expiry verifier frame must be the first frame", ErrMempoolPolicy)
-		}
+	if len(shape) > 0 && shape[0] == SpeciesRecentRootVerify {
+		shape = shape[1:]
 	}
 
-	// A deploy frame leads the prefix, after a leading expiry frame if there is one.
-	deployIndex := 0
-	if len(species) > 0 && species[0] == SpeciesExpiryVerify {
-		deployIndex = 1
-	}
+	// A deploy frame leads what remains.
+	deployIndex := prefixLen - len(shape)
 
 	if !matchesRecognizedPrefix(shape) {
 		return fmt.Errorf("%w: validation prefix %v is not a recognized shape", ErrMempoolPolicy, shape)
@@ -443,7 +442,44 @@ func (tx *FrameTx) ValidateMempoolPrefix() error {
 	return tx.validatePrefixGas(prefixLen)
 }
 
+// validateProtocolVerifierPlacement checks where the protocol-defined verifier frames
+// may sit for public mempool eligibility: an expiry frame only at index 0, a recent
+// root frame only directly after it or at index 0, and no more than one of each.
+func (tx *FrameTx) validateProtocolVerifierPlacement() error {
+	recentRootIndex := -1
+
+	for i, frame := range tx.Frames {
+		if frame.IsExpiryVerifier() && i != 0 {
+			return fmt.Errorf("%w: expiry verifier frame must be the first frame", ErrMempoolPolicy)
+		}
+
+		if !frame.IsRecentRootVerifier() {
+			continue
+		}
+
+		if recentRootIndex >= 0 {
+			return fmt.Errorf("%w: more than one recent root verifier frame", ErrMempoolPolicy)
+		}
+
+		recentRootIndex = i
+
+		allowed := 0
+		if tx.Frames[0].IsExpiryVerifier() {
+			allowed = 1
+		}
+
+		if i != allowed {
+			return fmt.Errorf("%w: recent root verifier frame must directly follow the expiry frame or lead the frame list", ErrMempoolPolicy)
+		}
+	}
+
+	return nil
+}
+
 // validatePrefixGas checks the verification gas caps over the validation prefix.
+//
+// EIP-8272 excludes its verifier frame's execution budget from the MaxVerifyGas cap: its
+// work is bounded by its own shape instead. Its state budget is zero by definition.
 func (tx *FrameTx) validatePrefixGas(prefixLen int) error {
 	sigGas, err := tx.SignatureVerificationGas()
 	if err != nil {
@@ -454,6 +490,10 @@ func (tx *FrameTx) validatePrefixGas(prefixLen int) error {
 	stateGas := uint64(0)
 
 	for i := 0; i < prefixLen; i++ {
+		if tx.Frames[i].IsRecentRootVerifier() {
+			continue
+		}
+
 		executionGas += tx.Frames[i].Limits.Execution
 		stateGas += tx.Frames[i].Limits.State
 	}

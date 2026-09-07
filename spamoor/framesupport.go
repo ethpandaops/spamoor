@@ -25,13 +25,18 @@ const frameSupportRetryInterval = 30 * time.Second
 //	EIP-8272  RECENT_ROOT_ADDRESS  0x…8272
 //
 // The extension set decides the envelope's wire layout, so it has to be known before a
-// transaction can be encoded.
+// transaction can be encoded. EIP-8272 leaves the envelope alone, its verifier is an
+// ordinary frame, so it is reported separately.
 type FrameSupport struct {
 	// Active reports whether the chain implements frame transactions.
 	Active bool
 
 	// Extensions are the envelope extensions the chain activates.
 	Extensions txtypes.FrameExtensions
+
+	// RecentRoots reports whether the EIP-8272 recent root contract is installed, so a
+	// transaction may carry a recent root verifier frame.
+	RecentRoots bool
 }
 
 // frameSupportState is the pool's cached capability and the probe that fills it.
@@ -86,7 +91,7 @@ func (pool *TxPool) GetFrameSupportWithInit(ctx context.Context) (FrameSupport, 
 	pool.frameSupport.lastProbe = time.Now()
 
 	if support.Active {
-		logrus.Infof("detected frame transaction support: envelope %s", support.Extensions)
+		logrus.Infof("detected frame transaction support: envelope %s, recent roots %v", support.Extensions, support.RecentRoots)
 	}
 
 	return support, nil
@@ -119,9 +124,7 @@ func probeFrameSupport(ctx context.Context, client *Client) (FrameSupport, error
 		return FrameSupport{}, fmt.Errorf("failed reading the EIP-8272 recent root predeploy: %w", err)
 	}
 
-	if roots {
-		support.Extensions |= txtypes.FrameExtRecentRoots
-	}
+	support.RecentRoots = roots
 
 	return support, nil
 }

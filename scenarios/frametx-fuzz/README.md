@@ -67,8 +67,8 @@ axis with equal weight. An axis whose EIP the chain does not run is disabled aut
 | `failures` | Frames built to fail: a revert, or a budget too small for the frame-entry charge |
 | `signatures` | ARBITRARY witnesses and P256 entries alongside the sender's own |
 | `nonces` | EIP-8250 keyed nonce domains, including how many see their first use |
-| `roots` | EIP-8272 references, including the window edges and the cases that must be refused |
-| `posttx` | EIP-7906 assertion frames, passing and failing |
+| `roots` | EIP-8272 recent root verifier frames, including the window edges and the cases that must be refused |
+| `posttx` | EIP-7906 assertion frames, and the `TXTRACE`/`TXDIFF`/`EVENTDATACOPY` sweep that only exists inside them |
 | `probe` | Calls into the fixed probe contract, including the introspection sweep |
 | `code` | Deploying fuzzed contracts from one frame and calling them from another, and the fuzzed sender and paymaster roles |
 
@@ -80,9 +80,10 @@ introduces would ever execute. Two contracts do that work.
 **A fixed probe contract**, deployed once through the CREATE2 factory, whose calldata is a
 script: revert, write storage, emit a log, burn gas, `APPROVE`, and execute each
 introspection instruction. The read operations discard their results — the point is to
-reach the instruction, not to decide what it should have returned. One consequence worth
-noting: a script that reads both `SIGDATACOPY` and `RECENTROOTREFLOAD` emits the byte
-`0xb5` twice, because EIP-8141 and EIP-8272 both assign it.
+reach the instruction, not to decide what it should have returned. Opcode bytes follow the
+frame-transaction family registry EIP-8141 carries for its dependents: EIP-7906's `TXTRACE`,
+`TXDIFF` and `EVENTDATACOPY` sit at `0xb7`-`0xb9` and are only defined inside a `POST_TX`
+frame, which is where the probe runs them.
 
 The same code plays paymaster and contract sender through an EIP-7702 delegation, because
 EIP-8141's own answer (a deploy frame) costs ~224k gas against the 100k execution cap on
@@ -148,8 +149,8 @@ What the chain did is recorded, not judged. An accepted violation is logged as a
 its reproduction line, because what a client must reject is part of what is still being settled.
 
 The same applies to the awkward-but-legal cases the generator reaches on its own: recent root
-references at the window edges, references to a slot that was never written, duplicate references,
-and key sets whose sequences have to be read from chain state before they can be used.
+verifier frames naming roots at the window edges, a slot that was never written, or the same root
+twice, and key sets whose sequences have to be read from chain state before they can be used.
 
 ## Usage
 
@@ -174,7 +175,7 @@ spamoor frametx-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -t 10
 - `--code-gas` — Base execution gas for frames that deploy or call generated code
 
 ### Frame settings
-- `--envelope` — Pin the payload shape: `auto` (default), `base`, `keyed`, `roots`, `full`
+- `--envelope` — Pin the payload shape: `auto` (default), `base`, `keyed`, `full`
 - `--post-tx` — EIP-7906 frames: `auto` (probe the chain), `on`, `off`
 - `--user-op-gas`, `--verify-gas`, `--state-gas`, `--amount`, `--expiry-offset`, `--data`
 

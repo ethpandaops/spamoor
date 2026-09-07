@@ -132,10 +132,6 @@ func (s *Scenario) buildRecipe(ctx context.Context, client *spamoor.Client, env 
 		return nil, err
 	}
 
-	if err := s.applyRecentRoots(env, recipe, result); err != nil {
-		return nil, err
-	}
-
 	return result, nil
 }
 
@@ -149,6 +145,10 @@ func (s *Scenario) buildPrefix(env *environment, recipe *Recipe, result *build) 
 		// when the prefix is matched against the recognized shapes.
 		result.append(txtypes.ExpiryFrame(s.deadline(), s.options.VerifyGas))
 	}
+
+	// The recent root verifier frame sits directly after the expiry frame, before the
+	// account validation it vouches for, and is skipped the same way.
+	s.appendRecentRootFrame(env, recipe, result)
 
 	contractSender := recipe.Sender == SenderContract && env.probe != nil && env.contractCount > 0
 	fuzzedSender := result.keyless
@@ -359,7 +359,7 @@ func (s *Scenario) buildBodyFrame(env *environment, recipe *Recipe, result *buil
 
 	target, targetEmpty := s.resolveTarget(env, recipe, result, spec, index)
 
-	script, err := s.buildScript(env, recipe, spec, index)
+	script, err := s.buildScript(env, recipe, result, spec, index)
 	if err != nil {
 		return nil, err
 	}
@@ -535,8 +535,28 @@ func (s *Scenario) resolveTarget(env *environment, recipe *Recipe, result *build
 // them, the read operations that make the instructions EIP-8141 introduces execute
 // inside a frame. The reads discard their results -- the point is to reach the
 // instruction, not to decide what it should have returned.
-func (s *Scenario) buildScript(env *environment, recipe *Recipe, spec BodyFrame, index int) (*ProbeScript, error) {
-	if spec.Kind != KindProbe || env.probe == nil {
+func (s *Scenario) buildScript(env *environment, recipe *Recipe, result *build, spec BodyFrame, index int) (*ProbeScript, error) {
+	if env.probe == nil {
+		return nil, nil
+	}
+
+	// A POST_TX frame is where EIP-7906's assertion instructions exist, and nowhere
+	// else, so the sweep for them rides on the assertion frames rather than the probe
+	// frames. A chain that refused POST_TX at startup downgrades the frame to an
+	// ordinary call, where those instructions would only halt.
+	if spec.Kind == KindPostTx {
+		if !recipe.Reads || spec.Target != TargetProbe || !env.allowPostTx {
+			return nil, nil
+		}
+
+		script := NewProbeScript()
+		appendPostTxReads(script, recipe, result.senderAddr)
+		result.cover("post-tx-reads")
+
+		return script, nil
+	}
+
+	if spec.Kind != KindProbe {
 		return nil, nil
 	}
 
@@ -615,43 +635,48 @@ func (s *Scenario) applyNonceKeys(ctx context.Context, client *spamoor.Client, e
 		result.cover("keyed-nonce-first-use")
 	}
 
-	// The frame executing APPROVE has to budget for the surcharge, or the approval
-	// halts out of gas.
+	// A key's first use creates its slot under NONCE_MANAGER, which is state gas drawn
+	// from the pool of the frame executing the payment-scoped APPROVE. Without the
+	// budget the approval halts and, being a VERIFY frame, invalidates the transaction.
 	if sel.firstUses > 0 {
-		result.frames[result.prefixLen-1].Limits.Execution += uint64(sel.firstUses) * txtypes.KeyedNonceFirstUseGas
+		result.frames[result.prefixLen-1].Limits.State += uint64(sel.firstUses) * txtypes.KeyedNonceFirstUseStateGas
 	}
 
 	return nil
 }
 
 // firstUseHeadroom returns how many never-before-used nonce keys still fit inside the
-// public mempool's verification gas cap, given what this transaction's validation prefix
-// and signature list already cost.
+// public mempool's validation prefix, given the state gas the prefix already budgets.
+//
+// The first-use charge is state gas, so it counts against MaxVerifyStateGas rather than
+// the execution cap the signature list and the prefix frames share.
 func (s *Scenario) firstUseHeadroom(result *build) int {
-	used, err := result.tx.SignatureVerificationGas()
-	if err != nil {
-		return 0
-	}
+	used := uint64(0)
 
 	for i := 0; i < result.prefixLen && i < len(result.frames); i++ {
-		used += result.frames[i].Limits.Execution
+		used += result.frames[i].Limits.State
 	}
 
-	if used >= txtypes.MaxVerifyGas {
+	if used >= txtypes.MaxVerifyStateGas {
 		return 0
 	}
 
-	return int((txtypes.MaxVerifyGas - used) / txtypes.KeyedNonceFirstUseGas)
+	return int((txtypes.MaxVerifyStateGas - used) / txtypes.KeyedNonceFirstUseStateGas)
 }
 
-// applyRecentRoots declares EIP-8272 references on the transaction.
-func (s *Scenario) applyRecentRoots(env *environment, recipe *Recipe, result *build) error {
-	if recipe.RecentRoots == 0 || env.roots == nil || !env.extensions.Has(txtypes.FrameExtRecentRoots) {
-		return nil
+// appendRecentRootFrame adds the EIP-8272 recent root verifier frame a recipe asks for.
+//
+// The frame is the only thing EIP-8272 adds to a transaction: a VERIFY frame calling the
+// recent root contract with the packed references, which reverts unless every one names
+// a root its source committed within the usable window. The public mempool excludes its
+// execution budget from the verification gas cap.
+func (s *Scenario) appendRecentRootFrame(env *environment, recipe *Recipe, result *build) {
+	if recipe.RecentRoots == 0 || env.roots == nil {
+		return
 	}
 
 	if !env.roots.calibratedClock() {
-		return nil
+		return
 	}
 
 	// One slot of margin: the reference has to be usable in the block the transaction
@@ -659,23 +684,21 @@ func (s *Scenario) applyRecentRoots(env *environment, recipe *Recipe, result *bu
 	// slot S only becomes referenceable in S+1.
 	current := s.currentSlot()
 	if current == 0 {
-		return nil
+		return
 	}
 
 	references, legal := env.roots.references(recipe, current-1)
 	if len(references) == 0 {
-		return nil
+		return
 	}
 
-	result.tx.RecentRoots = references
+	result.append(txtypes.RecentRootVerifyFrame(references, txtypes.RecentRootVerifyGas(len(references))))
 	result.mempoolLegal = result.mempoolLegal && legal
 	result.cover("recent-roots")
 
 	if recipe.RecentRootEdge != "" {
 		result.cover("root-edge:" + recipe.RecentRootEdge)
 	}
-
-	return nil
 }
 
 // append adds a frame.

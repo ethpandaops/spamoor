@@ -262,10 +262,9 @@ func TestFrameIntrinsicGas(t *testing.T) {
 	want += StandardTokenCost * (65 * 4)
 	// The user op carries value to a foreign target.
 	want += TxValueCost
-	// Both envelope extensions price their own encoding as transaction data. The
-	// default [0] key set encodes as rlp([0]) || rlp(0) = c1 80 80, and the empty
-	// recent root list as c0: four non-zero bytes in total.
-	extensionTokens := uint64(4 * 4)
+	// The envelope extension prices its own encoding as transaction data. The default
+	// [0] key set encodes as rlp([0]) || rlp(0) = c1 80 80: three non-zero bytes.
+	extensionTokens := uint64(3 * 4)
 	want += StandardTokenCost * extensionTokens
 
 	if got := tx.IntrinsicGas(); got != want {
@@ -760,11 +759,11 @@ func TestFrameSignatureBytesValidation(t *testing.T) {
 	}
 }
 
-// TestFrameEnvelopeShapes checks that each of the four payload shapes encodes, decodes
-// back to itself, and is told apart from the others.
+// TestFrameEnvelopeShapes checks that each payload shape encodes, decodes back to
+// itself, and is told apart from the other.
 //
-// EIP-8250 and EIP-8272 amend EIP-8141's envelope independently, so a chain may run
-// any combination and the shape has to be read off the payload rather than assumed.
+// EIP-8250 amends EIP-8141's envelope, so a chain may run either shape and the shape
+// has to be read off the payload rather than assumed.
 func TestFrameEnvelopeShapes(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	if err != nil {
@@ -780,8 +779,6 @@ func TestFrameEnvelopeShapes(t *testing.T) {
 	}{
 		{"8141", 0, 7},
 		{"8141+8250", FrameExtKeyedNonces, 8},
-		{"8141+8272", FrameExtRecentRoots, 8},
-		{"8141+8250+8272", FrameExtAll, 9},
 	}
 
 	for _, shape := range shapes {
@@ -793,12 +790,6 @@ func TestFrameEnvelopeShapes(t *testing.T) {
 					UserOpFrame(&testTarget, nil, nil, FrameLimits{Execution: 30_000}),
 				},
 				[]*FrameSignature{SenderSignature()})
-
-			if shape.extensions.Has(FrameExtRecentRoots) {
-				tx.RecentRoots = []*RecentRootReference{
-					{SourceID: common.HexToHash("0x01"), Slot: 9, Root: common.HexToHash("0x02")},
-				}
-			}
 
 			if tx.Extensions.String() != shape.name {
 				t.Fatalf("extension name = %s, want %s", tx.Extensions, shape.name)
@@ -855,10 +846,6 @@ func TestFrameEnvelopeShapes(t *testing.T) {
 				t.Fatal("keyed nonce flag did not survive")
 			}
 
-			if len(back.RecentRoots) != len(tx.RecentRoots) {
-				t.Fatalf("recent roots did not survive: %d != %d", len(back.RecentRoots), len(tx.RecentRoots))
-			}
-
 			// A scalar-nonce transaction must not claim keys, and vice versa.
 			if !shape.extensions.Has(FrameExtKeyedNonces) && len(back.NonceKeys) != 0 {
 				t.Fatal("scalar nonce shape decoded nonce keys")
@@ -906,13 +893,6 @@ func TestFrameExtensionMismatch(t *testing.T) {
 
 	if err := withKeys.ValidatePayload(); err == nil {
 		t.Fatal("nonce keys without the EIP-8250 extension should be rejected")
-	}
-
-	withRoots := base()
-	withRoots.RecentRoots = []*RecentRootReference{{}}
-
-	if err := withRoots.ValidatePayload(); err == nil {
-		t.Fatal("recent roots without the EIP-8272 extension should be rejected")
 	}
 }
 
