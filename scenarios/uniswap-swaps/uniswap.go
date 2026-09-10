@@ -19,18 +19,34 @@ import (
 )
 
 type UniswapOptions struct {
-	Version             uint64
-	BaseFee             float64
-	TipFee              float64
-	BaseFeeWei          string
-	TipFeeWei           string
-	DaiPairs            uint64
-	EthLiquidityPerPair *uint256.Int
-	DaiLiquidityFactor  uint64
-	FeeTier             uint64
-	ClientGroup         string
+	Version    uint64
+	BaseFee    float64
+	TipFee     float64
+	BaseFeeWei string
+	TipFeeWei  string
+	// PairCount is the number of DAI tokens to deploy; each one is paired with
+	// the shared quote token on both factories.
+	PairCount uint64
+	// QuoteLiquidityPerPool is the quote token reserve seeded into every pair /
+	// pool; the DAI side is QuoteLiquidityPerPool * TokensPerQuote.
+	QuoteLiquidityPerPool *big.Int
+	// TokensPerQuote is the initial price: DAI tokens per quote token.
+	TokensPerQuote uint64
+	// QuoteFunding is the quote token amount minted to each child wallet at
+	// startup and whenever a wallet cannot afford a buy.
+	QuoteFunding *big.Int
+	FeeTier      uint64
+	ClientGroup  string
 }
 
+// Uniswap owns the deployed contract set (v2 pairs or v3 pools) and the local
+// per-wallet token balance cache used to decide swap directions without an RPC
+// round trip per swap.
+//
+// Every pair trades a per-pair mock DAI token against one shared mock quote
+// token. Both are ERC20s with a public mint, so no ETH capital beyond gas is
+// needed: pools are seeded by minting and child wallets mint their own quote
+// tokens.
 type Uniswap struct {
 	ctx            context.Context
 	walletPool     *spamoor.WalletPool
@@ -39,20 +55,18 @@ type Uniswap struct {
 	logger         *logrus.Entry
 	options        UniswapOptions
 
-	// local cache of token balances
+	// local cache of token balances: wallet -> token -> balance
 	tokenBalances      map[common.Address]map[common.Address]*big.Int
 	tokenBalancesMutex sync.RWMutex
 
-	// v2 contract instances
-	RouterA *contract.UniswapV2Router02
-	RouterB *contract.UniswapV2Router02
-	Weth    *contract.WETH9
-	Tokens  map[common.Address]*contract.Dai
+	// contract instances bound to the static call client
+	RouterA *contract.UniswapV2Router02 // v2 only
+	RouterB *contract.UniswapV2Router02 // v2 only
+	Quote   *contract.Dai
 }
 
-// tokenAddrs returns the list of DAI token addresses across all deployed pairs
-// or pools, used by the generic balance/allowance setup phases.
-func (u *Uniswap) tokenAddrs() []common.Address {
+// daiAddrs returns the per-pair DAI token addresses of the active deployment.
+func (u *Uniswap) daiAddrs() []common.Address {
 	if u.options.Version == 3 {
 		addrs := make([]common.Address, 0, len(u.v3Deployment.Pools))
 		for _, pool := range u.v3Deployment.Pools {
@@ -67,16 +81,22 @@ func (u *Uniswap) tokenAddrs() []common.Address {
 	return addrs
 }
 
-// wethAddr returns the WETH9 address of the active deployment.
-func (u *Uniswap) wethAddr() common.Address {
+// quoteAddr returns the shared quote token address of the active deployment.
+func (u *Uniswap) quoteAddr() common.Address {
 	if u.options.Version == 3 {
-		return u.v3Deployment.Weth9Addr
+		return u.v3Deployment.QuoteAddr
 	}
-	return u.deploymentInfo.Weth9Addr
+	return u.deploymentInfo.QuoteAddr
+}
+
+// allTokenAddrs returns every token a child wallet holds: all DAI tokens plus
+// the quote token. Used by the generic balance/allowance setup phases.
+func (u *Uniswap) allTokenAddrs() []common.Address {
+	return append(u.daiAddrs(), u.quoteAddr())
 }
 
 // spenderAddrs returns the addresses child wallets must approve for token
-// transfers: both v2 routers, or the single v3 SwapRouter.
+// transfers: both v2 routers, or both v3 SwapRouters.
 func (u *Uniswap) spenderAddrs() []common.Address {
 	if u.options.Version == 3 {
 		return []common.Address{u.v3Deployment.RouterAAddr, u.v3Deployment.RouterBAddr}
@@ -94,55 +114,48 @@ func NewUniswap(ctx context.Context, walletPool *spamoor.WalletPool, logger *log
 	}
 }
 
-// Initialize contract instances to reuse
-func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) error {
-	u.deploymentInfo = deploymentInfo
-
+// staticCallClient returns the client used for eth_calls and for binding the
+// reusable contract instances.
+func (u *Uniswap) staticCallClient() (*spamoor.Client, error) {
 	client := u.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
 		spamoor.WithoutBuilder(), // avoid using builders for eth_calls
 	)
 	if client == nil {
-		return fmt.Errorf("no client available")
+		return nil, fmt.Errorf("no client available")
+	}
+	u.logger.Infof("Using client for static calls: %s", client.GetName())
+	return client, nil
+}
+
+// InitializeContracts binds the deployed v2 contract instances to the static
+// call client and stores the deployment for the swap phase.
+func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) error {
+	u.deploymentInfo = deploymentInfo
+
+	client, err := u.staticCallClient()
+	if err != nil {
+		return err
 	}
 
-	u.logger.Infof("Using client for static calls: %s", client.GetName())
-
-	// Initialize router A
-	routerA, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterAAddr, client.GetEthClient())
+	u.RouterA, err = contract.NewUniswapV2Router02(deploymentInfo.UniswapRouterAAddr, client.GetEthClient())
 	if err != nil {
 		return fmt.Errorf("could not initialize router A: %w", err)
 	}
-	u.RouterA = routerA
-
-	// Initialize router B
-	routerB, err := contract.NewUniswapV2Router02(u.deploymentInfo.UniswapRouterBAddr, client.GetEthClient())
+	u.RouterB, err = contract.NewUniswapV2Router02(deploymentInfo.UniswapRouterBAddr, client.GetEthClient())
 	if err != nil {
 		return fmt.Errorf("could not initialize router B: %w", err)
 	}
-	u.RouterB = routerB
-
-	// Initialize WETH9
-	weth, err := contract.NewWETH9(u.deploymentInfo.Weth9Addr, client.GetEthClient())
+	u.Quote, err = contract.NewDai(deploymentInfo.QuoteAddr, client.GetEthClient())
 	if err != nil {
-		return fmt.Errorf("could not initialize WETH9: %w", err)
-	}
-	u.Weth = weth
-
-	// Initialize token contracts
-	u.Tokens = make(map[common.Address]*contract.Dai)
-	for _, pair := range u.deploymentInfo.Pairs {
-		token, err := contract.NewDai(pair.DaiAddr, client.GetEthClient())
-		if err != nil {
-			return fmt.Errorf("could not initialize token %v: %w", pair.DaiAddr, err)
-		}
-		u.Tokens[pair.DaiAddr] = token
+		return fmt.Errorf("could not initialize quote token: %w", err)
 	}
 
 	return nil
 }
 
-// Initialize token balances for all wallets
+// InitializeTokenBalances reads the DAI and quote token balances of all child
+// wallets into the local cache.
 func (u *Uniswap) InitializeTokenBalances() {
 	// Initialize the 2D map
 	u.tokenBalances = make(map[common.Address]map[common.Address]*big.Int)
@@ -150,6 +163,7 @@ func (u *Uniswap) InitializeTokenBalances() {
 
 	// Get all wallets
 	wallets := u.walletPool.GetAllWallets()
+	tokenAddrs := u.allTokenAddrs()
 
 	// Read balances for each wallet in parallel across clients. Doing this
 	// serially over hundreds of wallets is hundreds of blocking RPC calls; the
@@ -182,9 +196,7 @@ func (u *Uniswap) InitializeTokenBalances() {
 			}
 			callOpts := &bind.CallOpts{Context: u.ctx}
 
-			tokenAddrs := u.tokenAddrs()
-			wethAddr := u.wethAddr()
-			balances := make(map[common.Address]*big.Int, len(tokenAddrs)+1)
+			balances := make(map[common.Address]*big.Int, len(tokenAddrs))
 			for _, tokenAddr := range tokenAddrs {
 				token, err := contract.NewDai(tokenAddr, rclient.GetEthClient())
 				if err != nil {
@@ -199,14 +211,6 @@ func (u *Uniswap) InitializeTokenBalances() {
 				balances[tokenAddr] = balance
 			}
 
-			if weth, err := contract.NewWETH9(wethAddr, rclient.GetEthClient()); err != nil {
-				u.logger.Errorf("could not bind WETH9: %v", err)
-			} else if wethBalance, err := weth.BalanceOf(callOpts, walletAddr); err != nil {
-				u.logger.Errorf("could not get WETH balance for %v: %v", walletAddr, err)
-			} else {
-				balances[wethAddr] = wethBalance
-			}
-
 			u.tokenBalancesMutex.Lock()
 			u.tokenBalances[walletAddr] = balances
 			u.tokenBalancesMutex.Unlock()
@@ -215,7 +219,7 @@ func (u *Uniswap) InitializeTokenBalances() {
 	wg.Wait()
 }
 
-// Get DAI balance from local cache
+// GetTokenBalance returns the cached balance of a token for a wallet.
 func (u *Uniswap) GetTokenBalance(walletAddr common.Address, tokenAddr common.Address) *big.Int {
 	u.tokenBalancesMutex.RLock()
 	defer u.tokenBalancesMutex.RUnlock()
@@ -232,7 +236,7 @@ func (u *Uniswap) GetTokenBalance(walletAddr common.Address, tokenAddr common.Ad
 	return balance
 }
 
-// Update DAI balance in local cache
+// UpdateTokenBalance overwrites the cached balance of a token for a wallet.
 func (u *Uniswap) UpdateTokenBalance(walletAddr common.Address, tokenAddr common.Address, newBalance *big.Int) {
 	u.tokenBalancesMutex.Lock()
 	defer u.tokenBalancesMutex.Unlock()
@@ -251,6 +255,11 @@ func (u *Uniswap) UpdateTokenBalance(walletAddr common.Address, tokenAddr common
 // allowances for hundreds of wallets needs no per-tx eth_estimateGas round trip.
 const approvalGasLimit = 250000
 
+// mintGasLimit is the static gas limit for quote token mint txs. A mint to a
+// wallet without a balance yet creates one fresh storage slot (like approve)
+// and updates the total supply, so the same headroom applies.
+const mintGasLimit = 250000
+
 // setupConcurrency bounds the parallel per-wallet RPC fan-out used by the setup
 // phases (balance reads, allowance checks). Sized to the number of healthy
 // clients so the load spreads across nodes, capped to avoid overwhelming them.
@@ -259,9 +268,37 @@ func (u *Uniswap) setupConcurrency() int {
 	return min(max(n, 1), 50)
 }
 
-// Set unlimited allowances for all wallets to both routers
-func (u *Uniswap) SetUnlimitedAllowances() error {
-	u.logger.Infof("Setting unlimited allowances for all wallets...")
+// buildQuoteMintTx builds a tx in which the wallet mints QuoteFunding quote
+// tokens to itself, and bumps the cached balance accordingly. The quote token
+// is a mock with a public mint, so this is how child wallets are capitalized
+// instead of receiving ETH.
+func (u *Uniswap) buildQuoteMintTx(ctx context.Context, wallet *spamoor.Wallet, feeCap, tipCap *big.Int) (*txtypes.Transaction, error) {
+	quoteAddr := u.quoteAddr()
+	walletAddr := wallet.GetAddress()
+
+	tx, err := wallet.BuildBoundTx(ctx, &txbuilder.TxMetadata{
+		GasFeeCap: uint256.MustFromBig(feeCap),
+		GasTipCap: uint256.MustFromBig(tipCap),
+		Gas:       mintGasLimit,
+		Value:     uint256.NewInt(0),
+	}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+		return u.Quote.Mint(transactOpts, walletAddr, u.options.QuoteFunding)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("could not build quote mint tx: %w", err)
+	}
+
+	balance := u.GetTokenBalance(walletAddr, quoteAddr)
+	u.UpdateTokenBalance(walletAddr, quoteAddr, new(big.Int).Add(balance, u.options.QuoteFunding))
+	return tx, nil
+}
+
+// PrepareWallets gets every child wallet ready for swapping: it sets unlimited
+// allowances for all tokens to the router(s) and mints the initial quote token
+// funding to wallets holding less than that amount. Must run after
+// InitializeTokenBalances, whose cache decides which wallets need funding.
+func (u *Uniswap) PrepareWallets() error {
+	u.logger.Infof("Preparing wallets (allowances + quote token funding)...")
 
 	// Get all wallets
 	wallets := u.walletPool.GetAllWallets()
@@ -285,22 +322,30 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 	}
 
 	routers := u.spenderAddrs()
-	tokenAddrs := u.tokenAddrs()
-	wethAddr := u.wethAddr()
+	tokenAddrs := u.allTokenAddrs()
+	quoteAddr := u.quoteAddr()
 
-	// Track all approval transactions
+	// Track all setup transactions
 	var (
-		approvalTxs     []*txtypes.Transaction
-		approvalWallets []*spamoor.Wallet
-		mu              sync.Mutex
-		wg              sync.WaitGroup
+		setupTxs     []*txtypes.Transaction
+		setupWallets []*spamoor.Wallet
+		mintCount    int
+		mu           sync.Mutex
+		wg           sync.WaitGroup
 	)
 
+	addSetupTx := func(wallet *spamoor.Wallet, tx *txtypes.Transaction) {
+		mu.Lock()
+		setupTxs = append(setupTxs, tx)
+		setupWallets = append(setupWallets, wallet)
+		mu.Unlock()
+	}
+
 	// Check allowances and build approval txs in parallel across clients. For N
-	// wallets this is up to 4*N allowance reads (DAI+WETH × router A+B); doing
-	// them serially on one client blocks the scenario for minutes at large wallet
-	// counts. The context-aware CallOpts also let a UI stop actually cancel the
-	// in-flight reads.
+	// wallets this is up to 2*(pairs+1)*N allowance reads (every token × router
+	// A+B); doing them serially on one client blocks the scenario for minutes at
+	// large wallet counts. The context-aware CallOpts also let a UI stop actually
+	// cancel the in-flight reads.
 	sem := make(chan struct{}, u.setupConcurrency())
 
 	buildApproval := func(wallet *spamoor.Wallet, approve func(*bind.TransactOpts) (*types.Transaction, error)) {
@@ -316,10 +361,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			u.logger.Errorf("could not build approval tx for %v: %v", wallet.GetAddress(), err)
 			return
 		}
-		mu.Lock()
-		approvalTxs = append(approvalTxs, approveTx)
-		approvalWallets = append(approvalWallets, wallet)
-		mu.Unlock()
+		addSetupTx(wallet, approveTx)
 	}
 
 	for idx, wallet := range wallets {
@@ -346,7 +388,6 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 			}
 			callOpts := &bind.CallOpts{Context: u.ctx}
 
-			// DAI tokens
 			for _, tokenAddr := range tokenAddrs {
 				token, err := contract.NewDai(tokenAddr, rclient.GetEthClient())
 				if err != nil {
@@ -368,24 +409,17 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 				}
 			}
 
-			// WETH
-			weth, err := contract.NewWETH9(wethAddr, rclient.GetEthClient())
-			if err != nil {
-				u.logger.Errorf("could not bind WETH9: %v", err)
-				return
-			}
-			for _, router := range routers {
-				allowance, err := weth.Allowance(callOpts, wallet.GetAddress(), router)
+			// Initial quote token funding for wallets below the funding amount.
+			if u.GetTokenBalance(wallet.GetAddress(), quoteAddr).Cmp(u.options.QuoteFunding) < 0 {
+				mintTx, err := u.buildQuoteMintTx(u.ctx, wallet, feeCap, tipCap)
 				if err != nil {
-					u.logger.Errorf("could not check WETH allowance for %v: %v", wallet.GetAddress(), err)
-					continue
+					u.logger.Errorf("could not build quote mint tx for %v: %v", wallet.GetAddress(), err)
+					return
 				}
-				if allowance.Cmp(maxAllowance) >= 0 {
-					continue
-				}
-				buildApproval(wallet, func(opts *bind.TransactOpts) (*types.Transaction, error) {
-					return weth.Approve(opts, router, maxAllowance)
-				})
+				mu.Lock()
+				mintCount++
+				mu.Unlock()
+				addSetupTx(wallet, mintTx)
 			}
 		}(idx, wallet)
 	}
@@ -395,13 +429,13 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 		return u.ctx.Err()
 	}
 
-	// Send all approval transactions in parallel
-	if len(approvalTxs) > 0 {
-		u.logger.Infof("Sending %d approval transactions...", len(approvalTxs))
+	// Send all setup transactions in parallel
+	if len(setupTxs) > 0 {
+		u.logger.Infof("Sending %d wallet setup transactions (%d approvals, %d quote mints)...", len(setupTxs), len(setupTxs)-mintCount, mintCount)
 
 		// Reuse the wait group (back to zero after the build phase) to track sends.
 		// Send each transaction to a different client
-		for i, tx := range approvalTxs {
+		for i, tx := range setupTxs {
 			// Get a different client for each transaction
 			txClient := u.walletPool.GetClient(
 				spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, i),
@@ -420,19 +454,19 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 					Rebroadcast: true,
 					OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 						if err != nil {
-							u.logger.Errorf("approval tx failed: %v", err)
+							u.logger.Errorf("wallet setup tx failed: %v", err)
 						}
 						wg.Done()
 					},
 				})
-			}(tx, txClient, approvalWallets[i])
+			}(tx, txClient, setupWallets[i])
 		}
 
 		// Wait for all transactions to be sent
 		wg.Wait()
-		u.logger.Infof("All approval transactions sent")
+		u.logger.Infof("All wallet setup transactions sent")
 	} else {
-		u.logger.Infof("No approval transactions needed (allowances already set)")
+		u.logger.Infof("No wallet setup transactions needed (allowances and funding already in place)")
 	}
 
 	return nil

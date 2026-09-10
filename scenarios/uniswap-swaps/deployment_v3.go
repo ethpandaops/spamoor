@@ -19,11 +19,14 @@ import (
 
 // V3DeploymentInfo holds the deployed Uniswap v3 contract set for the scenario.
 // Two factories (each with its own SwapRouter) are deployed so that every DAI
-// instance gets a separate pool per factory at the same fee tier, mirroring the
-// two-factory layout of the v2 path.
+// token gets a separate pool with the shared quote token per factory at the
+// same fee tier, mirroring the two-factory layout of the v2 path.
 type V3DeploymentInfo struct {
+	// Weth9Addr is only needed because the canonical SwapRouter requires a WETH
+	// address at construction; the scenario never trades ETH/WETH.
 	Weth9Addr             common.Address
-	Weth9                 *contract.WETH9
+	QuoteAddr             common.Address
+	Quote                 *contract.Dai
 	FactoryAAddr          common.Address
 	FactoryA              *contract.UniswapV3Factory
 	FactoryBAddr          common.Address
@@ -40,24 +43,19 @@ type V3DeploymentInfo struct {
 }
 
 type V3PoolDeploymentInfo struct {
-	DaiAddr      common.Address
-	Dai          *contract.Dai
-	WethIsToken0 bool
-	PoolAAddr    common.Address
-	PoolA        *contract.UniswapV3Pool
-	PoolBAddr    common.Address
-	PoolB        *contract.UniswapV3Pool
+	DaiAddr       common.Address
+	Dai           *contract.Dai
+	QuoteIsToken0 bool
+	PoolAAddr     common.Address
+	PoolA         *contract.UniswapV3Pool
+	PoolBAddr     common.Address
+	PoolB         *contract.UniswapV3Pool
 }
 
-// liquidityBudgetBps applies a small safety margin (0.1%) to the WETH liquidity
-// budget when sizing the position, so the pool's round-up of owed amounts can
-// never exceed the ETH value forwarded to the liquidity provider.
-const liquidityBudgetBps = 9990
-
 // DeployUniswapV3 deploys two canonical Uniswap v3 factories + SwapRouters, the
-// custom liquidity provider, and one DAI token per configured pair. Each DAI
-// gets a pool on both factories, which are then initialized and seeded with a
-// full-range position.
+// custom liquidity provider, the shared quote token and one DAI token per
+// configured pair. Each DAI gets a pool on both factories, which are then
+// initialized and seeded with a full-range position.
 func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 	client := u.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
@@ -72,7 +70,6 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 	if deployerWallet == nil || ownerWallet == nil {
 		return nil, scenario.ErrNoWallet
 	}
-	rootAddr := u.walletPool.GetRootWallet().GetWallet().GetAddress()
 
 	deployerSeed := [32]byte{}
 	copy(deployerSeed[:], deployerWallet.GetAddress().Bytes())
@@ -121,14 +118,10 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 		Fee: new(big.Int).SetUint64(u.options.FeeTier),
 	}
 
-	// deploy WETH9
+	// deploy WETH9 (SwapRouter constructor dependency only)
 	info.Weth9Addr, err = deployContract(contract.WETH9MetaData, true, 0)
 	if err != nil {
 		return nil, fmt.Errorf("could not deploy WETH9: %w", err)
-	}
-	info.Weth9, err = contract.NewWETH9(info.Weth9Addr, client.GetEthClient())
-	if err != nil {
-		return nil, fmt.Errorf("could not create instance of WETH9: %w", err)
 	}
 
 	// deploy two v3 factories (identical bytecode -> distinct salts)
@@ -169,8 +162,8 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 		return nil, fmt.Errorf("could not create instance of swap router B: %w", err)
 	}
 
-	// deploy liquidity provider helper
-	info.LiquidityProviderAddr, err = deployContract(contract.V3LiquidityProviderMetaData, false, 0, ownerWallet.GetAddress(), rootAddr, info.Weth9Addr)
+	// deploy liquidity provider helper (owner-only, mints both tokens on demand)
+	info.LiquidityProviderAddr, err = deployContract(contract.V3LiquidityProviderMetaData, false, 0, ownerWallet.GetAddress())
 	if err != nil {
 		return nil, fmt.Errorf("could not deploy v3 liquidity provider: %w", err)
 	}
@@ -179,10 +172,20 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 		return nil, fmt.Errorf("could not create instance of v3 liquidity provider: %w", err)
 	}
 
+	// deploy the shared quote token
+	info.QuoteAddr, err = deployContract(contract.DaiMetaData, true, quoteTokenSalt, deployerWallet.GetChainId())
+	if err != nil {
+		return nil, fmt.Errorf("could not deploy quote token: %w", err)
+	}
+	info.Quote, err = contract.NewDai(info.QuoteAddr, client.GetEthClient())
+	if err != nil {
+		return nil, fmt.Errorf("could not create instance of quote token: %w", err)
+	}
+
 	// deploy DAI tokens (one per pair)
-	for i := uint64(0); i < u.options.DaiPairs; i++ {
+	for i := uint64(0); i < u.options.PairCount; i++ {
 		poolInfo := V3PoolDeploymentInfo{}
-		poolInfo.DaiAddr, err = deployContract(contract.DaiMetaData, true, uint32(i), deployerWallet.GetChainId())
+		poolInfo.DaiAddr, err = deployContract(contract.DaiMetaData, true, daiTokenSalt+uint32(i), deployerWallet.GetChainId())
 		if err != nil {
 			return nil, fmt.Errorf("could not deploy Dai: %w", err)
 		}
@@ -190,7 +193,7 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("could not create instance of Dai: %w", err)
 		}
-		poolInfo.WethIsToken0 = info.Weth9Addr.Big().Cmp(poolInfo.DaiAddr.Big()) < 0
+		poolInfo.QuoteIsToken0 = info.QuoteAddr.Big().Cmp(poolInfo.DaiAddr.Big()) < 0
 		info.Pools = append(info.Pools, poolInfo)
 	}
 
@@ -215,7 +218,7 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 	for i := range info.Pools {
 		dai := info.Pools[i].DaiAddr
 		for _, factory := range []*contract.UniswapV3Factory{info.FactoryA, info.FactoryB} {
-			poolAddr, err := factory.GetPool(callOpts, dai, info.Weth9Addr, info.Fee)
+			poolAddr, err := factory.GetPool(callOpts, dai, info.QuoteAddr, info.Fee)
 			if err != nil {
 				return nil, fmt.Errorf("could not check pool existence: %w", err)
 			}
@@ -228,7 +231,7 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 				GasTipCap: uint256.MustFromBig(tipCap),
 				Value:     uint256.NewInt(0),
 			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-				return factory.CreatePool(transactOpts, dai, info.Weth9Addr, info.Fee)
+				return factory.CreatePool(transactOpts, dai, info.QuoteAddr, info.Fee)
 			})
 			if err != nil {
 				return nil, fmt.Errorf("could not create pool: %w", err)
@@ -244,11 +247,11 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 	for i := range info.Pools {
 		dai := info.Pools[i].DaiAddr
 
-		poolAAddr, err := info.FactoryA.GetPool(callOpts, dai, info.Weth9Addr, info.Fee)
+		poolAAddr, err := info.FactoryA.GetPool(callOpts, dai, info.QuoteAddr, info.Fee)
 		if err != nil {
 			return nil, fmt.Errorf("could not read pool A address: %w", err)
 		}
-		poolBAddr, err := info.FactoryB.GetPool(callOpts, dai, info.Weth9Addr, info.Fee)
+		poolBAddr, err := info.FactoryB.GetPool(callOpts, dai, info.QuoteAddr, info.Fee)
 		if err != nil {
 			return nil, fmt.Errorf("could not read pool B address: %w", err)
 		}
@@ -268,11 +271,11 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 		}
 	}
 
-	// Phase 3: initialize pools and grant the liquidity provider mint rights.
+	// Phase 3: initialize pools that have no price yet.
 	setupTxs := []*txtypes.Transaction{}
 	for i := range info.Pools {
 		poolInfo := info.Pools[i]
-		sqrtPriceX96 := u.v3SqrtPriceX96(poolInfo.WethIsToken0)
+		sqrtPriceX96 := u.v3SqrtPriceX96(poolInfo.QuoteIsToken0)
 
 		for _, pool := range []*contract.UniswapV3Pool{poolInfo.PoolA, poolInfo.PoolB} {
 			slot0, err := pool.Slot0(callOpts)
@@ -301,7 +304,7 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 	}
 
 	// Phase 4: seed full-range liquidity into every pool.
-	if err := u.provideV3Liquidity(info, client, feeCap, tipCap); err != nil {
+	if err := u.provideV3Liquidity(info, client, ownerWallet, feeCap, tipCap); err != nil {
 		return nil, err
 	}
 
@@ -311,21 +314,10 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 // InitializeContractsV3 binds the deployed v3 contract instances to the static
 // call client and stores the deployment for the swap phase.
 func (u *Uniswap) InitializeContractsV3(info *V3DeploymentInfo) error {
-	client := u.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
-		spamoor.WithoutBuilder(), // avoid using builders for eth_calls
-	)
-	if client == nil {
-		return scenario.ErrNoClients
-	}
-
-	u.logger.Infof("Using client for static calls: %s", client.GetName())
-
-	weth, err := contract.NewWETH9(info.Weth9Addr, client.GetEthClient())
+	client, err := u.staticCallClient()
 	if err != nil {
-		return fmt.Errorf("could not initialize WETH9: %w", err)
+		return err
 	}
-	u.Weth = weth
 
 	info.RouterA, err = contract.NewSwapRouter(info.RouterAAddr, client.GetEthClient())
 	if err != nil {
@@ -335,85 +327,84 @@ func (u *Uniswap) InitializeContractsV3(info *V3DeploymentInfo) error {
 	if err != nil {
 		return fmt.Errorf("could not initialize swap router B: %w", err)
 	}
-
-	u.Tokens = make(map[common.Address]*contract.Dai, len(info.Pools))
-	for _, poolInfo := range info.Pools {
-		token, err := contract.NewDai(poolInfo.DaiAddr, client.GetEthClient())
+	for i := range info.Pools {
+		info.Pools[i].PoolA, err = contract.NewUniswapV3Pool(info.Pools[i].PoolAAddr, client.GetEthClient())
 		if err != nil {
-			return fmt.Errorf("could not initialize token %v: %w", poolInfo.DaiAddr, err)
+			return fmt.Errorf("could not initialize pool A: %w", err)
 		}
-		u.Tokens[poolInfo.DaiAddr] = token
+		info.Pools[i].PoolB, err = contract.NewUniswapV3Pool(info.Pools[i].PoolBAddr, client.GetEthClient())
+		if err != nil {
+			return fmt.Errorf("could not initialize pool B: %w", err)
+		}
+	}
+	u.Quote, err = contract.NewDai(info.QuoteAddr, client.GetEthClient())
+	if err != nil {
+		return fmt.Errorf("could not initialize quote token: %w", err)
 	}
 
 	u.v3Deployment = info
 	return nil
 }
 
-// v3SqrtPriceX96 returns the starting price for a pool, derived from the desired
-// DAI/WETH reserve ratio (the same ratio the v2 path uses for liquidity depth).
-func (u *Uniswap) v3SqrtPriceX96(wethIsToken0 bool) *big.Int {
-	wethReserve := u.options.EthLiquidityPerPair.ToBig()
-	daiReserve := new(big.Int).Mul(wethReserve, new(big.Int).SetUint64(u.options.DaiLiquidityFactor))
+// v3SqrtPriceX96 returns the starting price for a pool, derived from the
+// seeded DAI/quote reserve ratio (TokensPerQuote DAI per quote token).
+func (u *Uniswap) v3SqrtPriceX96(quoteIsToken0 bool) *big.Int {
+	quoteReserve := u.options.QuoteLiquidityPerPool
+	daiReserve := new(big.Int).Mul(quoteReserve, new(big.Int).SetUint64(u.options.TokensPerQuote))
 
-	if wethIsToken0 {
-		// token0 = WETH, token1 = DAI -> price = DAI/WETH
-		return encodeSqrtRatioX96(daiReserve, wethReserve)
+	if quoteIsToken0 {
+		// token0 = quote, token1 = DAI -> price = DAI/quote
+		return encodeSqrtRatioX96(daiReserve, quoteReserve)
 	}
-	// token0 = DAI, token1 = WETH -> price = WETH/DAI
-	return encodeSqrtRatioX96(wethReserve, daiReserve)
+	// token0 = DAI, token1 = quote -> price = quote/DAI
+	return encodeSqrtRatioX96(quoteReserve, daiReserve)
 }
 
-// provideV3Liquidity seeds a full-range position into every pool from the root
-// wallet, forwarding ETH for the WETH side while DAI is minted on demand.
-func (u *Uniswap) provideV3Liquidity(info *V3DeploymentInfo, client *spamoor.Client, feeCap, tipCap *big.Int) error {
+// provideV3Liquidity seeds a full-range position into every pool that has no
+// liquidity yet. Both tokens are minted on demand by the liquidity provider, so
+// the owner wallet only pays gas.
+func (u *Uniswap) provideV3Liquidity(info *V3DeploymentInfo, client *spamoor.Client, ownerWallet *spamoor.Wallet, feeCap, tipCap *big.Int) error {
 	tickLower, tickUpper := fullRangeTicks(info.TickSpacing)
+	callOpts := &bind.CallOpts{Context: u.ctx}
+	liquidityTxs := []*txtypes.Transaction{}
 
-	// each DAI has a pool on both factories -> two liquidity txs per DAI.
-	poolCount := len(info.Pools) * 2
+	for i := range info.Pools {
+		poolInfo := info.Pools[i]
+		sqrtPriceX96 := u.v3SqrtPriceX96(poolInfo.QuoteIsToken0)
+		liquidity := fullRangeLiquidityForToken(sqrtPriceX96, poolInfo.QuoteIsToken0, u.options.QuoteLiquidityPerPool)
 
-	pairFundingAmount := uint256.NewInt(0)
-	for i := 0; i < poolCount; i++ {
-		pairFundingAmount = pairFundingAmount.Add(pairFundingAmount, u.options.EthLiquidityPerPair)
-		fundingFees := uint256.NewInt(6000000)
-		fundingFees = fundingFees.Mul(fundingFees, uint256.MustFromBig(feeCap))
-		pairFundingAmount = pairFundingAmount.Add(pairFundingAmount, fundingFees)
+		pools := []struct {
+			addr common.Address
+			pool *contract.UniswapV3Pool
+		}{
+			{poolInfo.PoolAAddr, poolInfo.PoolA},
+			{poolInfo.PoolBAddr, poolInfo.PoolB},
+		}
+		for _, p := range pools {
+			existing, err := p.pool.Liquidity(callOpts)
+			if err != nil {
+				return fmt.Errorf("could not read pool liquidity: %w", err)
+			}
+			if existing.Sign() > 0 {
+				continue
+			}
+
+			poolAddr := p.addr
+			tx, err := ownerWallet.BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
+				GasFeeCap: uint256.MustFromBig(feeCap),
+				GasTipCap: uint256.MustFromBig(tipCap),
+				Value:     uint256.NewInt(0),
+			}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
+				return info.LiquidityProvider.ProvideLiquidity(transactOpts, poolAddr, tickLower, tickUpper, liquidity)
+			})
+			if err != nil {
+				return fmt.Errorf("could not provide liquidity for pool %v: %w", poolAddr.Hex(), err)
+			}
+			liquidityTxs = append(liquidityTxs, tx)
+		}
 	}
 
-	rootWallet := u.walletPool.GetRootWallet()
-	return rootWallet.WithWalletLock(u.ctx, poolCount, pairFundingAmount, u.walletPool.GetClientPool(), func(reason string) {
-		u.logger.Infof("root wallet is locked, %s", reason)
-	}, func() error {
-		liquidityTxs := []*txtypes.Transaction{}
-
-		// WETH budget bounds the seeded liquidity; DAI is minted on demand.
-		wethBudget := new(big.Int).Div(
-			new(big.Int).Mul(u.options.EthLiquidityPerPair.ToBig(), big.NewInt(liquidityBudgetBps)),
-			big.NewInt(10000),
-		)
-
-		for i := range info.Pools {
-			poolInfo := info.Pools[i]
-			sqrtPriceX96 := u.v3SqrtPriceX96(poolInfo.WethIsToken0)
-			liquidity := fullRangeLiquidityForWeth(sqrtPriceX96, poolInfo.WethIsToken0, wethBudget)
-
-			for _, poolAddr := range []common.Address{poolInfo.PoolAAddr, poolInfo.PoolBAddr} {
-				poolAddr := poolAddr
-				tx, err := rootWallet.GetWallet().BuildBoundTxWithEstimate(u.ctx, client, u.walletPool.GetTxPool(), &txbuilder.TxMetadata{
-					GasFeeCap: uint256.MustFromBig(feeCap),
-					GasTipCap: uint256.MustFromBig(tipCap),
-					Value:     u.options.EthLiquidityPerPair,
-				}, func(transactOpts *bind.TransactOpts) (*types.Transaction, error) {
-					return info.LiquidityProvider.ProvideLiquidity(transactOpts, poolAddr, tickLower, tickUpper, liquidity)
-				})
-				if err != nil {
-					return fmt.Errorf("could not provide liquidity for pool %v: %w", poolAddr.Hex(), err)
-				}
-				liquidityTxs = append(liquidityTxs, tx)
-			}
-		}
-
-		return u.sendBatch(rootWallet.GetWallet(), client, liquidityTxs, "providing liquidity")
-	})
+	return u.sendBatch(ownerWallet, client, liquidityTxs, "providing liquidity")
 }
 
 // sendBatch submits a batch of transactions from a single wallet and waits for

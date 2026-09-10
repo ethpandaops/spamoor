@@ -4,9 +4,11 @@
 package contract
 
 import (
+	"context"
 	"errors"
 	"math/big"
 	"strings"
+	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -27,12 +29,14 @@ var (
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 	_ = abi.ConvertType
+	_ = time.Tick
+	_ = context.Background
 )
 
 // V3LiquidityProviderMetaData contains all meta data concerning the V3LiquidityProvider contract.
 var V3LiquidityProviderMetaData = &bind.MetaData{
-	ABI: "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"owner1\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"owner2\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"weth9\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"pool\",\"type\":\"address\"},{\"internalType\":\"int24\",\"name\":\"tickLower\",\"type\":\"int24\"},{\"internalType\":\"int24\",\"name\":\"tickUpper\",\"type\":\"int24\"},{\"internalType\":\"uint128\",\"name\":\"liquidity\",\"type\":\"uint128\"}],\"name\":\"provideLiquidity\",\"outputs\":[],\"stateMutability\":\"payable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"amount0Owed\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount1Owed\",\"type\":\"uint256\"},{\"internalType\":\"bytes\",\"name\":\"\",\"type\":\"bytes\"}],\"name\":\"uniswapV3MintCallback\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"stateMutability\":\"payable\",\"type\":\"receive\"}]",
-	Bin: "0x608060405234801561001057600080fd5b5060405161074138038061074183398101604081905261002f9161008d565b600080546001600160a01b039485166001600160a01b0319918216179091556001805493851693821693909317909255600280549190931691161790556100d0565b80516001600160a01b038116811461008857600080fd5b919050565b6000806000606084860312156100a257600080fd5b6100ab84610071565b92506100b960208501610071565b91506100c760408501610071565b90509250925092565b610662806100df6000396000f3fe60806040526004361061002d5760003560e01c80632b27850814610039578063d34879971461004e57600080fd5b3661003457005b600080fd5b61004c6100473660046104de565b61006e565b005b34801561005a57600080fd5b5061004c610069366004610542565b610223565b6000546001600160a01b031633148061009157506001546001600160a01b031633145b6100ce5760405162461bcd60e51b81526020600482015260096024820152683737ba1037bbb732b960b91b60448201526064015b60405180910390fd5b600380546001600160a01b0319166001600160a01b038616908117909155604051633c8a7d8d60e01b8152306004820152600285810b602483015284900b60448201526001600160801b038316606482015260a06084820152600060a4820152633c8a7d8d9060c40160408051808303816000875af1158015610155573d6000803e3d6000fd5b505050506040513d601f19601f8201168201806040525081019061017991906105c2565b5050600380546001600160a01b031916905547801561021c57604051600090329083908381818185875af1925050503d80600081146101d4576040519150601f19603f3d011682016040523d82523d6000602084013e6101d9565b606091505b505090508061021a5760405162461bcd60e51b815260206004820152600d60248201526c1c99599d5b990819985a5b1959609a1b60448201526064016100c5565b505b5050505050565b6003546001600160a01b031633146102715760405162461bcd60e51b81526020600482015260116024820152703ab732bc3832b1ba32b21031b0b63632b960791b60448201526064016100c5565b6000336001600160a01b0316630dfe16816040518163ffffffff1660e01b8152600401602060405180830381865afa1580156102b1573d6000803e3d6000fd5b505050506040513d601f19601f820116820180604052508101906102d591906105e6565b90506000336001600160a01b031663d21220a76040518163ffffffff1660e01b8152600401602060405180830381865afa158015610317573d6000803e3d6000fd5b505050506040513d601f19601f8201168201806040525081019061033b91906105e6565b9050851561034d5761034d8287610359565b841561021a5761021a81865b6002546001600160a01b039081169083160361045357600260009054906101000a90046001600160a01b03166001600160a01b031663d0e30db0826040518263ffffffff1660e01b81526004016000604051808303818588803b1580156103bf57600080fd5b505af11580156103d3573d6000803e3d6000fd5b505060025460405163a9059cbb60e01b8152336004820152602481018690526001600160a01b03909116935063a9059cbb925060440190506020604051808303816000875af115801561042a573d6000803e3d6000fd5b505050506040513d601f19601f8201168201806040525081019061044e919061060a565b505050565b6040516340c10f1960e01b8152336004820152602481018290526001600160a01b038316906340c10f1990604401600060405180830381600087803b15801561049b57600080fd5b505af115801561021a573d6000803e3d6000fd5b6001600160a01b03811681146104c457600080fd5b50565b8035600281900b81146104d957600080fd5b919050565b600080600080608085870312156104f457600080fd5b84356104ff816104af565b935061050d602086016104c7565b925061051b604086016104c7565b915060608501356001600160801b038116811461053757600080fd5b939692955090935050565b6000806000806060858703121561055857600080fd5b8435935060208501359250604085013567ffffffffffffffff8082111561057e57600080fd5b818701915087601f83011261059257600080fd5b8135818111156105a157600080fd5b8860208285010111156105b357600080fd5b95989497505060200194505050565b600080604083850312156105d557600080fd5b505080516020909101519092909150565b6000602082840312156105f857600080fd5b8151610603816104af565b9392505050565b60006020828403121561061c57600080fd5b8151801515811461060357600080fdfea2646970667358221220f85f4620491245007428e1aade4551bdfbbc1c53b9a953ea41e94c712d906ed564736f6c63430008110033",
+	ABI: "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"owner\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"pool\",\"type\":\"address\"},{\"internalType\":\"int24\",\"name\":\"tickLower\",\"type\":\"int24\"},{\"internalType\":\"int24\",\"name\":\"tickUpper\",\"type\":\"int24\"},{\"internalType\":\"uint128\",\"name\":\"liquidity\",\"type\":\"uint128\"}],\"name\":\"provideLiquidity\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"amount0Owed\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"amount1Owed\",\"type\":\"uint256\"},{\"internalType\":\"bytes\",\"name\":\"\",\"type\":\"bytes\"}],\"name\":\"uniswapV3MintCallback\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+	Bin: "0x608060405234801561001057600080fd5b5060405161057f38038061057f83398101604081905261002f91610054565b600080546001600160a01b0319166001600160a01b0392909216919091179055610084565b60006020828403121561006657600080fd5b81516001600160a01b038116811461007d57600080fd5b9392505050565b6104ec806100936000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632b2785081461003b578063d348799714610050575b600080fd5b61004e61004936600461038a565b610063565b005b61004e61005e3660046103ee565b610171565b6000546001600160a01b031633146100ae5760405162461bcd60e51b81526020600482015260096024820152683737ba1037bbb732b960b91b60448201526064015b60405180910390fd5b600180546001600160a01b0319166001600160a01b038616908117909155604051633c8a7d8d60e01b8152306004820152600285810b602483015284900b60448201526001600160801b038316606482015260a06084820152600060a4820152633c8a7d8d9060c40160408051808303816000875af1158015610135573d6000803e3d6000fd5b505050506040513d601f19601f82011682018060405250810190610159919061046e565b5050600180546001600160a01b031916905550505050565b6001546001600160a01b031633146101bf5760405162461bcd60e51b81526020600482015260116024820152703ab732bc3832b1ba32b21031b0b63632b960791b60448201526064016100a5565b831561028a57336001600160a01b0316630dfe16816040518163ffffffff1660e01b8152600401602060405180830381865afa158015610203573d6000803e3d6000fd5b505050506040513d601f19601f820116820180604052508101906102279190610492565b6040516340c10f1960e01b8152336004820152602481018690526001600160a01b0391909116906340c10f1990604401600060405180830381600087803b15801561027157600080fd5b505af1158015610285573d6000803e3d6000fd5b505050505b821561035557336001600160a01b031663d21220a76040518163ffffffff1660e01b8152600401602060405180830381865afa1580156102ce573d6000803e3d6000fd5b505050506040513d601f19601f820116820180604052508101906102f29190610492565b6040516340c10f1960e01b8152336004820152602481018590526001600160a01b0391909116906340c10f1990604401600060405180830381600087803b15801561033c57600080fd5b505af1158015610350573d6000803e3d6000fd5b505050505b50505050565b6001600160a01b038116811461037057600080fd5b50565b8035600281900b811461038557600080fd5b919050565b600080600080608085870312156103a057600080fd5b84356103ab8161035b565b93506103b960208601610373565b92506103c760408601610373565b915060608501356001600160801b03811681146103e357600080fd5b939692955090935050565b6000806000806060858703121561040457600080fd5b8435935060208501359250604085013567ffffffffffffffff8082111561042a57600080fd5b818701915087601f83011261043e57600080fd5b81358181111561044d57600080fd5b88602082850101111561045f57600080fd5b95989497505060200194505050565b6000806040838503121561048157600080fd5b505080516020909101519092909150565b6000602082840312156104a457600080fd5b81516104af8161035b565b939250505056fea26469706673582212208c4b3f6b983a1b5ab98728fca626459dcbfa23a216091deaf779d11d17ef132a64736f6c63430008110033",
 }
 
 // V3LiquidityProviderABI is the input ABI used to generate the binding from.
@@ -44,7 +48,7 @@ var V3LiquidityProviderABI = V3LiquidityProviderMetaData.ABI
 var V3LiquidityProviderBin = V3LiquidityProviderMetaData.Bin
 
 // DeployV3LiquidityProvider deploys a new Ethereum contract, binding an instance of V3LiquidityProvider to it.
-func DeployV3LiquidityProvider(auth *bind.TransactOpts, backend bind.ContractBackend, owner1 common.Address, owner2 common.Address, weth9 common.Address) (common.Address, *types.Transaction, *V3LiquidityProvider, error) {
+func DeployV3LiquidityProvider(auth *bind.TransactOpts, backend bind.ContractBackend, owner common.Address) (common.Address, *types.Transaction, *V3LiquidityProvider, error) {
 	parsed, err := V3LiquidityProviderMetaData.GetAbi()
 	if err != nil {
 		return common.Address{}, nil, nil, err
@@ -53,7 +57,7 @@ func DeployV3LiquidityProvider(auth *bind.TransactOpts, backend bind.ContractBac
 		return common.Address{}, nil, nil, errors.New("GetABI returned nil")
 	}
 
-	address, tx, contract, err := bind.DeployContract(auth, *parsed, common.FromHex(V3LiquidityProviderBin), backend, owner1, owner2, weth9)
+	address, tx, contract, err := bind.DeployContract(auth, *parsed, common.FromHex(V3LiquidityProviderBin), backend, owner)
 	if err != nil {
 		return common.Address{}, nil, nil, err
 	}
@@ -204,21 +208,21 @@ func (_V3LiquidityProvider *V3LiquidityProviderTransactorRaw) Transact(opts *bin
 
 // ProvideLiquidity is a paid mutator transaction binding the contract method 0x2b278508.
 //
-// Solidity: function provideLiquidity(address pool, int24 tickLower, int24 tickUpper, uint128 liquidity) payable returns()
+// Solidity: function provideLiquidity(address pool, int24 tickLower, int24 tickUpper, uint128 liquidity) returns()
 func (_V3LiquidityProvider *V3LiquidityProviderTransactor) ProvideLiquidity(opts *bind.TransactOpts, pool common.Address, tickLower *big.Int, tickUpper *big.Int, liquidity *big.Int) (*types.Transaction, error) {
 	return _V3LiquidityProvider.contract.Transact(opts, "provideLiquidity", pool, tickLower, tickUpper, liquidity)
 }
 
 // ProvideLiquidity is a paid mutator transaction binding the contract method 0x2b278508.
 //
-// Solidity: function provideLiquidity(address pool, int24 tickLower, int24 tickUpper, uint128 liquidity) payable returns()
+// Solidity: function provideLiquidity(address pool, int24 tickLower, int24 tickUpper, uint128 liquidity) returns()
 func (_V3LiquidityProvider *V3LiquidityProviderSession) ProvideLiquidity(pool common.Address, tickLower *big.Int, tickUpper *big.Int, liquidity *big.Int) (*types.Transaction, error) {
 	return _V3LiquidityProvider.Contract.ProvideLiquidity(&_V3LiquidityProvider.TransactOpts, pool, tickLower, tickUpper, liquidity)
 }
 
 // ProvideLiquidity is a paid mutator transaction binding the contract method 0x2b278508.
 //
-// Solidity: function provideLiquidity(address pool, int24 tickLower, int24 tickUpper, uint128 liquidity) payable returns()
+// Solidity: function provideLiquidity(address pool, int24 tickLower, int24 tickUpper, uint128 liquidity) returns()
 func (_V3LiquidityProvider *V3LiquidityProviderTransactorSession) ProvideLiquidity(pool common.Address, tickLower *big.Int, tickUpper *big.Int, liquidity *big.Int) (*types.Transaction, error) {
 	return _V3LiquidityProvider.Contract.ProvideLiquidity(&_V3LiquidityProvider.TransactOpts, pool, tickLower, tickUpper, liquidity)
 }
@@ -242,25 +246,4 @@ func (_V3LiquidityProvider *V3LiquidityProviderSession) UniswapV3MintCallback(am
 // Solidity: function uniswapV3MintCallback(uint256 amount0Owed, uint256 amount1Owed, bytes ) returns()
 func (_V3LiquidityProvider *V3LiquidityProviderTransactorSession) UniswapV3MintCallback(amount0Owed *big.Int, amount1Owed *big.Int, arg2 []byte) (*types.Transaction, error) {
 	return _V3LiquidityProvider.Contract.UniswapV3MintCallback(&_V3LiquidityProvider.TransactOpts, amount0Owed, amount1Owed, arg2)
-}
-
-// Receive is a paid mutator transaction binding the contract receive function.
-//
-// Solidity: receive() payable returns()
-func (_V3LiquidityProvider *V3LiquidityProviderTransactor) Receive(opts *bind.TransactOpts) (*types.Transaction, error) {
-	return _V3LiquidityProvider.contract.RawTransact(opts, nil) // calldata is disallowed for receive function
-}
-
-// Receive is a paid mutator transaction binding the contract receive function.
-//
-// Solidity: receive() payable returns()
-func (_V3LiquidityProvider *V3LiquidityProviderSession) Receive() (*types.Transaction, error) {
-	return _V3LiquidityProvider.Contract.Receive(&_V3LiquidityProvider.TransactOpts)
-}
-
-// Receive is a paid mutator transaction binding the contract receive function.
-//
-// Solidity: receive() payable returns()
-func (_V3LiquidityProvider *V3LiquidityProviderTransactorSession) Receive() (*types.Transaction, error) {
-	return _V3LiquidityProvider.Contract.Receive(&_V3LiquidityProvider.TransactOpts)
 }

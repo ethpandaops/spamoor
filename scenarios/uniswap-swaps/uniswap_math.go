@@ -6,12 +6,15 @@ import (
 
 // Uniswap v3 fixed-point math helpers. These mirror the relevant parts of the
 // Uniswap v3 SDK / TickMath / LiquidityAmounts libraries, just enough to seed a
-// full-range position at a chosen starting price.
+// full-range position at a chosen starting price and to quote swaps at spot.
 
 const (
 	// v3 tick bounds as defined by TickMath.
 	minTick int64 = -887272
 	maxTick int64 = 887272
+
+	// v3 fee denominator: fees are expressed in hundredths of a bip.
+	feeDenominator = 1_000_000
 )
 
 var (
@@ -80,18 +83,46 @@ func spotAmountOut(sqrtPriceX96, amountIn *big.Int, zeroForOne bool) *big.Int {
 	return new(big.Int).Div(new(big.Int).Mul(amountIn, q192), priceX192)
 }
 
-// fullRangeLiquidityForWeth computes the full-range liquidity bounded by the
-// available WETH budget. DAI is minted on demand by the liquidity provider, so
-// only the WETH side constrains how much liquidity can be seeded. sqrtPriceX96
-// is the pool's current price and wethIsToken0 indicates the token ordering.
-func fullRangeLiquidityForWeth(sqrtPriceX96 *big.Int, wethIsToken0 bool, wethBudget *big.Int) *big.Int {
+// spotAmountOutAfterFee returns the spot output for an exact input swap after
+// the pool fee (which v3 takes on the input), ignoring price impact.
+func spotAmountOutAfterFee(sqrtPriceX96, fee, amountIn *big.Int, zeroForOne bool) *big.Int {
+	feeDenom := big.NewInt(feeDenominator)
+	amountInAfterFee := new(big.Int).Div(new(big.Int).Mul(amountIn, new(big.Int).Sub(feeDenom, fee)), feeDenom)
+	return spotAmountOut(sqrtPriceX96, amountInAfterFee, zeroForOne)
+}
+
+// spotAmountIn returns the input needed to receive amountOut at the pool's
+// current spot price, grossed up for the pool fee (rounded up), ignoring price
+// impact. zeroForOne indicates the swap direction (token0 in, token1 out).
+func spotAmountIn(sqrtPriceX96, fee, amountOut *big.Int, zeroForOne bool) *big.Int {
+	// the spot price is symmetric: input = amountOut priced in the opposite direction
+	amountInAfterFee := spotAmountOut(sqrtPriceX96, amountOut, !zeroForOne)
+
+	// amountIn = ceil(amountInAfterFee * denom / (denom - fee))
+	feeDenom := big.NewInt(feeDenominator)
+	num := new(big.Int).Mul(amountInAfterFee, feeDenom)
+	den := new(big.Int).Sub(feeDenom, fee)
+	amountIn := new(big.Int).Add(num, new(big.Int).Sub(den, big.NewInt(1)))
+	amountIn.Div(amountIn, den)
+	if amountIn.Sign() == 0 {
+		amountIn = big.NewInt(1)
+	}
+	return amountIn
+}
+
+// fullRangeLiquidityForToken computes the full-range liquidity that puts
+// tokenAmount of one token into the position at the given price. The other
+// token is minted on demand by the liquidity provider, so only this side
+// constrains how much liquidity is seeded. sqrtPriceX96 is the pool's current
+// price and tokenIsToken0 indicates whether the sized token is token0.
+func fullRangeLiquidityForToken(sqrtPriceX96 *big.Int, tokenIsToken0 bool, tokenAmount *big.Int) *big.Int {
 	var liquidity *big.Int
-	if wethIsToken0 {
-		// token0 is WETH: amount0 is supplied over [current, max].
-		liquidity = getLiquidityForAmount0(sqrtPriceX96, maxSqrtRatio, wethBudget)
+	if tokenIsToken0 {
+		// token0 is supplied over [current, max].
+		liquidity = getLiquidityForAmount0(sqrtPriceX96, maxSqrtRatio, tokenAmount)
 	} else {
-		// token1 is WETH: amount1 is supplied over [min, current].
-		liquidity = getLiquidityForAmount1(minSqrtRatio, sqrtPriceX96, wethBudget)
+		// token1 is supplied over [min, current].
+		liquidity = getLiquidityForAmount1(minSqrtRatio, sqrtPriceX96, tokenAmount)
 	}
 	if liquidity.Cmp(maxUint128) > 0 {
 		liquidity = new(big.Int).Set(maxUint128)

@@ -3,7 +3,9 @@ package uniswapswaps
 import (
 	"context"
 	"fmt"
+	"math/big"
 	mathrand "math/rand"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -36,6 +38,7 @@ type ScenarioOptions struct {
 	SlippageMin       uint64  `yaml:"slippage_min"`
 	SlippageMax       uint64  `yaml:"slippage_max"`
 	SellThreshold     string  `yaml:"sell_threshold"`
+	QuoteFunding      string  `yaml:"quote_funding"`
 	Timeout           string  `yaml:"timeout"`
 	ClientGroup       string  `yaml:"client_group"`
 	DeployClientGroup string  `yaml:"deploy_client_group"`
@@ -49,15 +52,34 @@ type Scenario struct {
 
 	uniswap        *Uniswap
 	deploymentInfo *DeploymentInfo
+
+	// wei amounts parsed once from the string options
+	minSwapAmount *big.Int
+	maxSwapAmount *big.Int
+	sellThreshold *big.Int
+	quoteFunding  *big.Int
+
+	// randomness for swap sizing; ProcessNextTxFn runs concurrently so the
+	// source is guarded
+	randMu sync.Mutex
+	rand   *mathrand.Rand
 }
 
 // swapGasLimit is the static gas limit used for all swap (spam) transactions.
 // Swaps deliberately avoid per-tx gas estimation to skip the extra RPC round
 // trip on the hot path. Under the Amsterdam fee schedule a swap that creates
-// fresh state (e.g. the recipient's first token balance slot, WETH wrap/unwrap)
-// costs ~410k gas; this limit keeps comfortable headroom for the heaviest swap
-// variant. Bump it if a future fee schedule raises state-creation cost again.
+// fresh state (e.g. the recipient's first token balance slot) costs ~410k gas;
+// this limit keeps comfortable headroom for the heaviest swap variant. Bump it
+// if a future fee schedule raises state-creation cost again.
 const swapGasLimit = 600000
+
+// Every pool is seeded with quoteLiquidityPerPool quote tokens and
+// quoteLiquidityPerPool * tokensPerQuote pair tokens, which fixes the initial
+// price at tokensPerQuote pair tokens per quote token. Both tokens are minted
+// on demand, so the depth costs nothing but gas.
+const tokensPerQuote = 10000
+
+var quoteLiquidityPerPool = new(big.Int).Mul(big.NewInt(2000), big.NewInt(1e18))
 
 var ScenarioName = "uniswap-swaps"
 var ScenarioDefaultOptions = ScenarioOptions{
@@ -78,6 +100,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	SlippageMin:       0,
 	SlippageMax:       0,
 	SellThreshold:     "50000000000000000000000", // 50000 DAI
+	QuoteFunding:      "5000000000000000000",     // 5 quote tokens (= 50000 DAI at the seeded price)
 	Timeout:           "",
 	ClientGroup:       "",
 	DeployClientGroup: "",
@@ -94,6 +117,7 @@ func newScenario(logger logrus.FieldLogger) scenario.Scenario {
 	return &Scenario{
 		options: ScenarioDefaultOptions,
 		logger:  logger.WithField("scenario", ScenarioName),
+		rand:    mathrand.New(mathrand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -110,13 +134,14 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.Version, "uniswap-version", ScenarioDefaultOptions.Version, "Uniswap version to use (2 or 3)")
 	flags.Uint64Var(&s.options.FeeTier, "fee-tier", ScenarioDefaultOptions.FeeTier, "Uniswap v3 fee tier in hundredths of a bip (500, 3000, 10000)")
 	flags.Uint64Var(&s.options.PairCount, "pair-count", ScenarioDefaultOptions.PairCount, "Number of uniswap pairs to deploy")
-	flags.StringVar(&s.options.MinSwapAmount, "min-swap", ScenarioDefaultOptions.MinSwapAmount, "Minimum swap amount in wei")
-	flags.StringVar(&s.options.MaxSwapAmount, "max-swap", ScenarioDefaultOptions.MaxSwapAmount, "Maximum swap amount in wei")
+	flags.StringVar(&s.options.MinSwapAmount, "min-swap", ScenarioDefaultOptions.MinSwapAmount, "Minimum swap amount in DAI wei")
+	flags.StringVar(&s.options.MaxSwapAmount, "max-swap", ScenarioDefaultOptions.MaxSwapAmount, "Maximum swap amount in DAI wei")
 	flags.Uint64Var(&s.options.BuyRatio, "buy-ratio", ScenarioDefaultOptions.BuyRatio, "Ratio of buy vs sell swaps (0-100)")
 	flags.Uint64Var(&s.options.Slippage, "slippage", ScenarioDefaultOptions.Slippage, "Slippage tolerance in basis points")
 	flags.Uint64Var(&s.options.SlippageMin, "slippage-min", ScenarioDefaultOptions.SlippageMin, "Min per-trade slippage in bps (0 disables; use fixed --slippage)")
 	flags.Uint64Var(&s.options.SlippageMax, "slippage-max", ScenarioDefaultOptions.SlippageMax, "Max per-trade slippage in bps (when > slippage-min, slippage is randomized per trade)")
 	flags.StringVar(&s.options.SellThreshold, "sell-threshold", ScenarioDefaultOptions.SellThreshold, "DAI balance threshold to force sell (in wei)")
+	flags.StringVar(&s.options.QuoteFunding, "quote-funding", ScenarioDefaultOptions.QuoteFunding, "Quote token amount (in wei) minted to each child wallet at startup and whenever a wallet cannot afford a buy")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.StringVar(&s.options.DeployClientGroup, "deploy-client-group", ScenarioDefaultOptions.DeployClientGroup, "Client group to use for deployments")
@@ -137,6 +162,26 @@ func (s *Scenario) Init(options *scenario.Options) error {
 
 	if s.options.Version != 2 && s.options.Version != 3 {
 		return fmt.Errorf("invalid uniswap version %d, must be 2 or 3", s.options.Version)
+	}
+
+	var err error
+	if s.minSwapAmount, err = parseWei("min swap amount", s.options.MinSwapAmount); err != nil {
+		return err
+	}
+	if s.maxSwapAmount, err = parseWei("max swap amount", s.options.MaxSwapAmount); err != nil {
+		return err
+	}
+	if s.sellThreshold, err = parseWei("sell threshold", s.options.SellThreshold); err != nil {
+		return err
+	}
+	if s.quoteFunding, err = parseWei("quote funding", s.options.QuoteFunding); err != nil {
+		return err
+	}
+	if s.minSwapAmount.Cmp(s.maxSwapAmount) > 0 {
+		return fmt.Errorf("min swap amount %s exceeds max swap amount %s", s.options.MinSwapAmount, s.options.MaxSwapAmount)
+	}
+	if s.quoteFunding.Sign() <= 0 {
+		return fmt.Errorf("quote funding must be positive")
 	}
 
 	if s.options.MaxWallets > 0 {
@@ -177,6 +222,15 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	return nil
 }
 
+// parseWei parses a decimal wei amount from a string option.
+func parseWei(name, value string) (*big.Int, error) {
+	amount, ok := new(big.Int).SetString(value, 10)
+	if !ok || amount.Sign() < 0 {
+		return nil, fmt.Errorf("invalid %s: %s", name, value)
+	}
+	return amount, nil
+}
+
 func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s (V%d)", ScenarioName, s.options.Version)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
@@ -188,16 +242,17 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	// deploy uniswap contracts
 	s.uniswap = NewUniswap(ctx, s.walletPool, s.logger, UniswapOptions{
-		Version:             s.options.Version,
-		BaseFee:             s.options.BaseFee,
-		TipFee:              s.options.TipFee,
-		BaseFeeWei:          s.options.BaseFeeWei,
-		TipFeeWei:           s.options.TipFeeWei,
-		DaiPairs:            s.options.PairCount,
-		EthLiquidityPerPair: uint256.NewInt(0).Mul(uint256.NewInt(2000), uint256.NewInt(1000000000000000000)),
-		DaiLiquidityFactor:  10000,
-		FeeTier:             s.options.FeeTier,
-		ClientGroup:         deployClientGroup,
+		Version:               s.options.Version,
+		BaseFee:               s.options.BaseFee,
+		TipFee:                s.options.TipFee,
+		BaseFeeWei:            s.options.BaseFeeWei,
+		TipFeeWei:             s.options.TipFeeWei,
+		PairCount:             s.options.PairCount,
+		QuoteLiquidityPerPool: quoteLiquidityPerPool,
+		TokensPerQuote:        tokensPerQuote,
+		QuoteFunding:          s.quoteFunding,
+		FeeTier:               s.options.FeeTier,
+		ClientGroup:           deployClientGroup,
 	})
 
 	if s.options.Version == 3 {
@@ -221,7 +276,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 			return err
 		}
 		if deploymentInfo == nil {
-			return fmt.Errorf("could not deploy uniswap pairs: %w", err)
+			return fmt.Errorf("could not deploy uniswap pairs")
 		}
 		s.deploymentInfo = deploymentInfo
 
@@ -233,9 +288,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 	s.uniswap.InitializeTokenBalances()
 
-	// Set unlimited allowances for all wallets to the router(s)
-	if err := s.uniswap.SetUnlimitedAllowances(); err != nil {
-		s.logger.Errorf("could not set unlimited allowances: %v", err)
+	// Approve the router(s) and fund every child wallet with quote tokens
+	if err := s.uniswap.PrepareWallets(); err != nil {
+		s.logger.Errorf("could not prepare wallets: %v", err)
 		return err
 	}
 
@@ -324,6 +379,38 @@ func (s *Scenario) perTradeSlippage() uint64 {
 		slippage = 10000
 	}
 	return slippage
+}
+
+// randomSwapAmount draws a uniform random DAI amount from
+// [min_swap_amount, max_swap_amount].
+func (s *Scenario) randomSwapAmount() *big.Int {
+	span := new(big.Int).Sub(s.maxSwapAmount, s.minSwapAmount)
+	span.Add(span, big.NewInt(1))
+
+	s.randMu.Lock()
+	defer s.randMu.Unlock()
+	return new(big.Int).Add(s.minSwapAmount, new(big.Int).Rand(s.rand, span))
+}
+
+// decideSwapSide picks buy (true) or sell (false) for a trade of the given DAI
+// amount from the configured buy ratio and the wallet's tracked DAI balance: a
+// wallet holding more than the sell threshold is forced to sell so pools don't
+// get drained one-sided, and a wallet that cannot cover the sell buys instead.
+func (s *Scenario) decideSwapSide(daiBalance, amount *big.Int) bool {
+	isBuy := mathrand.Intn(100) < int(s.options.BuyRatio)
+	if daiBalance.Cmp(s.sellThreshold) > 0 {
+		isBuy = false
+	}
+	if !isBuy && daiBalance.Cmp(amount) < 0 {
+		isBuy = true
+	}
+	return isBuy
+}
+
+// applySlippage returns amount reduced by the given tolerance in basis points.
+func applySlippage(amount *big.Int, slippageBps uint64) *big.Int {
+	out := new(big.Int).Mul(amount, big.NewInt(10000-int64(slippageBps)))
+	return out.Div(out, big.NewInt(10000))
 }
 
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
