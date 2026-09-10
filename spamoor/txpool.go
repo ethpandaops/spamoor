@@ -1147,9 +1147,7 @@ func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wall
 	}
 
 	wallet.confirmedTxCount = nonce + 1
-	if nonce+1 > wallet.pendingTxCount.Load() {
-		wallet.pendingTxCount.Store(nonce + 1)
-	}
+	wallet.advancePendingTxCount(nonce + 1)
 	if blockNumber > wallet.lastConfirmation {
 		wallet.lastConfirmation = blockNumber
 	}
