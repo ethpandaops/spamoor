@@ -243,9 +243,18 @@ func (d *Daemon) DeleteSpammer(id int64, userEmail string) error {
 	// Capture name for audit log
 	spammerName := spammer.GetName()
 
-	// Stop if running
+	// Stop if running. Pause blocks for up to 10 seconds waiting for the scenario
+	// to wind down, so release the map lock around it (as the group branch above
+	// does) instead of freezing every GetSpammer/GetAllSpammers caller meanwhile.
 	if spammer.scenarioCancel != nil {
+		d.spammerMapMtx.Unlock()
 		spammer.Pause()
+		d.spammerMapMtx.Lock()
+
+		// A concurrent delete of the same id may have completed while unlocked.
+		if d.spammerMap[id] == nil {
+			return nil
+		}
 	}
 
 	// Delete from DB
