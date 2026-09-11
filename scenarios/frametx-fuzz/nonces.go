@@ -125,6 +125,7 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 
 	for _, slot := range bestSlots {
 		result.keys = append(result.keys, nonceKey(sender, slot))
+		result.slots = append(result.slots, slot)
 
 		if best == 0 {
 			result.firstUses++
@@ -132,8 +133,9 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 	}
 
 	// Keys must be strictly increasing by value, which the slot order does not
-	// guarantee once they are hashed into the key space.
-	sortKeys(result.keys)
+	// guarantee once they are hashed into the key space. The slots move with their
+	// keys so that consumed() advances exactly the slots the transaction used.
+	sortKeyedSlots(result.keys, result.slots)
 
 	if result.firstUses > maxFirstUses {
 		// Trimming keeps the transaction inside the public mempool's verification gas
@@ -144,10 +146,9 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 		}
 
 		result.keys = result.keys[:maxFirstUses]
+		result.slots = result.slots[:maxFirstUses]
 		result.firstUses = maxFirstUses
 	}
-
-	result.slots = bestSlots[:len(result.keys)]
 
 	return result, nil
 }
@@ -171,11 +172,13 @@ func (l *nonceLedger) consumed(sender common.Address, sel *selection) {
 	}
 }
 
-// sortKeys orders keys by numeric value, which is what the payload requires.
-func sortKeys(keys []*uint256.Int) {
+// sortKeyedSlots orders keys by numeric value, which is what the payload requires,
+// carrying each key's slot along so the two stay paired.
+func sortKeyedSlots(keys []*uint256.Int, slots []int) {
 	for i := 1; i < len(keys); i++ {
 		for j := i; j > 0 && keys[j].Cmp(keys[j-1]) < 0; j-- {
 			keys[j], keys[j-1] = keys[j-1], keys[j]
+			slots[j], slots[j-1] = slots[j-1], slots[j]
 		}
 	}
 }

@@ -466,7 +466,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		// The P256 entry's signer is part of the signature hash, so it has to be
 		// signed before the secp256k1 entries.
 		if err := result.tx.SignEntryP256(p256Index(result.tx), result.p256); err != nil {
-			result.sender.MarkSkippedNonce(result.tx.NonceSeq)
+			s.returnNonce(result.sender, result.tx)
 
 			return nil, result, client, err
 		}
@@ -479,7 +479,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 
 	signed, ok := tx.Inner().(*txtypes.FrameTx)
 	if !ok {
-		result.sender.MarkSkippedNonce(tx.Nonce())
+		s.returnNonce(result.sender, result.tx)
 
 		return nil, result, client, fmt.Errorf("built transaction is not a frame transaction")
 	}
@@ -499,7 +499,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		LogFn: spamoor.GetDefaultLogFn(s.logger, ScenarioName, fmt.Sprintf("%6d", txIdx+1), tx),
 	})
 	if err != nil {
-		result.sender.MarkSkippedNonce(tx.Nonce())
+		s.returnNonce(result.sender, result.tx)
 		s.coverage.refusedOne(result.recipe, err.Error())
 
 		return nil, result, client, err
@@ -508,6 +508,16 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	s.submitted.Add(1)
 
 	return receiptChan, result, client, nil
+}
+
+// returnNonce hands a prepared transaction's nonce back to its wallet when the
+// transaction is abandoned. Only a legacy nonce is the wallet's account nonce; a keyed
+// nonce is an EIP-8250 sequence in its own domain, which the wallet must not record as
+// a skipped account nonce or a later legacy-nonce transaction would reuse it.
+func (s *Scenario) returnNonce(sender *spamoor.Wallet, tx *txtypes.FrameTx) {
+	if tx.UsesLegacyNonce() {
+		sender.MarkSkippedNonce(tx.NonceSeq)
+	}
 }
 
 // keylessWatchTimeout bounds how long a contract sender's transaction is watched for
