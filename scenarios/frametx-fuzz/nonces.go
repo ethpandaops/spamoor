@@ -28,6 +28,12 @@ type nonceLedger struct {
 	// known records which keys have been read from the chain, so an unread key is
 	// looked up once rather than assumed to be at zero.
 	known map[common.Address]map[uint64]bool
+
+	// reserved records the slots an in-flight transaction is using. The chain only
+	// advances a sequence once the transaction lands, so without this two concurrent
+	// draws for one sender would pick the same keys at the same sequence and the
+	// second would be refused for a nonce the run itself burned.
+	reserved map[common.Address]map[uint64]bool
 }
 
 // newNonceLedger returns an empty ledger.
@@ -35,6 +41,7 @@ func newNonceLedger() *nonceLedger {
 	return &nonceLedger{
 		sequences: map[common.Address]map[uint64]uint64{},
 		known:     map[common.Address]map[uint64]bool{},
+		reserved:  map[common.Address]map[uint64]bool{},
 	}
 }
 
@@ -59,7 +66,8 @@ type selection struct {
 }
 
 // selectKeys returns up to count keys for a sender that all sit at the same sequence,
-// with no more than maxFirstUses of them seeing their first use.
+// with no more than maxFirstUses of them seeing their first use. The slots it returns
+// are reserved until the caller reports them consumed or releases them.
 //
 // Reading the current sequence from the chain rather than assuming zero is what lets a
 // second run against the same chain work at all: the protocol never writes zero, so an
@@ -77,15 +85,21 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 		sequences = map[uint64]uint64{}
 		l.sequences[sender] = sequences
 		l.known[sender] = map[uint64]bool{}
+		l.reserved[sender] = map[uint64]bool{}
 	}
 
 	known := l.known[sender]
+	reserved := l.reserved[sender]
 
 	// Group the candidate slots by the sequence they are at, reading any slot this run
-	// has not seen before.
+	// has not seen before. A slot another transaction is using is not a candidate.
 	bySequence := map[uint64][]int{}
 
 	for slot := 0; slot < count*2 && len(bySequence) <= count; slot++ {
+		if reserved[uint64(slot)] {
+			continue
+		}
+
 		if !known[uint64(slot)] {
 			key := nonceKey(sender, slot)
 
@@ -150,10 +164,15 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 		result.firstUses = maxFirstUses
 	}
 
+	for _, slot := range result.slots {
+		reserved[uint64(slot)] = true
+	}
+
 	return result, nil
 }
 
-// consumed records that a selection landed, moving every key in it to the next sequence.
+// consumed records that a selection landed, moving every key in it to the next sequence
+// and freeing its slots for the next draw.
 func (l *nonceLedger) consumed(sender common.Address, sel *selection) {
 	if sel == nil {
 		return
@@ -169,6 +188,30 @@ func (l *nonceLedger) consumed(sender common.Address, sel *selection) {
 
 	for _, slot := range sel.slots {
 		sequences[uint64(slot)] = sel.sequence + 1
+		l.known[sender][uint64(slot)] = true
+		delete(l.reserved[sender], uint64(slot))
+	}
+}
+
+// release frees a selection's slots without advancing them, for a transaction that was
+// not submitted or was refused. The slots are also forgotten so the next draw reads
+// them from the chain again: a refusal may mean the ledger's view of them is stale, and
+// re-reading is what brings it back in step.
+func (l *nonceLedger) release(sender common.Address, sel *selection) {
+	if sel == nil {
+		return
+	}
+
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	if l.sequences[sender] == nil {
+		return
+	}
+
+	for _, slot := range sel.slots {
+		delete(l.reserved[sender], uint64(slot))
+		delete(l.known[sender], uint64(slot))
 	}
 }
 

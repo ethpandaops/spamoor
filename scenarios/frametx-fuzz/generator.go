@@ -47,9 +47,6 @@ type build struct {
 	// nonces is the keyed nonce selection this transaction consumes on success.
 	nonces *selection
 
-	// mempoolLegal records whether the transaction is expected to propagate.
-	mempoolLegal bool
-
 	// coverage names the dimensions this transaction exercises, which is what the run
 	// reports: the point is to trigger combinations, not to predict their outcome.
 	coverage []string
@@ -77,7 +74,7 @@ type build struct {
 
 // buildRecipe assembles the transaction a recipe describes.
 func (s *Scenario) buildRecipe(ctx context.Context, client *spamoor.Client, env *environment, recipe *Recipe, feeCap, tipCap *big.Int) (*build, error) {
-	result := &build{recipe: recipe, mempoolLegal: true, feeCap: feeCap}
+	result := &build{recipe: recipe, feeCap: feeCap}
 
 	if recipe.Sender == SenderFuzzedContract && recipe.Invalid == "" {
 		if address, ok := env.accounts.take(int(recipe.Index)); ok {
@@ -687,13 +684,12 @@ func (s *Scenario) appendRecentRootFrame(env *environment, recipe *Recipe, resul
 		return
 	}
 
-	references, legal := env.roots.references(recipe, current-1)
+	references := env.roots.references(recipe, current-1)
 	if len(references) == 0 {
 		return
 	}
 
 	result.append(txtypes.RecentRootVerifyFrame(references, txtypes.RecentRootVerifyGas(len(references))))
-	result.mempoolLegal = result.mempoolLegal && legal
 	result.cover("recent-roots")
 
 	if recipe.RecentRootEdge != "" {

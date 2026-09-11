@@ -447,10 +447,16 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	}
 
 	if err := result.sender.ResetNoncesIfNeeded(ctx, client); err != nil {
+		s.releaseKeys(result)
+
 		return nil, result, client, err
 	}
 
 	if recipe.Invalid != "" {
+		// An invalid transaction is not expected to land, so whatever keys it drew go
+		// back to the ledger as soon as it has been sent.
+		defer s.releaseKeys(result)
+
 		if err := result.sender.PrepareFrameTx(result.tx); err != nil {
 			return nil, result, client, err
 		}
@@ -459,6 +465,8 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	}
 
 	if err := result.sender.PrepareFrameTx(result.tx); err != nil {
+		s.releaseKeys(result)
+
 		return nil, result, client, err
 	}
 
@@ -466,7 +474,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		// The P256 entry's signer is part of the signature hash, so it has to be
 		// signed before the secp256k1 entries.
 		if err := result.tx.SignEntryP256(p256Index(result.tx), result.p256); err != nil {
-			s.returnNonce(result.sender, result.tx)
+			s.abandon(result)
 
 			return nil, result, client, err
 		}
@@ -474,12 +482,14 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 
 	tx, err := result.sender.SignFrameTx(result.tx)
 	if err != nil {
+		s.abandon(result)
+
 		return nil, result, client, err
 	}
 
 	signed, ok := tx.Inner().(*txtypes.FrameTx)
 	if !ok {
-		s.returnNonce(result.sender, result.tx)
+		s.abandon(result)
 
 		return nil, result, client, fmt.Errorf("built transaction is not a frame transaction")
 	}
@@ -491,6 +501,12 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		ClientGroup: s.options.ClientGroup,
 		Rebroadcast: s.options.Rebroadcast > 0,
 		OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
+			if receipt == nil {
+				// The transaction was dropped or replaced without landing, so its
+				// keys are free again.
+				s.releaseKeys(result)
+			}
+
 			receiptChan <- receipt
 		},
 		OnConfirm: func(tx *txtypes.Transaction, receipt *txtypes.Receipt) {
@@ -499,7 +515,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 		LogFn: spamoor.GetDefaultLogFn(s.logger, ScenarioName, fmt.Sprintf("%6d", txIdx+1), tx),
 	})
 	if err != nil {
-		s.returnNonce(result.sender, result.tx)
+		s.abandon(result)
 		s.coverage.refusedOne(result.recipe, err.Error())
 
 		return nil, result, client, err
@@ -510,13 +526,24 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	return receiptChan, result, client, nil
 }
 
-// returnNonce hands a prepared transaction's nonce back to its wallet when the
-// transaction is abandoned. Only a legacy nonce is the wallet's account nonce; a keyed
-// nonce is an EIP-8250 sequence in its own domain, which the wallet must not record as
-// a skipped account nonce or a later legacy-nonce transaction would reuse it.
-func (s *Scenario) returnNonce(sender *spamoor.Wallet, tx *txtypes.FrameTx) {
-	if tx.UsesLegacyNonce() {
-		sender.MarkSkippedNonce(tx.NonceSeq)
+// releaseKeys returns a built transaction's keyed nonce selection to the ledger when the
+// transaction will not land.
+func (s *Scenario) releaseKeys(result *build) {
+	if result.nonces != nil {
+		s.env.nonces.release(result.senderAddr, result.nonces)
+	}
+}
+
+// abandon gives back everything a prepared transaction holds when it is dropped before
+// submission: its keyed nonce selection, and its account nonce. Only a legacy nonce is
+// the wallet's account nonce; a keyed nonce is an EIP-8250 sequence in its own domain,
+// which the wallet must not record as a skipped account nonce or a later legacy-nonce
+// transaction would reuse it.
+func (s *Scenario) abandon(result *build) {
+	s.releaseKeys(result)
+
+	if result.tx.UsesLegacyNonce() {
+		result.sender.MarkSkippedNonce(result.tx.NonceSeq)
 	}
 }
 
@@ -536,10 +563,13 @@ func (s *Scenario) sendKeyless(ctx context.Context, client *spamoor.Client, resu
 
 	raw, err := tx.MarshalNetwork()
 	if err != nil {
+		s.releaseKeys(result)
+
 		return err
 	}
 
 	if err := client.SendRawTransaction(ctx, raw); err != nil {
+		s.releaseKeys(result)
 		s.coverage.refusedOne(result.recipe, err.Error())
 
 		return nil
@@ -561,8 +591,9 @@ func (s *Scenario) sendKeyless(ctx context.Context, client *spamoor.Client, resu
 // onConfirm records what a landed transaction produced. The per-frame result is logged,
 // not judged.
 func (s *Scenario) onConfirm(result *build, tx *txtypes.FrameTx, receipt *txtypes.Receipt) {
+	// senderAddr covers both a wallet and a keyless contract sender, which has no wallet.
 	if result.nonces != nil {
-		s.env.nonces.consumed(result.sender.GetAddress(), result.nonces)
+		s.env.nonces.consumed(result.senderAddr, result.nonces)
 	}
 
 	s.coverage.confirmedOne()

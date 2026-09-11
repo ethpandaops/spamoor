@@ -197,12 +197,12 @@ func (r *rootRing) calibratedClock() bool {
 	return r.calibrated
 }
 
-// references builds the declared references a recipe asks for, reporting whether the
-// result is a plain reference or one of the edge cases that is refused by design.
-func (r *rootRing) references(recipe *Recipe, currentSlot uint64) ([]*txtypes.RecentRootReference, bool) {
+// references builds the declared references a recipe asks for, including the edge cases
+// the recipe names, which are refused by design.
+func (r *rootRing) references(recipe *Recipe, currentSlot uint64) []*txtypes.RecentRootReference {
 	entries := r.usable(currentSlot)
 	if len(entries) == 0 {
-		return nil, true
+		return nil
 	}
 
 	count := recipe.RecentRoots
@@ -224,47 +224,47 @@ func (r *rootRing) references(recipe *Recipe, currentSlot uint64) ([]*txtypes.Re
 		reference := base.reference()
 		reference.Slot = currentSlot
 
-		return append(references, reference), false
+		return append(references, reference)
 
 	case "future_slot":
 		reference := base.reference()
 		reference.Slot = currentSlot + 1
 
-		return append(references, reference), false
+		return append(references, reference)
 
 	case "unwritten":
 		reference := base.reference()
 		if reference.Slot == 0 {
-			return references, true
+			return references
 		}
 
 		reference.Slot--
 
-		return append(references, reference), false
+		return append(references, reference)
 
 	case "wrong_source":
 		reference := base.reference()
 		reference.SourceID[0] ^= 0xff
 
-		return append(references, reference), false
+		return append(references, reference)
 
 	case "outside_window":
 		if currentSlot <= txtypes.RecentRootUsableWindow {
 			// The chain is too young for the far edge of the window to exist.
-			return references, true
+			return references
 		}
 
 		reference := base.reference()
 		reference.Slot = currentSlot - txtypes.RecentRootUsableWindow - 1
 
-		return append(references, reference), false
+		return append(references, reference)
 
 	case "duplicate":
 		// Duplicates are valid, and are checked, charged and preserved independently.
-		return append(references, base.reference()), true
+		return append(references, base.reference())
 	}
 
-	return references, true
+	return references
 }
 
 // RootSourceWalletName is the wallet whose address identifies the run's root source. A

@@ -395,13 +395,16 @@ func (s *Scenario) sendInvalid(ctx context.Context, client *spamoor.Client, resu
 	}
 
 	// The nonce comes from the chain, since an invalid transaction never lands and the
-	// pool's sequence would run away from the account's.
-	nonce, err := client.GetPendingNonceAt(ctx, result.sender.GetAddress())
-	if err != nil {
-		return err
-	}
+	// pool's sequence would run away from the account's. A keyed nonce is not the
+	// account's and keeps the sequence the ledger chose.
+	if result.tx.UsesLegacyNonce() {
+		nonce, err := client.GetPendingNonceAt(ctx, result.sender.GetAddress())
+		if err != nil {
+			return err
+		}
 
-	result.tx.NonceSeq = nonce
+		result.tx.NonceSeq = nonce
+	}
 
 	if violator.apply != nil {
 		if err := violator.apply(result.tx); err != nil {
