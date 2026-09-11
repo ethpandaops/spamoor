@@ -128,6 +128,38 @@ http://host1:8545
 http://host2:8545
 ```
 
+#### RPC Host Prefixes
+
+An RPC host may carry prefixes that configure the client before the URL:
+
+| Prefix | Effect |
+|--------|--------|
+| `headers(k:v\|k2:v2)` | Sets HTTP headers on every request |
+| `name(label)` | Overrides the display name |
+| `type(builder)` | Marks the client as a builder (excluded from some selections) |
+| `group(a,b)` | Adds the client to named groups |
+| `group(-a)` | Removes the client from a group |
+
+#### Client Groups
+
+Every client starts in the **`default`** group. Scenarios select clients with
+`--client-group`; a scenario that names no group, and the internal selections
+for wallet funding, refills and contract deployments, all use `default`.
+
+`group(name)` is **additive**, so a client with `group(builder)` is in both
+`builder` and `default` and still receives group-less traffic. To reserve a
+client for one group only, remove it from `default`:
+
+```bash
+# Reachable only by scenarios with --client-group=private
+--rpchost "group(private,-default)name(Private Intake)http://localhost:8080/rpc"
+```
+
+This matters when the endpoint is not an ordinary node — a private transaction
+intake, a builder's submission endpoint, a rate-limited provider — and stray
+funding or deployment transactions must not land there. Removing every group
+is refused, since such a client could never be selected at all.
+
 ### Wallet Management
 
 Spamoor uses a sophisticated wallet management system designed for isolation, automation, and high-throughput operations:
