@@ -303,10 +303,9 @@ func (wallet *Wallet) SetNonce(nonce uint64) {
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
 
-	pendingNonce := wallet.pendingTxCount.Load()
-	if nonce > pendingNonce {
-		wallet.pendingTxCount.Store(nonce)
-	}
+	// nonceMutex only serializes against GetNextNonce, not against the
+	// confirmation path, so raise the counter with the same CAS helper.
+	wallet.advancePendingTxCount(nonce)
 
 	wallet.confirmedTxCount = nonce
 }
