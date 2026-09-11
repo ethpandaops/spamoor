@@ -33,7 +33,8 @@ const (
 	FixedGasLimitPerTx = 16700000 // Set slightly below max to ensure transaction success
 
 	// MaxBloatedAddressesPerTx is the maximum number of addresses we can bloat in a single transaction
-	// while staying under the EIP-7825 gas limit.
+	// while staying under the EIP-7825 gas limit on a pre-Amsterdam chain. On Amsterdam chains the
+	// batch size is derived from the state-creation cost instead, see addressesPerBloatTx.
 	//
 	// Gas cost breakdown per address iteration in bloatStorage():
 	//   - SSTORE to balanceOf[targetAddr]:
@@ -52,6 +53,23 @@ const (
 	// 16,700,000 / 44,400 ≈ 376 addresses
 	// We use 370 to leave a safety margin.
 	MaxBloatedAddressesPerTx = 370
+
+	// PreAmsterdamGasPerAddress is the per-address regular (compute) gas from the breakdown
+	// above. Amsterdam (EIP-8037/8038) restructures SSTORE to 3,000 cold access + 10,000
+	// first-write per fresh slot, so this figure stays a safe upper bound there as well.
+	PreAmsterdamGasPerAddress = 44400
+
+	// StateCreationBytesPerSlot is the EIP-8037 STORAGE_CREATION_SIZE: every fresh storage slot
+	// is charged key + value (64 bytes) of state-creation gas at the chain's cost per state byte.
+	StateCreationBytesPerSlot = 64
+
+	// BloatTxOverheadGas covers function dispatch, the nextStorageSlot write, the event and a
+	// safety margin per bloat transaction.
+	BloatTxOverheadGas = 300000
+
+	// batchGrowAfterRounds is the number of consecutive successful rounds after which a
+	// previously shrunk batch size is grown again by one step.
+	batchGrowAfterRounds = 10
 )
 
 type ScenarioOptions struct {
@@ -72,6 +90,14 @@ type Scenario struct {
 
 	contractAddr     common.Address
 	contractInstance *contract.ERC20Bloater
+
+	// addressesPerTx is the current bloat batch size. It starts at the fee-model derived
+	// estimate (maxAddressesPerTx), shrinks whenever a bloat tx runs out of gas (the cost
+	// per state byte a chain actually charges can exceed the static estimate) and grows
+	// back slowly after successful rounds.
+	addressesPerTx    uint64
+	maxAddressesPerTx uint64
+	roundsSinceShrink int
 }
 
 var ScenarioName = "erc20_bloater"
@@ -248,6 +274,12 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("target: %.2f GB = %d addresses (%.2f million)",
 		s.options.TargetStorageGB, targetAddresses, float64(targetAddresses)/1000000)
 
+	// Size the per-tx batch for the active fee model (GetCostPerStateByte is 0 on the
+	// legacy model, which yields the pre-Amsterdam constant).
+	s.maxAddressesPerTx = addressesPerBloatTx(s.walletPool.GetTxPool().GetCostPerStateByte())
+	s.addressesPerTx = s.maxAddressesPerTx
+	s.logger.Infof("bloating up to %d addresses per tx (%d gas each)", s.addressesPerTx, FixedGasLimitPerTx)
+
 	// Start bloating with EIP-7825 compliant transaction splitting
 	totalTxCount := uint64(0)
 	errorCount := 0
@@ -303,8 +335,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 			wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, walletIndex)
 
-			// Use the maximum number of addresses that fit within EIP-7825 limit
-			numAddresses := uint64(MaxBloatedAddressesPerTx)
+			// Use the maximum number of addresses that fit within the fixed gas limit
+			numAddresses := s.addressesPerTx
 
 			// Check if we would exceed our target addresses
 			endAddressIndex := nextAddressIndex + numAddresses
@@ -317,7 +349,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 				break // No more addresses to process
 			}
 
-			s.logger.Debugf("batch %d/%d: processing %d addresses (max per tx) with %dM gas limit",
+			s.logger.Debugf("batch %d/%d: processing %d addresses with %dM gas limit",
 				i+1, len(txSplits), numAddresses, FixedGasLimitPerTx/1000000)
 
 			// Build bloating transaction with calculated number of addresses
@@ -353,6 +385,12 @@ func (s *Scenario) Run(ctx context.Context) error {
 		}
 
 		if !roundSuccess {
+			// The txs built so far hold allocated nonces but will never be sent;
+			// release them so the wallets do not end up with a permanent nonce gap.
+			for _, batch := range txBatches {
+				batch.wallet.MarkSkippedNonce(batch.tx.Nonce())
+			}
+
 			// Revert to beginning of round on failure
 			nextAddressIndex = roundStartAddressIndex
 			errorCount++
@@ -387,12 +425,23 @@ func (s *Scenario) Run(ctx context.Context) error {
 		})
 		if err != nil {
 			s.logger.Errorf("failed to send transaction batch: %v", err)
+
+			// Release the nonces of txs that never reached a node. A submission
+			// failure drops the tx from the wallet's pending tracking, whereas a tx
+			// that was submitted but not confirmed yet stays pending and keeps its
+			// nonce. Confirmed nonces are ignored by MarkSkippedNonce.
+			for _, batch := range txBatches {
+				if batch.wallet.GetPendingTx(batch.tx) == nil {
+					batch.wallet.MarkSkippedNonce(batch.tx.Nonce())
+				}
+			}
+
 			roundSuccess = false
 		} else {
 			// Process receipts
 			for i, batch := range txBatches {
 				walletReceipts := receipts[batch.wallet]
-				if len(walletReceipts) == 0 {
+				if len(walletReceipts) == 0 || walletReceipts[0] == nil {
 					s.logger.Errorf("no receipt for batch tx %d/%d", i+1, len(txBatches))
 					roundSuccess = false
 					break
@@ -402,6 +451,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 				if receipt.Status != txtypes.ReceiptStatusSuccessful {
 					s.logger.Errorf("tx failed: %s (gas used: %d, gas limit: %d)",
 						batch.tx.Hash().Hex(), receipt.GasUsed, batch.tx.Gas())
+					// bloatStorage has no revert path of its own, so a failed tx ran out
+					// of gas: the batch is too large for what the chain actually charges.
+					s.shrinkBatchSize()
 					roundSuccess = false
 					break
 				}
@@ -432,6 +484,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 		// Reset error count on successful round
 		errorCount = 0
+		s.growBatchSize()
 
 		// Log progress after successful round
 		// Note: each address = 2 storage slots = 64 bytes
@@ -462,6 +515,61 @@ func (s *Scenario) calculateTransactionSplits(totalTargetGas uint64) []uint64 {
 	}
 
 	return splits
+}
+
+// addressesPerBloatTx returns how many fresh addresses a single bloat transaction can
+// process within FixedGasLimitPerTx for the given EIP-8037 cost per state byte
+// (0 on the legacy fee model).
+//
+// The gas limit deliberately stays at the EIP-7825 cap so the transaction is valid on
+// chains that have not activated Amsterdam yet (those reject larger limits outright).
+// Under Amsterdam a transaction at or below the cap gets no separate state-gas
+// reservoir, so the state-creation gas of every fresh slot (64 bytes x cost per state
+// byte) spills into regular gas and has to be accounted for in the batch size.
+func addressesPerBloatTx(costPerStateByte uint64) uint64 {
+	if costPerStateByte == 0 {
+		return MaxBloatedAddressesPerTx
+	}
+
+	stateGasPerAddress := uint64(SlotsPerBloatCycle) * StateCreationBytesPerSlot * costPerStateByte
+	gasPerAddress := PreAmsterdamGasPerAddress + stateGasPerAddress
+
+	addresses := uint64(FixedGasLimitPerTx-BloatTxOverheadGas) / gasPerAddress
+	if addresses == 0 {
+		return 1
+	}
+
+	return min(addresses, MaxBloatedAddressesPerTx)
+}
+
+// shrinkBatchSize reduces the per-tx address count after a bloat tx ran out of gas. The
+// static estimate assumes the flat CostPerStateByte, but the price a chain actually
+// charges can be higher, so adapt instead of retrying the same failing batch forever.
+func (s *Scenario) shrinkBatchSize() {
+	if s.addressesPerTx <= 1 {
+		return
+	}
+
+	s.addressesPerTx = max(1, s.addressesPerTx*3/4)
+	s.roundsSinceShrink = 0
+	s.logger.Warnf("reducing batch size to %d addresses per tx", s.addressesPerTx)
+}
+
+// growBatchSize slowly restores a shrunk batch size after a run of successful rounds so a
+// transient cost spike does not throttle the scenario for the rest of the run.
+func (s *Scenario) growBatchSize() {
+	if s.addressesPerTx >= s.maxAddressesPerTx {
+		return
+	}
+
+	s.roundsSinceShrink++
+	if s.roundsSinceShrink < batchGrowAfterRounds {
+		return
+	}
+
+	s.roundsSinceShrink = 0
+	s.addressesPerTx = min(s.maxAddressesPerTx, s.addressesPerTx+max(1, s.addressesPerTx/10))
+	s.logger.Infof("increasing batch size to %d addresses per tx", s.addressesPerTx)
 }
 
 // distributeTokensToWallets distributes tokens from wallet 0 to other wallets for parallel execution

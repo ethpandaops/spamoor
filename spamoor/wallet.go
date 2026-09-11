@@ -303,12 +303,30 @@ func (wallet *Wallet) SetNonce(nonce uint64) {
 	wallet.nonceMutex.Lock()
 	defer wallet.nonceMutex.Unlock()
 
-	pendingNonce := wallet.pendingTxCount.Load()
-	if nonce > pendingNonce {
-		wallet.pendingTxCount.Store(nonce)
-	}
+	// nonceMutex only serializes against GetNextNonce, not against the
+	// confirmation path, so raise the counter with the same CAS helper.
+	wallet.advancePendingTxCount(nonce)
 
 	wallet.confirmedTxCount = nonce
+}
+
+// advancePendingTxCount raises pendingTxCount to at least target. It runs on
+// the confirmation path under txNonceMutex while GetNextNonce advances the
+// same counter under nonceMutex, so a plain load-then-store could overwrite a
+// concurrent increment with a stale, lower value and hand out an in-flight
+// nonce twice. The compare-and-swap loop never moves the counter backwards
+// regardless of how the two paths interleave.
+func (wallet *Wallet) advancePendingTxCount(target uint64) {
+	for {
+		current := wallet.pendingTxCount.Load()
+		if target <= current {
+			return
+		}
+
+		if wallet.pendingTxCount.CompareAndSwap(current, target) {
+			return
+		}
+	}
 }
 
 // GetNextNonce atomically increments and returns the next available nonce.
