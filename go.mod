@@ -1,6 +1,6 @@
 module github.com/ethpandaops/spamoor
 
-go 1.25.7
+go 1.26.0
 
 require (
 	github.com/consensys/gnark-crypto v0.21.0
