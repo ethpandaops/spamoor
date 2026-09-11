@@ -383,15 +383,6 @@ func hashFromUint64(v uint64) common.Hash {
 	return common.BigToHash(new(uint256.Int).SetUint64(v).ToBig())
 }
 
-// hashFromU256 renders a 256-bit value as a word.
-func hashFromU256(v *uint256.Int) common.Hash {
-	if v == nil {
-		return common.Hash{}
-	}
-
-	return common.BigToHash(v.ToBig())
-}
-
 // memoryGas returns the EVM memory expansion cost for a region ending at size bytes.
 func memoryGas(size uint64) uint64 {
 	words := (size + 31) / 32

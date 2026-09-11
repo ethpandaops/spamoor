@@ -171,16 +171,6 @@ func (l *nonceLedger) consumed(sender common.Address, sel *selection) {
 	}
 }
 
-// forget drops a sender's cached sequences so the next selection reads them again. It is
-// used when a transaction is rejected for a reason that may mean the ledger is stale.
-func (l *nonceLedger) forget(sender common.Address) {
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-
-	delete(l.sequences, sender)
-	delete(l.known, sender)
-}
-
 // sortKeys orders keys by numeric value, which is what the payload requires.
 func sortKeys(keys []*uint256.Int) {
 	for i := 1; i < len(keys); i++ {

@@ -61,10 +61,9 @@ type environment struct {
 	contractsMutex sync.Mutex
 	contracts      []common.Address
 
-	// allowPostTx and allowBlobs record what the startup probes found, so a recipe
-	// asking for something the chain refuses is downgraded rather than sent.
+	// allowPostTx records what the startup probe found, so a recipe asking for
+	// POST_TX frames on a chain that refuses them is downgraded rather than sent.
 	allowPostTx bool
-	allowBlobs  bool
 }
 
 // plainWallet returns a wallet with no code, for recipes validated by default code.
