@@ -108,7 +108,6 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 		} else {
 			usedNonce = contractNonce
 		}
-		contractNonce++
 
 		xenCryptoAddr := crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 		xenTokenAddress = &xenCryptoAddr
@@ -137,7 +136,6 @@ func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.
 	} else {
 		usedNonce = contractNonce
 	}
-	contractNonce++
 
 	sybilAttackerAddr := crypto.CreateAddress(deployerWallet.GetAddress(), usedNonce)
 	sybilAttacker, err := contract.NewXENSybilAttacker(sybilAttackerAddr, client.GetEthClient())

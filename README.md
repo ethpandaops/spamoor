@@ -370,7 +370,7 @@ Guide for developing, distributing, and managing plugins. Covers:
 ## 🏗️ Development
 
 ### Prerequisites
-- Go 1.25+
+- Go 1.26+
 - CGO enabled (required for SQLite and cryptographic operations)
 - Build tags: `with_blob_v1,ckzg` for blob transaction support
 
