@@ -45,8 +45,11 @@ func init() {
 		"ExpiryFrame":                reflect.ValueOf(txtypes.ExpiryFrame),
 		"ExpiryVerifier":             reflect.ValueOf(&txtypes.ExpiryVerifier).Elem(),
 		"FrameBlobSidecarVersion1":   reflect.ValueOf(constant.MakeFromLiteral("1", token.INT, 0)),
+		"FrameExtAll":                reflect.ValueOf(txtypes.FrameExtAll),
+		"FrameExtKeyedNonces":        reflect.ValueOf(txtypes.FrameExtKeyedNonces),
 		"FrameFlagsMask":             reflect.ValueOf(constant.MakeFromLiteral("7", token.INT, 0)),
 		"FrameModeDefault":           reflect.ValueOf(txtypes.FrameModeDefault),
+		"FrameModePostTx":            reflect.ValueOf(txtypes.FrameModePostTx),
 		"FrameModeSender":            reflect.ValueOf(txtypes.FrameModeSender),
 		"FrameModeVerify":            reflect.ValueOf(txtypes.FrameModeVerify),
 		"FrameStatusFailed":          reflect.ValueOf(txtypes.FrameStatusFailed),
@@ -59,25 +62,49 @@ func init() {
 		"FromGethTx":                 reflect.ValueOf(txtypes.FromGethTx),
 		"GasPerBlob":                 reflect.ValueOf(constant.MakeFromLiteral("131072", token.INT, 0)),
 		"IsTxTypeSupported":          reflect.ValueOf(txtypes.IsTxTypeSupported),
+		"KeyedNonceFirstUseStateGas": reflect.ValueOf(constant.MakeFromLiteral("97920", token.INT, 0)),
 		"LegacyNonceKey":             reflect.ValueOf(&txtypes.LegacyNonceKey).Elem(),
 		"LegacyTxType":               reflect.ValueOf(constant.MakeFromLiteral("0", token.INT, 0)),
 		"MaxFrames":                  reflect.ValueOf(constant.MakeFromLiteral("64", token.INT, 0)),
 		"MaxNonceKeys":               reflect.ValueOf(constant.MakeFromLiteral("16", token.INT, 0)),
+		"MaxNonceSeq":                reflect.ValueOf(txtypes.MaxNonceSeq),
 		"MaxRecentRootReferences":    reflect.ValueOf(constant.MakeFromLiteral("16", token.INT, 0)),
 		"MaxVerifyGas":               reflect.ValueOf(constant.MakeFromLiteral("100000", token.INT, 0)),
 		"MaxVerifyStateGas":          reflect.ValueOf(constant.MakeFromLiteral("500000", token.INT, 0)),
 		"NewBlobSidecar":             reflect.ValueOf(txtypes.NewBlobSidecar),
 		"NewFrameTx":                 reflect.ValueOf(txtypes.NewFrameTx),
+		"NewFrameTxWithExtensions":   reflect.ValueOf(txtypes.NewFrameTxWithExtensions),
 		"NewTx":                      reflect.ValueOf(txtypes.NewTx),
+		"NonceKeysHash":              reflect.ValueOf(txtypes.NonceKeysHash),
 		"NonceManager":               reflect.ValueOf(&txtypes.NonceManager).Elem(),
+		"NonceManagerCode":           reflect.ValueOf(&txtypes.NonceManagerCode).Elem(),
+		"NonceManagerSlot":           reflect.ValueOf(txtypes.NonceManagerSlot),
 		"OnlyVerifyFrame":            reflect.ValueOf(txtypes.OnlyVerifyFrame),
 		"P256Signer":                 reflect.ValueOf(txtypes.P256Signer),
 		"ParseDelegation":            reflect.ValueOf(txtypes.ParseDelegation),
+		"ParseRecentRootVerifyData":  reflect.ValueOf(txtypes.ParseRecentRootVerifyData),
 		"PayFrame":                   reflect.ValueOf(txtypes.PayFrame),
 		"PostOpFrame":                reflect.ValueOf(txtypes.PostOpFrame),
+		"PostTxFrame":                reflect.ValueOf(txtypes.PostTxFrame),
 		"ReceiptStatusFailed":        reflect.ValueOf(txtypes.ReceiptStatusFailed),
 		"ReceiptStatusSuccessful":    reflect.ValueOf(txtypes.ReceiptStatusSuccessful),
 		"RecentRootAddress":          reflect.ValueOf(&txtypes.RecentRootAddress).Elem(),
+		"RecentRootEntryDomain":      reflect.ValueOf(&txtypes.RecentRootEntryDomain).Elem(),
+		"RecentRootEntryHash":        reflect.ValueOf(txtypes.RecentRootEntryHash),
+		"RecentRootIndex":            reflect.ValueOf(txtypes.RecentRootIndex),
+		"RecentRootLength":           reflect.ValueOf(constant.MakeFromLiteral("8192", token.INT, 0)),
+		"RecentRootReferenceUsable":  reflect.ValueOf(txtypes.RecentRootReferenceUsable),
+		"RecentRootSlotStorageKey":   reflect.ValueOf(txtypes.RecentRootSlotStorageKey),
+		"RecentRootSourceID":         reflect.ValueOf(txtypes.RecentRootSourceID),
+		"RecentRootStorageDomain":    reflect.ValueOf(&txtypes.RecentRootStorageDomain).Elem(),
+		"RecentRootStorageKey":       reflect.ValueOf(txtypes.RecentRootStorageKey),
+		"RecentRootTupleBytes":       reflect.ValueOf(constant.MakeFromLiteral("72", token.INT, 0)),
+		"RecentRootUsableWindow":     reflect.ValueOf(constant.MakeFromLiteral("8191", token.INT, 0)),
+		"RecentRootVerifyData":       reflect.ValueOf(txtypes.RecentRootVerifyData),
+		"RecentRootVerifyFrame":      reflect.ValueOf(txtypes.RecentRootVerifyFrame),
+		"RecentRootVerifyGas":        reflect.ValueOf(txtypes.RecentRootVerifyGas),
+		"RecentRootWriteCalldata":    reflect.ValueOf(txtypes.RecentRootWriteCalldata),
+		"RecentRootWriteLength":      reflect.ValueOf(constant.MakeFromLiteral("64", token.INT, 0)),
 		"RegisterReceiptDecoder":     reflect.ValueOf(txtypes.RegisterReceiptDecoder),
 		"RegisterTxType":             reflect.ValueOf(txtypes.RegisterTxType),
 		"RegisteredTxTypes":          reflect.ValueOf(txtypes.RegisteredTxTypes),
@@ -96,10 +123,13 @@ func init() {
 		"SpeciesOther":               reflect.ValueOf(txtypes.SpeciesOther),
 		"SpeciesPay":                 reflect.ValueOf(txtypes.SpeciesPay),
 		"SpeciesPostOp":              reflect.ValueOf(txtypes.SpeciesPostOp),
+		"SpeciesPostTx":              reflect.ValueOf(txtypes.SpeciesPostTx),
+		"SpeciesRecentRootVerify":    reflect.ValueOf(txtypes.SpeciesRecentRootVerify),
 		"SpeciesSelfVerify":          reflect.ValueOf(txtypes.SpeciesSelfVerify),
 		"SpeciesUserOp":              reflect.ValueOf(txtypes.SpeciesUserOp),
 		"StandardTokenCost":          reflect.ValueOf(constant.MakeFromLiteral("4", token.INT, 0)),
 		"StateBytesPerNewAccount":    reflect.ValueOf(constant.MakeFromLiteral("120", token.INT, 0)),
+		"StateBytesPerStorageSet":    reflect.ValueOf(constant.MakeFromLiteral("64", token.INT, 0)),
 		"TotalCostFloorPerToken":     reflect.ValueOf(constant.MakeFromLiteral("16", token.INT, 0)),
 		"TxMaxGasLimit":              reflect.ValueOf(constant.MakeFromLiteral("16777216", token.INT, 0)),
 		"TxValueCost":                reflect.ValueOf(constant.MakeFromLiteral("6000", token.INT, 0)),
@@ -122,6 +152,7 @@ func init() {
 		"ECDSASignedTx":        reflect.ValueOf((*txtypes.ECDSASignedTx)(nil)),
 		"ExplicitSenderTx":     reflect.ValueOf((*txtypes.ExplicitSenderTx)(nil)),
 		"Frame":                reflect.ValueOf((*txtypes.Frame)(nil)),
+		"FrameExtensions":      reflect.ValueOf((*txtypes.FrameExtensions)(nil)),
 		"FrameFees":            reflect.ValueOf((*txtypes.FrameFees)(nil)),
 		"FrameLimits":          reflect.ValueOf((*txtypes.FrameLimits)(nil)),
 		"FrameMode":            reflect.ValueOf((*txtypes.FrameMode)(nil)),
@@ -132,6 +163,7 @@ func init() {
 		"FrameSpecies":         reflect.ValueOf((*txtypes.FrameSpecies)(nil)),
 		"FrameTx":              reflect.ValueOf((*txtypes.FrameTx)(nil)),
 		"Header":               reflect.ValueOf((*txtypes.Header)(nil)),
+		"IndependentNonceTx":   reflect.ValueOf((*txtypes.IndependentNonceTx)(nil)),
 		"JSONTxData":           reflect.ValueOf((*txtypes.JSONTxData)(nil)),
 		"JSONTxEncoder":        reflect.ValueOf((*txtypes.JSONTxEncoder)(nil)),
 		"JSONTxFields":         reflect.ValueOf((*txtypes.JSONTxFields)(nil)),
@@ -156,6 +188,7 @@ func init() {
 		"_BlobTxData":          reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_BlobTxData)(nil)),
 		"_ECDSASignedTx":       reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ECDSASignedTx)(nil)),
 		"_ExplicitSenderTx":    reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ExplicitSenderTx)(nil)),
+		"_IndependentNonceTx":  reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_IndependentNonceTx)(nil)),
 		"_JSONTxData":          reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_JSONTxData)(nil)),
 		"_JSONTxEncoder":       reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_JSONTxEncoder)(nil)),
 		"_NetworkEncodedTx":    reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_NetworkEncodedTx)(nil)),
@@ -238,6 +271,16 @@ func (W _github_com_ethpandaops_spamoor_txtypes_ExplicitSenderTx) GetSender() co
 }
 func (W _github_com_ethpandaops_spamoor_txtypes_ExplicitSenderTx) SignPayload(chainID *big.Int, key *ecdsa.PrivateKey) error {
 	return W.WSignPayload(chainID, key)
+}
+
+// _github_com_ethpandaops_spamoor_txtypes_IndependentNonceTx is an interface wrapper for IndependentNonceTx type
+type _github_com_ethpandaops_spamoor_txtypes_IndependentNonceTx struct {
+	IValue            interface{}
+	WUsesAccountNonce func() bool
+}
+
+func (W _github_com_ethpandaops_spamoor_txtypes_IndependentNonceTx) UsesAccountNonce() bool {
+	return W.WUsesAccountNonce()
 }
 
 // _github_com_ethpandaops_spamoor_txtypes_JSONTxData is an interface wrapper for JSONTxData type

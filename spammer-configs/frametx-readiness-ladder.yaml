@@ -1,0 +1,254 @@
+# Name: Frame Transaction Readiness Ladder (EIP-8141)
+# Description: A graduated ladder of EIP-8141 frame transaction spammers, from the simplest self-signed transfer up to the full fuzzer. Run them one after another against a devnet to find the readiness stage at which a client breaks - each rung adds one dimension of complexity over the last.
+# Tags: eip-8141, eip-8250, eip-8272, eip-7906, frame-transactions, fuzzing, readiness
+# Min_Version: v1.2.4
+
+# ---------------------------------------------------------------------------
+# Stage 0 - the simplest thing that is still a frame transaction.
+# Self-signed sender (one secp256k1 entry), a single validation frame that
+# approves execution and payment, and one plain call. No value, no paymaster,
+# no batching, no extensions beyond whatever the chain runs.
+# ---------------------------------------------------------------------------
+- scenario: frametx
+  name: 'Frame ladder 0: self-verify'
+  description: Minimal self-signed frame transactions - one validation frame, one call. The floor of EIP-8141 support.
+  config:
+    seed: frametx-ladder-0
+    refill_amount: 5000000000000000000
+    refill_balance: 2000000000000000000
+    refill_interval: 600
+    total_count: 0
+    throughput: 3
+    max_pending: 6
+    max_wallets: 0
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    shapes: self-verify
+    envelope: auto
+    verify_frames: true
+
+# ---------------------------------------------------------------------------
+# Stage 1 - value transfers. Adds EIP-2780 value cost and the state gas a
+# fresh recipient needs, still self-signed and single-framed.
+# ---------------------------------------------------------------------------
+- scenario: frametx
+  name: 'Frame ladder 1: transfers'
+  description: Self-signed frame transactions that move value, exercising the value cost and recipient-creation state gas.
+  config:
+    seed: frametx-ladder-1
+    refill_amount: 5000000000000000000
+    refill_balance: 2000000000000000000
+    refill_interval: 600
+    total_count: 0
+    throughput: 3
+    max_pending: 6
+    max_wallets: 0
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    shapes: self-verify:1,transfer:2
+    envelope: auto
+    random_amount: true
+    verify_frames: true
+
+# ---------------------------------------------------------------------------
+# Stage 2 - the expiry verifier predeploy. Adds the leading expiry_verify
+# frame and the mempool deadline handling around it.
+# ---------------------------------------------------------------------------
+- scenario: frametx
+  name: 'Frame ladder 2: expiry'
+  description: Adds the EIP-8141 expiry verifier predeploy and its mempool deadline handling to simple self-signed transfers.
+  config:
+    seed: frametx-ladder-2
+    refill_amount: 5000000000000000000
+    refill_balance: 2000000000000000000
+    refill_interval: 600
+    total_count: 0
+    throughput: 3
+    max_pending: 6
+    max_wallets: 0
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    shapes: self-verify:1,transfer:1,expiry:1
+    envelope: auto
+    random_amount: true
+    verify_frames: true
+
+# ---------------------------------------------------------------------------
+# Stage 3 - atomic batches. Multi-frame transactions, atomic batch runs, and
+# the rolled-back and skipped frame statuses that only a batch produces.
+# ---------------------------------------------------------------------------
+- scenario: frametx
+  name: 'Frame ladder 3: batches'
+  description: Multi-frame transactions with atomic batches, exercising batch unrolling and the rolled-back and skipped frame statuses.
+  config:
+    seed: frametx-ladder-3
+    refill_amount: 5000000000000000000
+    refill_balance: 2000000000000000000
+    refill_interval: 600
+    total_count: 0
+    throughput: 3
+    max_pending: 6
+    max_wallets: 0
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    shapes: batch:2,atomic:2,atomic-fail:1
+    frames_per_tx: 4
+    envelope: auto
+    verify_frames: true
+
+# ---------------------------------------------------------------------------
+# Stage 4 - every static shape. Deploys the probe contract and adds the shapes
+# that reach it: introspection reads, a contract sender approving in its own
+# code, and a paymaster sponsoring the transaction.
+# ---------------------------------------------------------------------------
+- scenario: frametx
+  name: 'Frame ladder 4: full static'
+  description: Every enumerated shape, including the probe contract - introspection reads, a contract sender, and a sponsoring paymaster.
+  config:
+    seed: frametx-ladder-4
+    refill_amount: 10000000000000000000
+    refill_balance: 4000000000000000000
+    refill_interval: 600
+    total_count: 0
+    throughput: 3
+    max_pending: 6
+    max_wallets: 0
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    shapes: all
+    envelope: auto
+    verify_frames: true
+
+# ---------------------------------------------------------------------------
+# Stage 5 - the fuzzer, structure only. Random prefix shapes, atomic batches
+# and gas-starved failures, no probe contract or extension EIPs, no invalid
+# transactions. The first generated (rather than enumerated) stage.
+# ---------------------------------------------------------------------------
+- scenario: frametx-fuzz
+  name: 'Frame ladder 5: fuzz structure'
+  description: The fuzzer restricted to structure - prefix shapes, atomic batches and starved-frame failures. No probe, no extensions, no invalid transactions.
+  config:
+    seed: frametx-ladder-5
+    refill_amount: 10000000000000000000
+    refill_balance: 4000000000000000000
+    refill_interval: 600
+    total_count: 0
+    throughput: 4
+    max_pending: 0
+    max_wallets: 0
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    axes: prefix,batches,failures
+    envelope: auto
+    post_tx: 'off'
+    invalid_ratio: 0
+    max_frames: 6
+
+# ---------------------------------------------------------------------------
+# Stage 6 - add signatures and the probe contract. P256 and arbitrary-witness
+# entries, generated contracts deployed and called, and the introspection
+# sweep over every new instruction.
+# ---------------------------------------------------------------------------
+- scenario: frametx-fuzz
+  name: 'Frame ladder 6: fuzz code & signatures'
+  description: Adds P256 and arbitrary-witness signatures, generated contracts deployed and called from frames, and the introspection sweep over the new instructions.
+  config:
+    seed: frametx-ladder-6
+    refill_amount: 10000000000000000000
+    refill_balance: 4000000000000000000
+    refill_interval: 600
+    total_count: 0
+    throughput: 4
+    max_pending: 0
+    max_wallets: 0
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    axes: prefix,batches,failures,signatures,probe,code
+    envelope: auto
+    post_tx: 'off'
+    invalid_ratio: 0
+    max_frames: 6
+
+# ---------------------------------------------------------------------------
+# Stage 7 - the extension EIPs. EIP-8250 keyed nonces and EIP-8272 recent
+# roots, including the awkward reference cases the chain is meant to refuse.
+# ---------------------------------------------------------------------------
+- scenario: frametx-fuzz
+  name: 'Frame ladder 7: fuzz extensions'
+  description: EIP-8250 keyed nonces and EIP-8272 recent roots, including the window-edge and unwritten-slot references a chain is meant to refuse.
+  config:
+    seed: frametx-ladder-7
+    refill_amount: 10000000000000000000
+    refill_balance: 4000000000000000000
+    refill_interval: 600
+    total_count: 0
+    throughput: 4
+    max_pending: 0
+    max_wallets: 0
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    axes: prefix,nonces,roots
+    envelope: auto
+    post_tx: 'off'
+    invalid_ratio: 0
+    max_frames: 6
+
+# ---------------------------------------------------------------------------
+# Stage 8 - everything, well-formed. Every axis at once, the contract sender
+# and paymaster roles played by generated account code, but no deliberately
+# invalid transactions yet.
+# ---------------------------------------------------------------------------
+- scenario: frametx-fuzz
+  name: 'Frame ladder 8: fuzz all'
+  description: Every fuzzing dimension at once, with generated account contracts playing the sender and paymaster roles. Well-formed transactions only.
+  config:
+    seed: frametx-ladder-8
+    refill_amount: 20000000000000000000
+    refill_balance: 8000000000000000000
+    refill_interval: 600
+    total_count: 0
+    throughput: 4
+    max_pending: 0
+    max_wallets: 0
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    axes: all
+    envelope: auto
+    post_tx: auto
+    invalid_ratio: 0
+    max_frames: 8
+
+# ---------------------------------------------------------------------------
+# Stage 9 - the top of the ladder. Everything, plus the negative tier: a
+# share of the stream is deliberately malformed to probe what the chain
+# rejects. If a client survives this, it is ready.
+# ---------------------------------------------------------------------------
+- scenario: frametx-fuzz
+  name: 'Frame ladder 9: fuzz all + invalid'
+  description: The full fuzzer, including a share of deliberately invalid transactions probing what the chain rejects. The top of the readiness ladder.
+  config:
+    seed: frametx-ladder-9
+    refill_amount: 20000000000000000000
+    refill_balance: 8000000000000000000
+    refill_interval: 600
+    total_count: 0
+    throughput: 4
+    max_pending: 0
+    max_wallets: 0
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 2
+    axes: all
+    envelope: auto
+    post_tx: auto
+    invalid_ratio: 0.1
+    max_frames: 8

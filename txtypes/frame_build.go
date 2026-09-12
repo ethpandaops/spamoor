@@ -67,6 +67,42 @@ func ExpiryFrame(deadline uint64, executionGas uint64) *Frame {
 	}
 }
 
+// RecentRootVerifyFrame builds an EIP-8272 recent root verifier frame: a VERIFY frame
+// calling the recent root contract with the packed references, which reverts unless
+// every one is a root its source committed within the usable window.
+//
+// In a public-mempool transaction it sits directly after the optional expiry frame and
+// before everything else; its execution budget is excluded from the MaxVerifyGas cap.
+func RecentRootVerifyFrame(references []*RecentRootReference, executionGas uint64) *Frame {
+	target := RecentRootAddress
+
+	return &Frame{
+		Mode:   FrameModeVerify,
+		Flags:  ApproveNone,
+		Target: &target,
+		Limits: FrameLimits{Execution: executionGas},
+		Value:  new(uint256.Int),
+		Data:   RecentRootVerifyData(references),
+	}
+}
+
+// RecentRootVerifyGas returns an execution budget for a recent root verifier frame
+// checking count references.
+//
+// RECENT_ROOT_CODE is still TBD in the EIP, so this prices what the validation
+// operation must do rather than a known bytecode: the cold target access at frame
+// entry, then per tuple a cold SLOAD, two keccaks and the arithmetic around them, with
+// headroom. The mempool does not count it, so erring high only raises the up-front
+// max cost.
+func RecentRootVerifyGas(count int) uint64 {
+	const (
+		entryGas    = 2_600 + 2_000
+		perTupleGas = 2_100 + 2*(30+6*4) + 600
+	)
+
+	return entryGas + uint64(count)*perTupleGas
+}
+
 // UserOpFrame builds a SENDER frame: the user operation, executed with tx.sender as
 // the caller. A nil target resolves to the sender itself.
 func UserOpFrame(target *common.Address, value *uint256.Int, data []byte, limits FrameLimits) *Frame {
@@ -91,6 +127,23 @@ func DeployFrame(factory common.Address, data []byte, limits FrameLimits) *Frame
 		Mode:   FrameModeDefault,
 		Flags:  ApproveNone,
 		Target: &factory,
+		Limits: limits,
+		Value:  new(uint256.Int),
+		Data:   data,
+	}
+}
+
+// PostTxFrame builds an EIP-7906 POST_TX assertion frame.
+//
+// Not to be confused with PostOpFrame: that is a DEFAULT frame a paymaster uses to
+// settle up, this is a STATICCALL-semantics assertion that may not APPROVE and whose
+// failure reverts the whole execution body. POST_TX frames must be a trailing suffix
+// of the frame list.
+func PostTxFrame(target common.Address, data []byte, limits FrameLimits) *Frame {
+	return &Frame{
+		Mode:   FrameModePostTx,
+		Flags:  ApproveNone,
+		Target: &target,
 		Limits: limits,
 		Value:  new(uint256.Int),
 		Data:   data,
@@ -156,9 +209,15 @@ func DefaultCodeVerifyLimits(senderExists bool) FrameLimits {
 // NewFrameTx assembles a frame transaction from its parts, filling in the zero values
 // the encoder requires.
 //
-// The nonce selects the sender's ordinary account nonce sequence, which is EIP-8250's
-// [0] key set. Use NonceKeys directly for independent nonce domains.
+// It builds the envelope shape current devnets run, with both extensions active and
+// the nonce in EIP-8250's [0] key set, which is the sender's ordinary account nonce.
+// Use NewFrameTxWithExtensions for a chain running a different combination.
 func NewFrameTx(chainID *uint256.Int, sender common.Address, nonce uint64, fees FrameFees, frames []*Frame, signatures []*FrameSignature) *FrameTx {
+	return NewFrameTxWithExtensions(FrameExtAll, chainID, sender, nonce, fees, frames, signatures)
+}
+
+// NewFrameTxWithExtensions assembles a frame transaction in a chosen envelope shape.
+func NewFrameTxWithExtensions(extensions FrameExtensions, chainID *uint256.Int, sender common.Address, nonce uint64, fees FrameFees, frames []*Frame, signatures []*FrameSignature) *FrameTx {
 	if fees.GasTipCap == nil {
 		fees.GasTipCap = new(uint256.Int)
 	}
@@ -181,13 +240,19 @@ func NewFrameTx(chainID *uint256.Int, sender common.Address, nonce uint64, fees 
 		}
 	}
 
-	return &FrameTx{
+	tx := &FrameTx{
 		ChainID:    chainID,
-		NonceKeys:  []*uint256.Int{new(uint256.Int)},
 		NonceSeq:   nonce,
 		Sender:     sender,
 		Frames:     frames,
 		Signatures: signatures,
 		Fees:       fees,
+		Extensions: extensions,
 	}
+
+	if extensions.Has(FrameExtKeyedNonces) {
+		tx.NonceKeys = []*uint256.Int{new(uint256.Int)}
+	}
+
+	return tx
 }
