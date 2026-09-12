@@ -77,30 +77,14 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 		count = txtypes.MaxNonceKeys
 	}
 
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
+	// The chain reads happen outside the lock, so a slow node holds up this draw and
+	// not every sender's. What they return is merged afterwards, and a slot that was
+	// consumed in the meantime keeps the newer value the ledger already holds.
+	unread := l.unreadSlots(sender, count*2)
+	if len(unread) > 0 {
+		values := make(map[int]uint64, len(unread))
 
-	sequences := l.sequences[sender]
-	if sequences == nil {
-		sequences = map[uint64]uint64{}
-		l.sequences[sender] = sequences
-		l.known[sender] = map[uint64]bool{}
-		l.reserved[sender] = map[uint64]bool{}
-	}
-
-	known := l.known[sender]
-	reserved := l.reserved[sender]
-
-	// Group the candidate slots by the sequence they are at, reading any slot this run
-	// has not seen before. A slot another transaction is using is not a candidate.
-	bySequence := map[uint64][]int{}
-
-	for slot := 0; slot < count*2 && len(bySequence) <= count; slot++ {
-		if reserved[uint64(slot)] {
-			continue
-		}
-
-		if !known[uint64(slot)] {
+		for _, slot := range unread {
 			key := nonceKey(sender, slot)
 
 			value, err := client.GetStorageAt(ctx, txtypes.NonceManager, txtypes.NonceManagerSlot(sender, key))
@@ -108,8 +92,27 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 				return nil, err
 			}
 
-			sequences[uint64(slot)] = new(uint256.Int).SetBytes(value.Bytes()).Uint64()
-			known[uint64(slot)] = true
+			values[slot] = new(uint256.Int).SetBytes(value.Bytes()).Uint64()
+		}
+
+		l.learn(sender, values)
+	}
+
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	sequences := l.sequences[sender]
+	known := l.known[sender]
+	reserved := l.reserved[sender]
+
+	// Group the candidate slots by the sequence they are at. A slot another transaction
+	// is using is not a candidate, and neither is one released since it was read, which
+	// the next draw will read again.
+	bySequence := map[uint64][]int{}
+
+	for slot := 0; slot < count*2; slot++ {
+		if reserved[uint64(slot)] || !known[uint64(slot)] {
+			continue
 		}
 
 		sequence := sequences[uint64(slot)]
@@ -169,6 +172,50 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 	}
 
 	return result, nil
+}
+
+// unreadSlots lists the slots below limit this run has not read from the chain yet,
+// creating the sender's ledger entries on first sight.
+func (l *nonceLedger) unreadSlots(sender common.Address, limit int) []int {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	if l.sequences[sender] == nil {
+		l.sequences[sender] = map[uint64]uint64{}
+		l.known[sender] = map[uint64]bool{}
+		l.reserved[sender] = map[uint64]bool{}
+	}
+
+	known := l.known[sender]
+	unread := []int(nil)
+
+	for slot := 0; slot < limit; slot++ {
+		if !known[uint64(slot)] {
+			unread = append(unread, slot)
+		}
+	}
+
+	return unread
+}
+
+// learn records sequences read from the chain for slots the ledger did not know. A slot
+// that became known while the read was in flight was consumed by a transaction that
+// landed after the read, so the ledger's value is the newer one and is kept.
+func (l *nonceLedger) learn(sender common.Address, values map[int]uint64) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	sequences := l.sequences[sender]
+	known := l.known[sender]
+
+	for slot, sequence := range values {
+		if known[uint64(slot)] {
+			continue
+		}
+
+		sequences[uint64(slot)] = sequence
+		known[uint64(slot)] = true
+	}
 }
 
 // consumed records that a selection landed, moving every key in it to the next sequence
