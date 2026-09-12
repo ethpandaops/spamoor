@@ -170,6 +170,20 @@ func (f *DeploymentFactory) deployFactory(ctx context.Context, client *Client) (
 	return factoryAddr, nil
 }
 
+// GetFactoryAddress returns the CREATE2 factory's address, deploying it if this is the
+// first use.
+//
+// Callers that build their own deployment calls need it: the factory's calldata is a
+// salt followed by init code, so anything that wants to deploy from inside a transaction
+// it is assembling itself has to address the factory directly.
+func (f *DeploymentFactory) GetFactoryAddress(ctx context.Context) (common.Address, error) {
+	if err := f.lazyInit(ctx); err != nil {
+		return common.Address{}, err
+	}
+
+	return f.factoryAddr, nil
+}
+
 func (f *DeploymentFactory) GetContractDeployment(ctx context.Context, initcode []byte, salt [32]byte, client *Client, deployer *Wallet, feeCap *big.Int, tipCap *big.Int, submit bool) (common.Address, *txtypes.Transaction, error) {
 	err := f.lazyInit(ctx)
 	if err != nil {

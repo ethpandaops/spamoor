@@ -56,6 +56,11 @@ spamoor eoatx --privkey="0x..." \
 # With authentication
 spamoor eoatx --privkey="0x..." \
   --rpchost="headers(Authorization:Bearer token)http://node:8545"
+
+# Reserve an endpoint for one scenario: clients are in "default" unless
+# removed from it, and group-less selections (funding, deploys) use "default"
+spamoor eoatx --privkey="0x..." --client-group=private \
+  --rpchost="group(private,-default)http://intake:8080/rpc"
 ```
 
 💡 **See the [App User Guide](./docs/app-users.md) for advanced RPC configuration options**
@@ -365,7 +370,7 @@ Guide for developing, distributing, and managing plugins. Covers:
 ## 🏗️ Development
 
 ### Prerequisites
-- Go 1.25+
+- Go 1.26+
 - CGO enabled (required for SQLite and cryptographic operations)
 - Build tags: `with_blob_v1,ckzg` for blob transaction support
 

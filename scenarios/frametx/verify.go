@@ -33,6 +33,27 @@ func formatStatuses(extra *txtypes.FrameReceiptExtra) string {
 	return strings.Join(names, ",")
 }
 
+// formatDurable renders which frames' effects survived, e.g. "yes,no,no". A frame can
+// report success and still have been discarded, by an unrolled atomic batch or a
+// failed POST_TX frame reverting the execution body.
+func formatDurable(extra *txtypes.FrameReceiptExtra, tx *txtypes.FrameTx) string {
+	if tx == nil {
+		return "?"
+	}
+
+	durable := extra.DurableFrames(tx)
+
+	names := make([]string, len(durable))
+	for i, ok := range durable {
+		names[i] = "no"
+		if ok {
+			names[i] = "yes"
+		}
+	}
+
+	return strings.Join(names, ",")
+}
+
 // compareStatuses checks a receipt's frame statuses against what the shape should have
 // produced. It returns an empty string when they agree, and a description of the
 // disagreement otherwise.
