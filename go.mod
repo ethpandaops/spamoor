@@ -23,7 +23,7 @@ require (
 	github.com/tdewolff/minify v2.3.6+incompatible
 	github.com/traefik/yaegi v0.16.2-0.20260209085605-fcb76d1ece0c
 	github.com/urfave/negroni v1.0.0
-	golang.org/x/time v0.15.0
+	golang.org/x/time v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
