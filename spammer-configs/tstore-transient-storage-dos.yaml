@@ -1,0 +1,43 @@
+# Name: Transient storage (TSTORE) exhaustion DoS
+# Description: Reproduces the max-gas TSTORE flood - each tx runs an infinite loop that writes a fresh transient-storage slot per iteration until it hits the EIP-7825 per-tx gas cap, forcing clients to build and discard ~146k transient entries per tx. Stresses the in-memory transient-storage map and revert journal; hits Besu far harder than other clients.
+# Tags: tstore, transient-storage, eip-1153, eip-7825, performance, max-gas, dos
+# Min_Version: v1.1.5
+- scenario: calltx
+  name: TSTORE transient-storage exhaustion
+  description: Repeatedly calls a 6-byte contract that loops PREVRANDAO/GAS/TSTORE with the current gas counter as the key, allocating a new transient slot every iteration until the tx runs out of gas at the EIP-7825 per-tx cap (2^24 gas). Every call fails (status 0), so nothing is committed - the whole cost is the EVM building and throwing away the transient-storage entries.
+  config:
+    # wallet settings
+    seed: calltx-tstore-1 # seed for the wallet
+    refill_amount: 10000000000000000000 # refill 10 ETH when
+    refill_balance: 3000000000000000000 # balance drops below 3 ETH (each max-gas tx reserves gas_limit * base_fee)
+    refill_interval: 600 # check every 10 minutes
+
+    # scenario: calltx
+    total_count: 0
+    throughput: 11 # 11 max-gas txs per slot (~184M gas/block), matching the observed attack
+    max_pending: 22
+    max_wallets: 20
+    rebroadcast: 1
+    base_fee: 20
+    tip_fee: 1
+    deploy_gas_limit: 200000
+    gas_limit: 16777216 # exactly TX_MAX_GAS_LIMIT (2^24), the EIP-7825 per-tx cap = the maximum-size version of the attack
+    amount: 0
+    random_amount: false
+    random_target: false
+    # deployer wrapper (600b380380600b5f395ff3) returning the 6-byte runtime 5b445a5d3656:
+    #   5b JUMPDEST / 44 PREVRANDAO / 5a GAS / 5d TSTORE / 36 CALLDATASIZE / 56 JUMP -> infinite TSTORE loop
+    contract_code: "0x600b380380600b5f395ff35b445a5d3656"
+    contract_file: ""
+    contract_address: ""
+    contract_args: ""
+    contract_addr_path: ""
+    call_data: "" # empty calldata; CALLDATASIZE is the jump target (0) that keeps the loop going
+    call_abi: ""
+    call_abi_file: ""
+    call_fn_name: ""
+    call_fn_sig: ""
+    call_args: ""
+    timeout: ""
+    client_group: ""
+    log_txs: false
