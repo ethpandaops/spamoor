@@ -26,35 +26,40 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount        uint64  `yaml:"total_count"`
-	Throughput        uint64  `yaml:"throughput"`
-	MaxPending        uint64  `yaml:"max_pending"`
-	MaxWallets        uint64  `yaml:"max_wallets"`
-	Rebroadcast       uint64  `yaml:"rebroadcast"`
-	BaseFee           float64 `yaml:"base_fee"`
-	TipFee            float64 `yaml:"tip_fee"`
-	BaseFeeWei        string  `yaml:"base_fee_wei"`
-	TipFeeWei         string  `yaml:"tip_fee_wei"`
-	DeployGasLimit    uint64  `yaml:"deploy_gas_limit"`
-	GasLimit          uint64  `yaml:"gas_limit"`
-	Amount            uint64  `yaml:"amount"`
-	RandomAmount      bool    `yaml:"random_amount"`
-	RandomTarget      bool    `yaml:"random_target"`
-	ContractCode      string  `yaml:"contract_code"`
-	ContractFile      string  `yaml:"contract_file"`
-	ContractAddress   string  `yaml:"contract_address"`
-	ContractArgs      string  `yaml:"contract_args"`
-	ContractAddrPath  string  `yaml:"contract_addr_path"`
-	CallData          string  `yaml:"call_data"`
-	CallABI           string  `yaml:"call_abi"`
-	CallABIFile       string  `yaml:"call_abi_file"`
-	CallFnName        string  `yaml:"call_fn_name"`
-	CallFnSig         string  `yaml:"call_fn_sig"`
-	CallArgs          string  `yaml:"call_args"`
-	Timeout           string  `yaml:"timeout"`
-	ClientGroup       string  `yaml:"client_group"`
-	DeployClientGroup string  `yaml:"deploy_client_group"`
-	LogTxs            bool    `yaml:"log_txs"`
+	TotalCount        uint64            `yaml:"total_count"`
+	Throughput        uint64            `yaml:"throughput"`
+	MaxPending        uint64            `yaml:"max_pending"`
+	MaxWallets        uint64            `yaml:"max_wallets"`
+	Rebroadcast       uint64            `yaml:"rebroadcast"`
+	BaseFee           float64           `yaml:"base_fee"`
+	TipFee            float64           `yaml:"tip_fee"`
+	BaseFeeWei        string            `yaml:"base_fee_wei"`
+	TipFeeWei         string            `yaml:"tip_fee_wei"`
+	DeployGasLimit    uint64            `yaml:"deploy_gas_limit"`
+	GasLimit          uint64            `yaml:"gas_limit"`
+	Amount            uint64            `yaml:"amount"`
+	RandomAmount      bool              `yaml:"random_amount"`
+	RandomTarget      bool              `yaml:"random_target"`
+	ContractCode      string            `yaml:"contract_code"`
+	ContractFile      string            `yaml:"contract_file"`
+	ContractAddress   string            `yaml:"contract_address"`
+	ContractArgs      string            `yaml:"contract_args"`
+	ContractAddrPath  string            `yaml:"contract_addr_path"`
+	CallData          string            `yaml:"call_data"`
+	CallABI           string            `yaml:"call_abi"`
+	CallABIFile       string            `yaml:"call_abi_file"`
+	CallFnName        string            `yaml:"call_fn_name"`
+	CallFnSig         string            `yaml:"call_fn_sig"`
+	CallArgs          string            `yaml:"call_args"`
+	Targets           TargetPoolOptions `yaml:"targets"`
+	TargetsFile       string            `yaml:"targets_file"`
+	CallValue         uint64            `yaml:"call_value"`
+	GasBuffer         uint64            `yaml:"gas_buffer"`
+	SaltStride        uint64            `yaml:"salt_stride"`
+	Timeout           string            `yaml:"timeout"`
+	ClientGroup       string            `yaml:"client_group"`
+	DeployClientGroup string            `yaml:"deploy_client_group"`
+	LogTxs            bool              `yaml:"log_txs"`
 }
 
 type Scenario struct {
@@ -64,6 +69,7 @@ type Scenario struct {
 
 	contractAddr   common.Address
 	abiCallBuilder *utils.ABICallDataBuilder
+	attackTargets  *attackTargets
 }
 
 var ScenarioName = "calltx"
@@ -91,6 +97,11 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	CallFnName:        "",
 	CallFnSig:         "",
 	CallArgs:          "",
+	Targets:           TargetPoolOptions{},
+	TargetsFile:       "",
+	CallValue:         0,
+	GasBuffer:         50000,
+	SaltStride:        0,
 	Timeout:           "",
 	ClientGroup:       "",
 	DeployClientGroup: "",
@@ -136,6 +147,10 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.CallFnName, "call-fn-name", ScenarioDefaultOptions.CallFnName, "Function name to call (requires --call-abi)")
 	flags.StringVar(&s.options.CallFnSig, "call-fn-sig", ScenarioDefaultOptions.CallFnSig, "Function signature to call (alternative to --call-abi)")
 	flags.StringVar(&s.options.CallArgs, "call-args", ScenarioDefaultOptions.CallArgs, "JSON array of arguments to pass to the function")
+	flags.StringVar(&s.options.TargetsFile, "targets-file", ScenarioDefaultOptions.TargetsFile, "YAML file with CREATE2 receiver patterns; builds the callAttack calldata automatically")
+	flags.Uint64Var(&s.options.CallValue, "call-value", ScenarioDefaultOptions.CallValue, "Wei sent by each CALL of the attack loop (requires --targets-file; 0 or 1 match the benchmark arms)")
+	flags.Uint64Var(&s.options.GasBuffer, "gas-buffer", ScenarioDefaultOptions.GasBuffer, "Gas the attack loop leaves unspent before it stops (requires --targets-file)")
+	flags.Uint64Var(&s.options.SaltStride, "salt-stride", ScenarioDefaultOptions.SaltStride, "Salts to advance between consecutive txs of one pattern (0 = every tx restarts at start_salt)")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.StringVar(&s.options.DeployClientGroup, "deploy-client-group", ScenarioDefaultOptions.DeployClientGroup, "Client group to use for deployments")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
@@ -204,6 +219,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("only one of --contract-code, --contract-file, or --contract-address can be set")
 	}
 
+	if err := s.initAttackTargets(); err != nil {
+		return err
+	}
+
 	// Initialize ABI call builder if ABI options are provided
 	if s.options.CallABI != "" || s.options.CallABIFile != "" || s.options.CallFnSig != "" {
 		var abiContent string
@@ -242,6 +261,103 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		if err != nil {
 			return fmt.Errorf("failed to initialize ABI call builder: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// initAttackTargets resolves the CREATE2 receiver address list that feeds the
+// callAttack calldata. Kept separate from Init so it can be tested without a
+// wallet pool.
+func (s *Scenario) initAttackTargets() error {
+	inlineConfigured := s.options.Targets.configured()
+	fileConfigured := strings.TrimSpace(s.options.TargetsFile) != ""
+	if inlineConfigured && fileConfigured {
+		return fmt.Errorf("targets and targets_file cannot be used together")
+	}
+
+	if inlineConfigured || fileConfigured {
+		conflicting := []string{}
+		if s.options.CallData != "" {
+			conflicting = append(conflicting, "call_data")
+		}
+		if s.options.CallABI != "" {
+			conflicting = append(conflicting, "call_abi")
+		}
+		if s.options.CallABIFile != "" {
+			conflicting = append(conflicting, "call_abi_file")
+		}
+		if s.options.CallFnName != "" {
+			conflicting = append(conflicting, "call_fn_name")
+		}
+		if s.options.CallFnSig != "" {
+			conflicting = append(conflicting, "call_fn_sig")
+		}
+		if s.options.CallArgs != "" {
+			conflicting = append(conflicting, "call_args")
+		}
+		if len(conflicting) > 0 {
+			return fmt.Errorf("targets builds the %s calldata itself and cannot be combined with %s", CallAttackFnSig, strings.Join(conflicting, ", "))
+		}
+
+		if s.options.GasBuffer == 0 {
+			return fmt.Errorf("gas_buffer must be greater than zero, otherwise the attack loop runs out of gas instead of returning")
+		}
+
+		targetOptions := s.options.Targets
+		baseDir := ""
+		if fileConfigured {
+			var err error
+			targetOptions, baseDir, err = loadTargetPoolOptions(s.options.TargetsFile)
+			if err != nil {
+				return err
+			}
+		}
+
+		if err := s.resolveFactoryPlaceholders(&targetOptions); err != nil {
+			return err
+		}
+
+		targets, ignored, err := buildAttackTargets(targetOptions, baseDir, s.options.SaltStride)
+		if err != nil {
+			return fmt.Errorf("invalid targets configuration: %w", err)
+		}
+		if len(ignored) > 0 {
+			s.logger.Warnf("ignoring targets fields that calltx cannot map to CREATE2 attack calldata: %s", strings.Join(ignored, ", "))
+		}
+		s.attackTargets = targets
+
+		if s.options.CallValue > 0 && s.options.Amount == 0 {
+			s.logger.Warnf("call_value is %d but amount is 0, so the attack contract is never funded and every CALL will fail", s.options.CallValue)
+		}
+
+		for _, pattern := range targets.patterns {
+			s.logger.Infof(
+				"attack target %q: factory %v, initCodeHash %v, salts %d..%d",
+				pattern.Name, pattern.Factory.Hex(), pattern.InitCodeHash.Hex(),
+				pattern.StartSalt, pattern.StartSalt+pattern.Count-1,
+			)
+		}
+	}
+
+	return nil
+}
+
+// resolveFactoryPlaceholders expands the {factory_address} placeholder in the
+// factory field of every CREATE2 pattern. The well-known factory of the
+// factorydeploytx scenario is derived from the root wallet rather than being a
+// global constant, so a targets file that hardcoded its address would only
+// work for one deployment.
+func (s *Scenario) resolveFactoryPlaceholders(options *TargetPoolOptions) error {
+	for i := range options.Create2Patterns {
+		factory := options.Create2Patterns[i].Factory
+		if !strings.Contains(factory, factoryAddressPlaceholder) {
+			continue
+		}
+		if s.walletPool == nil {
+			return fmt.Errorf("create2 pattern %d uses the %s placeholder, which requires a wallet pool", i+1, factoryAddressPlaceholder)
+		}
+		options.Create2Patterns[i].Factory = s.replaceCallDataPlaceholders(factory)
 	}
 
 	return nil
@@ -484,7 +600,12 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 
 	txCallData := []byte{}
 
-	if s.abiCallBuilder != nil {
+	if s.attackTargets != nil {
+		// Feed the CREATE2 address list into the attack contract
+		data, pattern, startSalt := s.attackTargets.buildCallData(txIdx, s.options.CallValue, s.options.GasBuffer)
+		txCallData = data
+		s.logger.Debugf("tx %6d: attacking %q from salt %d", txIdx+1, pattern.Name, startSalt)
+	} else if s.abiCallBuilder != nil {
 		// Use ABI call builder
 		var err error
 		txCallData, err = s.abiCallBuilder.BuildCallData(txIdx)
@@ -552,12 +673,12 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 // replaceCallDataPlaceholders replaces placeholders in call data with actual values
 func (s *Scenario) replaceCallDataPlaceholders(callData string) string {
 	// Replace factory address placeholder with well-known CREATE2 factory address
-	if strings.Contains(callData, "{factory_address}") {
+	if strings.Contains(callData, factoryAddressPlaceholder) {
 		// Use the same well-known CREATE2 factory address as factorydeploytx scenario
 		// Get the very well known factory deployer wallet address and calculate the factory address
 		factoryWalletAddr := s.walletPool.GetVeryWellKnownWalletAddress("create2-factory-deployer")
 		factoryAddr := crypto.CreateAddress(factoryWalletAddr, 0)
-		result := strings.ReplaceAll(callData, "{factory_address}", factoryAddr.Hex())
+		result := strings.ReplaceAll(callData, factoryAddressPlaceholder, factoryAddr.Hex())
 		return result
 	}
 
