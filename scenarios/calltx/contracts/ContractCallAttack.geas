@@ -1,0 +1,144 @@
+;;; Minimal CALL account-access attack - runtime code
+;;;
+;;; Port of the `opcode = CALL, overhead_baseline = False` arm of
+;;; `test_account_access` from execution-specs
+;;; (tests/benchmark/stateful/bloatnet/test_account_query.py), with the
+;;; CREATE2 address derivation of `Create2PreimageLayout` and the target
+;;; layout of `Create2AddressSource` / `AccountCreator`.
+;;;
+;;; Derives the CREATE2 addresses of contracts deployed by the
+;;; `factorydeploytx` scenario and hits each one with CALL until the remaining
+;;; gas drops to `gasBuffer`. The salt walk is monotonic: it starts at
+;;; `startSalt` and increments by one per iteration, exactly like the
+;;; `increment_salt_op` of `Create2PreimageLayout`. There is deliberately no
+;;; wrap-around in here - keeping the walk inside the salt range that was
+;;; actually deployed is the caller's job, and the caller is the one holding
+;;; the receiver address list.
+;;;
+;;; In spamoor that caller is the calltx scenario: `--salt-stride` decides how
+;;; far `startSalt` moves between consecutive txs of one pattern. A stride of 0
+;;; (the default) restarts every tx at the pattern's `start_salt`, so all txs
+;;; walk the same prefix. A non-zero stride gives each tx a disjoint slice,
+;;; which is what the `calldata(iteration_count, start_iteration)` generator
+;;; does upstream; the scenario wraps back to `start_salt` once the range is
+;;; exhausted.
+;;;
+;;; `callValue` picks the two arms the benchmark parametrises:
+;;;
+;;;   callValue = 0   cold account access only            (value_sent = 0)
+;;;   callValue = 1   cold access + value transfer        (value_sent = 1)
+;;;
+;;; Because the walk never repeats an address, every CALL is a cold (EIP-2929)
+;;; account access for the whole tx. EIP-2929 warmth is per-tx, so a tx that
+;;; re-walks a slice an earlier tx already touched still pays the full 2600
+;;; gas, while the client's own state cache stays warm across them - that
+;;; trades some disk-level pressure for a fully predictable walk.
+;;;
+;;; With callValue = 1 this contract must hold balance: it sends 1 wei per
+;;; iteration. Fund it with `calltx --amount` (gwei per call tx).
+;;;
+;;; Calldata layout is ABI compatible with the solidity version, so this can be
+;;; called with
+;;; `--call-fn-sig "callAttack(address,bytes32,uint256,uint256,uint256)"`.
+;;; The selector itself is not checked - any selector runs the attack.
+;;;
+;;;   0x04  address factory
+;;;   0x24  bytes32 initCodeHash
+;;;   0x44  uint256 startSalt
+;;;   0x64  uint256 callValue
+;;;   0x84  uint256 gasBuffer
+;;;
+;;; Measured per-iteration cost (geth `evm run`, shanghai, targets deployed):
+;;;
+;;;   callValue  gas/iter  breakdown                          attack share
+;;;   ---------  --------  ---------------------------------  ------------
+;;;   0              2725  2600 cold account access                  95.4%
+;;;   1              9425  2600 cold + 9000 value transfer,          98.7%
+;;;                        less the 2300 stipend returned
+;;;                        unused by the STOP target
+;;;
+;;; The remaining 125 gas is the loop itself: 48 for keccak256 over 85 bytes
+;;; and 77 for the stack and memory bookkeeping.
+;;;
+;;; So a 30M gas tx buys ~11000 iterations at callValue = 0 and ~3180 at
+;;; callValue = 1. Size the deployed salt range per tx accordingly.
+
+;;; Needs shanghai or later (PUSH0).
+#pragma target "shanghai"
+
+;;; ----------------------------------------------------------------------------
+;;; CREATE2 preimage buffer, built once
+;;;
+;;;   mem[0x0b]        = 0xff
+;;;   mem[0x0c..0x1f]  = factory            (20 bytes)
+;;;   mem[0x20..0x3f]  = salt               (rewritten every iteration)
+;;;   mem[0x40..0x5f]  = initCodeHash       (32 bytes)
+;;;
+;;; This is byte-for-byte the layout of `Create2PreimageLayout(offset=0)`.
+;;; keccak256(mem[0x0b], 85) is the CREATE2 hash; CALL truncates it to the low
+;;; 20 bytes on its own, so no explicit address mask is needed.
+;;; ----------------------------------------------------------------------------
+
+push 0x04
+calldataload           ;; [factory]
+push 0
+mstore                 ;; mem[0x00..0x1f] = zero padding || factory
+
+push 0xff
+push 0x0b
+mstore8                ;; mem[0x0b] = 0xff (must run after the mstore above)
+
+push 0x24
+calldataload           ;; [initCodeHash]
+push 0x40
+mstore                 ;; mem[0x40..0x5f] = initCodeHash
+
+;;; ----------------------------------------------------------------------------
+;;; Loop state, kept on the stack as [salt, callValue, gasBuffer]
+;;; ----------------------------------------------------------------------------
+
+push 0x84
+calldataload           ;; [gasBuffer]
+push 0x64
+calldataload           ;; [callValue, gasBuffer]
+push 0x44
+calldataload           ;; [salt, callValue, gasBuffer]
+
+loop:
+    ;; stop once gasleft() <= gasBuffer
+    gas                ;; [gas, salt, callValue, gasBuffer]
+    dup4               ;; [gasBuffer, gas, salt, callValue, gasBuffer]
+    lt                 ;; [gasBuffer < gas, salt, callValue, gasBuffer]
+    iszero             ;; [gas <= gasBuffer, salt, callValue, gasBuffer]
+    jumpi @done        ;; [salt, callValue, gasBuffer]
+
+    dup1               ;; [salt, salt, callValue, gasBuffer]
+    push 0x20
+    mstore             ;; [salt, callValue, gasBuffer]
+
+    ;; target = keccak256(0xff ++ factory ++ salt ++ initCodeHash)
+    push 0x55          ;; [85, salt, callValue, gasBuffer]
+    push 0x0b          ;; [11, 85, salt, callValue, gasBuffer]
+    keccak256          ;; [target, salt, callValue, gasBuffer]
+
+    ;; the actual attack: CALL(gas(), target, callValue, 0, 0, 0, 0)
+    ;; CALL pops gas, address, value, argsOffset, argsSize, retOffset, retSize,
+    ;; so the zero-length args/return window is pushed first.
+    push 0             ;; [retSize, target, ...]
+    push 0             ;; [retOffset, retSize, target, ...]
+    push 0             ;; [argsSize, retOffset, retSize, target, ...]
+    push 0             ;; [argsOffset, argsSize, retOffset, retSize, target, ...]
+    dup7               ;; [callValue, argsOffset, argsSize, retOffset, retSize, target, ...]
+    dup6               ;; [target, callValue, argsOffset, argsSize, retOffset, retSize, target, ...]
+    gas                ;; [gas, target, callValue, argsOffset, argsSize, retOffset, retSize, target, ...]
+    call               ;; [success, target, salt, callValue, gasBuffer]
+    pop                ;; [target, salt, callValue, gasBuffer]
+    pop                ;; [salt, callValue, gasBuffer]
+
+    ;; salt = salt + 1 (no wrap - see the header)
+    push 1             ;; [1, salt, callValue, gasBuffer]
+    add                ;; [salt, callValue, gasBuffer]
+    jump @loop
+
+done:
+    stop
