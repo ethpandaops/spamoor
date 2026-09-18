@@ -170,3 +170,104 @@ spamoor calltx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 5 \
   --contract-addr-path ".0.1" \
   --call-data "0x06fdde03"
 ```
+
+## Account-access attack
+
+`contracts/ContractCallAttack.geas` is a port of the
+`opcode = CALL, overhead_baseline = False` arm of `test_account_access` from
+[execution-specs](https://github.com/ethereum/execution-specs/blob/master/tests/benchmark/stateful/bloatnet/test_account_query.py).
+It derives the CREATE2 addresses of contracts deployed by the `factorydeploytx`
+scenario and hits each one with a cold `CALL`, so a run only has to carry the
+three CREATE2 inputs - factory, initcode hash and salt range - rather than a
+list of addresses.
+
+The memory layout is byte-for-byte the `Create2PreimageLayout(offset=0)` of
+execution-specs, and the salt walk is monotonic - `startSalt`, `startSalt + 1`,
+... with no wrap-around - matching its `increment_salt_op`. Keeping the walk
+inside the salt range that was actually deployed is therefore the caller's job.
+
+The call data is ABI compatible with the `callAttack` function of
+`ContractReadAttackController.sol`, so the same arguments drive either
+implementation:
+
+```
+callAttack(address factory, bytes32 initCodeHash, uint256 startSalt, uint256 callValue, uint256 gasBuffer)
+```
+
+`callValue` selects the two arms the benchmark parametrises: `0` measures the
+cold account access alone, `1` adds the value transfer. `gasBuffer` is the gas
+the loop leaves unspent before it returns - it has to exceed one iteration, or
+the loop runs out of gas instead of stopping.
+
+Build the deploy bytecode with [geas](https://github.com/fjl/geas):
+
+```bash
+geas scenarios/calltx/contracts/ContractCallAttackCtor.geas
+```
+
+### Step 1: deploy the targets
+
+A cold access is only interesting against an account that exists, so deploy the
+targets first. Keep the `--init-code` and `--start-salt` values - the attack has
+to be pointed at the same salt range:
+
+```bash
+spamoor factorydeploytx -p "<PRIVKEY>" -h http://rpc-host:8545 \
+  -c 20000 -t 50 \
+  --init-code "0x60006001f3" \
+  --start-salt 0
+```
+
+`factorydeploytx` logs the factory it used as `using CREATE2 factory at: 0x...`.
+
+### Step 2: run the attack
+
+`initCodeHash` is `keccak256` of the init code from step 1 - for the
+`0x60006001f3` above that is
+`0x69bbd4b361c1909d4a86161461f44312fb9ec4112b37041b9411ad86310b6b48`. The
+`{factory_address}` placeholder fills in the well-known factory of
+`factorydeploytx`, which is derived from the root wallet rather than being a
+global constant:
+
+```bash
+spamoor calltx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 10 \
+  --contract-code "$(geas scenarios/calltx/contracts/ContractCallAttackCtor.geas)" \
+  --gas-limit 30000000 \
+  --call-fn-sig "callAttack(address,bytes32,uint256,uint256,uint256)" \
+  --call-args '["{factory_address}","0x69bbd4b361c1909d4a86161461f44312fb9ec4112b37041b9411ad86310b6b48","0","0","50000"]'
+```
+
+The `value_sent = 1` arm sets `callValue` to `1`. Each iteration then sends
+1 wei, so the attack contract needs a balance: `--amount` tops it up with every
+call tx (in gwei), and one gwei covers a million iterations.
+
+```bash
+spamoor calltx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 10 \
+  --contract-code "$(geas scenarios/calltx/contracts/ContractCallAttackCtor.geas)" \
+  --gas-limit 30000000 --amount 1 \
+  --call-fn-sig "callAttack(address,bytes32,uint256,uint256,uint256)" \
+  --call-args '["{factory_address}","0x69bbd4b361c1909d4a86161461f44312fb9ec4112b37041b9411ad86310b6b48","0","1","50000"]'
+```
+
+Because `--call-args` is fixed for the whole run, every transaction restarts its
+walk at the same `startSalt`. EIP-2929 warmth is per-tx, so each transaction
+still pays the full cold-access cost, while the client's own state cache stays
+warm across them - that trades some disk-level pressure for a fully predictable
+walk. Use `{txid}` in `--call-args` to give each transaction its own slice.
+
+### Sizing the salt range
+
+Measured per-iteration cost (geth `evm run`, shanghai, targets deployed):
+
+| `callValue` | gas/iteration | attack share | iterations per 30M gas |
+| --- | --- | --- | --- |
+| 0 | 2725 | 2600 cold account access (95.4%) | ~11000 |
+| 1 | 9425 | 2600 cold + 9000 value transfer, less the 2300 stipend the `STOP` target returns unused (98.7%) | ~3180 |
+
+The remaining 125 gas per iteration is the loop itself: 48 for `keccak256` over
+the 85-byte CREATE2 preimage and 77 for stack and memory bookkeeping.
+
+Deploy at least that many targets per transaction, and keep the walk inside the
+deployed range: at `callValue = 1`, a salt that was never deployed is charged
+the 25000 gas account-creation cost instead of a plain cold access, which
+measures a different benchmark (`account_mode = NON_EXISTING_ACCOUNT`).
