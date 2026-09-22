@@ -292,14 +292,9 @@ func (s *Scenario) checkFrameTxSupport(ctx context.Context) error {
 		return fmt.Errorf("frame transactions need the Amsterdam (EIP-8037) gas model, but --pre-amsterdam-fee-model is set")
 	}
 
-	support, err := txpool.GetFrameSupportWithInit(ctx)
+	support, err := txpool.AwaitFrameSupport(ctx, s.logger)
 	if err != nil {
 		return err
-	}
-
-	if !support.Active {
-		return fmt.Errorf("no account at the EIP-8141 expiry verifier predeploy %s: this chain does not implement frame transactions",
-			txtypes.ExpiryVerifier)
 	}
 
 	if !s.autoDetect {
