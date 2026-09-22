@@ -6,6 +6,17 @@
 # NOTE: the index generator reads one line per header key and stops at the first
 # non-comment line, so the Description above must stay on a single line.
 #
+# !! NOT PORTABLE AS-IS -- DO NOT UPSTREAM WITHOUT READING THIS !!
+# Every address below is a CREATE2 address off spamoor's "well-known" factory, and that
+# factory's deployer is derived as sha256(root private key || "create2-factory-deployer")
+# (spamoor/walletpool.go:575-599). It is therefore stable across scenario runs on ONE
+# spamoor instance and different on every other one. These addresses were computed against
+# glamsterdam-devnet-8's instance. On any other deployment the blob deploys elsewhere, the
+# driver EXTCODECOPYs an empty account, the initcode becomes 128 KiB of zeros, the jump to
+# byte 131,041 lands on a non-JUMPDEST and every child frame halts exceptionally: whole
+# blocks burnt while nothing is analysed. Making this a genuine library entry needs the
+# source address resolved at runtime (a scenario change), not a config change.
+#
 # Port of https://github.com/ethereum/execution-specs/pull/3631 to live spammers.
 # Two attack variants share one driver; pick either, or run them in sequence:
 #
