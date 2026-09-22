@@ -71,6 +71,7 @@ axis with equal weight. An axis whose EIP the chain does not run is disabled aut
 | `posttx` | EIP-7906 assertion frames, and the `TXTRACE`/`TXDIFF`/`EVENTDATACOPY` sweep that only exists inside them |
 | `probe` | Calls into the fixed probe contract, including the introspection sweep |
 | `code` | Deploying fuzzed contracts from one frame and calling them from another, and the fuzzed sender and paymaster roles |
+| `deploy` | The deploy-led validation prefixes, which create the sender's account in the transaction that uses it |
 
 ### Generated contracts
 
@@ -122,13 +123,44 @@ tracked through a keyless wallet registered with the transaction pool.
 Both are drawn rarely: a fuzzed prologue often halts before reaching the `APPROVE`, and
 such a transaction never lands, so the fixed contract plays both roles most of the time.
 
-> A *fresh* sender per transaction would be possible through EIP-8141's
-> `[deploy, only_verify, pay]` prefix, where the deploy frame installs code at `tx.sender`
-> because `tx.sender` is the CREATE2 address. It is not reachable on the client tested
-> here: a deploy frame's code cost lands in the **execution** dimension (~1,530/byte, with
-> `stateGasUsed` reported as zero), so even a small contract needs roughly 500k execution
-> against a `MAX_VERIFY_GAS` of 100k. On a client charging it to state it would fit inside
-> both caps.
+### Deploy-led prefixes
+
+The `deploy` axis reaches EIP-8141's flagship shape: a validation prefix that *creates* the
+sender. A deploy frame leads the prefix and calls the CREATE2 factory, and because a CREATE2
+address is a function of the code, the contract it creates is `tx.sender` — the account is
+deployed, validated and spent in one transaction, and the code that approves the transaction
+did not exist when it was sent. It is also the only shape that puts a contract creation inside
+the part of a transaction the public mempool simulates.
+
+Both payers are drawn:
+
+- `[deploy, self_verify]` — the account pays for itself, so an earlier transaction has to credit
+  its address first. A frame riding along on ordinary transactions funds the next addresses,
+  which is safe because CREATE2 refuses an address with code or a nonce but not one with a mere
+  balance. After use, the account joins the same wipe queue the deployed account contracts use,
+  so its leftover funding returns to a tracked wallet.
+- `[deploy, only_verify, pay]` — a paymaster pays, so the account needs no balance at all and is
+  minted on the spot. Its body carries no value, since the sender holds none.
+
+> Earlier notes called this unreachable, on a measurement of ~224k execution for a CREATE2
+> account deployment against a `MAX_VERIFY_GAS` of 100k. That is no longer where the cost
+> lands: on the devnet a 99-byte account deployed from the prefix charges **~15k execution and
+> ~151k state**, the code deposit having moved to the state dimension, which leaves the shape
+> comfortably inside both caps.
+
+> Client divergence, as measured on glamsterdam-devnet-8: geth and nethermind accept these
+> transactions and execute them identically, while **ethrex rejects them at mempool admission**
+> (`validation prefix frame reverted`) although it executes the same transactions correctly once
+> another client includes them. A keyless contract sender *without* a deploy frame is accepted by
+> ethrex, so the rejection is about the deploy frame, not contract senders. Sending to a client
+> that refuses them shows up as a refusal in the coverage report rather than as an error.
+
+> A second divergence, this one on the sponsored shape: geth refuses
+> `[deploy, only_verify, pay]` with `insufficient funds for gas * price + value`, having checked
+> the *sender's* balance even though the pay frame names a paymaster as the payer. The account
+> a sponsored deploy creates holds nothing by design, so the shape is admitted nowhere at the
+> moment and the run reports it as a refusal under `prefix:deploy+only_verify+pay`. The
+> self-paying shape is unaffected.
 
 ## Invalid combinations
 
@@ -172,7 +204,8 @@ spamoor frametx-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -t 10
 - `--invalid-ratio` — Share of the stream carrying a deliberate violation (default: 0.05)
 - `--log-frames` — Log the per-frame result of every landed transaction
 - `--max-code-size` — Maximum size of a generated contract's runtime code (default: 256)
-- `--code-gas` — Base execution gas for frames that deploy or call generated code
+- `--code-gas` — Base execution gas for frames that deploy or call generated code (also sizes the
+  account code a deploy-led prefix creates)
 
 ### Frame settings
 - `--envelope` — Pin the payload shape: `auto` (default), `base`, `keyed`, `full`
@@ -192,7 +225,13 @@ ordinary scenario's starves the generator at a few transactions per block whatev
 
 ## Requirements
 
-The chain must have an account at the EIP-8141 expiry verifier predeploy (`0x…8141`); the scenario
-refuses to start otherwise rather than sending transactions every client will reject. The envelope
-shape and the two extensions are read from their predeploys the same way, and `--pre-amsterdam-fee-model`
-is incompatible: frame transactions need the EIP-8037 gas model.
+The chain must have an account at the EIP-8141 expiry verifier predeploy (`0x…8141`). Forks activate
+at an epoch rather than at genesis, so on a chain without it the scenario warns and re-probes every
+30 seconds until the fork lands instead of failing. The envelope shape and the two extensions are
+read from their predeploys the same way, and `--pre-amsterdam-fee-model` is incompatible: frame
+transactions need the EIP-8037 gas model.
+
+`--post-tx auto` settles EIP-7906 support by sending one transaction with a `POST_TX` frame and one
+without, from a dedicated prober wallet. A client that does not implement the feature may accept the
+transaction into its mempool and never build a block with it, so a probe that is still missing five
+blocks after submission counts as unsupported.

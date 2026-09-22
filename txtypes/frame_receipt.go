@@ -102,12 +102,40 @@ func (r *Receipt) FrameExtra() *FrameReceiptExtra {
 // clients are likely to use: the two-dimensional gas as an object, as a two-element
 // array mirroring the consensus encoding, or as flat sibling fields.
 type jsonFrameReceipt struct {
-	Status  *hexutil.Uint64 `json:"status"`
+	Status  *flexUint64     `json:"status"`
 	GasUsed json.RawMessage `json:"gasUsed"`
 	Logs    []*jsonLog      `json:"logs"`
 
-	ExecutionGasUsed *hexutil.Uint64 `json:"executionGasUsed"`
-	StateGasUsed     *hexutil.Uint64 `json:"stateGasUsed"`
+	ExecutionGasUsed *flexUint64 `json:"executionGasUsed"`
+	StateGasUsed     *flexUint64 `json:"stateGasUsed"`
+}
+
+// flexUint64 reads a number written either as a JSON-RPC quantity ("0x1") or as a bare
+// JSON number (1). Both are in use: nethermind reports a frame's status as a number while
+// ethrex quotes it, and with no JSON encoding specified by EIP-8141 neither is wrong.
+type flexUint64 uint64
+
+// UnmarshalJSON accepts both spellings.
+func (v *flexUint64) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '"' {
+		var quantity hexutil.Uint64
+		if err := json.Unmarshal(data, &quantity); err != nil {
+			return err
+		}
+
+		*v = flexUint64(quantity)
+
+		return nil
+	}
+
+	var number uint64
+	if err := json.Unmarshal(data, &number); err != nil {
+		return err
+	}
+
+	*v = flexUint64(number)
+
+	return nil
 }
 
 // jsonFrameReceiptExtra is the frame-specific part of a JSON-RPC receipt. Clients
@@ -197,7 +225,7 @@ func frameGasUsed(frame *jsonFrameReceipt) (execution, state uint64) {
 		return execution, state
 	}
 
-	var pair []hexutil.Uint64
+	var pair []flexUint64
 	if err := json.Unmarshal(frame.GasUsed, &pair); err == nil {
 		if len(pair) > 0 {
 			execution = uint64(pair[0])
@@ -211,8 +239,8 @@ func frameGasUsed(frame *jsonFrameReceipt) (execution, state uint64) {
 	}
 
 	var object struct {
-		Execution *hexutil.Uint64 `json:"execution"`
-		State     *hexutil.Uint64 `json:"state"`
+		Execution *flexUint64 `json:"execution"`
+		State     *flexUint64 `json:"state"`
 	}
 
 	if err := json.Unmarshal(frame.GasUsed, &object); err == nil {
@@ -228,7 +256,7 @@ func frameGasUsed(frame *jsonFrameReceipt) (execution, state uint64) {
 	}
 
 	// A plain number means the node reports a single combined value.
-	var combined hexutil.Uint64
+	var combined flexUint64
 	if err := json.Unmarshal(frame.GasUsed, &combined); err == nil {
 		execution = uint64(combined)
 	}
