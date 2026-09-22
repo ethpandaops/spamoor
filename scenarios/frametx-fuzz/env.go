@@ -35,6 +35,10 @@ type environment struct {
 	// probe is the deployed probe contract, or nil when probe axes are disabled.
 	probe *ProbeDeployment
 
+	// pending are funded addresses whose account code is not deployed yet, waiting for
+	// a transaction whose validation prefix creates them at tx.sender.
+	pending *pendingBuffer
+
 	// The wallet pool is split in two: wallets with no code, and wallets delegated to
 	// the probe contract, whose validation frames run that code instead of the
 	// protocol's default code.
@@ -202,6 +206,7 @@ func (s *Scenario) setupEnvironment(ctx context.Context) (*environment, error) {
 	env.plainCount = total
 	env.burner = s.walletPool.GetWellKnownWallet(BurnerWalletName)
 	env.accounts = newAccountBuffer()
+	env.pending = newPendingBuffer()
 
 	client := s.walletPool.GetClient(spamoor.WithClientGroup(s.options.ClientGroup))
 	if client == nil {
@@ -219,10 +224,12 @@ func (s *Scenario) setupEnvironment(ctx context.Context) (*environment, error) {
 		}
 	}
 
-	if s.axes.enabled(axisCode) {
+	// Both generated contracts and deploy-led prefixes address the CREATE2 factory: one
+	// deploys through it from a body frame, the other from the validation prefix.
+	if s.axes.enabled(axisCode) || s.axes.enabled(axisDeploy) {
 		env.factory, err = s.walletPool.GetDeploymentFactory().GetFactoryAddress(ctx)
 		if err != nil {
-			s.logger.Warnf("generated contract axis disabled: %v", err)
+			s.logger.Warnf("generated contract and deploy-prefix axes disabled: %v", err)
 		}
 	}
 

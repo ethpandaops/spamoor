@@ -419,6 +419,9 @@ func (s *Scenario) recipeFor(txIdx uint64) *Recipe {
 		AllowCode:          s.env.factory != (common.Address{}),
 		AllowFuzzedAccount: s.env.accounts.available(),
 
+		AllowDeploySender:    s.axes.enabled(axisDeploy) && s.env.factory != (common.Address{}) && s.env.pending.available(),
+		AllowDeployPaymaster: s.axes.enabled(axisDeploy) && s.env.factory != (common.Address{}) && s.env.probe != nil,
+
 		InvalidChance: s.options.InvalidRatio,
 		Violations:    violationNames(),
 	})
@@ -452,7 +455,7 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	// carries no signature, and it is submitted out of the pool and tracked by hash,
 	// since the pool has no wallet to match its inclusion through.
 	if result.keyless {
-		prepareKeylessFrameTx(result.tx, result.senderAddr, uint256.MustFromBig(s.walletPool.GetChainId()))
+		prepareKeylessFrameTx(result.tx, result.senderAddr, uint256.MustFromBig(s.walletPool.GetChainId()), result.senderNonce)
 
 		return nil, result, client, s.sendKeyless(ctx, client, result)
 	}
@@ -575,12 +578,14 @@ func (s *Scenario) sendKeyless(ctx context.Context, client *spamoor.Client, resu
 	raw, err := tx.MarshalNetwork()
 	if err != nil {
 		s.releaseKeys(result)
+		s.returnPendingAccount(result)
 
 		return err
 	}
 
 	if err := client.SendRawTransaction(ctx, raw); err != nil {
 		s.releaseKeys(result)
+		s.returnPendingAccount(result)
 		s.coverage.refusedOne(result.recipe, err.Error())
 
 		return nil
@@ -599,6 +604,19 @@ func (s *Scenario) sendKeyless(ctx context.Context, client *spamoor.Client, resu
 	return nil
 }
 
+// returnPendingAccount puts a funded account back for another transaction to deploy.
+//
+// A refused transaction never reached a mempool, so the account it would have created
+// still does not exist: its address holds the funding and no code. Dropping it would
+// strand that balance, since the wipe path only works on an account that has code.
+func (s *Scenario) returnPendingAccount(result *build) {
+	if result.deploy == nil || !result.deploy.Funded {
+		return
+	}
+
+	s.env.pending.remember([]pendingAccount{*result.deploy})
+}
+
 // onConfirm records what a landed transaction produced. The per-frame result is logged,
 // not judged.
 func (s *Scenario) onConfirm(result *build, tx *txtypes.FrameTx, receipt *txtypes.Receipt) {
@@ -610,6 +628,13 @@ func (s *Scenario) onConfirm(result *build, tx *txtypes.FrameTx, receipt *txtype
 	s.coverage.confirmedOne()
 	s.env.rememberContracts(result.deployed)
 	s.env.accounts.remember(result.accounts)
+	s.env.pending.remember(result.funded)
+
+	// An account a deploy-led prefix created now holds code and whatever funding is left
+	// over, so it joins the wipe queue the deployed accounts use.
+	if result.deploy != nil && result.deploy.Funded {
+		s.env.accounts.queueWipe(result.deploy.Address)
+	}
 
 	if !s.options.LogFrames {
 		return

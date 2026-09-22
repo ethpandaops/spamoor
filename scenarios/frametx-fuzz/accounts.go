@@ -128,6 +128,16 @@ func (b *accountBuffer) take(index int) (accountContract, bool) {
 	return contract, true
 }
 
+// queueWipe queues a contract for a wipe without it having passed through the ready ring.
+// A deploy-led prefix creates its account in the transaction that spends it, so the
+// account never waits in the ring, but its leftover funding is reclaimed the same way.
+func (b *accountBuffer) queueWipe(address common.Address) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	b.wipeQueue = append(b.wipeQueue, address)
+}
+
 // takeWipe returns a contract to reclaim, once enough others are queued behind it that a
 // used contract's transaction has settled. It returns false when nothing is due.
 func (b *accountBuffer) takeWipe() (common.Address, bool) {
@@ -150,7 +160,7 @@ func (b *accountBuffer) takeWipe() (common.Address, bool) {
 // A contract sender approves in its own code, so it contributes no signature entry and
 // nothing signs the transaction. The fields still have to be final before the hash is
 // taken, so this runs where PrepareFrameTx would for a keyed sender.
-func prepareKeylessFrameTx(frameTx *txtypes.FrameTx, sender common.Address, chainID *uint256.Int) {
+func prepareKeylessFrameTx(frameTx *txtypes.FrameTx, sender common.Address, chainID *uint256.Int, nonce uint64) {
 	frameTx.ChainID = chainID
 	frameTx.Sender = sender
 
@@ -159,6 +169,6 @@ func prepareKeylessFrameTx(frameTx *txtypes.FrameTx, sender common.Address, chai
 	}
 
 	if frameTx.UsesLegacyNonce() {
-		frameTx.NonceSeq = senderNonce
+		frameTx.NonceSeq = nonce
 	}
 }
