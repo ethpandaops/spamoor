@@ -88,7 +88,7 @@
 - scenario: calltx
   name: "3631 attack A: randomized jumpdest analysis, STOP tail (stop_jumpdest_push1)"
   description: >-
-    Each tx CREATEs 128 KiB of non-repeating random initcode ~823 times; the initcode
+    Each tx CREATEs 128 KiB of non-repeating random initcode ~820 times (measured); the initcode
     jumps to its last byte so the whole thing must be analysed, and the counter mixed in at
     offset 32 makes every analysis unique so no client cache can serve it. The child falls
     into an implicit STOP and the account IS created (as in the PR); the driver REVERTs at
@@ -127,7 +127,15 @@
     refill_interval: 600
     contract_address: "0x100dae30856f1b5b689b1a88c8ddf18fc83bfbcf"
     call_data: "0x0000000000000000000000003b47073bd0313c8e775e215cb80d85b7c6990e615b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5f5ffd"
-    gas_limit: 16777216
+    # 17,000,000 rather than the 2^24 execution cap: EIP-8037 splits tx.gas into an
+    # execution budget capped at TX_MAX_GAS_LIMIT and a state-gas reservoir holding the
+    # overflow, so the extra 222,784 becomes reservoir. Each CREATE's NEW_ACCOUNT charge
+    # (183,600) is then taken from the reservoir and refilled when the child reverts,
+    # instead of spilling into execution gas. Without it the loop cannot finish its last
+    # iteration and ends in out-of-gas, burning the limit and telling you nothing.
+    # Measured: 16,728,927 used via a clean REVERT (~820 CREATEs) vs an OOG at 16,777,216
+    # (~822) -- 0.29% less gas for a receipt that shows whether the loop actually ran.
+    gas_limit: 17000000
     throughput: 12
     amount: 0
     rebroadcast: 120
