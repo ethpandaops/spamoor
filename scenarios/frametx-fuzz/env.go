@@ -176,14 +176,9 @@ func (s *Scenario) setupEnvironment(ctx context.Context) (*environment, error) {
 		return nil, fmt.Errorf("frame transactions need the Amsterdam (EIP-8037) gas model, but --pre-amsterdam-fee-model is set")
 	}
 
-	support, err := txpool.GetFrameSupportWithInit(ctx)
+	support, err := txpool.AwaitFrameSupport(ctx, s.logger)
 	if err != nil {
 		return nil, err
-	}
-
-	if !support.Active {
-		return nil, fmt.Errorf("no account at the EIP-8141 expiry verifier predeploy %s: this chain does not implement frame transactions",
-			txtypes.ExpiryVerifier)
 	}
 
 	env := &environment{

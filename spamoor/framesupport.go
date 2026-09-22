@@ -148,3 +148,47 @@ func predeployActive(ctx context.Context, client *Client, address common.Address
 
 	return nonce > 0, nil
 }
+
+// AwaitFrameSupport returns the chain's frame transaction capability, blocking until the
+// chain activates it.
+//
+// The predeploys appear at the fork rather than at genesis, so a spammer started from
+// genesis on a devnet that schedules the fork a few epochs in simply has to wait for it.
+// That is a normal state rather than a failure, so it is logged once as a warning and
+// re-probed until the fork lands or the context is cancelled. Probe errors are treated
+// the same way: a node that is not answering yet is not a chain without frames.
+func (pool *TxPool) AwaitFrameSupport(ctx context.Context, logger logrus.FieldLogger) (FrameSupport, error) {
+	if logger == nil {
+		logger = logrus.StandardLogger()
+	}
+
+	waiting := false
+
+	for {
+		support, err := pool.GetFrameSupportWithInit(ctx)
+
+		switch {
+		case err == nil && support.Active:
+			if waiting {
+				logger.Infof("frame transactions are now active on this chain")
+			}
+
+			return support, nil
+
+		case !waiting:
+			waiting = true
+
+			if err != nil {
+				logger.Warnf("could not probe frame transaction support (%v), waiting for the chain to become available", err)
+			} else {
+				logger.Warnf("no account at the EIP-8141 expiry verifier predeploy %s, this chain does not implement frame transactions yet, waiting for activation", txtypes.ExpiryVerifier)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return FrameSupport{}, ctx.Err()
+		case <-time.After(frameSupportRetryInterval):
+		}
+	}
+}

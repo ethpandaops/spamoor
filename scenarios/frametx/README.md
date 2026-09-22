@@ -140,8 +140,10 @@ spamoor frametx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 5 \
 
 ## Troubleshooting
 
-**"this chain does not implement frame transactions"** - the chain has not activated EIP-8141. The
-probe reports which client rejected the type.
+**"this chain does not implement frame transactions yet, waiting for activation"** - the chain has
+not activated EIP-8141. Forks do not land at genesis, so this is a warning rather than an error:
+the scenario re-probes the predeploys every 30 seconds and starts sending as soon as the fork is
+live.
 
 **Frame receipt mismatches** - the client's per-frame statuses differ from the shape's expectation.
 This is the signal the scenario exists to produce; the warning names the frame index and both
