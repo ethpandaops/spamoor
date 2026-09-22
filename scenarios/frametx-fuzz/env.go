@@ -2,10 +2,12 @@ package frametxfuzz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
 	"sync"
+	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
@@ -289,6 +291,8 @@ func (s *Scenario) probeCapabilities(ctx context.Context, env *environment) {
 	} else if s.options.PostTx == "on" {
 		env.allowPostTx = true
 	} else {
+		s.logger.Infof("probing EIP-7906 POST_TX support, this takes up to %v blocks per probe transaction", probeInclusionBlocks)
+
 		env.allowPostTx = s.abProbe(ctx, env, "POST_TX", func(frames []*txtypes.Frame) []*txtypes.Frame {
 			return append(frames, txtypes.PostTxFrame(txtypes.ExpiryVerifier, expiryData(s.deadline()),
 				txtypes.FrameLimits{Execution: s.options.VerifyGas}))
@@ -317,7 +321,7 @@ func (s *Scenario) abProbe(ctx context.Context, env *environment, name string, a
 		return false
 	}
 
-	wallet := env.plainWallet(0)
+	wallet := s.walletPool.GetWellKnownWallet(CapabilityProbeWalletName)
 	if wallet == nil {
 		return false
 	}
@@ -341,13 +345,29 @@ func (s *Scenario) abProbe(ctx context.Context, env *environment, name string, a
 	}
 
 	if err := s.sendProbeTx(ctx, client, wallet, env, addFeature(baseline()), feeCap, tipCap); err != nil {
-		s.logger.Debugf("%s probe transaction was refused: %v", name, err)
+		s.logger.Infof("%s probe transaction did not confirm: %v", name, err)
 
 		return false
 	}
 
 	return true
 }
+
+// CapabilityProbeWalletName is the wallet capability probes are sent from. It is
+// deliberately not one of the fuzzing wallets: a probe that is accepted but never
+// included leaves a pending transaction behind, and everything the wallet sends after it
+// would queue behind that.
+const CapabilityProbeWalletName = "frametx-fuzz-prober"
+
+// probeInclusionBlocks is how many blocks a capability probe gives its transaction to
+// land in.
+//
+// A rejection is not the only way a chain says no: a client that does not implement the
+// feature may still accept the transaction into its mempool and simply never build a
+// block containing it. The probe would then wait forever, so a transaction still missing
+// after this many blocks counts as a negative result. Blocks rather than a wall clock
+// duration, because what the probe is waiting for is a block builder's decision.
+const probeInclusionBlocks = 5
 
 // sendProbeTx submits one capability probe transaction and waits for its receipt.
 func (s *Scenario) sendProbeTx(ctx context.Context, client *spamoor.Client, wallet *spamoor.Wallet, env *environment, frames []*txtypes.Frame, feeCap, tipCap *big.Int) error {
@@ -365,10 +385,35 @@ func (s *Scenario) sendProbeTx(ctx context.Context, client *spamoor.Client, wall
 		return err
 	}
 
-	if _, err := s.walletPool.GetTxPool().SendAndAwaitTransaction(ctx, wallet, tx, &spamoor.SendTransactionOptions{
+	txpool := s.walletPool.GetTxPool()
+
+	probeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Give up once the chain has built probeInclusionBlocks blocks without the
+	// transaction. The subscription is in place before the transaction is submitted, so
+	// the count only covers blocks that could have carried it.
+	var blocks atomic.Int64
+
+	subscription := txpool.SubscribeToBlockUpdates(s.walletPool, func(_ uint64, _ *spamoor.WalletPoolBlockStats) {
+		if blocks.Add(1) >= probeInclusionBlocks {
+			cancel()
+		}
+	})
+	defer txpool.UnsubscribeFromBlockUpdates(subscription)
+
+	if _, err := txpool.SendAndAwaitTransaction(probeCtx, wallet, tx, &spamoor.SendTransactionOptions{
 		Client:      client,
 		ClientGroup: s.options.ClientGroup,
+		Rebroadcast: true,
 	}); err != nil {
+		if ctx.Err() == nil && errors.Is(probeCtx.Err(), context.Canceled) {
+			// The transaction is in a mempool, it just never made it into a block.
+			// Its nonce stays consumed: reusing it would collide with the copy the
+			// node still holds, which is why probes run on their own wallet.
+			return fmt.Errorf("the probe transaction was accepted but not included within %v blocks", probeInclusionBlocks)
+		}
+
 		wallet.MarkSkippedNonce(tx.Nonce())
 
 		return err

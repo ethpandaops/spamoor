@@ -192,7 +192,13 @@ ordinary scenario's starves the generator at a few transactions per block whatev
 
 ## Requirements
 
-The chain must have an account at the EIP-8141 expiry verifier predeploy (`0x…8141`); the scenario
-refuses to start otherwise rather than sending transactions every client will reject. The envelope
-shape and the two extensions are read from their predeploys the same way, and `--pre-amsterdam-fee-model`
-is incompatible: frame transactions need the EIP-8037 gas model.
+The chain must have an account at the EIP-8141 expiry verifier predeploy (`0x…8141`). Forks activate
+at an epoch rather than at genesis, so on a chain without it the scenario warns and re-probes every
+30 seconds until the fork lands instead of failing. The envelope shape and the two extensions are
+read from their predeploys the same way, and `--pre-amsterdam-fee-model` is incompatible: frame
+transactions need the EIP-8037 gas model.
+
+`--post-tx auto` settles EIP-7906 support by sending one transaction with a `POST_TX` frame and one
+without, from a dedicated prober wallet. A client that does not implement the feature may accept the
+transaction into its mempool and never build a block with it, so a probe that is still missing five
+blocks after submission counts as unsupported.

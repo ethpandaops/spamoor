@@ -226,6 +226,17 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		})
 	}
 
+	if s.options.PostTx == "auto" && s.axes.enabled(axisPostTx) {
+		// Capability probes run on their own wallet: a probe the chain neither rejects
+		// nor includes stays in the mempool for good, and that must not be a fuzzing
+		// wallet whose every later transaction would queue behind it.
+		s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
+			Name:          CapabilityProbeWalletName,
+			RefillAmount:  uint256.NewInt(200000000000000000),
+			RefillBalance: uint256.NewInt(50000000000000000),
+		})
+	}
+
 	if s.axes.enabled(axisRoots) {
 		// A root source is identified by the address that wrote it, so a fixed wallet
 		// lets a rerun reference roots an earlier run committed.
