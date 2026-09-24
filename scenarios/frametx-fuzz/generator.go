@@ -26,6 +26,30 @@ const deployGasPerCodeByte = 1_600
 // the wiping transaction's sender.
 const wipeFrameGas = 40_000
 
+// prefixDeployBaseGas and prefixDeployGasPerCodeByte budget the execution a deploy frame
+// inside the validation prefix may spend.
+//
+// Far tighter than a body deployment's budget, because the whole prefix shares
+// MaxVerifyGas. What makes that fit at all is where EIP-8037 charges a code deposit: the
+// devnet measurement for a 99-byte account is ~15k execution against ~151k state, so the
+// code size lands in the state dimension and the execution side stays near constant.
+const (
+	prefixDeployBaseGas        = 25_000
+	prefixDeployGasPerCodeByte = 150
+)
+
+// prefixDeployStateGas budgets the state gas a prefix deploy frame needs: the new
+// account's leaf plus a byte per byte of code, with headroom. The leaf is charged even
+// for a pre-funded address, which only carries a balance.
+func prefixDeployStateGas(codeSize int) uint64 {
+	return uint64(txtypes.StateBytesPerNewAccount+codeSize) * txtypes.CostPerStateByte * 5 / 4
+}
+
+// prefixDeployExecutionGas budgets a prefix deploy frame's execution gas.
+func prefixDeployExecutionGas(codeSize int) uint64 {
+	return prefixDeployBaseGas + uint64(codeSize)*prefixDeployGasPerCodeByte
+}
+
 // fuzzedVerifyGas is what a validation frame running fuzzed account code may spend.
 //
 // It has to leave room: the whole validation prefix, signature verification included,
@@ -64,6 +88,18 @@ type build struct {
 	// code, so it carries no signature and nothing signs it.
 	keyless bool
 
+	// deploy is the account this transaction's own validation prefix creates at
+	// tx.sender, set only for a deploy-led prefix.
+	deploy *pendingAccount
+
+	// senderNonce is the nonce the sender's transaction uses, which differs between a
+	// contract an earlier transaction deployed and one created in this one.
+	senderNonce uint64
+
+	// funded are the account addresses this transaction credits, which later
+	// transactions deploy in their own validation prefix.
+	funded []pendingAccount
+
 	// senderAddr is the transaction's sender, a wallet or a one-shot contract.
 	senderAddr common.Address
 
@@ -74,9 +110,15 @@ type build struct {
 
 // buildRecipe assembles the transaction a recipe describes.
 func (s *Scenario) buildRecipe(ctx context.Context, client *spamoor.Client, env *environment, recipe *Recipe, feeCap, tipCap *big.Int) (*build, error) {
-	result := &build{recipe: recipe, feeCap: feeCap}
+	result := &build{recipe: recipe, feeCap: feeCap, senderNonce: senderNonce}
 
-	if recipe.Sender == SenderFuzzedContract && recipe.Invalid == "" {
+	if recipe.Prefix.deploys() && recipe.Invalid == "" {
+		if err := s.takeDeployedSender(env, recipe, result); err != nil {
+			return nil, err
+		}
+	}
+
+	if !result.keyless && recipe.Sender == SenderFuzzedContract && recipe.Invalid == "" {
 		if address, ok := env.accounts.take(int(recipe.Index)); ok {
 			result.keyless = true
 			result.senderAddr = address.Address
@@ -150,6 +192,10 @@ func (s *Scenario) buildPrefix(env *environment, recipe *Recipe, result *build) 
 	contractSender := recipe.Sender == SenderContract && env.probe != nil && env.contractCount > 0
 	fuzzedSender := result.keyless
 
+	// The deploy frame leads the prefix, ahead of the verification it makes possible:
+	// the code validating this transaction does not exist until it runs.
+	s.appendDeployFrame(result)
+
 	result.cover("prefix:" + string(recipe.Prefix))
 
 	if recipe.Expiry {
@@ -160,12 +206,14 @@ func (s *Scenario) buildPrefix(env *environment, recipe *Recipe, result *build) 
 		result.cover("contract-sender")
 	}
 
-	if fuzzedSender {
+	// A deploy-led sender runs fuzzed account code too, but it is reported under its own
+	// dimension: what is interesting about it is that the code did not exist yet.
+	if fuzzedSender && result.deploy == nil {
 		result.cover("fuzzed-sender")
 	}
 
-	switch recipe.Prefix {
-	case PrefixPaymaster:
+	switch {
+	case recipe.Prefix.sponsored():
 		if env.probe == nil {
 			// Without the probe contract there is nothing to play the paymaster, so
 			// the recipe falls back to the self-relayed shape rather than building a
@@ -195,6 +243,28 @@ func (s *Scenario) buildPrefix(env *environment, recipe *Recipe, result *build) 
 	result.prefixLen = len(result.frames)
 
 	return nil
+}
+
+// appendDeployFrame prepends the deploy frame a deploy-led prefix opens with.
+//
+// It calls the CREATE2 factory with the salt and init code, and because a CREATE2 address
+// is a function of the code, the contract it creates *is* tx.sender. Its budgets are sized
+// for the prefix's caps rather than a body deployment's: the code deposit is state gas, so
+// only a small, near-constant execution budget is needed.
+func (s *Scenario) appendDeployFrame(result *build) {
+	if result.deploy == nil {
+		return
+	}
+
+	codeSize := len(result.deploy.InitCode)
+	factory := result.deploy.Factory
+
+	result.append(txtypes.DeployFrame(factory, result.deploy.deployData(), txtypes.FrameLimits{
+		Execution: prefixDeployExecutionGas(codeSize),
+		State:     prefixDeployStateGas(codeSize),
+	}))
+
+	result.cover("deploy-prefix-frame")
 }
 
 // buildSelfVerifyPrefix appends the single-frame validation prefix.
@@ -267,6 +337,7 @@ func (s *Scenario) buildBody(env *environment, recipe *Recipe, result *build) er
 	}
 
 	s.appendAccountDeploys(env, recipe, result)
+	s.appendPendingFundings(env, recipe, result)
 	s.appendWipeFrame(env, result)
 
 	return nil
@@ -324,6 +395,122 @@ func (s *Scenario) appendAccountDeploys(env *environment, recipe *Recipe, result
 		result.cover("deploy-account")
 	}
 }
+
+// takeDeployedSender makes the transaction's sender an account its own validation prefix
+// creates.
+//
+// The self-paying shape draws a funded address an earlier transaction credited; the
+// sponsored shape needs no balance, so its account is minted here and exists only as code
+// and an address until the deploy frame runs. Either way the sender is keyless: its code
+// approves, so there is nothing to sign and nothing for the pool to track but the hash.
+//
+// A recipe that asks for a deploy prefix with nothing to deploy falls back to the
+// self-relayed shape rather than building a transaction that cannot validate.
+func (s *Scenario) takeDeployedSender(env *environment, recipe *Recipe, result *build) error {
+	if env.factory == (common.Address{}) {
+		recipe.Prefix = PrefixSelfVerify
+
+		return nil
+	}
+
+	if recipe.Prefix == PrefixDeploySelfVerify {
+		account, ok := env.pending.take(int(recipe.Index))
+		if !ok {
+			recipe.Prefix = PrefixSelfVerify
+
+			return nil
+		}
+
+		s.useDeployedSender(result, account)
+
+		return nil
+	}
+
+	if env.probe == nil {
+		recipe.Prefix = PrefixSelfVerify
+
+		return nil
+	}
+
+	account, err := newPendingAccount(s.seed, env.factory, recipe.Index, deployedSenderIndex,
+		s.options.CodeGas, recipe.Index%10 != 0)
+	if err != nil {
+		return err
+	}
+
+	s.useDeployedSender(result, account)
+
+	return nil
+}
+
+// deployedSenderIndex is the frame index a deploy-led prefix's account derives its salt
+// from, kept clear of the body's deployments and the account pool's.
+const deployedSenderIndex = 220
+
+// useDeployedSender points the build at an account its prefix will create.
+func (s *Scenario) useDeployedSender(result *build, account pendingAccount) {
+	result.keyless = true
+	result.senderAddr = account.Address
+	result.senderNonce = deployedSenderNonce
+	result.deploy = &account
+
+	result.cover("deployed-sender")
+}
+
+// appendPendingFundings credits addresses that later transactions deploy in their own
+// validation prefix.
+//
+// A self-paying deploy-led transaction is charged before its prefix runs, so its account
+// must already hold a balance when it is still nothing but an address. Funding it is an
+// ordinary value transfer -- CREATE2 refuses an address with code or a nonce, but balance
+// alone does not block it -- so it rides along on transactions that are being sent anyway,
+// the way account deployments do.
+func (s *Scenario) appendPendingFundings(env *environment, recipe *Recipe, result *build) {
+	if result.keyless || recipe.Invalid != "" || env.factory == (common.Address{}) {
+		return
+	}
+
+	if !s.axes.enabled(axisDeploy) {
+		return
+	}
+
+	want := pendingReadyTarget - env.pending.readyCount()
+	if want <= 0 {
+		return
+	}
+
+	if want > pendingFundingsPerTx {
+		want = pendingFundingsPerTx
+	}
+
+	funding := new(uint256.Int).Mul(uint256.MustFromBig(result.feeCap), uint256.NewInt(accountFundingGas))
+
+	for k := 0; k < want; k++ {
+		index := pendingFundingIndexBase + k
+		approves := (recipe.Index+uint64(k))%10 != 0
+
+		account, err := newPendingAccount(s.seed, env.factory, recipe.Index, index, s.options.CodeGas, approves)
+		if err != nil {
+			return
+		}
+
+		account.Funded = true
+
+		// A plain transfer: the address holds no code yet, so there is nothing to call
+		// and nothing that could revert.
+		result.append(txtypes.UserOpFrame(&account.Address, new(uint256.Int).Set(funding), nil,
+			txtypes.FrameLimits{
+				Execution: transferFrameGas,
+				State:     txtypes.StateBytesPerNewAccount * txtypes.CostPerStateByte,
+			}))
+
+		result.funded = append(result.funded, account)
+		result.cover("fund-pending-account")
+	}
+}
+
+// transferFrameGas covers a value transfer to an address that holds no code.
+const transferFrameGas = 30_000
 
 // appendWipeFrame reclaims one queued account contract by calling it with an empty
 // preamble, which its zero-scope dispatch answers by sending its whole balance to CALLER.

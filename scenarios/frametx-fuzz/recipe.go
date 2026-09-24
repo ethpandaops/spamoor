@@ -65,13 +65,26 @@ type Recipe struct {
 // PrefixShape is one of the validation prefixes the public mempool recognizes.
 type PrefixShape string
 
-// The recognized prefixes. The two deploy-led shapes are absent: a CREATE2 account
-// deployment costs far more than the prefix's execution cap allows, and such a
-// transaction's sender has no key for the pool to track.
+// The recognized prefixes, including the two deploy-led shapes that create the sender's
+// account in the transaction that uses it. Their senders are keyless, like any contract
+// sender, so the pool tracks them by hash rather than through a wallet.
 const (
-	PrefixSelfVerify PrefixShape = "self_verify"
-	PrefixPaymaster  PrefixShape = "only_verify+pay"
+	PrefixSelfVerify       PrefixShape = "self_verify"
+	PrefixPaymaster        PrefixShape = "only_verify+pay"
+	PrefixDeploySelfVerify PrefixShape = "deploy+self_verify"
+	PrefixDeployPaymaster  PrefixShape = "deploy+only_verify+pay"
 )
+
+// deploys reports whether the prefix leads with a deploy frame, which makes the sender an
+// account the transaction itself creates.
+func (p PrefixShape) deploys() bool {
+	return p == PrefixDeploySelfVerify || p == PrefixDeployPaymaster
+}
+
+// sponsored reports whether a paymaster rather than the sender pays.
+func (p PrefixShape) sponsored() bool {
+	return p == PrefixPaymaster || p == PrefixDeployPaymaster
+}
 
 // SenderKind selects what code runs in the sender's validation frame.
 type SenderKind string
@@ -91,6 +104,11 @@ const (
 	// anything and the transaction carries no signature at all. Drawn rarely: a fuzzed
 	// prologue often halts before it reaches the approval.
 	SenderFuzzedContract SenderKind = "fuzzed_contract"
+
+	// SenderDeployed is an account contract this transaction's own deploy frame
+	// creates, so the code validating the transaction did not exist when it was sent.
+	// It follows from a deploy-led prefix rather than being drawn.
+	SenderDeployed SenderKind = "deployed"
 )
 
 // FrameKind is what a body frame does.
@@ -244,12 +262,13 @@ const (
 	axisPostTx    axis = "posttx"
 	axisProbe     axis = "probe"
 	axisCode      axis = "code"
+	axisDeploy    axis = "deploy"
 )
 
 // axisNames lists the axes in a stable order for help text and validation.
 var axisNames = []axis{
 	axisPrefix, axisBatches, axisFailures, axisSignature,
-	axisNonces, axisRoots, axisPostTx, axisProbe, axisCode,
+	axisNonces, axisRoots, axisPostTx, axisProbe, axisCode, axisDeploy,
 }
 
 // axisWeights is a validated axis selection.
@@ -298,6 +317,14 @@ type DrawOptions struct {
 	AllowProbe         bool
 	AllowCode          bool
 	AllowFuzzedAccount bool
+
+	// AllowDeploySender reports whether a funded, undeployed account is waiting, which
+	// is what the self-paying deploy prefix needs.
+	AllowDeploySender bool
+
+	// AllowDeployPaymaster reports whether a paymaster is available to pay for an
+	// account that holds nothing, which is the sponsored deploy prefix.
+	AllowDeployPaymaster bool
 	// InvalidChance is how often a drawn recipe carries a deliberate violation.
 	InvalidChance float64
 
@@ -314,6 +341,7 @@ func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 	recipe := &Recipe{Index: index}
 
 	prefixDraw := rng.Float64()
+	deployDraw := rng.Float64()
 	paymasterDraw := rng.Float64()
 	expiryDraw := rng.Float64()
 	senderDraw := rng.Float64()
@@ -346,6 +374,18 @@ func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 	recipe.Prefix = PrefixSelfVerify
 	if opts.Axes.enabled(axisPrefix) && prefixDraw < 0.35*opts.Axes.chance(axisPrefix) {
 		recipe.Prefix = PrefixPaymaster
+	}
+
+	// A deploy-led prefix creates the sender in the transaction that uses it. Which of
+	// the two is drawn follows who pays: the sponsored shape needs no funded account, so
+	// it is the fallback when none is waiting.
+	if opts.Axes.enabled(axisDeploy) && deployDraw < 0.3*opts.Axes.chance(axisDeploy) {
+		switch {
+		case opts.AllowDeployPaymaster && (recipe.Prefix == PrefixPaymaster || !opts.AllowDeploySender):
+			recipe.Prefix = PrefixDeployPaymaster
+		case opts.AllowDeploySender:
+			recipe.Prefix = PrefixDeploySelfVerify
+		}
 	}
 
 	recipe.Expiry = opts.Axes.enabled(axisPrefix) && expiryDraw < 0.25
@@ -565,6 +605,26 @@ func (r *Recipe) normalize(opts DrawOptions) {
 	if opts.AllowCode {
 		r.pairDeployWithCall()
 	}
+
+	// Last, because pairing a call with a deployment can put a deployment back: a
+	// deploy-led prefix creates the sender in this transaction, so the sender kind
+	// follows from the prefix and its body stays cheap. The account holds only the
+	// funding one transaction was sized for, and under a sponsored deploy it holds
+	// nothing at all, so a value transfer out of it would fail for want of balance.
+	if r.Prefix.deploys() {
+		r.Sender = SenderDeployed
+
+		for i := range r.Body {
+			if r.Body[i].Kind == KindDeployCode {
+				r.Body[i].Kind = KindCall
+				r.Body[i].Target = TargetWallet
+			}
+
+			if r.Prefix == PrefixDeployPaymaster && r.Body[i].Kind == KindTransfer {
+				r.Body[i].Kind = KindCall
+			}
+		}
+	}
 }
 
 // refusalKey names the aspect of a recipe a refusal is most likely about, so recorded
@@ -577,10 +637,12 @@ func (r *Recipe) refusalKey() string {
 		return "root-edge:" + r.RecentRootEdge
 	case r.RecentRoots > 0:
 		return "recent-roots"
-	case r.Prefix == PrefixPaymaster:
+	case r.Prefix.deploys(), r.Prefix == PrefixPaymaster:
 		return "prefix:" + string(r.Prefix)
 	case r.Sender == SenderContract:
 		return "contract-sender"
+	case r.Sender == SenderDeployed:
+		return "deployed-sender"
 	case r.Sender == SenderFuzzedContract:
 		return "fuzzed-sender"
 	case r.FuzzedPaymaster:

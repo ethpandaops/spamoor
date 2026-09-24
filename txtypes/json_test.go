@@ -707,6 +707,44 @@ func TestReceiptJSONRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFrameReceiptNumericFields checks that a frame receipt decodes when the client
+// writes its numbers as bare JSON numbers rather than as JSON-RPC quantities, which is
+// what nethermind does for a frame's status. EIP-8141 specifies no JSON encoding, so
+// neither spelling is wrong and a client using one must not break block processing.
+func TestFrameReceiptNumericFields(t *testing.T) {
+	raw := `{
+		"type": "0x6",
+		"status": "0x1",
+		"cumulativeGasUsed": "0x5bbc",
+		"gasUsed": "0x5bbc",
+		"transactionHash": "0xaaaa00000000000000000000000000000000000000000000000000000000001a",
+		"payer": "0xdddd000000000000000000000000000000000004",
+		"logs": [],
+		"frameReceipts": [
+			{"status":1,"executionGasUsed":"0xbeb","stateGasUsed":"0x0","logs":[]},
+			{"status":0,"executionGasUsed":100,"stateGasUsed":7,"logs":[]}
+		]
+	}`
+
+	var receipt Receipt
+	if err := json.Unmarshal([]byte(raw), &receipt); err != nil {
+		t.Fatalf("a frame receipt with numeric fields should decode: %v", err)
+	}
+
+	extra := receipt.FrameExtra()
+	if extra == nil || len(extra.Frames) != 2 {
+		t.Fatal("frame receipts were not decoded")
+	}
+
+	if extra.Frames[0].Status != 1 || extra.Frames[0].ExecutionGas != 0xbeb {
+		t.Fatalf("first frame decoded as %+v", extra.Frames[0])
+	}
+
+	if extra.Frames[1].Status != 0 || extra.Frames[1].ExecutionGas != 100 || extra.Frames[1].StateGas != 7 {
+		t.Fatalf("second frame decoded as %+v", extra.Frames[1])
+	}
+}
+
 // TestReceiptLogsWithoutPosition checks that logs nested in a frame receipt decode
 // even though they carry none of the position fields go-ethereum's Log requires, and
 // that they inherit the receipt's position.
