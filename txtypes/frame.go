@@ -391,6 +391,19 @@ func (f *Frame) ExpiryDeadline() (uint64, bool) {
 	return binary.BigEndian.Uint64(f.Data), true
 }
 
+// ExpiryDeadline returns the deadline of the transaction's expiry verifier frame, if it
+// carries one. It satisfies ExpiringTx: a transaction past this deadline is refused by the
+// expiry verifier, so it can never be included again.
+func (tx *FrameTx) ExpiryDeadline() (uint64, bool) {
+	for _, frame := range tx.Frames {
+		if deadline, ok := frame.ExpiryDeadline(); ok {
+			return deadline, true
+		}
+	}
+
+	return 0, false
+}
+
 // IsRecentRootVerifier reports whether the frame is an EIP-8272 recent root verifier
 // frame: a VERIFY frame targeting RECENT_ROOT_ADDRESS with zero flags, value and state
 // budget, whose data is one to MaxRecentRootReferences whole tuples.

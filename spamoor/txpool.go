@@ -1302,7 +1302,10 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 
 	// Close channels for confirmed transactions and collect txs to rebroadcast
 	var txsToRebroadcast []*PendingTx
+	var expiredTxs []*PendingTx
 	var nonceGaps []uint64
+
+	chainTime := pool.blockTime(blockNumber)
 
 	// Only consider rebroadcasting the 2 lowest pending nonces
 	const maxRebroadcastNonces = 2
@@ -1320,6 +1323,17 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 			// Get the most recent pending tx for this nonce (last in the list)
 			if len(nonceChan.txs) > 0 {
 				mostRecentTx := nonceChan.txs[len(nonceChan.txs)-1]
+
+				// A transaction past its own deadline is dead rather than slow: it is
+				// replaced rather than rebroadcast, and regardless of whether the
+				// caller asked for rebroadcasts, because until its nonce is retired
+				// nothing else this wallet sends can confirm.
+				if isExpiredTx(mostRecentTx.Tx, chainTime) {
+					expiredTxs = append(expiredTxs, mostRecentTx)
+
+					continue
+				}
+
 				if mostRecentTx.Options != nil && mostRecentTx.Options.Rebroadcast {
 					// Check if enough time has passed since last rebroadcast
 					backoffDelay := pool.calculateBackoffDelay(mostRecentTx.RebroadcastCount)
@@ -1344,6 +1358,16 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 	}
 
 	wallet.txNonceMutex.Unlock()
+
+	// Retire expired transactions, which hold a nonce nothing can ever confirm. The
+	// attempt is counted like a rebroadcast, so a replacement a client refuses as
+	// underpriced is retried at a higher price rather than at the same one forever.
+	for _, expired := range expiredTxs {
+		expired.RebroadcastCount++
+		expired.LastRebroadcast = time.Now()
+
+		go pool.replaceExpiredTransaction(pool.options.Context, wallet, expired, expired.RebroadcastCount)
+	}
 
 	// Fill nonce gaps if any
 	if len(nonceGaps) > 0 {
@@ -1966,6 +1990,25 @@ func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
 	return delay
 }
 
+// rebroadcastStartOffset picks the client a rebroadcast attempt starts at.
+//
+// The transaction hash spreads the starting point across the client pool, the way
+// submitTransaction does, and the retry count advances it, so every attempt begins at the
+// next client rather than at the one the previous attempt already reached. That matters
+// because the loop stops at the first client that takes the transaction and a client
+// already holding it takes it again: without the retry offset a stuck transaction is
+// re-sent to the same node forever. Observed on frames-devnet-0, where reth keeps frame
+// transactions in its queued set and never includes or forwards them -- every retry went
+// back into the same node and the wallet stayed blocked.
+func rebroadcastStartOffset(configured int, hash common.Hash, retryCount uint64) int {
+	offset := configured
+	if offset == 0 {
+		offset = int(hash[0]) | (int(hash[1]) << 8)
+	}
+
+	return offset + int(retryCount)
+}
+
 // rebroadcastTransaction performs the actual rebroadcast of a transaction.
 // This method encapsulates the existing rebroadcast logic for reuse.
 func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Transaction, options *SendTransactionOptions, retryCount uint64) {
@@ -1992,13 +2035,7 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 		clientCount = 5
 	}
 
-	// Use tx hash for offset to distribute rebroadcasts across all clients,
-	// matching the fix in submitTransaction.
-	startOffset := options.ClientsStartOffset
-	if startOffset == 0 {
-		h := tx.Hash()
-		startOffset = int(h[0]) | (int(h[1]) << 8)
-	}
+	startOffset := rebroadcastStartOffset(options.ClientsStartOffset, tx.Hash(), retryCount)
 
 	for j := 0; j < clientCount; j++ {
 		if ctx.Err() != nil {
@@ -2030,6 +2067,157 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 		if err == nil || strings.Contains(err.Error(), "already known") {
 			break
 		}
+	}
+}
+
+// blockTime returns the timestamp of a processed block.
+//
+// The newest block still tracked answers for one that has already been pruned, since a
+// later timestamp only makes a deadline more certainly past. Zero means no block has been
+// processed yet, and nothing is judged expired on that.
+func (pool *TxPool) blockTime(blockNumber uint64) uint64 {
+	pool.blocksMutex.RLock()
+	defer pool.blocksMutex.RUnlock()
+
+	if info := pool.blocks[blockNumber]; info != nil {
+		return info.Timestamp
+	}
+
+	newest := uint64(0)
+	for _, info := range pool.blocks {
+		if info != nil && info.Timestamp > newest {
+			newest = info.Timestamp
+		}
+	}
+
+	return newest
+}
+
+// isExpiredTx reports whether a transaction carries a deadline the chain has already
+// passed.
+//
+// The comparison is against the head block's timestamp rather than the local clock: a
+// later block can only carry a later timestamp, so a deadline that the head has reached
+// can never be met again. Without a known chain time nothing is treated as expired.
+func isExpiredTx(tx *txtypes.Transaction, chainTime uint64) bool {
+	if chainTime == 0 {
+		return false
+	}
+
+	deadline, ok := tx.ExpiryDeadline()
+
+	return ok && deadline <= chainTime
+}
+
+// replacementFeeBumpPercent is how far a replacement transaction is priced above the one
+// it replaces. Clients require a bump before accepting a replacement at the same nonce --
+// 10% in geth -- and the extra margin covers the ones that ask for more.
+const replacementFeeBumpPercent = 25
+
+// replacementFees prices a transaction meant to replace another one at the same nonce.
+// The bump grows with the attempt count, so a replacement a client refuses as underpriced
+// is not retried at the same price forever.
+func (pool *TxPool) replacementFees(replaced *txtypes.Transaction, attempt uint64) (gasFeeCap, gasTipCap *big.Int) {
+	if attempt < 1 {
+		attempt = 1
+	}
+
+	percent := big.NewInt(100 + replacementFeeBumpPercent*int64(attempt))
+
+	bump := func(value *big.Int) *big.Int {
+		if value == nil {
+			return big.NewInt(0)
+		}
+
+		bumped := new(big.Int).Mul(value, percent)
+
+		return bumped.Div(bumped, big.NewInt(100))
+	}
+
+	gasFeeCap = bump(replaced.GasFeeCap())
+	gasTipCap = bump(replaced.GasTipCap())
+
+	// The bump alone can still leave the replacement below what the chain currently
+	// costs, which would strand it just as thoroughly as the transaction it replaces.
+	// The base fee is unknown only before the first block was processed, and stale
+	// processing is driven by block processing, so the guard is for the helper's sake.
+	if baseFee := pool.GetCurrentBaseFee(); baseFee != nil {
+		minFeeCap := new(big.Int).Mul(baseFee, big.NewInt(2))
+		if gasFeeCap.Cmp(minFeeCap) < 0 {
+			gasFeeCap = minFeeCap
+		}
+	}
+
+	minTipCap := big.NewInt(1e9)
+	if gasTipCap.Cmp(minTipCap) < 0 {
+		gasTipCap = minTipCap
+	}
+
+	if gasTipCap.Cmp(gasFeeCap) > 0 {
+		gasTipCap = new(big.Int).Set(gasFeeCap)
+	}
+
+	return gasFeeCap, gasTipCap
+}
+
+// replaceExpiredTransaction takes over the nonce of a transaction whose deadline passed.
+//
+// Such a transaction is not slow, it is finished: an EIP-8141 expiry verifier frame
+// reverts once its deadline is behind the chain, so no amount of rebroadcasting will ever
+// get it included -- while it keeps occupying its nonce, and every later transaction the
+// wallet sends queues behind it for the rest of the run. A dummy transaction at the same
+// nonce, priced above the original so the pools take the replacement, retires it the same
+// way fillNonceGaps retires a gap.
+func (pool *TxPool) replaceExpiredTransaction(ctx context.Context, wallet *Wallet, expired *PendingTx, attempt uint64) {
+	nonce := expired.Tx.Nonce()
+	deadline, _ := expired.Tx.ExpiryDeadline()
+
+	gasFeeCap, gasTipCap := pool.replacementFees(expired.Tx, attempt)
+
+	fillerTx, err := wallet.BuildFillerTx(nonce, gasTipCap, gasFeeCap, pool.MinIntrinsicGas())
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"wallet": wallet.GetAddress().Hex(),
+			"nonce":  nonce,
+		}).WithError(err).Warnf("failed to build replacement for expired transaction")
+
+		return
+	}
+
+	options := &SendTransactionOptions{
+		Rebroadcast: true,
+		OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
+			fields := logrus.Fields{
+				"wallet": wallet.GetAddress().Hex(),
+				"nonce":  tx.Nonce(),
+				"txhash": tx.Hash().Hex(),
+			}
+
+			switch {
+			case err != nil:
+				logrus.WithFields(fields).WithError(err).Warnf("replacement for expired transaction failed")
+			case receipt != nil:
+				logrus.WithFields(fields).Infof("replacement for expired transaction confirmed")
+			}
+		},
+	}
+	if expired.Options != nil {
+		options.ClientGroup = expired.Options.ClientGroup
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"wallet":   wallet.GetAddress().Hex(),
+		"nonce":    nonce,
+		"txhash":   expired.Tx.Hash().Hex(),
+		"deadline": deadline,
+		"attempt":  attempt,
+	}).Warnf("transaction expired in the mempool, replacing it to unblock the nonce")
+
+	if err := pool.submitTransaction(ctx, wallet, fillerTx, options, true); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"wallet": wallet.GetAddress().Hex(),
+			"nonce":  nonce,
+		}).WithError(err).Warnf("failed to submit replacement for expired transaction")
 	}
 }
 

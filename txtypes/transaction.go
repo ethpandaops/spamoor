@@ -125,6 +125,17 @@ type IndependentNonceTx interface {
 	UsesAccountNonce() bool
 }
 
+// ExpiringTx is implemented by transaction types that carry a deadline after which they
+// can no longer be included. A frame transaction with an EIP-8141 expiry verifier frame is
+// the current case: once the deadline has passed the verifier reverts, so the transaction
+// is dead rather than merely delayed -- and since it still occupies its nonce, anything
+// tracking a nonce sequence has to notice and move past it.
+type ExpiringTx interface {
+	// ExpiryDeadline returns the unix timestamp after which the transaction can no
+	// longer be included, and whether it carries one at all.
+	ExpiryDeadline() (uint64, bool)
+}
+
 // txRegistry maps EIP-2718 type bytes to constructors. Guarded by a mutex because
 // plugins may register types after startup.
 var (
@@ -312,6 +323,16 @@ func (tx *Transaction) UsesAccountNonce() bool {
 	}
 
 	return true
+}
+
+// ExpiryDeadline returns the deadline after which the transaction can no longer be
+// included, and whether it has one. Types without a deadline never expire.
+func (tx *Transaction) ExpiryDeadline() (uint64, bool) {
+	if inner, ok := tx.inner.(ExpiringTx); ok {
+		return inner.ExpiryDeadline()
+	}
+
+	return 0, false
 }
 
 // RawSignatureValues returns the signature values of an ECDSA-signed transaction.
