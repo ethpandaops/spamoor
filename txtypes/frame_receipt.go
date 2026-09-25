@@ -101,12 +101,18 @@ func (r *Receipt) FrameExtra() *FrameReceiptExtra {
 // EIP-8141 does not specify a JSON-RPC encoding, so the decoder accepts the shapes
 // clients are likely to use: the two-dimensional gas as an object, as a two-element
 // array mirroring the consensus encoding, or as flat sibling fields.
+//
+// EIP-8037's execution dimension goes by two names. A receipt reporting it as a sibling
+// field calls it executionGasUsed, while the same clients' callTracer output calls it
+// regularGasUsed, so both spellings are read here rather than only the one a given client
+// happens to use in a given response.
 type jsonFrameReceipt struct {
 	Status  *flexUint64     `json:"status"`
 	GasUsed json.RawMessage `json:"gasUsed"`
 	Logs    []*jsonLog      `json:"logs"`
 
 	ExecutionGasUsed *flexUint64 `json:"executionGasUsed"`
+	RegularGasUsed   *flexUint64 `json:"regularGasUsed"`
 	StateGasUsed     *flexUint64 `json:"stateGasUsed"`
 }
 
@@ -215,6 +221,8 @@ func decodeFrameReceipt(receipt *Receipt, raw json.RawMessage) error {
 func frameGasUsed(frame *jsonFrameReceipt) (execution, state uint64) {
 	if frame.ExecutionGasUsed != nil {
 		execution = uint64(*frame.ExecutionGasUsed)
+	} else if frame.RegularGasUsed != nil {
+		execution = uint64(*frame.RegularGasUsed)
 	}
 
 	if frame.StateGasUsed != nil {
@@ -240,10 +248,15 @@ func frameGasUsed(frame *jsonFrameReceipt) (execution, state uint64) {
 
 	var object struct {
 		Execution *flexUint64 `json:"execution"`
+		Regular   *flexUint64 `json:"regular"`
 		State     *flexUint64 `json:"state"`
 	}
 
 	if err := json.Unmarshal(frame.GasUsed, &object); err == nil {
+		if object.Execution == nil {
+			object.Execution = object.Regular
+		}
+
 		if object.Execution != nil {
 			execution = uint64(*object.Execution)
 		}
