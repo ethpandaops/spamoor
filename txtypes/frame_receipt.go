@@ -144,6 +144,15 @@ func (v *flexUint64) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// flexValue converts an optional flexible quantity, mapping absent to zero.
+func flexValue(v *flexUint64) uint64 {
+	if v == nil {
+		return 0
+	}
+
+	return uint64(*v)
+}
+
 // jsonFrameReceiptExtra is the frame-specific part of a JSON-RPC receipt. Clients
 // differ on the key: ethrex reports "frameReceipts".
 type jsonFrameReceiptExtra struct {

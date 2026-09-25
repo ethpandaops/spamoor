@@ -1044,21 +1044,37 @@ func weightedTokens(data []byte) uint64 {
 }
 
 // jsonFrame is a frame as reported by JSON-RPC. EIP-8141 does not specify a JSON
-// encoding; these key names follow ethrex, the first client to ship the type.
+// encoding, so every field is read in each spelling and each number format clients use:
+// a quantity string or a bare JSON number, which nethermind writes for a frame's mode and
+// flags where the others quote them.
 type jsonFrame struct {
-	Mode     *hexutil.Uint64 `json:"mode"`
-	Flags    *hexutil.Uint64 `json:"flags"`
-	To       *common.Address `json:"to"`
-	Target   *common.Address `json:"target"`
-	GasLimit *hexutil.Uint64 `json:"gasLimit"`
-	Value    *hexutil.Big    `json:"value"`
-	Data     *hexutil.Bytes  `json:"data"`
+	Mode   *flexUint64     `json:"mode"`
+	Flags  *flexUint64     `json:"flags"`
+	To     *common.Address `json:"to"`
+	Target *common.Address `json:"target"`
+	Value  *hexutil.Big    `json:"value"`
+	Data   *hexutil.Bytes  `json:"data"`
+
+	// The execution gas limit follows whichever name the client gives the dimension:
+	// gasLimit for reth and ethrex, executionGasLimit for nethermind, matching the
+	// executionGasUsed it reports on a receipt.
+	GasLimit          *flexUint64 `json:"gasLimit"`
+	ExecutionGasLimit *flexUint64 `json:"executionGasLimit"`
 
 	// ethrex has shipped both spellings of the state gas limit. Reading only one of
 	// them decodes every frame from the other build with a state limit of zero and
 	// nothing says so, which changes the transaction's hash on re-encoding.
-	StateLimit    *hexutil.Uint64 `json:"stateLimit"`
-	StateGasLimit *hexutil.Uint64 `json:"stateGasLimit"`
+	StateLimit    *flexUint64 `json:"stateLimit"`
+	StateGasLimit *flexUint64 `json:"stateGasLimit"`
+}
+
+// executionLimit returns whichever spelling the client used.
+func (f *jsonFrame) executionLimit() uint64 {
+	if f.GasLimit != nil {
+		return uint64(*f.GasLimit)
+	}
+
+	return flexValue(f.ExecutionGasLimit)
 }
 
 // stateLimit returns whichever spelling the client used.
@@ -1067,12 +1083,12 @@ func (f *jsonFrame) stateLimit() uint64 {
 		return uint64(*f.StateLimit)
 	}
 
-	return jsonUint64(f.StateGasLimit)
+	return flexValue(f.StateGasLimit)
 }
 
 // jsonFrameSignature is a signature entry as reported by JSON-RPC.
 type jsonFrameSignature struct {
-	Scheme    *hexutil.Uint64 `json:"scheme"`
+	Scheme    *flexUint64     `json:"scheme"`
 	Signer    *common.Address `json:"signer"`
 	Msg       *hexutil.Bytes  `json:"msg"`
 	Signature *hexutil.Bytes  `json:"signature"`
@@ -1082,7 +1098,7 @@ type jsonFrameSignature struct {
 type jsonFrameTx struct {
 	Sender     *common.Address       `json:"sender"`
 	NonceKeys  []*hexutil.Big        `json:"nonceKeys"`
-	NonceSeq   *hexutil.Uint64       `json:"nonceSeq"`
+	NonceSeq   *flexUint64           `json:"nonceSeq"`
 	Frames     []*jsonFrame          `json:"frames"`
 	Signatures []*jsonFrameSignature `json:"signatures"`
 }
@@ -1108,7 +1124,7 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 	}
 
 	tx.ChainID = jsonU256(fields.ChainID)
-	tx.NonceSeq = jsonUint64(dec.NonceSeq)
+	tx.NonceSeq = flexValue(dec.NonceSeq)
 	tx.Fees = FrameFees{
 		GasTipCap:  jsonU256(fields.MaxPriorityFeePerGas),
 		GasFeeCap:  jsonU256(fields.MaxFeePerGas),
@@ -1150,11 +1166,11 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 		}
 
 		tx.Frames = append(tx.Frames, &Frame{
-			Mode:   FrameMode(jsonUint64(frame.Mode)),
-			Flags:  uint8(jsonUint64(frame.Flags)),
+			Mode:   FrameMode(flexValue(frame.Mode)),
+			Flags:  uint8(flexValue(frame.Flags)),
 			Target: copyAddressPtr(target),
 			Limits: FrameLimits{
-				Execution: jsonUint64(frame.GasLimit),
+				Execution: frame.executionLimit(),
 				State:     frame.stateLimit(),
 			},
 			Value: jsonU256(frame.Value),
@@ -1166,7 +1182,7 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 
 	for _, sig := range dec.Signatures {
 		entry := &FrameSignature{
-			Scheme:    FrameSigScheme(jsonUint64(sig.Scheme)),
+			Scheme:    FrameSigScheme(flexValue(sig.Scheme)),
 			Msg:       jsonBytes(sig.Msg),
 			Signature: jsonBytes(sig.Signature),
 		}

@@ -1123,3 +1123,295 @@ func TestFrameGasUsedAcceptsEverySpelling(t *testing.T) {
 		})
 	}
 }
+
+// The same frame transaction as each client of the frames devnet reports it over
+// eth_getTransactionByHash, with the block position fields dropped. EIP-8141 specifies no
+// JSON encoding here either: reth and ethrex name a frame's execution budget gasLimit
+// while nethermind calls it executionGasLimit and writes mode, flags and a signature
+// scheme as bare numbers instead of quantities, and geth reports a type 0x6 transaction
+// with none of its frame fields at all. Reading a limit under the wrong name is worse than
+// failing, because the frame decodes with a budget of zero and the transaction then
+// re-encodes to a different hash - so each spelling is checked against the hash the chain
+// knows the transaction by.
+var clientFrameTransactions = []struct {
+	client string
+	raw    string
+	frames bool
+}{
+	{
+		client: "geth",
+		raw: `{
+  "from": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "gas": "0x14335",
+  "gasPrice": "0x4a817c800",
+  "hash": "0x19913e328c64448454a530c1bd77921e0af678f768e8222b520c9c7b65a993a7",
+  "input": "0x",
+  "nonce": "0xd33",
+  "r": null,
+  "s": null,
+  "to": null,
+  "type": "0x6",
+  "v": null,
+  "value": "0x0"
+}`,
+		frames: false,
+	},
+	{
+		client: "reth",
+		raw: `{
+  "blobVersionedHashes": [],
+  "chainId": "0x1a3453829",
+  "frames": [
+    {
+      "data": "0x",
+      "flags": "0x3",
+      "gasLimit": "0x1388",
+      "mode": "0x1",
+      "stateLimit": "0x0",
+      "to": null,
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x4",
+      "gasLimit": "0x7530",
+      "mode": "0x2",
+      "stateLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x4",
+      "gasLimit": "0x1",
+      "mode": "0x2",
+      "stateLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x0",
+      "gasLimit": "0x7530",
+      "mode": "0x2",
+      "stateLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    }
+  ],
+  "from": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "gasPrice": "0x77359407",
+  "hash": "0x19913e328c64448454a530c1bd77921e0af678f768e8222b520c9c7b65a993a7",
+  "maxFeePerBlobGas": "0x0",
+  "maxFeePerGas": "0x4a817c800",
+  "maxPriorityFeePerGas": "0x77359400",
+  "nonce": "0xd33",
+  "sender": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "signatures": [
+    {
+      "msg": "0x",
+      "scheme": "0x1",
+      "signature": "0x0192867c8205c20a9b9675f2673f931aa7732b169904b66bcac8ddb946561c02da0f999c8a348b8b8101a3045611994bf6f4ef5a4a6627d92ff0b6ac88e8a0ab1d",
+      "signer": null
+    }
+  ],
+  "type": "0x6"
+}`,
+		frames: true,
+	},
+	{
+		client: "nethermind",
+		raw: `{
+  "accessList": [],
+  "blobVersionedHashes": [],
+  "chainId": "0x1a3453829",
+  "frames": [
+    {
+      "data": "0x",
+      "executionGasLimit": "0x1388",
+      "flags": 3,
+      "mode": 1,
+      "stateGasLimit": "0x0",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "executionGasLimit": "0x7530",
+      "flags": 4,
+      "mode": 2,
+      "stateGasLimit": "0x0",
+      "target": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "executionGasLimit": "0x1",
+      "flags": 4,
+      "mode": 2,
+      "stateGasLimit": "0x0",
+      "target": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "executionGasLimit": "0x7530",
+      "flags": 0,
+      "mode": 2,
+      "stateGasLimit": "0x0",
+      "target": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    }
+  ],
+  "from": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "gas": "0xfde9",
+  "gasPrice": "0x77359407",
+  "hash": "0x19913e328c64448454a530c1bd77921e0af678f768e8222b520c9c7b65a993a7",
+  "input": "0x",
+  "maxFeePerBlobGas": "0x0",
+  "maxFeePerGas": "0x4a817c800",
+  "maxPriorityFeePerGas": "0x77359400",
+  "nonce": "0xd33",
+  "r": "0x0",
+  "s": "0x0",
+  "signatures": [
+    {
+      "msg": "0x",
+      "scheme": 1,
+      "signature": "0x0192867c8205c20a9b9675f2673f931aa7732b169904b66bcac8ddb946561c02da0f999c8a348b8b8101a3045611994bf6f4ef5a4a6627d92ff0b6ac88e8a0ab1d"
+    }
+  ],
+  "to": null,
+  "type": "0x6",
+  "v": "0x0",
+  "value": "0x0",
+  "yParity": "0x0"
+}`,
+		frames: true,
+	},
+	{
+		client: "ethrex",
+		raw: `{
+  "blobVersionedHashes": [],
+  "chainId": "0x1a3453829",
+  "frames": [
+    {
+      "data": "0x",
+      "flags": "0x3",
+      "gasLimit": "0x1388",
+      "mode": "0x1",
+      "stateGasLimit": "0x0",
+      "to": null,
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x4",
+      "gasLimit": "0x7530",
+      "mode": "0x2",
+      "stateGasLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x4",
+      "gasLimit": "0x1",
+      "mode": "0x2",
+      "stateGasLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x0",
+      "gasLimit": "0x7530",
+      "mode": "0x2",
+      "stateGasLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    }
+  ],
+  "from": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "hash": "0x19913e328c64448454a530c1bd77921e0af678f768e8222b520c9c7b65a993a7",
+  "maxFeePerBlobGas": "0x0",
+  "maxFeePerGas": "0x4a817c800",
+  "maxPriorityFeePerGas": "0x77359400",
+  "nonce": "0xd33",
+  "sender": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "signatures": [
+    {
+      "msg": "0x",
+      "scheme": "0x1",
+      "signature": "0x0192867c8205c20a9b9675f2673f931aa7732b169904b66bcac8ddb946561c02da0f999c8a348b8b8101a3045611994bf6f4ef5a4a6627d92ff0b6ac88e8a0ab1d",
+      "signer": null
+    }
+  ],
+  "type": "0x6"
+}`,
+		frames: true,
+	},
+}
+
+// A frame transaction must read the same whichever client served the JSON, and a client
+// that reports no frame fields must still leave an indexable transaction behind.
+func TestFrameTxDecodesEveryClientSpelling(t *testing.T) {
+	var reference *FrameTx
+
+	for _, tc := range clientFrameTransactions {
+		t.Run(tc.client, func(t *testing.T) {
+			tx, err := UnmarshalJSONTx([]byte(tc.raw))
+			if err != nil {
+				t.Fatalf("transaction does not decode: %v", err)
+			}
+
+			if tx.Type() != FrameTxType {
+				t.Fatalf("type = %d, want %d", tx.Type(), FrameTxType)
+			}
+
+			frameTx, ok := tx.Inner().(*FrameTx)
+			if !tc.frames {
+				// Nothing can reconstruct frames a client did not report, but the
+				// transaction still has to survive as its generic self.
+				if ok {
+					t.Fatal("frames decoded from an object that carries none")
+				}
+
+				return
+			}
+
+			if !ok {
+				t.Fatalf("decoded as %T, want a frame transaction", tx.Inner())
+			}
+
+			encoded, err := tx.MarshalBinary()
+			if err != nil {
+				t.Fatalf("re-encode failed: %v", err)
+			}
+
+			// Any field read under the wrong name or dropped shows up here.
+			if got := crypto.Keccak256Hash(encoded); got != tx.Hash() {
+				t.Errorf("re-encoded hash = %s, want the reported %s", got, tx.Hash())
+			}
+
+			if reference == nil {
+				reference = frameTx
+
+				return
+			}
+
+			if frameTx.Sender != reference.Sender || len(frameTx.Frames) != len(reference.Frames) ||
+				len(frameTx.Signatures) != len(reference.Signatures) {
+				t.Fatalf("envelope differs from the first client's: %+v", frameTx)
+			}
+
+			for i, frame := range frameTx.Frames {
+				want := reference.Frames[i]
+				if frame.Mode != want.Mode || frame.Flags != want.Flags ||
+					frame.Limits != want.Limits {
+					t.Errorf("frame %d = {mode %d, flags %d, limits %+v}, want {mode %d, flags %d, limits %+v}",
+						i, frame.Mode, frame.Flags, frame.Limits, want.Mode, want.Flags, want.Limits)
+				}
+			}
+		})
+	}
+}
