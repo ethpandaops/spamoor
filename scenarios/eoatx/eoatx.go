@@ -20,31 +20,34 @@ import (
 )
 
 type ScenarioOptions struct {
-	TotalCount   uint64  `yaml:"total_count"`
-	Throughput   uint64  `yaml:"throughput"`
-	MaxPending   uint64  `yaml:"max_pending"`
-	MaxWallets   uint64  `yaml:"max_wallets"`
-	Rebroadcast  uint64  `yaml:"rebroadcast"`
-	BaseFee      float64 `yaml:"base_fee"`
-	TipFee       float64 `yaml:"tip_fee"`
-	BaseFeeWei   string  `yaml:"base_fee_wei"`
-	TipFeeWei    string  `yaml:"tip_fee_wei"`
-	GasLimit     uint64  `yaml:"gas_limit"`
-	Amount       uint64  `yaml:"amount"`
-	Data         string  `yaml:"data"`
-	To           string  `yaml:"to"`
-	Timeout      string  `yaml:"timeout"`
-	RandomAmount bool    `yaml:"random_amount"`
-	RandomTarget bool    `yaml:"random_target"`
-	SelfTxOnly   bool    `yaml:"self_tx_only"`
-	ClientGroup  string  `yaml:"client_group"`
-	LogTxs       bool    `yaml:"log_txs"`
+	TotalCount   uint64            `yaml:"total_count"`
+	Throughput   uint64            `yaml:"throughput"`
+	MaxPending   uint64            `yaml:"max_pending"`
+	MaxWallets   uint64            `yaml:"max_wallets"`
+	Rebroadcast  uint64            `yaml:"rebroadcast"`
+	BaseFee      float64           `yaml:"base_fee"`
+	TipFee       float64           `yaml:"tip_fee"`
+	BaseFeeWei   string            `yaml:"base_fee_wei"`
+	TipFeeWei    string            `yaml:"tip_fee_wei"`
+	GasLimit     uint64            `yaml:"gas_limit"`
+	Amount       uint64            `yaml:"amount"`
+	Data         string            `yaml:"data"`
+	To           string            `yaml:"to"`
+	Timeout      string            `yaml:"timeout"`
+	RandomAmount bool              `yaml:"random_amount"`
+	RandomTarget bool              `yaml:"random_target"`
+	SelfTxOnly   bool              `yaml:"self_tx_only"`
+	Targets      TargetPoolOptions `yaml:"targets"`
+	TargetsFile  string            `yaml:"targets_file"`
+	ClientGroup  string            `yaml:"client_group"`
+	LogTxs       bool              `yaml:"log_txs"`
 }
 
 type Scenario struct {
 	options    ScenarioOptions
 	logger     *logrus.Entry
 	walletPool *spamoor.WalletPool
+	targetPool *targetPool
 }
 
 var ScenarioName = "eoatx"
@@ -64,6 +67,8 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	RandomAmount: false,
 	RandomTarget: false,
 	SelfTxOnly:   false,
+	Targets:      TargetPoolOptions{},
+	TargetsFile:  "",
 	ClientGroup:  "",
 	LogTxs:       false,
 }
@@ -99,6 +104,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
 	flags.BoolVar(&s.options.SelfTxOnly, "self-tx-only", ScenarioDefaultOptions.SelfTxOnly, "Only send transactions to self")
+	flags.StringVar(&s.options.TargetsFile, "targets-file", ScenarioDefaultOptions.TargetsFile, "YAML file containing explicit and CREATE2-derived target addresses")
 	flags.StringVar(&s.options.ClientGroup, "client-group", ScenarioDefaultOptions.ClientGroup, "Client group to use for sending transactions")
 	flags.BoolVar(&s.options.LogTxs, "log-txs", ScenarioDefaultOptions.LogTxs, "Log all submitted transactions")
 	return nil
@@ -113,6 +119,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if err := s.initTargetPool(); err != nil {
+		return err
 	}
 
 	if s.options.MaxWallets > 0 {
@@ -138,8 +148,58 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
 	}
 
+	if s.options.To != "" && !common.IsHexAddress(s.options.To) {
+		return fmt.Errorf("invalid target address %q", s.options.To)
+	}
+
 	if blockLimit := s.walletPool.GetTxPool().GetCurrentGasLimit(); blockLimit > 0 && s.options.GasLimit > blockLimit {
 		s.logger.Warnf("Gas limit %d exceeds block gas limit %d and will most likely be dropped by the execution layer client", s.options.GasLimit, blockLimit)
+	}
+
+	return nil
+}
+
+func (s *Scenario) initTargetPool() error {
+	inlineConfigured := s.options.Targets.configured()
+	fileConfigured := strings.TrimSpace(s.options.TargetsFile) != ""
+	if inlineConfigured && fileConfigured {
+		return fmt.Errorf("targets and targets_file cannot be used together")
+	}
+	if !inlineConfigured && !fileConfigured {
+		return nil
+	}
+	if s.options.To != "" || s.options.RandomTarget || s.options.SelfTxOnly {
+		return fmt.Errorf("targets cannot be combined with to, random_target, or self_tx_only")
+	}
+
+	targetOptions := s.options.Targets
+	baseDir := "."
+	if fileConfigured {
+		var err error
+		targetOptions, baseDir, err = loadTargetPoolOptions(s.options.TargetsFile)
+		if err != nil {
+			return err
+		}
+	}
+
+	pool, sourceCounts, err := buildTargetPool(targetOptions, baseDir)
+	if err != nil {
+		return fmt.Errorf("invalid targets configuration: %w", err)
+	}
+	s.targetPool = pool
+
+	if !pool.repeat {
+		if s.options.TotalCount == 0 {
+			s.options.TotalCount = pool.len()
+			s.logger.Infof("target pool is non-repeating; limiting scenario to %d transactions", pool.len())
+		} else if s.options.TotalCount > pool.len() {
+			return fmt.Errorf("total_count %d exceeds non-repeating target pool size %d", s.options.TotalCount, pool.len())
+		}
+	}
+
+	s.logger.Infof("loaded %d receiver targets from %d sources", pool.len(), len(sourceCounts))
+	for source, count := range sourceCounts {
+		s.logger.Debugf("receiver target source %q: %d addresses", source, count)
 	}
 
 	return nil
@@ -256,7 +316,13 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	// spamoor wallet or user-supplied --to address is treated as non-empty to
 	// avoid paying the EIP-2780 state-gas charge on every send.
 	targetIsEmpty := false
-	if s.options.To != "" {
+	if s.targetPool != nil {
+		target, ok := s.targetPool.targetFor(txIdx)
+		if !ok {
+			return nil, nil, client, wallet, fmt.Errorf("receiver target pool exhausted at transaction %d", txIdx+1)
+		}
+		toAddr = target.Address
+	} else if s.options.To != "" {
 		toAddr = common.HexToAddress(s.options.To)
 	} else {
 		toAddr = s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
