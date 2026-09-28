@@ -72,6 +72,7 @@ func init() {
 		"NewEIP155Signer":          reflect.ValueOf(types.NewEIP155Signer),
 		"NewEIP2930Signer":         reflect.ValueOf(types.NewEIP2930Signer),
 		"NewEmptyStateAccount":     reflect.ValueOf(types.NewEmptyStateAccount),
+		"NewListHashStream":        reflect.ValueOf(types.NewListHashStream),
 		"NewLondonSigner":          reflect.ValueOf(types.NewLondonSigner),
 		"NewPragueSigner":          reflect.ValueOf(types.NewPragueSigner),
 		"NewRandomCustodyBitmap":   reflect.ValueOf(types.NewRandomCustodyBitmap),
@@ -87,6 +88,7 @@ func init() {
 		"SignSetCode":              reflect.ValueOf(types.SignSetCode),
 		"SignTx":                   reflect.ValueOf(types.SignTx),
 		"SlimAccountRLP":           reflect.ValueOf(types.SlimAccountRLP),
+		"SlimAccountRLPInto":       reflect.ValueOf(types.SlimAccountRLPInto),
 		"TxDifference":             reflect.ValueOf(types.TxDifference),
 
 		// type definitions
@@ -112,6 +114,7 @@ func init() {
 		"Header":               reflect.ValueOf((*types.Header)(nil)),
 		"HomesteadSigner":      reflect.ValueOf((*types.HomesteadSigner)(nil)),
 		"LegacyTx":             reflect.ValueOf((*types.LegacyTx)(nil)),
+		"ListHashStream":       reflect.ValueOf((*types.ListHashStream)(nil)),
 		"ListHasher":           reflect.ValueOf((*types.ListHasher)(nil)),
 		"Log":                  reflect.ValueOf((*types.Log)(nil)),
 		"Receipt":              reflect.ValueOf((*types.Receipt)(nil)),
