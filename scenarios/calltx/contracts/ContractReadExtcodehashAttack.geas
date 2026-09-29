@@ -1,0 +1,104 @@
+;;; Minimal EXTCODEHASH attack - runtime code
+;;;
+;;; Derives the CREATE2 addresses of contracts deployed by the `factorydeploytx`
+;;; scenario and hits each one with EXTCODEHASH until the remaining gas drops to
+;;; `gasBuffer`. The salt is a plain counter: it starts at 0 and increments once
+;;; per iteration, wrapping around at `contractCount`.
+;;;
+;;; Because the walk never repeats an address before it wraps, every EXTCODEHASH
+;;; is a cold (EIP-2929) account access as long as `contractCount` exceeds the
+;;; number of iterations a single tx can pay for. Measured over 30M gas:
+;;; count=1000 gives 1k cold + 125k warm accesses (~237 gas each), count=12000
+;;; and above gives 11034 cold + 0 warm accesses (2718 gas each). So keep
+;;; contractCount above ~11k per 30M of block gas limit.
+;;;
+;;; The counter restarts at 0 on every call, so all txs in a block walk the same
+;;; prefix of the address space. EIP-2929 warmth is per-tx, so each tx still pays
+;;; the 2600 gas cold access, but the client's own state cache stays warm across
+;;; them - this trades some disk-level pressure for a fully predictable walk.
+;;;
+;;; Calldata layout is ABI compatible with the solidity version, so this can be
+;;; called with `--call-fn-sig "extcodehashAttack(address,bytes32,uint256,uint256)"`.
+;;; The selector itself is not checked - any selector runs the attack.
+;;;
+;;;   0x04  address factory
+;;;   0x24  bytes32 initCodeHash
+;;;   0x44  uint256 contractCount
+;;;   0x64  uint256 gasBuffer
+;;;
+;;; Note: contractCount == 0 does not revert here (EVM MOD by zero yields zero),
+;;; it just pins every iteration to salt 0.
+;;;
+;;; Per-iteration cost is 2718 gas, of which 2600 is the cold EXTCODEHASH itself,
+;;; so 96% of the loop is the attack and only 118 gas is overhead.
+
+;;; Needs shanghai or later (PUSH0).
+#pragma target "shanghai"
+
+;;; ----------------------------------------------------------------------------
+;;; CREATE2 preimage buffer, built once
+;;;
+;;;   mem[0x0b]        = 0xff
+;;;   mem[0x0c..0x1f]  = factory            (20 bytes)
+;;;   mem[0x20..0x3f]  = salt               (rewritten every iteration)
+;;;   mem[0x40..0x5f]  = initCodeHash       (32 bytes)
+;;;
+;;; keccak256(mem[0x0b], 85) is the CREATE2 hash; EXTCODEHASH truncates it to
+;;; the low 20 bytes on its own, so no explicit address mask is needed.
+;;; ----------------------------------------------------------------------------
+
+push 0x04
+calldataload           ;; [factory]
+push 0
+mstore                 ;; mem[0x00..0x1f] = zero padding || factory
+
+push 0xff
+push 0x0b
+mstore8                ;; mem[0x0b] = 0xff (must run after the mstore above)
+
+push 0x24
+calldataload           ;; [initCodeHash]
+push 0x40
+mstore                 ;; mem[0x40..0x5f] = initCodeHash
+
+;;; ----------------------------------------------------------------------------
+;;; Loop state, kept on the stack as [salt, contractCount, gasBuffer]
+;;; ----------------------------------------------------------------------------
+
+push 0x64
+calldataload           ;; [gasBuffer]
+push 0x44
+calldataload           ;; [contractCount, gasBuffer]
+push 0                 ;; [salt, contractCount, gasBuffer]
+
+loop:
+    ;; stop once gasleft() <= gasBuffer
+    gas                ;; [gas, salt, contractCount, gasBuffer]
+    dup4               ;; [gasBuffer, gas, salt, contractCount, gasBuffer]
+    lt                 ;; [gasBuffer < gas, salt, contractCount, gasBuffer]
+    iszero             ;; [gas <= gasBuffer, salt, contractCount, gasBuffer]
+    jumpi @done        ;; [salt, contractCount, gasBuffer]
+
+    dup1               ;; [salt, salt, contractCount, gasBuffer]
+    push 0x20
+    mstore             ;; [salt, contractCount, gasBuffer]
+
+    ;; target = keccak256(0xff ++ factory ++ salt ++ initCodeHash)
+    push 0x55          ;; [85, salt, contractCount, gasBuffer]
+    push 0x0b          ;; [11, 85, salt, contractCount, gasBuffer]
+    keccak256          ;; [target, salt, contractCount, gasBuffer]
+
+    ;; the actual attack: cold account access + code hash lookup
+    extcodehash        ;; [codehash, salt, contractCount, gasBuffer]
+    pop                ;; [salt, contractCount, gasBuffer]
+
+    ;; salt = (salt + 1) % contractCount
+    push 1             ;; [1, salt, contractCount, gasBuffer]
+    add                ;; [salt+1, contractCount, gasBuffer]
+    dup2               ;; [contractCount, salt+1, contractCount, gasBuffer]
+    swap1              ;; [salt+1, contractCount, contractCount, gasBuffer]
+    mod                ;; [salt, contractCount, gasBuffer]
+    jump @loop
+
+done:
+    stop

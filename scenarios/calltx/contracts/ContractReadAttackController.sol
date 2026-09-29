@@ -78,4 +78,49 @@ contract AttackController {
 
         emit BytesCollected(collectedCount);
     }
+
+    /// Port of the `opcode = CALL, overhead_baseline = False` arm of
+    /// `test_account_access` from execution-specs
+    /// (tests/benchmark/stateful/bloatnet/test_account_query.py).
+    ///
+    /// `callValue = 0` measures the cold account access alone, `callValue = 1`
+    /// adds the value transfer. Unlike the two attacks above, the salt walk is
+    /// monotonic - `startSalt`, `startSalt + 1`, ... with no wrap-around -
+    /// matching `Create2PreimageLayout.increment_salt_op` upstream. Keeping
+    /// the walk inside the salt range that was actually deployed is the
+    /// caller's job: it advances `startSalt` per tx from the receiver address
+    /// list.
+    ///
+    /// `payable` so the contract can be topped up by the attack tx itself
+    /// (`calltx --amount`), which it needs when `callValue > 0`.
+    function callAttack(
+        address factory,
+        bytes32 initCodeHash,
+        uint256 startSalt,
+        uint256 callValue,
+        uint256 gasBuffer
+    ) external payable {
+        uint256 salt = startSalt;
+
+        while (gasleft() > gasBuffer) {
+            address target = address(uint160(uint256(keccak256(abi.encodePacked(
+                bytes1(0xff),
+                factory,
+                bytes32(salt),
+                initCodeHash
+            )))));
+
+            // The actual attack: cold account access, plus a value transfer
+            // when callValue > 0. The return value is ignored on purpose - a
+            // reverting target must not abort the walk.
+            assembly {
+                pop(call(gas(), target, callValue, 0, 0, 0, 0))
+            }
+
+            salt++;
+        }
+    }
+
+    /// Accept plain top-ups so `callValue > 0` runs do not starve.
+    receive() external payable {}
 }
