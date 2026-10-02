@@ -1,11 +1,9 @@
 package utils
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -254,54 +252,7 @@ func (b *ABICallDataBuilder) processArgs(args string, txIdx uint64) (string, err
 	if args == "" {
 		return "[]", nil
 	}
-
-	// Replace placeholders
-	processed := args
-
-	// Replace {txid} with transaction index
-	processed = strings.ReplaceAll(processed, "{txid}", fmt.Sprintf("%d", txIdx))
-
-	// Replace {random} with random uint256
-	randomRegex := regexp.MustCompile(`\{random\}`)
-	randomMatches := randomRegex.FindAllStringSubmatch(processed, -1)
-	for _, match := range randomMatches {
-		randomVal, err := generateRandomUint256()
-		if err != nil {
-			return "", fmt.Errorf("failed to generate random value: %w", err)
-		}
-		processed = strings.Replace(processed, match[0], randomVal, 1)
-	}
-
-	// Replace {random:N} with random number between 0 and N
-	randomRangeRegex := regexp.MustCompile(`\{random:(\d+)\}`)
-	randomRangeMatches := randomRangeRegex.FindAllStringSubmatch(processed, -1)
-	for _, match := range randomRangeMatches {
-		if len(match) != 2 {
-			continue
-		}
-		maxVal, err := strconv.ParseUint(match[1], 10, 64)
-		if err != nil {
-			return "", fmt.Errorf("invalid random range: %s", match[1])
-		}
-		randomVal, err := generateRandomInRange(maxVal)
-		if err != nil {
-			return "", fmt.Errorf("failed to generate random value in range: %w", err)
-		}
-		processed = strings.Replace(processed, match[0], fmt.Sprintf("%d", randomVal), 1)
-	}
-
-	// Replace {randomaddr} with random address
-	randomAddrRegex := regexp.MustCompile(`\{randomaddr\}`)
-	randomAddrMatches := randomAddrRegex.FindAllStringSubmatch(processed, -1)
-	for _, match := range randomAddrMatches {
-		randomAddr, err := generateRandomAddress()
-		if err != nil {
-			return "", fmt.Errorf("failed to generate random address: %w", err)
-		}
-		processed = strings.Replace(processed, match[0], randomAddr, 1)
-	}
-
-	return processed, nil
+	return TxPlaceholders(txIdx).Resolve(args)
 }
 
 func (b *ABICallDataBuilder) convertArgs(args []interface{}) ([]interface{}, error) {
@@ -458,37 +409,6 @@ func convertToSlice(arg interface{}, expectedType abi.Type) (interface{}, error)
 	}
 
 	return converted, nil
-}
-
-func generateRandomUint256() (string, error) {
-	bytes := make([]byte, 32)
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return "", err
-	}
-	return new(big.Int).SetBytes(bytes).String(), nil
-}
-
-func generateRandomInRange(max uint64) (uint64, error) {
-	if max == 0 {
-		return 0, nil
-	}
-	bytes := make([]byte, 8)
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return 0, err
-	}
-	randomVal := new(big.Int).SetBytes(bytes).Uint64()
-	return randomVal % max, nil
-}
-
-func generateRandomAddress() (string, error) {
-	bytes := make([]byte, 20)
-	_, err := rand.Read(bytes)
-	if err != nil {
-		return "", err
-	}
-	return common.BytesToAddress(bytes).Hex(), nil
 }
 
 // validateArgs validates that the provided arguments are compatible with the function signature

@@ -481,6 +481,8 @@ Plugins can import the following pre-extracted packages:
 
 **Standard library:** All Go standard library packages are available (e.g. `fmt`, `context`, `time`, `math/big`, `math/rand`).
 
+Generic helpers that plugins should reuse instead of reimplementing include `scenario.TxPlaceholders` (the shared [placeholder resolver](./contributing-workloads.md#placeholders)) and `scenario.Create2FactoryAddress` (the shared CREATE2 factory used by `factorydeploytx`).
+
 If you need a package that is not listed here, symbols must be extracted first. See [Adding New Package Symbols](#adding-new-package-symbols) in the troubleshooting section.
 
 

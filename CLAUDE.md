@@ -20,6 +20,7 @@ Comprehensive documentation is available in the `docs/` directory for different 
 - **`docs/app-users.md`**: Complete guide for CLI usage, daemon mode, configuration, and troubleshooting
 - **`docs/api-consumers.md`**: REST API documentation with bash/curl examples for all endpoints  
 - **`docs/scenario-developers.md`**: Comprehensive guide for implementing custom transaction scenarios
+- **`docs/contributing-workloads.md`**: Where new benchmarks/tests belong (spammer config, plugin, or core primitive) and the shared placeholder reference
 
 **Before working on any scenario development or API integration, Claude MUST read the relevant documentation files to understand:**
 - Critical development rules (no root wallet usage, proper nonce management, etc.)

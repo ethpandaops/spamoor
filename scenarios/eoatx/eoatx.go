@@ -94,7 +94,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.Uint64Var(&s.options.GasLimit, "gaslimit", ScenarioDefaultOptions.GasLimit, "Gas limit to use in transactions")
 	flags.Uint64Var(&s.options.Amount, "amount", ScenarioDefaultOptions.Amount, "Transfer amount per transaction (in gwei)")
 	flags.StringVar(&s.options.Data, "data", ScenarioDefaultOptions.Data, "Transaction call data to send")
-	flags.StringVar(&s.options.To, "to", ScenarioDefaultOptions.To, "Target address to send transactions to (uses existing logic when empty)")
+	flags.StringVar(&s.options.To, "to", ScenarioDefaultOptions.To, "Target address to send transactions to, supports placeholders like {create2:{factory_address}:<initcodehash>:{txid}} (uses existing logic when empty)")
 	flags.StringVar(&s.options.Timeout, "timeout", ScenarioDefaultOptions.Timeout, "Timeout for the scenario (e.g. '1h', '30m', '5s') - empty means no timeout")
 	flags.BoolVar(&s.options.RandomAmount, "random-amount", ScenarioDefaultOptions.RandomAmount, "Use random amounts for transactions (with --amount as limit)")
 	flags.BoolVar(&s.options.RandomTarget, "random-target", ScenarioDefaultOptions.RandomTarget, "Use random to addresses for transactions")
@@ -136,6 +136,12 @@ func (s *Scenario) Init(options *scenario.Options) error {
 
 	if s.options.TotalCount == 0 && s.options.Throughput == 0 {
 		return fmt.Errorf("neither total count nor throughput limit set, must define at least one of them (see --help for list of all flags)")
+	}
+
+	if s.options.To != "" {
+		if _, err := s.resolveTarget(0); err != nil {
+			return err
+		}
 	}
 
 	if blockLimit := s.walletPool.GetTxPool().GetCurrentGasLimit(); blockLimit > 0 && s.options.GasLimit > blockLimit {
@@ -216,6 +222,18 @@ func (s *Scenario) Run(ctx context.Context) error {
 	return err
 }
 
+// resolveTarget evaluates the --to placeholders for transaction txIdx.
+func (s *Scenario) resolveTarget(txIdx uint64) (common.Address, error) {
+	to, err := scenario.TxPlaceholders(s.walletPool, txIdx).Resolve(s.options.To)
+	if err != nil {
+		return common.Address{}, err
+	}
+	if !common.IsHexAddress(to) {
+		return common.Address{}, fmt.Errorf("invalid target address %q", to)
+	}
+	return common.HexToAddress(to), nil
+}
+
 func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptChan, *txtypes.Transaction, *spamoor.Client, *spamoor.Wallet, error) {
 	client := s.walletPool.GetClient(
 		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, int(txIdx)),
@@ -257,7 +275,10 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 	// avoid paying the EIP-2780 state-gas charge on every send.
 	targetIsEmpty := false
 	if s.options.To != "" {
-		toAddr = common.HexToAddress(s.options.To)
+		toAddr, err = s.resolveTarget(txIdx)
+		if err != nil {
+			return nil, nil, client, wallet, err
+		}
 	} else {
 		toAddr = s.walletPool.GetWallet(spamoor.SelectWalletByIndex, int(txIdx)+1).GetAddress()
 		if s.options.RandomTarget {

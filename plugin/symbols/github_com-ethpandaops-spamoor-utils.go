@@ -25,12 +25,15 @@ func init() {
 		"ReadFileLinesTrimmed":        reflect.ValueOf(utils.ReadFileLinesTrimmed),
 		"ReadableAmount":              reflect.ValueOf(utils.ReadableAmount),
 		"RecoverPanic":                reflect.ValueOf(utils.RecoverPanic),
+		"TxPlaceholders":              reflect.ValueOf(utils.TxPlaceholders),
 		"WeiToEther":                  reflect.ValueOf(utils.WeiToEther),
 
 		// type definitions
 		"ABICallDataBuilder": reflect.ValueOf((*utils.ABICallDataBuilder)(nil)),
 		"DeterministicRNG":   reflect.ValueOf((*utils.DeterministicRNG)(nil)),
 		"FlexibleJsonUInt64": reflect.ValueOf((*utils.FlexibleJsonUInt64)(nil)),
+		"PlaceholderFn":      reflect.ValueOf((*utils.PlaceholderFn)(nil)),
+		"Placeholders":       reflect.ValueOf((*utils.Placeholders)(nil)),
 		"TxFees":             reflect.ValueOf((*utils.TxFees)(nil)),
 	}
 }

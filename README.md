@@ -347,6 +347,12 @@ Comprehensive guide for implementing custom transaction scenarios. Covers:
 - Contract interaction patterns
 - Testing and debugging scenarios
 
+### 🧩 [Contributing Workloads](./docs/contributing-workloads.md)
+Where a new benchmark or test belongs: a spammer config, a plugin, or a core primitive. Covers:
+- Choosing between configs, plugins and core changes
+- Placeholder reference for generic scenarios
+- Checklist for core primitive PRs
+
 ### 🔌 [Plugin System Guide](./docs/plugin-system.md)
 Guide for developing, distributing, and managing plugins. Covers:
 - Plugin development and scenario implementation

@@ -1,0 +1,28 @@
+# Name: CREATE2 receiver transfers
+# Description: Deploys 1000 contracts via the shared CREATE2 factory, then sends plain ETH transfers to them so every tx touches an existing contract account
+# Tags: performance, state-access, create2, eoa
+# Min_Version: v1.2.5
+- scenario: factorydeploytx
+  name: CREATE2 receivers (preparation)
+  description: Deploys 1000 contracts with distinct 1 KiB runtime code (first byte STOP, so value transfers succeed) via the shared CREATE2 factory
+  config:
+    seed: create2-receivers-deploy
+    total_count: 1000
+    throughput: 20
+    max_pending: 40
+    gas_limit: 3000000
+    well_known_factory: true
+    # geas: gas number xor push 0x20 mstore push 0x400 push0 return
+    init_code: 5a43186020526104005ff3
+    start_salt: 0
+- scenario: eoatx
+  name: CREATE2 receiver transfers
+  description: Sends 1 gwei to a random contract from the preparation spammer in every tx
+  config:
+    seed: create2-receivers-transfer
+    throughput: 50
+    amount: 1
+    gas_limit: 50000
+    # {create2:<factory>:<keccak256(init_code)>:<salt>}; use {txid} instead of {random:1000}
+    # with total_count 1000 to hit every receiver exactly once.
+    to: "{create2:{factory_address}:0xd0923e8cfd0a2bfc5da9c3ba0e9c938e9bc40774659544ab488bf241b918a07a:{random:1000}}"

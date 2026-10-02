@@ -177,6 +177,7 @@ TaskRunner supports dynamic placeholders in arguments and bytecode:
 - `{randomaddr}` - Random Ethereum address
 - `{txid}` - Current transaction ID
 - `{stepid}` - Current step index within execution cycle
+- `{create2:<factory>:<initcodehash>:<salt>}` - CREATE2 address; placeholders nest, e.g. `{create2:{contract:factory}:0x...:{txid}}`
 
 #### Contract Address Placeholders
 - `{contract:name}` - Reference to deployed contract address

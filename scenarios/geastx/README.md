@@ -20,6 +20,7 @@ spamoor geastx [flags]
 - `--geasfile`  Path to a file containing geas opcodes / assembly
 - `--geascode`  Inline geas opcodes / assembly string (overrides `--geasfile`)
 
+`{factory_address}` in the code is replaced with the shared CREATE2 factory deployed by `factorydeploytx`.
 
 ### Volume control ( **either** `-c` **or** `-t` is required )
 - `-c, --count`  Total number of geas transactions to send
