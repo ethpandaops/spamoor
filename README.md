@@ -107,6 +107,7 @@ Scenarios that require additional configuration, target specialized workloads (e
 | [`geastx`](./scenarios/geastx/README.md) | **Geas Transactions** - Execute custom geas bytecode |
 | [`storagespam`](./scenarios/storagespam/README.md) | **Storage Spam** - Stress-test EVM storage growth |
 | [`erc20_bloater`](./scenarios/statebloat/erc20_bloater/README.md) | **ERC20 State Bloat** - Bloat ERC20 contract storage to a target GB size |
+| [`bloated-eoa`](./scenarios/statebloat/bloated_eoa/README.md) | **Bloated EOA Storage** - Delegate a storage-bloated EOA and hammer its storage with SLOAD/SSTORE loops |
 | [`replay-eest`](./scenarios/replay-eest/README.md) | **EEST Replay** - Replay EEST test fixtures from intermediate representation |
 | [`taskrunner`](./scenarios/taskrunner/README.md) | **Task Runner** - Execute configurable task sequences with init and recurring execution phases |
 | [`wallets`](./scenarios/wallets/) | **Wallets** - Utility scenario that shows child wallet balances |
