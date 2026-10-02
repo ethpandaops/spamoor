@@ -1,0 +1,40 @@
+;; Calldata-driven SSTORE loop for the bloated EOA delegation target.
+;;
+;; Port of the runtime used by the EELS bloatnet benchmark
+;; tests/benchmark/stateful/bloatnet/test_sstore.py::test_sstore_bloated.
+;;
+;; calldata[0:32]  = start slot (counter)
+;; calldata[32:64] = end slot (exclusive)
+;;
+;; Writes %Access to s[counter] for counter in [start, end), i.e. the loop
+;; runs while counter+1 < end. Each benchmark tx carries its own disjoint
+;; range, so no storage counter is kept and slot 0 is never touched (matching
+;; EELS, which drives the range purely from calldata).
+;;
+;; A calldata guard makes the EIP-7702 delegation transaction (sent with empty
+;; calldata) a no-op instead of executing a spurious slot-0 write; the
+;; benchmarked loop below is byte-identical to the EELS runtime.
+;;
+;; The including variant file defines %Access (stack [counter, end] -> [counter, end]).
+
+    calldatasize          ;; [cds]
+    iszero                ;; [cds == 0]
+    jumpi @done           ;; empty calldata (delegation tx) -> no-op
+
+    push 32               ;; [32]
+    calldataload          ;; [end]
+    push0                 ;; [0, end]
+    calldataload          ;; [counter, end]
+
+loop:
+    %Access               ;; [counter, end]
+
+    push 1                ;; [1, counter, end]
+    add                   ;; [counter+1, end]
+    dup2                  ;; [end, counter+1, end]
+    dup2                  ;; [counter+1, end, counter+1, end]
+    lt                    ;; [counter+1 < end, counter+1, end]
+    jumpi @loop           ;; [counter+1, end]
+
+done:
+    stop
