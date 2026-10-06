@@ -1040,3 +1040,5 @@ See `plugins/_example-plugin/` for a complete working example that demonstrates:
 - Fee resolution supporting both gwei and wei
 - Nonce management with `MarkSkippedNonce`
 - Wallet pool sizing based on transaction volume
+
+See `plugins/_example-delegation/` for a workload that needs a plugin rather than a spammer config: a receipt-dependent EIP-7702 delegation followed by a transaction loop against the delegated EOA.
