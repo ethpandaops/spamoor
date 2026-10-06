@@ -32,6 +32,44 @@ A config file can hold several spammers, e.g. a `factorydeploytx` preparation sp
 
 Scenario-specific options on a generic scenario (target pools, salt strides, benchmark presets) are not primitives. If a feature only makes sense for one workload, it belongs in that workload's config or plugin.
 
+## Examples
+
+One reference contribution per layer.
+
+### Spammer config: CREATE2 receiver transfers
+
+[`spammer-configs/create2-receiver-transfers.yaml`](../spammer-configs/create2-receiver-transfers.yaml) sends ETH transfers to a set of contracts at CREATE2 addresses. Two generic scenarios, no Go code:
+- `factorydeploytx` deploys 1000 contracts with distinct 1 KiB code through the shared factory.
+- `eoatx` sends each tx to `{create2:{factory_address}:<initcodehash>:{random:1000}}`.
+
+```bash
+spamoor run spammer-configs/create2-receiver-transfers.yaml -h <RPC> -p <PRIVKEY> -s 0   # deploy receivers
+spamoor run spammer-configs/create2-receiver-transfers.yaml -h <RPC> -p <PRIVKEY> -s 1   # transfers
+```
+
+In the daemon the same file appears in the Spammer Library after `make generate-spammer-index`.
+
+### Plugin: delegated counter
+
+[`plugins/_example-delegation`](../plugins/_example-delegation) deploys a counter contract, delegates an EOA to it with an EIP-7702 set-code tx, then sends txs to the EOA so each one increments its storage. The delegation needs the deployment receipt and the spam targets the delegated EOA, so no spammer config can express it.
+
+```bash
+spamoor --plugin ./plugins/_example-delegation delegated-counter -h <RPC> -p <PRIVKEY> -c 40 -t 20
+```
+
+The [plugin README](../plugins/_example-delegation/README.md) covers validation, packaging and loading from a URL.
+
+### Core primitive: CREATE2 placeholders
+
+The `{create2:...}` and `{factory_address}` placeholders ([#297](https://github.com/ethpandaops/spamoor/pull/297)) were added because the config above could not otherwise address a CREATE2 contract set. Against the checklist below:
+
+| Checklist item | In the change |
+|---|---|
+| Consumer | `spammer-configs/create2-receiver-transfers.yaml` |
+| Generic | One resolver (`utils/placeholders.go`, `scenario/placeholders.go`) replacing three copies, used by `eoatx`, `calltx`, `geastx`, `taskrunner` and plugins |
+| Tests and symbols | `utils/placeholders_test.go`, `scenarios/taskrunner/placeholders_test.go`, regenerated `plugin/symbols` |
+| Docs | Scenario READMEs, this guide, the Plugin System Guide |
+
 ## Placeholders
 
 Generic scenarios resolve these placeholders in user-supplied values. Placeholders nest and resolve innermost-first.

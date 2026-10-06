@@ -360,7 +360,7 @@ Guide for developing, distributing, and managing plugins. Covers:
 - CLI and daemon mode usage
 - REST API for runtime plugin management
 - Architecture and Yaegi interpreter limitations
-- See [example plugin](./plugins/_example-plugin/)
+- See [example plugin](./plugins/_example-plugin/) and the [EIP-7702 delegation example](./plugins/_example-delegation/)
 
 ## ✨ Key Features
 
