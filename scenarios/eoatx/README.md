@@ -25,7 +25,7 @@ spamoor eoatx [flags]
 - `--gaslimit` - Gas limit per transaction (default: 21000)
 - `--amount` - Transfer amount per transaction in gwei (default: 20)
 - `--random-amount` - Use random amounts (with --amount as limit)
-- `--to` - Target address to send transactions to (overrides other target options when specified)
+- `--to` - Target address to send transactions to (overrides other target options when specified). Resolved per transaction, so it accepts [placeholders](../../docs/contributing-workloads.md#placeholders) such as `{create2:{factory_address}:<initcodehash>:{random:1000}}`
 - `--random-target` - Use random destination addresses
 - `--self-tx-only` - Use sender wallet as destination address
 - `--data` - Custom transaction call data to send

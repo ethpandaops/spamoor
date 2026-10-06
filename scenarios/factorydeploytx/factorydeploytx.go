@@ -121,7 +121,7 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	// Set up well-known factory wallet if enabled
 	if s.options.WellKnownFactory {
 		s.walletPool.AddWellKnownWallet(&spamoor.WellKnownWalletConfig{
-			Name:          "create2-factory-deployer",
+			Name:          scenario.Create2FactoryWalletName,
 			RefillAmount:  uint256.NewInt(10000000000000000000), // 10 ETH
 			RefillBalance: uint256.NewInt(1000000000000000000),  // 1 ETH
 			VeryWellKnown: true,
@@ -258,7 +258,7 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 		return common.HexToAddress(s.options.FactoryAddress), nil
 	}
 
-	factoryWallet := s.walletPool.GetWellKnownWallet("create2-factory-deployer")
+	factoryWallet := s.walletPool.GetWellKnownWallet(scenario.Create2FactoryWalletName)
 	if factoryWallet == nil {
 		return common.Address{}, fmt.Errorf("factory deployer wallet not available")
 	}
