@@ -1215,8 +1215,9 @@ SendTransactionOptions{
 ```
 
 **Rebroadcast Features**:
-- **Automatic detection**: Monitors for transactions stuck in mempool
-- **Exponential backoff**: Increases wait time between rebroadcast attempts (2s, 4s, 8s, 16s, ...)
+- **Automatic detection**: A wallet with pending transactions and no confirmation for 10 blocks is treated as stuck
+- **Gap recovery**: The wallet's 16 lowest pending transactions are resent in nonce order, each to clients until one accepts it as new (a client that already knows it won't gossip it again). If the chain confirms that window and stops at its end, the next window is resent on the next block
+- **Exponential backoff**: Paced by the lowest pending transaction: 20s, 30s, 45s, ... up to 5 minutes between rebroadcasts
 - **Replacement handling**: Detects when replacement transactions are confirmed
 - **Context cancellation**: Stops rebroadcasting when scenario is cancelled
 - **Logging**: Provides detailed logs for debugging stuck transactions

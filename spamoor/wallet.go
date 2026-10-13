@@ -54,6 +54,10 @@ type Wallet struct {
 	txNonceMutex     sync.Mutex
 	lastConfirmation uint64
 
+	// rebroadcastEnd is the nonce after the last rebroadcast window while pending
+	// transactions remain behind it, 0 otherwise. Guarded by txNonceMutex.
+	rebroadcastEnd uint64
+
 	lowBalanceNotifyChan chan<- struct{}
 	lowBalanceThreshold  *big.Int
 }
@@ -909,6 +913,15 @@ func (wallet *Wallet) getPendingHashTxs() []*PendingTx {
 	})
 
 	return pendingTxs
+}
+
+// reachedRebroadcastEnd reports whether the chain confirmed the last rebroadcast window
+// and stopped exactly at its end: the pools lost the transactions behind it as well.
+func (wallet *Wallet) reachedRebroadcastEnd() bool {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	return wallet.rebroadcastEnd != 0 && wallet.confirmedTxCount == wallet.rebroadcastEnd
 }
 
 // hasPendingHashTxs reports whether any hash-tracked transaction is outstanding.

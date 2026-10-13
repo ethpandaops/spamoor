@@ -1237,13 +1237,30 @@ func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wall
 
 }
 
+const (
+	// staleConfirmationBlocks is how long a wallet with pending transactions may go
+	// without a confirmation before they are treated as stuck.
+	staleConfirmationBlocks = 10
+
+	// rebroadcastWindow is how many of a stuck wallet's lowest pending transactions are
+	// resent together. Overloaded pools trim the tails of long accounts, so a stuck wallet
+	// usually misses a run of nonces, not just the lowest. 16 is geth's per-account
+	// pending allowance, the depth such a trim leaves.
+	rebroadcastWindow = 16
+
+	// maxRebroadcastClients bounds how many clients one rebroadcast of a transaction tries.
+	maxRebroadcastClients = 5
+)
+
 // processStaleConfirmations recovers stale transactions that may have been missed
 // and handles rebroadcasting of pending transactions.
-// It checks if a wallet has pending transactions that are older than 10 blocks,
+// It checks if a wallet has gone staleConfirmationBlocks without a confirmation,
 // queries the current nonce from the blockchain, recovers any confirmed transactions
-// that weren't properly tracked, and rebroadcasts pending transactions if enabled.
+// that weren't properly tracked, and rebroadcasts the lowest pending transactions.
+// Once the chain has confirmed a rebroadcast window and stopped exactly at its end,
+// the next window follows on the next block instead of after another stale period.
 func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet) {
-	if blockNumber <= wallet.lastConfirmation+10 {
+	if blockNumber <= wallet.lastConfirmation+staleConfirmationBlocks && !wallet.reachedRebroadcastEnd() {
 		return
 	}
 
@@ -1300,13 +1317,10 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 	logrus.Debugf("processing stale confirmations for %v (on-chain nonce: %v, confirmed: %v, pending count: %v, lowest pending: %v)",
 		name, onChainNonce, wallet.confirmedTxCount, len(wallet.txNonceChans), lowestPendingNonce)
 
-	// Close channels for confirmed transactions and collect txs to rebroadcast
-	var txsToRebroadcast []*PendingTx
+	// Close channels for confirmed transactions and collect the lowest pending ones
+	var window []*PendingTx
 	var nonceGaps []uint64
-
-	// Only consider rebroadcasting the 2 lowest pending nonces
-	const maxRebroadcastNonces = 2
-	pendingNoncesChecked := 0
+	hasBacklog := false
 
 	for _, nonce := range pendingNonces {
 		nonceChan := wallet.txNonceChans[nonce]
@@ -1315,20 +1329,36 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 			logrus.Debugf("recovering stale confirmed transaction for %v (nonce %v)", wallet.address.String(), nonce)
 			close(nonceChan.channel)
 			delete(wallet.txNonceChans, nonce)
-		} else if nonce <= onChainNonce+(maxRebroadcastNonces-1) {
-			pendingNoncesChecked++
-			// Get the most recent pending tx for this nonce (last in the list)
-			if len(nonceChan.txs) > 0 {
-				mostRecentTx := nonceChan.txs[len(nonceChan.txs)-1]
-				if mostRecentTx.Options != nil && mostRecentTx.Options.Rebroadcast {
-					// Check if enough time has passed since last rebroadcast
-					backoffDelay := pool.calculateBackoffDelay(mostRecentTx.RebroadcastCount)
-					if time.Since(mostRecentTx.LastRebroadcast) >= backoffDelay {
-						txsToRebroadcast = append(txsToRebroadcast, mostRecentTx)
-					}
-				}
-			}
+			continue
 		}
+
+		if len(window) == rebroadcastWindow {
+			hasBacklog = true
+			break
+		}
+
+		// Get the most recent pending tx for this nonce (last in the list)
+		mostRecentTx := nonceChan.txs[len(nonceChan.txs)-1]
+		if mostRecentTx.Options != nil && mostRecentTx.Options.Rebroadcast {
+			window = append(window, mostRecentTx)
+		}
+	}
+
+	// The window is paced by its lowest transaction, the one the chain is waiting for;
+	// the ones above it cannot be included without it.
+	if len(window) > 0 && time.Since(window[0].LastRebroadcast) < pool.calculateBackoffDelay(window[0].RebroadcastCount) {
+		window = nil
+	}
+
+	now := time.Now()
+	for _, pendingTx := range window {
+		pendingTx.LastRebroadcast = now
+		pendingTx.RebroadcastCount++
+	}
+
+	wallet.rebroadcastEnd = 0
+	if len(window) > 0 && hasBacklog {
+		wallet.rebroadcastEnd = window[len(window)-1].Tx.Nonce() + 1
 	}
 
 	// Update confirmed nonce
@@ -1354,18 +1384,28 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 		go pool.fillNonceGaps(pool.options.Context, wallet, nonceGaps, nil)
 	}
 
-	// Rebroadcast pending transactions
-	for _, pendingTx := range txsToRebroadcast {
-		logrus.WithFields(logrus.Fields{
-			"wallet": wallet.GetAddress().Hex(),
-			"nonce":  pendingTx.Tx.Nonce(),
-			"txhash": pendingTx.Tx.Hash().Hex(),
-		}).Debugf("rebroadcasting stale transaction")
-
-		pendingTx.LastRebroadcast = time.Now()
-		pendingTx.RebroadcastCount++
-		go pool.rebroadcastTransaction(pool.options.Context, pendingTx.Tx, pendingTx.Options, pendingTx.RebroadcastCount)
+	if len(window) == 0 {
+		return
 	}
+
+	retryCount := window[0].RebroadcastCount
+	logrus.WithFields(logrus.Fields{
+		"wallet":     wallet.GetAddress().Hex(),
+		"firstNonce": window[0].Tx.Nonce(),
+		"count":      len(window),
+		"retry":      retryCount,
+	}).Debugf("rebroadcasting stale transactions")
+
+	// Every transaction of the window goes to the same clients in nonce order, so each
+	// client receives a contiguous, executable run; the start rotates with every retry.
+	address := wallet.GetAddress()
+	startOffset := (int(address[0]) | (int(address[1]) << 8)) + int(retryCount)
+
+	go func() {
+		for _, pendingTx := range window {
+			pool.rebroadcastTransaction(pool.options.Context, pendingTx.Tx, pendingTx.Options, retryCount, startOffset)
+		}
+	}()
 }
 
 // processStaleHashTxs recovers hash-tracked transactions, which the nonce-based recovery
@@ -1402,7 +1442,9 @@ func (pool *TxPool) processStaleHashTxs(wallet *Wallet) {
 		pendingTx.LastRebroadcast = time.Now()
 		pendingTx.RebroadcastCount++
 
-		go pool.rebroadcastTransaction(pool.options.Context, pendingTx.Tx, pendingTx.Options, pendingTx.RebroadcastCount)
+		txHash := pendingTx.Tx.Hash()
+		startOffset := (int(txHash[0]) | (int(txHash[1]) << 8)) + int(pendingTx.RebroadcastCount)
+		go pool.rebroadcastTransaction(pool.options.Context, pendingTx.Tx, pendingTx.Options, pendingTx.RebroadcastCount, startOffset)
 	}
 }
 
@@ -1966,9 +2008,11 @@ func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
 	return delay
 }
 
-// rebroadcastTransaction performs the actual rebroadcast of a transaction.
-// This method encapsulates the existing rebroadcast logic for reuse.
-func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Transaction, options *SendTransactionOptions, retryCount uint64) {
+// rebroadcastTransaction resends a transaction to up to maxRebroadcastClients clients,
+// beginning at startOffset, until one accepts it as new. Only a fresh acceptance makes
+// a client gossip the transaction: one that already knows it announced it once and
+// will not again, so peers that dropped or rejected it back then stay without it.
+func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Transaction, options *SendTransactionOptions, retryCount uint64, startOffset int) {
 	submitTx := func(client *Client) error {
 		if options.hasEncodeFn() {
 			txBytes, err := options.invokeEncode(tx)
@@ -1988,17 +2032,7 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 	if len(options.ClientList) > 0 {
 		clientCount = len(options.ClientList)
 	}
-	if clientCount > 5 {
-		clientCount = 5
-	}
-
-	// Use tx hash for offset to distribute rebroadcasts across all clients,
-	// matching the fix in submitTransaction.
-	startOffset := options.ClientsStartOffset
-	if startOffset == 0 {
-		h := tx.Hash()
-		startOffset = int(h[0]) | (int(h[1]) << 8)
-	}
+	clientCount = min(clientCount, maxRebroadcastClients)
 
 	for j := 0; j < clientCount; j++ {
 		if ctx.Err() != nil {
@@ -2013,7 +2047,7 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 			if options.ClientGroup != "" {
 				clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
 			}
-			clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, j+startOffset+1))
+			clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, j+startOffset))
 			client = pool.options.ClientPool.GetClient(clientOpts...)
 		}
 
@@ -2027,7 +2061,7 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 			options.LogFn(client, j, int(retryCount), err)
 		}
 
-		if err == nil || strings.Contains(err.Error(), "already known") {
+		if err == nil {
 			break
 		}
 	}
