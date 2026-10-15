@@ -78,7 +78,6 @@ func init() {
 		"NewTx":                      reflect.ValueOf(txtypes.NewTx),
 		"NonceKeysHash":              reflect.ValueOf(txtypes.NonceKeysHash),
 		"NonceManager":               reflect.ValueOf(&txtypes.NonceManager).Elem(),
-		"NonceManagerCode":           reflect.ValueOf(&txtypes.NonceManagerCode).Elem(),
 		"NonceManagerSlot":           reflect.ValueOf(txtypes.NonceManagerSlot),
 		"OnlyVerifyFrame":            reflect.ValueOf(txtypes.OnlyVerifyFrame),
 		"P256Signer":                 reflect.ValueOf(txtypes.P256Signer),

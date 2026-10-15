@@ -32,11 +32,6 @@ const (
 	MaxNonceSeq = uint64(1<<64 - 1)
 )
 
-// NonceManagerCode is the runtime code installed at NonceManager on activation, a
-// bare revert(0, 0). Ordinary calls to the address are meant to fail; only the protocol
-// writes its storage.
-var NonceManagerCode = []byte{0x60, 0x00, 0x60, 0x00, 0xfd}
-
 // EIP-8272 recent root constants.
 const (
 	// RecentRootLength is the number of entries a root source can hold, so a source
