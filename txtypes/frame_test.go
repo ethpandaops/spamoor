@@ -294,6 +294,45 @@ func TestFrameIntrinsicGas(t *testing.T) {
 	}
 }
 
+// TestFrameKeyedNonceAccessCost checks that each non-zero nonce key adds EIP-8250's
+// KEYED_NONCE_ACCESS_COST to both the intrinsic cost and the calldata floor, and that
+// the legacy key set adds nothing.
+func TestFrameKeyedNonceAccessCost(t *testing.T) {
+	sender := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
+	newTx := func() *FrameTx {
+		return NewFrameTx(testChainID, sender, 0,
+			FrameFees{GasFeeCap: uint256.NewInt(1e9)},
+			[]*Frame{SelfVerifyFrame(FrameLimits{Execution: 5_000})},
+			[]*FrameSignature{{Scheme: SigSchemeSecp256k1, Signature: bytes.Repeat([]byte{0x11}, 65)}},
+		)
+	}
+
+	legacy := newTx()
+	keyed := newTx().WithNonceKeys([]*uint256.Int{uint256.NewInt(7), uint256.NewInt(9)}, 3)
+
+	if got := legacy.keyedNonceAccessCost(); got != 0 {
+		t.Fatalf("legacy key set access cost = %d, want 0", got)
+	}
+
+	if got := keyed.keyedNonceAccessCost(); got != 2*12_100 {
+		t.Fatalf("two-key access cost = %d, want %d", got, 2*12_100)
+	}
+
+	// Only the nonce encoding and the access cost differ between the two.
+	legacyExt, keyedExt := legacy.extensionCalldata(), keyed.extensionCalldata()
+
+	wantIntrinsic := legacy.IntrinsicGas() - calldataCost(legacyExt) + calldataCost(keyedExt) + 2*12_100
+	if got := keyed.IntrinsicGas(); got != wantIntrinsic {
+		t.Fatalf("intrinsic gas = %d, want %d", got, wantIntrinsic)
+	}
+
+	wantFloor := legacy.CalldataFloorGas() +
+		TotalCostFloorPerToken*(weightedTokens(keyedExt)-weightedTokens(legacyExt)) + 2*12_100
+	if got := keyed.CalldataFloorGas(); got != wantFloor {
+		t.Fatalf("calldata floor gas = %d, want %d", got, wantFloor)
+	}
+}
+
 // TestFrameValidatePayload checks the static validity rules.
 func TestFrameValidatePayload(t *testing.T) {
 	key, err := crypto.GenerateKey()

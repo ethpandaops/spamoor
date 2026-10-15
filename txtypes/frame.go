@@ -61,13 +61,13 @@ var (
 	EntryPoint = common.HexToAddress("0x00000000000000000000000000000000000000aa")
 
 	// ExpiryVerifier is the built-in deadline verifier predeploy.
-	ExpiryVerifier = common.HexToAddress("0x0000000000000000000000000000000000008141")
+	ExpiryVerifier = common.HexToAddress("0x81413f0cF12e9b6a49B1D0439E081c577D57FfFf")
 
 	// NonceManager stores the non-zero keyed nonce sequences of EIP-8250.
-	NonceManager = common.HexToAddress("0x0000000000000000000000000000000000008250")
+	NonceManager = common.HexToAddress("0x8250968C12e01A19d6F667b9B2F3b3A4d0e51cB7")
 
 	// RecentRootAddress stores the recent roots of EIP-8272.
-	RecentRootAddress = common.HexToAddress("0x0000000000000000000000000000000000008272")
+	RecentRootAddress = common.HexToAddress("0x8272D9679689Ea2f307140CdF9002D27dC00Ffff")
 
 	// LegacyNonceKey selects the sender's ordinary account nonce sequence.
 	LegacyNonceKey = uint256.NewInt(0)
@@ -903,7 +903,18 @@ func (tx *FrameTx) IntrinsicGas() uint64 {
 		gas += calldataCost(sig.Signer) + calldataCost(sig.Msg) + calldataCost(sig.Signature)
 	}
 
-	return gas + calldataCost(tx.extensionCalldata())
+	return gas + calldataCost(tx.extensionCalldata()) + tx.keyedNonceAccessCost()
+}
+
+// keyedNonceAccessCost returns EIP-8250's keyed_nonce_access_cost, charged in both the
+// intrinsic cost and the calldata floor. The legacy key set uses the account nonce and
+// pays nothing.
+func (tx *FrameTx) keyedNonceAccessCost() uint64 {
+	if tx.UsesLegacyNonce() {
+		return 0
+	}
+
+	return uint64(len(tx.NonceKeys)) * KeyedNonceAccessCost
 }
 
 // extensionCalldata returns the encoding the envelope extension prices as transaction
@@ -947,7 +958,7 @@ func (tx *FrameTx) CalldataFloorGas() uint64 {
 	// data, contributing its weighted token count.
 	tokens += weightedTokens(tx.extensionCalldata())
 
-	gas := uint64(FrameTxIntrinsicCost) + uint64(len(tx.Frames))*FrameTxPerFrameCost + sigGas
+	gas := uint64(FrameTxIntrinsicCost) + uint64(len(tx.Frames))*FrameTxPerFrameCost + sigGas + tx.keyedNonceAccessCost()
 
 	for _, frame := range tx.Frames {
 		gas += tx.valueCost(frame)

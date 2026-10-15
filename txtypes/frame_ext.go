@@ -23,6 +23,11 @@ const (
 	// mempool-legal transaction may open.
 	KeyedNonceFirstUseStateGas = StateBytesPerStorageSet * CostPerStateByte
 
+	// KeyedNonceAccessCost is the execution gas each non-zero nonce key pays in both
+	// the intrinsic cost and the calldata floor: COLD_STORAGE_ACCESS + STORAGE_WRITE
+	// (EIP-8038) for the protocol's cold read and write of its NONCE_MANAGER slot.
+	KeyedNonceAccessCost = 2_100 + 10_000
+
 	// MaxNonceSeq is EIP-8250's exclusive bound on nonce_seq.
 	MaxNonceSeq = uint64(1<<64 - 1)
 )

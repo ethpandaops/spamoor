@@ -62,6 +62,7 @@ func init() {
 		"FromGethTx":                 reflect.ValueOf(txtypes.FromGethTx),
 		"GasPerBlob":                 reflect.ValueOf(constant.MakeFromLiteral("131072", token.INT, 0)),
 		"IsTxTypeSupported":          reflect.ValueOf(txtypes.IsTxTypeSupported),
+		"KeyedNonceAccessCost":       reflect.ValueOf(constant.MakeFromLiteral("12100", token.INT, 0)),
 		"KeyedNonceFirstUseStateGas": reflect.ValueOf(constant.MakeFromLiteral("97920", token.INT, 0)),
 		"LegacyNonceKey":             reflect.ValueOf(&txtypes.LegacyNonceKey).Elem(),
 		"LegacyTxType":               reflect.ValueOf(constant.MakeFromLiteral("0", token.INT, 0)),
