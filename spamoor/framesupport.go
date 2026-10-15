@@ -18,11 +18,15 @@ import (
 const frameSupportRetryInterval = 30 * time.Second
 
 // FrameSupport describes a chain's EIP-8141 frame transaction capability, derived from
-// the predeploys the three EIPs install at activation:
+// the contracts the three EIPs deploy with keyless deployment transactions:
 //
-//	EIP-8141  EXPIRY_VERIFIER      0x…8141
-//	EIP-8250  NONCE_MANAGER        0x…8250
-//	EIP-8272  RECENT_ROOT_ADDRESS  0x…8272
+//	EIP-8141  EXPIRY_VERIFIER      0x81413f0cF12e9b6a49B1D0439E081c577D57FfFf
+//	EIP-8250  NONCE_MANAGER        0x8250968C12e01A19d6F667b9B2F3b3A4d0e51cB7
+//	EIP-8272  RECENT_ROOT_ADDRESS  0x8272D9679689Ea2f307140CdF9002D27dC00Ffff
+//
+// These are ordinary contracts and may be in state before the fork activates (devnet
+// genesis files carry them from block 0), so their presence settles the envelope layout
+// but not whether the chain accepts frame transactions yet.
 //
 // The extension set decides the envelope's wire layout, so it has to be known before a
 // transaction can be encoded. EIP-8272 leaves the envelope alone, its verifier is an
@@ -60,8 +64,8 @@ func (pool *TxPool) GetFrameSupport() FrameSupport {
 // first use.
 //
 // A positive result is cached for the process lifetime; a negative one is re-probed,
-// because the predeploys appear at the fork rather than at genesis and a spammer started
-// before activation would otherwise be stuck reading an inactive chain.
+// because on a chain that deploys the contracts by transaction they appear after genesis
+// and a spammer started before then would otherwise be stuck reading an inactive chain.
 func (pool *TxPool) GetFrameSupportWithInit(ctx context.Context) (FrameSupport, error) {
 	pool.frameSupport.mutex.Lock()
 	defer pool.frameSupport.mutex.Unlock()
@@ -152,8 +156,10 @@ func predeployActive(ctx context.Context, client *Client, address common.Address
 // AwaitFrameSupport returns the chain's frame transaction capability, blocking until the
 // chain activates it.
 //
-// The predeploys appear at the fork rather than at genesis, so a spammer started from
-// genesis on a devnet that schedules the fork a few epochs in simply has to wait for it.
+// On a chain that deploys the contracts by transaction they appear after genesis, so a
+// spammer started from genesis simply has to wait for them. Where genesis already carries
+// them this returns before the fork; scenarios that read a refusal as an answer have to
+// wait for a frame transaction to land as well (see frametx-fuzz's awaitFrameAcceptance).
 // That is a normal state rather than a failure, so it is logged once as a warning and
 // re-probed until the fork lands or the context is cancelled. Probe errors are treated
 // the same way: a node that is not answering yet is not a chain without frames.

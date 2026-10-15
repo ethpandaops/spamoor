@@ -8,6 +8,7 @@ import (
 
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
@@ -338,20 +339,13 @@ func (s *Scenario) abProbe(ctx context.Context, env *environment, name string, a
 		return false
 	}
 
-	baseline := func() []*txtypes.Frame {
-		return []*txtypes.Frame{
-			txtypes.SelfVerifyFrame(txtypes.FrameLimits{Execution: s.options.VerifyGas}),
-			txtypes.UserOpFrame(nil, nil, nil, txtypes.FrameLimits{Execution: s.options.UserOpGas}),
-		}
-	}
-
-	if err := s.sendProbeTx(ctx, client, wallet, env, baseline(), feeCap, tipCap); err != nil {
+	if err := s.sendProbeTx(ctx, client, wallet, env, s.baselineFrames(), feeCap, tipCap); err != nil {
 		s.logger.Warnf("could not establish a baseline for the %s probe, assuming unsupported: %v", name, err)
 
 		return false
 	}
 
-	if err := s.sendProbeTx(ctx, client, wallet, env, addFeature(baseline()), feeCap, tipCap); err != nil {
+	if err := s.sendProbeTx(ctx, client, wallet, env, addFeature(s.baselineFrames()), feeCap, tipCap); err != nil {
 		s.logger.Infof("%s probe transaction did not confirm: %v", name, err)
 
 		return false
@@ -365,6 +359,70 @@ func (s *Scenario) abProbe(ctx context.Context, env *environment, name string, a
 // included leaves a pending transaction behind, and everything the wallet sends after it
 // would queue behind that.
 const CapabilityProbeWalletName = "frametx-fuzz-prober"
+
+// baselineFrames is the minimal frame transaction body: the sender approves itself and
+// runs one empty call.
+func (s *Scenario) baselineFrames() []*txtypes.Frame {
+	return []*txtypes.Frame{
+		txtypes.SelfVerifyFrame(txtypes.FrameLimits{Execution: s.options.VerifyGas}),
+		txtypes.UserOpFrame(nil, nil, nil, txtypes.FrameLimits{Execution: s.options.UserOpGas}),
+	}
+}
+
+// frameAcceptanceRetryInterval is how long to wait between attempts to land the
+// baseline frame transaction while the chain still refuses it.
+const frameAcceptanceRetryInterval = 12 * time.Second
+
+// awaitFrameAcceptance blocks until the chain includes a baseline frame transaction.
+//
+// The frame-family contracts are ordinary contracts and can be in state before the fork
+// activates (the genesis generator deploys them at genesis), so finding them settles the
+// envelope layout but not whether frame transactions are accepted yet. The capability
+// probes read a refusal as "unsupported" and the coverage report counts every refusal,
+// so neither may start before the chain takes frame transactions.
+func (s *Scenario) awaitFrameAcceptance(ctx context.Context, env *environment) error {
+	wallet := s.walletPool.GetWellKnownWallet(CapabilityProbeWalletName)
+	if wallet == nil {
+		return fmt.Errorf("the %q well-known wallet is not registered", CapabilityProbeWalletName)
+	}
+
+	lastReason := ""
+
+	for {
+		client := s.walletPool.GetClient(spamoor.WithClientGroup(s.options.ClientGroup))
+		if client == nil {
+			return scenario.ErrNoClients
+		}
+
+		feeCap, tipCap, err := s.fees(client)
+		if err == nil {
+			err = s.sendProbeTx(ctx, client, wallet, env, s.baselineFrames(), feeCap, tipCap)
+		}
+
+		if err == nil {
+			if lastReason != "" {
+				s.logger.Infof("the chain accepts frame transactions now")
+			}
+
+			return nil
+		}
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if reason := err.Error(); reason != lastReason {
+			s.logger.Infof("the chain does not take frame transactions yet (%v), retrying every %v", err, frameAcceptanceRetryInterval)
+			lastReason = reason
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(frameAcceptanceRetryInterval):
+		}
+	}
+}
 
 // probeInclusionBlocks is how many blocks a capability probe gives its transaction to
 // land in.
