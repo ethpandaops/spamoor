@@ -133,6 +133,12 @@ func TestDrawNormalizesFormatConstraints(t *testing.T) {
 				t.Fatalf("index %d batches a POST_TX frame", index)
 			}
 
+			// EIP-7906: the atomic batch flag is not valid on a frame directly before a
+			// POST_TX frame.
+			if frame.Batch && i+1 < len(recipe.Body) && recipe.Body[i+1].Kind == KindPostTx {
+				t.Fatalf("index %d batches frame %d directly before a POST_TX frame", index, i)
+			}
+
 			if frame.Kind == KindPostTx && frame.Script != ScriptNone {
 				t.Fatalf("index %d gives a POST_TX frame a writing script", index)
 			}

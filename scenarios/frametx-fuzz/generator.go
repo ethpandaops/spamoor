@@ -340,7 +340,27 @@ func (s *Scenario) buildBody(env *environment, recipe *Recipe, result *build) er
 	s.appendPendingFundings(env, recipe, result)
 	s.appendWipeFrame(env, result)
 
+	// The frames above ride along after the body, but POST_TX frames must stay a
+	// trailing suffix.
+	result.frames = postTxLast(result.frames)
+
 	return nil
+}
+
+// postTxLast moves POST_TX frames to the end, keeping the order within both groups.
+func postTxLast(frames []*txtypes.Frame) []*txtypes.Frame {
+	ordered := make([]*txtypes.Frame, 0, len(frames))
+	suffix := make([]*txtypes.Frame, 0, len(frames))
+
+	for _, frame := range frames {
+		if frame.Mode == txtypes.FrameModePostTx {
+			suffix = append(suffix, frame)
+		} else {
+			ordered = append(ordered, frame)
+		}
+	}
+
+	return append(ordered, suffix...)
 }
 
 // accountReadyTarget is the number of account contracts the buffer is kept topped up to,

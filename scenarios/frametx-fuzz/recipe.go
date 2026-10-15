@@ -534,8 +534,9 @@ func (r *Recipe) normalize(opts DrawOptions) {
 		}
 
 		// A batched frame may not be the last one, and a POST_TX frame's failure
-		// overrides batching anyway, so the flag is meaningless on one.
-		if i == len(r.Body)-1 || frame.Kind == KindPostTx {
+		// overrides batching anyway, so the flag is meaningless on one. EIP-7906 also
+		// forbids it on the frame directly before a POST_TX frame.
+		if i == len(r.Body)-1 || frame.Kind == KindPostTx || r.Body[i+1].Kind == KindPostTx {
 			frame.Batch = false
 		}
 	}
