@@ -1,6 +1,7 @@
 package frametxfuzz
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -386,6 +387,29 @@ func findViolation(name string) *violation {
 	return nil
 }
 
+// mutateSigned applies the violation's post-signing mutations to the encoded transaction.
+// It reports false when a mutation left the bytes unchanged, which is how a rewrite says
+// the transaction has nothing it can alter (a P256 corruption on a transaction without a
+// P256 entry, a high-s flip without a secp256k1 signature). Sending those would report a
+// valid transaction as an accepted violation.
+func (v *violation) mutateSigned(tx *txtypes.Transaction, raw []byte) ([]byte, bool) {
+	if v.rewrite == nil && v.corrupt == nil {
+		return raw, true
+	}
+
+	mutated := raw
+
+	if v.rewrite != nil {
+		mutated = v.rewrite(tx, mutated)
+	}
+
+	if v.corrupt != nil {
+		mutated = v.corrupt(mutated)
+	}
+
+	return mutated, !bytes.Equal(mutated, raw)
+}
+
 // sendInvalid submits a transaction carrying a deliberate violation, out of pool: the
 // RPC's accept or reject is the whole result. What happened is recorded, not judged.
 func (s *Scenario) sendInvalid(ctx context.Context, client *spamoor.Client, result *build) error {
@@ -426,12 +450,9 @@ func (s *Scenario) sendInvalid(ctx context.Context, client *spamoor.Client, resu
 		return err
 	}
 
-	if violator.rewrite != nil {
-		raw = violator.rewrite(tx, raw)
-	}
-
-	if violator.corrupt != nil {
-		raw = violator.corrupt(raw)
+	raw, applicable := violator.mutateSigned(tx, raw)
+	if !applicable {
+		return nil
 	}
 
 	if err := client.SendRawTransaction(ctx, raw); err != nil {

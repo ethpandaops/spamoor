@@ -337,6 +337,10 @@ func (s *Scenario) Run(ctx context.Context) error {
 	s.env = env
 	s.coverage = newCoverage(s.logger, strings.TrimPrefix(s.seed, "0x"))
 
+	if err := s.awaitFrameAcceptance(ctx, env); err != nil {
+		return err
+	}
+
 	s.probeCapabilities(ctx, env)
 
 	if env.roots != nil {

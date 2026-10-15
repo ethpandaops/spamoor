@@ -133,3 +133,61 @@ func TestByteViolationsChangeTheEncoding(t *testing.T) {
 		})
 	}
 }
+
+// TestRewriteViolationsReportWhenNotApplicable checks that a signature rewrite with nothing
+// to rewrite is reported as not applicable instead of sending the valid transaction as a
+// violation, which would surface as "the chain accepted a transaction carrying the
+// violation" against every client.
+func TestRewriteViolationsReportWhenNotApplicable(t *testing.T) {
+	frameTx := validFrameTx()
+	signTestTx(t, frameTx, testKey)
+
+	tx := txtypes.NewTx(frameTx)
+
+	raw, err := tx.MarshalNetwork()
+	if err != nil {
+		t.Fatalf("could not encode the transaction: %v", err)
+	}
+
+	// The baseline carries one secp256k1 sender signature and no P256 entry.
+	for name, wantApplicable := range map[string]bool{
+		"high-s-signature":               true,
+		"p256-signature-does-not-verify": false,
+	} {
+		t.Run(name, func(t *testing.T) {
+			violator := findViolation(name)
+			if violator == nil {
+				t.Fatalf("unknown violation %q", name)
+			}
+
+			mutated, applicable := violator.mutateSigned(tx, raw)
+			if applicable != wantApplicable {
+				t.Fatalf("applicable = %v, want %v", applicable, wantApplicable)
+			}
+
+			if applicable && string(mutated) == string(raw) {
+				t.Error("an applicable rewrite left the encoding unchanged")
+			}
+		})
+	}
+}
+
+// TestPostTxLastKeepsTheSuffix checks that frames appended after the body move in front
+// of the POST_TX suffix, keeping their order.
+func TestPostTxLastKeepsTheSuffix(t *testing.T) {
+	limits := txtypes.FrameLimits{Execution: 21_000}
+	verify := txtypes.SelfVerifyFrame(limits)
+	body := txtypes.UserOpFrame(nil, nil, nil, limits)
+	post := txtypes.PostTxFrame(txtypes.ExpiryVerifier, nil, limits)
+	rideAlong1 := txtypes.UserOpFrame(nil, nil, nil, limits)
+	rideAlong2 := txtypes.UserOpFrame(nil, nil, nil, limits)
+
+	got := postTxLast([]*txtypes.Frame{verify, body, post, rideAlong1, rideAlong2})
+	want := []*txtypes.Frame{verify, body, rideAlong1, rideAlong2, post}
+
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("frame %d is out of place", i)
+		}
+	}
+}

@@ -225,11 +225,17 @@ ordinary scenario's starves the generator at a few transactions per block whatev
 
 ## Requirements
 
-The chain must have an account at the EIP-8141 expiry verifier predeploy (`0x…8141`). Forks activate
-at an epoch rather than at genesis, so on a chain without it the scenario warns and re-probes every
-30 seconds until the fork lands instead of failing. The envelope shape and the two extensions are
-read from their predeploys the same way, and `--pre-amsterdam-fee-model` is incompatible: frame
-transactions need the EIP-8037 gas model.
+The chain must have an account at the EIP-8141 expiry verifier (`0x81413f0c…FfFf`). On a chain without
+it the scenario warns and re-probes every 30 seconds instead of failing. The envelope shape and the two
+extensions are read from their contracts the same way, and `--pre-amsterdam-fee-model` is incompatible:
+frame transactions need the EIP-8037 gas model.
+
+The contracts are ordinary contracts and devnet genesis files carry them from block 0, before the fork
+activates, so finding them does not mean frame transactions are accepted yet. Before probing
+capabilities or generating anything, the scenario lands a baseline frame transaction from the prober
+wallet, retrying every 12 seconds while the chain refuses it. Without that wait a spammer started
+before the fork would probe `POST_TX` against a chain that refuses every frame transaction, conclude
+it is unsupported for the whole run, and fill the coverage report with pre-fork refusals.
 
 `--post-tx auto` settles EIP-7906 support by sending one transaction with a `POST_TX` frame and one
 without, from a dedicated prober wallet. A client that does not implement the feature may accept the
