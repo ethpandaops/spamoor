@@ -23,14 +23,14 @@ const (
 	// mempool-legal transaction may open.
 	KeyedNonceFirstUseStateGas = StateBytesPerStorageSet * CostPerStateByte
 
+	// KeyedNonceAccessCost is the execution gas each non-zero nonce key pays in both
+	// the intrinsic cost and the calldata floor: COLD_STORAGE_ACCESS + STORAGE_WRITE
+	// (EIP-8038) for the protocol's cold read and write of its NONCE_MANAGER slot.
+	KeyedNonceAccessCost = 2_100 + 10_000
+
 	// MaxNonceSeq is EIP-8250's exclusive bound on nonce_seq.
 	MaxNonceSeq = uint64(1<<64 - 1)
 )
-
-// NonceManagerCode is the runtime code installed at NonceManager on activation, a
-// bare revert(0, 0). Ordinary calls to the address are meant to fail; only the protocol
-// writes its storage.
-var NonceManagerCode = []byte{0x60, 0x00, 0x60, 0x00, 0xfd}
 
 // EIP-8272 recent root constants.
 const (
