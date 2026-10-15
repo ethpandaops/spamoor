@@ -473,6 +473,14 @@ func (s *Scenario) sendProbeTx(ctx context.Context, client *spamoor.Client, wall
 		Rebroadcast: true,
 	}); err != nil {
 		if ctx.Err() == nil && errors.Is(probeCtx.Err(), context.Canceled) {
+			// The pool's inclusion tracking can miss a transaction that lands in the
+			// block right after the wallet's previous one (seen right after the fork,
+			// where a probe follows the acceptance probe), so ask the node before
+			// counting the transaction as never included.
+			if receipt, err := client.GetTransactionReceipt(ctx, tx.Hash()); err == nil && receipt != nil {
+				return nil
+			}
+
 			// The transaction is in a mempool, it just never made it into a block.
 			// Its nonce stays consumed: reusing it would collide with the copy the
 			// node still holds, which is why probes run on their own wallet.
