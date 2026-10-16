@@ -182,6 +182,11 @@ func (s *Scenario) Run(ctx context.Context) error {
 		return fmt.Errorf("no geas code or file provided")
 	}
 
+	geasCode, err := scenario.FactoryPlaceholders(s.walletPool).Resolve(geasCode)
+	if err != nil {
+		return err
+	}
+
 	receipt, _, err := s.sendDeploymentTx(ctx, s.trimGeasOpcodes(geasCode))
 	if err != nil {
 		return err

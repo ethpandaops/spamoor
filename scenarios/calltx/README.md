@@ -40,6 +40,10 @@ The `--call-args` parameter supports the following placeholders:
 - `{random}` - Random uint256 value
 - `{random:N}` - Random number between 0 and N
 - `{randomaddr}` - Random Ethereum address
+- `{factory_address}` - Shared CREATE2 factory deployed by `factorydeploytx`
+- `{create2:<factory>:<initcodehash>:<salt>}` - CREATE2 address (placeholders nest, e.g. `{create2:{factory_address}:0x...:{txid}}`)
+
+See [Contributing Workloads](../../docs/contributing-workloads.md#placeholders) for the full placeholder reference.
 
 ### Transaction Settings
 - `--basefee` - Max fee per gas in gwei (default: 20)

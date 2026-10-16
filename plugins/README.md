@@ -71,6 +71,8 @@ See `docs/scenario-developers.md` for the complete scenario development guide, i
 - The `onComplete` callback pattern
 - Configuration via flags and YAML
 
+See `_example-delegation/` for a workload that needs a plugin: receipt-dependent EIP-7702 setup followed by a transaction loop against the delegated EOA.
+
 ## Loading Plugins
 
 ### CLI Usage
