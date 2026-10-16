@@ -1106,7 +1106,15 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 	}
 
 	tx.ChainID = jsonU256(fields.ChainID)
-	tx.NonceSeq = jsonUint64(dec.NonceSeq)
+
+	// Clients report the EIP-8250 sequence as "nonce"; "nonceSeq" is what EncodeJSONTx
+	// writes, so accept both.
+	nonceSeq := dec.NonceSeq
+	if nonceSeq == nil {
+		nonceSeq = fields.Nonce
+	}
+
+	tx.NonceSeq = jsonUint64(nonceSeq)
 	tx.Fees = FrameFees{
 		GasTipCap:  jsonU256(fields.MaxPriorityFeePerGas),
 		GasFeeCap:  jsonU256(fields.MaxFeePerGas),
