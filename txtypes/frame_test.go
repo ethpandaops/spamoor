@@ -597,6 +597,36 @@ func TestFrameReceiptWithoutFrameFields(t *testing.T) {
 	}
 }
 
+// TestFrameTxJSONNonceField checks that the sequence of a keyed-envelope frame
+// transaction is read from "nonce", the field clients report it in. Reading it as zero
+// left every awaited frame transaction unconfirmed until stale recovery.
+func TestFrameTxJSONNonceField(t *testing.T) {
+	// reth bogota-devnet-1, block 1788 transaction 0 (nethermind and ethrex report it alike)
+	raw := `{"blockNumber":"0x6fc","from":"0xd23e74bc0622087c685981e9974a426d89701053","gas":"0xe051",
+		"maxFeePerGas":"0x4a817c800","maxPriorityFeePerGas":"0x77359400","maxFeePerBlobGas":"0x0",
+		"hash":"0x9bc7aee18912f786f04fea5eaead7ffcb66b6582994c4a76ce4a3fb39cb9ede4","input":"0x",
+		"nonce":"0x29a","nonceKeys":["0x0"],"to":null,"transactionIndex":"0x0","value":"0x0","type":"0x6",
+		"chainId":"0x1a38c5b87","frames":[{"mode":"0x1","flags":"0x3","executionGas":"0x1388","stateGas":"0x0",
+		"value":"0x0","data":"0x"}],"signatures":[{"scheme":"0x1","msg":"0x","signature":"0x01"}]}`
+
+	tx, err := UnmarshalJSONTx([]byte(raw))
+	if err != nil {
+		t.Fatalf("failed decoding: %v", err)
+	}
+
+	if _, ok := tx.Inner().(*FrameTx); !ok {
+		t.Fatalf("decoded as %T, expected a frame transaction", tx.Inner())
+	}
+
+	if tx.Nonce() != 0x29a {
+		t.Fatalf("nonce %d, expected %d", tx.Nonce(), 0x29a)
+	}
+
+	if !tx.UsesAccountNonce() {
+		t.Fatal("the legacy key set should use the account nonce")
+	}
+}
+
 // TestFrameTxNotRepresentableInGeth checks that conversion fails loudly rather than
 // producing a transaction with a different hash.
 func TestFrameTxNotRepresentableInGeth(t *testing.T) {
