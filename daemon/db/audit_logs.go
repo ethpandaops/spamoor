@@ -51,6 +51,9 @@ const (
 	AuditActionPluginRegister AuditActionType = "plugin_register"
 	AuditActionPluginDelete   AuditActionType = "plugin_delete"
 	AuditActionPluginReload   AuditActionType = "plugin_reload"
+
+	// Debug actions
+	AuditActionPprofDownload AuditActionType = "pprof_download"
 )
 
 // AuditEntityType defines the types of entities that can be logged
@@ -62,6 +65,7 @@ const (
 	AuditEntitySystem     AuditEntityType = "system"
 	AuditEntityRootWallet AuditEntityType = "root_wallet"
 	AuditEntityPlugin     AuditEntityType = "plugin"
+	AuditEntityDebug      AuditEntityType = "debug"
 )
 
 // AuditMetadata represents additional metadata for an audit log entry

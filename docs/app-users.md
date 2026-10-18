@@ -781,6 +781,17 @@ spamoor eoatx --trace ...
 spamoor eoatx --log-txs ...
 ```
 
+### Profiling (pprof)
+
+The daemon exposes Go's profiling endpoints under `http://localhost:8080/debug/pprof/`. A profile (heap dump, goroutine dump, CPU profile, trace, ...) contains the internals of the process, including RPC credentials and the private keys of every wallet, so treat it like the private key itself.
+
+When `--auth-provider-url` is set, the profiling pages require a login:
+
+- **Browser**: open `/debug/pprof/` in the web UI. A short gate page hands your session over as a cookie scoped to `/debug/pprof` (valid for at most 30 minutes) and reloads, or asks you to log in first.
+- **Tools**: send the token as a bearer header, e.g. `curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/debug/pprof/heap -o heap.pprof`, then `go tool pprof heap.pprof`.
+
+Every profile download is recorded in the audit log (action `pprof_download`, with the profile name and query); opening the index page is not. Without an auth provider the profiling pages are as open as the rest of the API, so only run that way on a trusted network.
+
 ### Getting Help
 
 - View available scenarios: `spamoor` (without arguments)
