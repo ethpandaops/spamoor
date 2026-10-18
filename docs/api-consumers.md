@@ -583,6 +583,24 @@ Interactive Swagger UI documentation.
 GET /docs/
 ```
 
+### Go Profiling (pprof)
+
+Go's `net/http/pprof` endpoints for heap, goroutine, CPU and trace profiles.
+
+```http
+GET /debug/pprof/
+GET /debug/pprof/heap
+GET /debug/pprof/goroutine?debug=2
+GET /debug/pprof/profile?seconds=30
+```
+
+A profile contains the process internals, including RPC credentials and wallet private keys. With `--auth-provider-url` set, every request needs a login: a bearer header for tools, or the `spamoor_debug_token` cookie that the web UI's gate page sets for a browser (path-scoped to `/debug/pprof`, SameSite=Strict, at most 30 minutes). Requests without a valid token get a `401` with `WWW-Authenticate: Bearer`; a browser (`Accept: text/html`) gets the gate page instead. Every profile download is written to the audit log as `pprof_download` with the profile name and query string; the index page is not audited.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/debug/pprof/heap -o heap.pprof
+go tool pprof heap.pprof
+```
+
 ## Error Handling
 
 The API uses standard HTTP status codes and returns JSON error responses:

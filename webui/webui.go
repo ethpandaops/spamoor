@@ -142,8 +142,18 @@ func StartHttpServer(config *types.FrontendConfig, daemon *daemon.Daemon) {
 	router.PathPrefix("/docs/").Handler(docs.GetSwaggerHandler(logrus.StandardLogger()))
 
 	if config.Pprof {
-		// add pprof handler
-		router.PathPrefix("/debug/pprof/").Handler(http.DefaultServeMux)
+		// pprof handler — net/http/pprof registers itself on http.DefaultServeMux
+		// via the blank import above. Profiles need a login: a heap dump
+		// contains the RPC credentials and private keys of this process.
+		// Tools send the bearer token; a browser without the login cookie gets
+		// the gate page, which sets it (see newPprofHandler). Every profile
+		// download is audited, the index page is not.
+		router.PathPrefix(pprofPathPrefix).Handler(newPprofHandler(
+			authHandler,
+			pprofAuditor(daemon),
+			http.HandlerFunc(frontendHandler.PprofLogin),
+			http.DefaultServeMux,
+		))
 	}
 
 	router.PathPrefix("/").Handler(frontend)

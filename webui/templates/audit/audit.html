@@ -250,6 +250,9 @@ function renderAuditLogs(data) {
     } else if (log.entity_type === 'plugin') {
       entityIcon = 'fa-puzzle-piece';
       entityPrefix = 'Plugin';
+    } else if (log.entity_type === 'debug') {
+      entityIcon = 'fa-bug';
+      entityPrefix = 'Profiling';
     }
 
     var changesHtml = '<span class="text-muted">No changes</span>';
@@ -367,7 +370,8 @@ function formatActionType(action) {
     'root_wallet_transaction': 'Root Wallet Transaction',
     'plugin_register': 'Register Plugin',
     'plugin_delete': 'Delete Plugin',
-    'plugin_reload': 'Reload Plugin'
+    'plugin_reload': 'Reload Plugin',
+    'pprof_download': 'Download Profile'
   };
   return actionMap[action] || action;
 }

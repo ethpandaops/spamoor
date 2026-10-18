@@ -306,6 +306,34 @@ func (al *AuditLogger) LogPluginAction(userEmail string, action db.AuditActionTy
 	})
 }
 
+// LogPprofDownload logs a download from the /debug/pprof endpoints. A
+// profile (heap, goroutine, ...) exposes the process internals including
+// RPC credentials and private keys, so every download is recorded; the
+// index page is not. result is "ok" or a short error description.
+func (al *AuditLogger) LogPprofDownload(userEmail string, profile string, query string, result string) error {
+	metadata := db.AuditMetadata{
+		"profile": profile,
+		"query":   query,
+		"result":  result,
+	}
+
+	diff := fmt.Sprintf("Profile: %s\nQuery: %s\nResult: %s", profile, query, result)
+
+	log := &db.AuditLog{
+		UserEmail:  userEmail,
+		ActionType: string(db.AuditActionPprofDownload),
+		EntityType: string(db.AuditEntityDebug),
+		EntityID:   profile,
+		EntityName: profile,
+		Diff:       diff,
+		Metadata:   db.MarshalAuditMetadata(metadata),
+	}
+
+	return al.daemon.db.RunDBTransaction(func(tx *sqlx.Tx) error {
+		return al.daemon.db.InsertAuditLog(tx, log)
+	})
+}
+
 // generateConfigDiff generates a unified diff for configuration changes
 func (al *AuditLogger) generateConfigDiff(oldConfig, newConfig, filename string) string {
 	if oldConfig == "" && newConfig == "" {

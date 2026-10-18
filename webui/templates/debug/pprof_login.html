@@ -1,0 +1,128 @@
+{{ define "page" }}
+  <div class="container mt-2">
+    <div class="card mx-auto" style="max-width: 560px;">
+      <div class="card-body">
+        <h5 class="card-title">Profiling</h5>
+        <div id="pprof-login-error" class="alert alert-danger small mb-0 d-none"></div>
+        <p id="pprof-login-progress" class="text-muted mb-0">
+          <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+          Opening the profiling pages…
+        </p>
+        <p id="pprof-login-required" class="mb-0 d-none">
+          <i class="fas fa-lock me-2"></i>
+          The profiling pages need a login. Log in with the button in the header; this page continues
+          on its own afterwards.
+        </p>
+      </div>
+    </div>
+  </div>
+{{ end }}
+
+{{ define "css" }}
+{{ end }}
+
+{{ define "js" }}
+<script>
+(function() {
+  /* The server's /debug/pprof pages need a login. Tools send the bearer
+     token; a browser gets this page instead, which hands the session's
+     token to the server as a short-lived cookie scoped to /debug/pprof and
+     reloads. Must match pprofTokenCookie in webui/pprof.go. */
+  var DEBUG_TOKEN_COOKIE = 'spamoor_debug_token';
+  var COOKIE_PATH = '/debug/pprof';
+  /* The token tried last (its signature tail, never the token) and when: a
+     token the server turned down right after its cookie was set must not
+     reload the page in a loop. An older attempt is a cookie that expired
+     before its token, which is simply set again. */
+  var ATTEMPT_KEY = 'spamoor_debug_token_attempt';
+  var REFUSED_WITHIN_MS = 15000;
+  /* The cookie never outlives the token, nor this cap. */
+  var MAX_COOKIE_AGE_SECONDS = 30 * 60;
+
+  var attempted = false;
+
+  function show(id, visible) {
+    var el = document.getElementById(id);
+    if (el) el.classList.toggle('d-none', !visible);
+  }
+
+  function showError(message) {
+    var el = document.getElementById('pprof-login-error');
+    if (el) el.textContent = message;
+    show('pprof-login-error', true);
+    show('pprof-login-progress', false);
+    show('pprof-login-required', false);
+  }
+
+  function showLoginRequired() {
+    show('pprof-login-error', false);
+    show('pprof-login-progress', false);
+    show('pprof-login-required', true);
+  }
+
+  function readAttempt() {
+    try {
+      return sessionStorage.getItem(ATTEMPT_KEY) || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function writeAttempt(value) {
+    try {
+      sessionStorage.setItem(ATTEMPT_KEY, value);
+    } catch (e) {
+      /* Without storage a refused token shows the error after one reload. */
+    }
+  }
+
+  function handover() {
+    var state = window.spamoor.authState;
+    if (state.authError) {
+      showError(state.authError);
+      return;
+    }
+    if (!window.spamoor.isAuthenticated()) {
+      showLoginRequired();
+      return;
+    }
+    if (attempted) return;
+    attempted = true;
+
+    show('pprof-login-error', false);
+    show('pprof-login-required', false);
+    show('pprof-login-progress', true);
+
+    window.spamoor.getAuthToken().then(function(token) {
+      if (!token) {
+        showError(state.authDisabled
+          ? 'This server needs no login, but did not serve the page; try reloading.'
+          : 'Your session did not provide a login token.');
+        attempted = false;
+        return;
+      }
+
+      var tail = token.slice(-16);
+      var last = readAttempt().split(':');
+      if (last[0] === tail && Date.now() - Number(last[1]) < REFUSED_WITHIN_MS) {
+        showError('The server did not accept your login for the profiling pages.');
+        return;
+      }
+      writeAttempt(tail + ':' + Date.now());
+
+      var remaining = state.expiresAt ? Math.floor((state.expiresAt - Date.now()) / 1000) : MAX_COOKIE_AGE_SECONDS;
+      var maxAge = Math.max(1, Math.min(remaining, MAX_COOKIE_AGE_SECONDS));
+      var secure = window.location.protocol === 'https:' ? '; Secure' : '';
+      document.cookie = DEBUG_TOKEN_COOKIE + '=' + token + '; Path=' + COOKIE_PATH + '; Max-Age=' + maxAge + '; SameSite=Strict' + secure;
+      window.location.reload();
+    });
+  }
+
+  /* spamoor.js initialises the auth state on DOMContentLoaded before this
+     listener runs; the v2 client's status events arrive later and land in
+     authStateChanged, which continues the handover after a login. */
+  document.addEventListener('DOMContentLoaded', handover);
+  window.addEventListener('authStateChanged', handover);
+})();
+</script>
+{{ end }}
