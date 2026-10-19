@@ -1044,19 +1044,28 @@ func weightedTokens(data []byte) uint64 {
 // jsonFrame is a frame as reported by JSON-RPC. EIP-8141 does not specify a JSON
 // encoding; these key names follow ethrex, the first client to ship the type.
 type jsonFrame struct {
-	Mode     *hexutil.Uint64 `json:"mode"`
-	Flags    *hexutil.Uint64 `json:"flags"`
-	To       *common.Address `json:"to"`
-	Target   *common.Address `json:"target"`
-	GasLimit *hexutil.Uint64 `json:"gasLimit"`
-	Value    *hexutil.Big    `json:"value"`
-	Data     *hexutil.Bytes  `json:"data"`
+	Mode         *hexutil.Uint64 `json:"mode"`
+	Flags        *hexutil.Uint64 `json:"flags"`
+	To           *common.Address `json:"to"`
+	Target       *common.Address `json:"target"`
+	GasLimit     *hexutil.Uint64 `json:"gasLimit"`
+	ExecutionGas *hexutil.Uint64 `json:"executionGas"`
+	Value        *hexutil.Big    `json:"value"`
+	Data         *hexutil.Bytes  `json:"data"`
 
 	// ethrex has shipped both spellings of the state gas limit. Reading only one of
 	// them decodes every frame from the other build with a state limit of zero and
 	// nothing says so, which changes the transaction's hash on re-encoding.
 	StateLimit    *hexutil.Uint64 `json:"stateLimit"`
 	StateGasLimit *hexutil.Uint64 `json:"stateGasLimit"`
+	StateGas      *hexutil.Uint64 `json:"stateGas"`
+}
+
+func (f *jsonFrame) executionLimit() uint64 {
+	if f.GasLimit != nil {
+		return uint64(*f.GasLimit)
+	}
+	return jsonUint64(f.ExecutionGas)
 }
 
 // stateLimit returns whichever spelling the client used.
@@ -1065,13 +1074,16 @@ func (f *jsonFrame) stateLimit() uint64 {
 		return uint64(*f.StateLimit)
 	}
 
-	return jsonUint64(f.StateGasLimit)
+	if f.StateGasLimit != nil {
+		return uint64(*f.StateGasLimit)
+	}
+	return jsonUint64(f.StateGas)
 }
 
 // jsonFrameSignature is a signature entry as reported by JSON-RPC.
 type jsonFrameSignature struct {
 	Scheme    *hexutil.Uint64 `json:"scheme"`
-	Signer    *common.Address `json:"signer"`
+	Signer    *hexutil.Bytes  `json:"signer"`
 	Msg       *hexutil.Bytes  `json:"msg"`
 	Signature *hexutil.Bytes  `json:"signature"`
 }
@@ -1160,7 +1172,7 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 			Flags:  uint8(jsonUint64(frame.Flags)),
 			Target: copyAddressPtr(target),
 			Limits: FrameLimits{
-				Execution: jsonUint64(frame.GasLimit),
+				Execution: frame.executionLimit(),
 				State:     frame.stateLimit(),
 			},
 			Value: jsonU256(frame.Value),
@@ -1178,7 +1190,7 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 		}
 
 		if sig.Signer != nil {
-			entry.Signer = sig.Signer.Bytes()
+			entry.Signer = jsonBytes(sig.Signer)
 		}
 
 		tx.Signatures = append(tx.Signatures, entry)
