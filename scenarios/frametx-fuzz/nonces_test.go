@@ -6,6 +6,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
+
+	"github.com/ethpandaops/spamoor/txtypes"
 )
 
 // The payload wants keys in increasing order, but the ledger tracks them by slot.
@@ -104,5 +106,71 @@ func TestSelectKeysReservesSlotsUntilSettled(t *testing.T) {
 	again, err := ledger.selectKeys(context.Background(), nil, sender, 2, 2)
 	if err != nil || again == nil || len(again.slots) != 2 || again.sequence != 4 {
 		t.Fatalf("draw after settling = %v, %v, want 2 slots at sequence 4", again, err)
+	}
+}
+
+// A slot read at MaxNonceSeq is an exhausted key: a sequential use would have to carry
+// the single-use sequence, which needs an unused key, so the ledger must never offer it.
+func TestSelectKeysSkipsExhaustedSlots(t *testing.T) {
+	sender := common.HexToAddress("0x1234")
+	ledger := newNonceLedger()
+
+	ledger.sequences[sender] = map[uint64]uint64{}
+	ledger.known[sender] = map[uint64]bool{}
+	ledger.reserved[sender] = map[uint64]bool{}
+
+	for slot := uint64(0); slot < 4; slot++ {
+		ledger.sequences[sender][slot] = txtypes.MaxNonceSeq
+		ledger.known[sender][slot] = true
+	}
+
+	ledger.sequences[sender][1] = 2
+
+	sel, err := ledger.selectKeys(context.Background(), nil, sender, 2, 2)
+	if err != nil || sel == nil {
+		t.Fatalf("draw = %v, %v", sel, err)
+	}
+
+	if len(sel.slots) != 1 || sel.slots[0] != 1 || sel.sequence != 2 {
+		t.Fatalf("draw picked slots %v at sequence %d, want only slot 1 at 2", sel.slots, sel.sequence)
+	}
+}
+
+// A single-use selection lives outside the slot window, so settling or releasing it must
+// leave the sequential ledger alone, and its keys must be distinct from sequential keys.
+func TestSingleUseSelectionLeavesSlotsAlone(t *testing.T) {
+	sender := common.HexToAddress("0x1234")
+	ledger := newNonceLedger()
+
+	ledger.sequences[sender] = map[uint64]uint64{0: 3}
+	ledger.known[sender] = map[uint64]bool{0: true}
+	ledger.reserved[sender] = map[uint64]bool{}
+
+	sel := &selection{
+		keys:      []*uint256.Int{singleUseKey(sender, 42, 0)},
+		slots:     []int{-1},
+		sequence:  txtypes.MaxNonceSeq,
+		firstUses: 1,
+	}
+
+	ledger.consumed(sender, sel)
+	ledger.release(sender, sel)
+
+	if got := ledger.sequences[sender][0]; got != 3 {
+		t.Fatalf("sequential slot 0 moved to %d", got)
+	}
+
+	if !ledger.known[sender][0] {
+		t.Fatal("sequential slot 0 was forgotten")
+	}
+
+	for slot := 0; slot < 8; slot++ {
+		if singleUseKey(sender, 42, 0).Eq(nonceKey(sender, slot)) {
+			t.Fatalf("single-use key collides with sequential slot %d", slot)
+		}
+	}
+
+	if singleUseKey(sender, 42, 0).Eq(singleUseKey(sender, 42, 1)) || singleUseKey(sender, 42, 0).Eq(singleUseKey(sender, 43, 0)) {
+		t.Fatal("single-use keys are not distinct per ordinal and index")
 	}
 }

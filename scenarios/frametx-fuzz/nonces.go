@@ -16,9 +16,15 @@ import (
 // protocol storage under NONCE_MANAGER, so nothing in the engine tracks them.
 //
 // Two rules shape it: every key a transaction selects must sit at the same nonce_seq, and
-// a key's first use costs KeyedNonceFirstUseGas out of the frame executing APPROVE. The
-// ledger therefore hands out subsets that share a sequence, and reports how many of them
-// are new so the caller can budget the surcharge.
+// a key's first use costs KeyedNonceFirstUseStateGas out of the frame executing APPROVE.
+// The ledger therefore hands out subsets that share a sequence, and reports how many of
+// them are new so the caller can budget the surcharge. A slot read at MaxNonceSeq is an
+// exhausted key, consumed single-use or advanced to its bound, and is never offered.
+//
+// The ledger deliberately runs concurrent keyed transactions per sender on disjoint key
+// sets, which the protocol allows. The public mempool rules keep one pending frame
+// transaction per sender regardless of keys, so a public pool drops all but one of them;
+// the refusals are part of what the run reports, not a defect to work around.
 type nonceLedger struct {
 	mutex sync.Mutex
 
@@ -116,6 +122,12 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 		}
 
 		sequence := sequences[uint64(slot)]
+		if sequence == txtypes.MaxNonceSeq {
+			// Exhausted: a sequential use would need seq MaxNonceSeq, which is the
+			// single-use form and requires an unused key.
+			continue
+		}
+
 		bySequence[sequence] = append(bySequence[sequence], slot)
 	}
 
@@ -174,6 +186,68 @@ func (l *nonceLedger) selectKeys(ctx context.Context, client *spamoor.Client, se
 	return result, nil
 }
 
+// singleUseKey derives a key for the single-use form. These keys are consumed for good,
+// so they come from a namespace disjoint from the sequential slots, salted with the
+// recipe index: a sequential slot is reused run after run, an exhausted one would be
+// dead space in the slot window.
+func singleUseKey(sender common.Address, index uint64, ordinal int) *uint256.Int {
+	var buf [32]byte
+
+	copy(buf[:20], sender.Bytes())
+	buf[20] = 0x01
+	binary.BigEndian.PutUint64(buf[21:29], index)
+	buf[31] = byte(ordinal)
+
+	return new(uint256.Int).SetBytes(buf[:])
+}
+
+// selectSingleUseKeys returns up to count keys for the single-use form, derived from the
+// recipe index and confirmed unused on chain, capped at maxFirstUses since every one of
+// them is a first use. The keys need no reservation: no other draw can derive them.
+//
+// A key that reads non-zero was used by an earlier run of the same seed and index, which
+// the single-use form cannot select again, so it is dropped rather than retried.
+func (l *nonceLedger) selectSingleUseKeys(ctx context.Context, client *spamoor.Client, sender common.Address, index uint64, count, maxFirstUses int) (*selection, error) {
+	if count > txtypes.MaxNonceKeys {
+		count = txtypes.MaxNonceKeys
+	}
+
+	if count > maxFirstUses {
+		count = maxFirstUses
+	}
+
+	if count <= 0 {
+		return nil, nil
+	}
+
+	result := &selection{sequence: txtypes.MaxNonceSeq}
+
+	for ordinal := 0; ordinal < count; ordinal++ {
+		key := singleUseKey(sender, index, ordinal)
+
+		value, err := client.GetStorageAt(ctx, txtypes.NonceManager, txtypes.NonceManagerSlot(sender, key))
+		if err != nil {
+			return nil, err
+		}
+
+		if !new(uint256.Int).SetBytes(value.Bytes()).IsZero() {
+			continue
+		}
+
+		result.keys = append(result.keys, key)
+		result.slots = append(result.slots, -1-ordinal)
+		result.firstUses++
+	}
+
+	if len(result.keys) == 0 {
+		return nil, nil
+	}
+
+	sortKeyedSlots(result.keys, result.slots)
+
+	return result, nil
+}
+
 // unreadSlots lists the slots below limit this run has not read from the chain yet,
 // creating the sender's ledger entries on first sight.
 func (l *nonceLedger) unreadSlots(sender common.Address, limit int) []int {
@@ -219,9 +293,10 @@ func (l *nonceLedger) learn(sender common.Address, values map[int]uint64) {
 }
 
 // consumed records that a selection landed, moving every key in it to the next sequence
-// and freeing its slots for the next draw.
+// and freeing its slots for the next draw. A single-use selection has nothing to record:
+// its keys are exhausted on chain and live outside the slot window.
 func (l *nonceLedger) consumed(sender common.Address, sel *selection) {
-	if sel == nil {
+	if sel == nil || sel.sequence == txtypes.MaxNonceSeq {
 		return
 	}
 
@@ -245,7 +320,7 @@ func (l *nonceLedger) consumed(sender common.Address, sel *selection) {
 // them from the chain again: a refusal may mean the ledger's view of them is stale, and
 // re-reading is what brings it back in step.
 func (l *nonceLedger) release(sender common.Address, sel *selection) {
-	if sel == nil {
+	if sel == nil || sel.sequence == txtypes.MaxNonceSeq {
 		return
 	}
 

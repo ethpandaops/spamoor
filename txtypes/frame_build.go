@@ -72,7 +72,8 @@ func ExpiryFrame(deadline uint64, executionGas uint64) *Frame {
 // every one is a root its source committed within the usable window.
 //
 // In a public-mempool transaction it sits directly after the optional expiry frame and
-// before everything else; its execution budget is excluded from the MaxVerifyGas cap.
+// before everything else, and its execution budget counts toward the MaxVerifyGas cap
+// like every other prefix frame's, so RecentRootVerifyGas is sized tightly.
 func RecentRootVerifyFrame(references []*RecentRootReference, executionGas uint64) *Frame {
 	target := RecentRootAddress
 
@@ -89,15 +90,16 @@ func RecentRootVerifyFrame(references []*RecentRootReference, executionGas uint6
 // RecentRootVerifyGas returns an execution budget for a recent root verifier frame
 // checking count references.
 //
-// RECENT_ROOT_CODE is still TBD in the EIP, so this prices what the validation
-// operation must do rather than a known bytecode: the cold target access at frame
-// entry, then per tuple a cold SLOAD, two keccaks and the arithmetic around them, with
-// headroom. The mempool does not count it, so erring high only raises the up-front
-// max cost.
+// It is priced from RecentRootCode: the cold target access charged at frame entry
+// (3000 under EIP-8038), a 107-gas prologue plus the first memory expansion, then per
+// tuple one cold SLOAD, two keccaks over 104 and 72 bytes, a 72-byte CALLDATACOPY and
+// the arithmetic around them, which comes to 2396 gas when the slot is cold and 396 for
+// a duplicate tuple. The budget counts toward MaxVerifyGas, so the headroom is a few
+// percent rather than a multiple: sixteen cold tuples fit under 44k.
 func RecentRootVerifyGas(count int) uint64 {
 	const (
-		entryGas    = 2_600 + 2_000
-		perTupleGas = 2_100 + 2*(30+6*4) + 600
+		entryGas    = 3_000 + 107 + 12 + 281
+		perTupleGas = 2_396 + 104
 	)
 
 	return entryGas + uint64(count)*perTupleGas
@@ -133,21 +135,29 @@ func DeployFrame(factory common.Address, data []byte, limits FrameLimits) *Frame
 	}
 }
 
-// PostTxFrame builds an EIP-7906 POST_TX assertion frame.
+// AssertFrame builds an EIP-7906 ASSERT frame.
 //
 // Not to be confused with PostOpFrame: that is a DEFAULT frame a paymaster uses to
 // settle up, this is a STATICCALL-semantics assertion that may not APPROVE and whose
-// failure reverts the whole execution body. POST_TX frames must be a trailing suffix
-// of the frame list.
-func PostTxFrame(target common.Address, data []byte, limits FrameLimits) *Frame {
+// failure reverts the whole execution body while keeping the transaction valid. ASSERT
+// frames must be a trailing suffix of the frame list, may not carry the atomic batch
+// flag, and may not directly follow a frame that carries it.
+func AssertFrame(target common.Address, data []byte, limits FrameLimits) *Frame {
 	return &Frame{
-		Mode:   FrameModePostTx,
+		Mode:   FrameModeAssert,
 		Flags:  ApproveNone,
 		Target: &target,
 		Limits: limits,
 		Value:  new(uint256.Int),
 		Data:   data,
 	}
+}
+
+// PostTxFrame is the former name of AssertFrame.
+//
+// Deprecated: EIP-7906 renamed the mode to ASSERT; use AssertFrame.
+func PostTxFrame(target common.Address, data []byte, limits FrameLimits) *Frame {
+	return AssertFrame(target, data, limits)
 }
 
 // PostOpFrame builds a DEFAULT frame that runs after the user operations, used by
@@ -209,14 +219,16 @@ func DefaultCodeVerifyLimits(senderExists bool) FrameLimits {
 // NewFrameTx assembles a frame transaction from its parts, filling in the zero values
 // the encoder requires.
 //
-// It builds the envelope shape current devnets run, with both extensions active and
-// the nonce in EIP-8250's [0] key set, which is the sender's ordinary account nonce.
-// Use NewFrameTxWithExtensions for a chain running a different combination.
+// It builds the envelope shape the current EIP texts define, with every extension
+// active and the nonce selecting the sender's ordinary account nonce (EIP-8250's empty
+// key set). Use NewFrameTxWithExtensions for a chain running a different combination.
 func NewFrameTx(chainID *uint256.Int, sender common.Address, nonce uint64, fees FrameFees, frames []*Frame, signatures []*FrameSignature) *FrameTx {
 	return NewFrameTxWithExtensions(FrameExtAll, chainID, sender, nonce, fees, frames, signatures)
 }
 
-// NewFrameTxWithExtensions assembles a frame transaction in a chosen envelope shape.
+// NewFrameTxWithExtensions assembles a frame transaction in a chosen envelope shape. The
+// nonce selects the account nonce in the form that shape spells it; see WithNonceKeys
+// for the keyed forms.
 func NewFrameTxWithExtensions(extensions FrameExtensions, chainID *uint256.Int, sender common.Address, nonce uint64, fees FrameFees, frames []*Frame, signatures []*FrameSignature) *FrameTx {
 	if fees.GasTipCap == nil {
 		fees.GasTipCap = new(uint256.Int)
@@ -250,9 +262,5 @@ func NewFrameTxWithExtensions(extensions FrameExtensions, chainID *uint256.Int, 
 		Extensions: extensions,
 	}
 
-	if extensions.Has(FrameExtKeyedNonces) {
-		tx.NonceKeys = []*uint256.Int{new(uint256.Int)}
-	}
-
-	return tx
+	return tx.WithLegacyNonce()
 }

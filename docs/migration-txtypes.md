@@ -98,3 +98,49 @@ for decoding from JSON-RPC. Receipts with type-specific content register a decod
 Types with no registered decoder still appear in block processing as `txtypes.UnknownTx`
 with the generic fields the node reports, so they take part in confirmation tracking and
 block accounting.
+
+## Frame transaction changes, October 2026
+
+`txtypes` was aligned with the EIP texts as of 2026-10-18 (EIP-8141, 8250, 7906, 8272 at
+EIPs commit `d4b89184`). Behaviour changes for library consumers:
+
+**EIP-8250 keyed nonces.** The account nonce is selected by an *empty* `NonceKeys`; every
+key, including zero, is an independent domain in `NONCE_MANAGER` and pays
+`KeyedNonceAccessCost`. `UsesLegacyNonce`/`UsesAccountNonce` are true only for an empty
+key set (or no keyed-nonce extension). `[0]`, `[0, 5]` and up to sixteen strictly
+increasing keys are valid. A `NonceSeq` of `MaxNonceSeq` (inclusive bound) with a non-empty
+key set is the single-use form (`UsesSingleUseNonce`, `WithSingleUseNonceKeys`); with an
+empty key set it is invalid. JSON decoding keeps an empty `nonceKeys` empty. The nonce
+calldata's floor cost is flat per byte, as the EIP prices it. `LegacyNonceKey` is gone.
+
+The revision before 2026-10-16, in which `[0]` selected the account nonce, is selectable
+with `FrameExtLegacyNonceKeyZero` for building and validating transactions for chains whose
+clients still implement it. It is not on the wire: decoders never set it, and a decoded
+`[0]` is key zero. `WithLegacyNonce` spells the account nonce for either revision.
+`spamoor.KeyedNonceRevision` is what spamoor's own probing assumes.
+
+**EIP-7906.** The mode is `ASSERT`: `FrameModeAssert`, `SpeciesAssert` (`"assert"`),
+`AssertFrame`, `FrameTx.AssertIndex`, `FrameReceiptExtra.AssertReverted`. The `PostTx` names
+remain as deprecated aliases. `ValidatePayload` now rejects the atomic batch flag on an
+ASSERT frame and on the frame directly before one.
+
+**EIP-8272.** `ValidateMempoolPrefix` counts the recent root verifier frame's execution
+budget toward `MaxVerifyGas`. `RecentRootVerifyGas` is sized from the now-fixed
+`RecentRootCode` (about 3.4k plus 2.5k per tuple). `ExpiryVerifierCode`, `NonceManagerCode`
+and `RecentRootCode` are exported.
+
+**Validation and signing.** Gas totals are summed with overflow checks: `ValidatePayload`
+rejects limits that wrap, and `IntrinsicGas`, `CalldataFloorGas`, `ExecutionGas`, `MaxGas`
+and `GetStateGas` saturate at `math.MaxUint64` instead of wrapping. `VerifySignatures`
+verifies P256 entries (previously only their encoding was checked). `SignPayload` signs
+explicit-msg entries before canonical-hash entries; `SignEntryP256` refuses to run after a
+canonical-hash entry has been signed, since it changes that entry's digest. `SignTx` sets
+`From` to the explicit sender for `ExplicitSenderTx` types, even when a co-signer's key
+signs.
+
+**Gas and cost accessors.** `Gas()`/`GetGas()` return `MaxGas`, the payer's charge basis
+across both dimensions; block packing uses `ExecutionReservation()` and `StateReservation()`
+separately. `Cost()` is `MaxGas × fee cap + Σ value`, which spans two accounts for frame
+transactions: `FrameTx.MaxCost(blobBaseFee)` is the payer's up-front charge and
+`FrameTx.SenderValue()` the sender's own outlay. `EncodeFrameReceiptRLP` and
+`DecodeFrameReceiptRLP` handle the consensus receipt encoding.

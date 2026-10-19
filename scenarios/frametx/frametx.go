@@ -204,8 +204,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 		return err
 	}
 
-	if s.shapes.requiresPostTx() {
-		s.logger.Warnf("EIP-7906 POST_TX shapes were selected; a chain without EIP-7906 rejects frame mode 3")
+	if s.shapes.requiresAssert() {
+		s.logger.Warnf("EIP-7906 ASSERT shapes were selected; a chain without EIP-7906 rejects frame mode 3")
 	}
 
 	maxPending := s.options.MaxPending
@@ -484,7 +484,7 @@ func (s *Scenario) onConfirm(client *spamoor.Client, shape *builtShape, txIdx ui
 
 	bodyReverted := false
 	if frameTx != nil {
-		bodyReverted = extra.PostTxReverted(frameTx)
+		bodyReverted = extra.AssertReverted(frameTx)
 	}
 
 	logger.Debugf(" frame tx %d (%s) confirmed in block #%v. payer: %v, frames: %v, durable: %v, exec gas: %v, state gas: %v, total fee: %v gwei",
@@ -506,7 +506,7 @@ func (s *Scenario) onConfirm(client *spamoor.Client, shape *builtShape, txIdx ui
 		return
 	}
 
-	// A POST_TX failure must revert the whole execution body, which the per-frame
+	// An ASSERT failure must revert the whole execution body, which the per-frame
 	// statuses alone do not show.
 	if bodyReverted != shape.expectBodyReverted {
 		s.framesMismatch.Add(1)

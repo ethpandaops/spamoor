@@ -263,8 +263,8 @@ func TestFrameIntrinsicGas(t *testing.T) {
 	// The user op carries value to a foreign target.
 	want += TxValueCost
 	// The envelope extension prices its own encoding as transaction data. The default
-	// [0] key set encodes as rlp([0]) || rlp(0) = c1 80 80: three non-zero bytes.
-	extensionTokens := uint64(3 * 4)
+	// empty key set encodes as rlp([]) || rlp(0) = c0 80: two non-zero bytes.
+	extensionTokens := uint64(2 * 4)
 	want += StandardTokenCost * extensionTokens
 
 	if got := tx.IntrinsicGas(); got != want {
@@ -373,7 +373,7 @@ func TestFrameValidatePayload(t *testing.T) {
 		}},
 		{"reserved flag bits", func(tx *FrameTx) { tx.Frames[1].Flags = 0x8 }},
 		{"value outside SENDER mode", func(tx *FrameTx) { tx.Frames[0].Value = uint256.NewInt(1) }},
-		{"unknown mode", func(tx *FrameTx) { tx.Frames[1].Mode = 3 }},
+		{"unknown mode", func(tx *FrameTx) { tx.Frames[1].Mode = 4 }},
 		{"unknown signature scheme", func(tx *FrameTx) { tx.Signatures[0].Scheme = 0x7 }},
 		{"arbitrary entry with signer", func(tx *FrameTx) {
 			tx.Signatures[0].Scheme = SigSchemeArbitrary
@@ -622,8 +622,37 @@ func TestFrameTxJSONNonceField(t *testing.T) {
 		t.Fatalf("nonce %d, expected %d", tx.Nonce(), 0x29a)
 	}
 
+	// The key set is kept as reported. Under the current EIP-8250 text [0] is key zero,
+	// an independent domain, not the account nonce the chain this came from read it as.
+	inner, _ := tx.Inner().(*FrameTx)
+	if len(inner.NonceKeys) != 1 || !inner.NonceKeys[0].IsZero() {
+		t.Fatalf("nonce keys %v, expected [0]", inner.NonceKeys)
+	}
+
+	if tx.UsesAccountNonce() {
+		t.Fatal("key zero is not the account nonce under the current revision")
+	}
+
+	// An empty key set stays empty and is the account nonce.
+	raw = `{"from":"0xd23e74bc0622087c685981e9974a426d89701053","gas":"0xe051",
+		"maxFeePerGas":"0x4a817c800","maxPriorityFeePerGas":"0x77359400","maxFeePerBlobGas":"0x0",
+		"hash":"0x9bc7aee18912f786f04fea5eaead7ffcb66b6582994c4a76ce4a3fb39cb9ede4","input":"0x",
+		"nonce":"0x29a","nonceKeys":[],"to":null,"value":"0x0","type":"0x6",
+		"chainId":"0x1a38c5b87","frames":[{"mode":"0x1","flags":"0x3","executionGas":"0x1388","stateGas":"0x0",
+		"value":"0x0","data":"0x"}],"signatures":[{"scheme":"0x1","msg":"0x","signature":"0x01"}]}`
+
+	tx, err = UnmarshalJSONTx([]byte(raw))
+	if err != nil {
+		t.Fatalf("failed decoding: %v", err)
+	}
+
+	inner, _ = tx.Inner().(*FrameTx)
+	if len(inner.NonceKeys) != 0 || !inner.HasKeyedNonces() {
+		t.Fatalf("nonce keys %v with extensions %s, expected an empty keyed set", inner.NonceKeys, inner.Extensions)
+	}
+
 	if !tx.UsesAccountNonce() {
-		t.Fatal("the legacy key set should use the account nonce")
+		t.Fatal("the empty key set should use the account nonce")
 	}
 }
 
@@ -965,9 +994,9 @@ func TestFrameExtensionMismatch(t *testing.T) {
 	}
 }
 
-// TestFramePostTxMode checks EIP-7906's POST_TX mode: it is a valid mode, it must form
+// TestFrameAssertMode checks EIP-7906's ASSERT mode: it is a valid mode, it must form
 // a trailing suffix, and it is classified for display.
-func TestFramePostTxMode(t *testing.T) {
+func TestFrameAssertMode(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	if err != nil {
 		t.Fatalf("failed generating key: %v", err)
@@ -992,32 +1021,32 @@ func TestFramePostTxMode(t *testing.T) {
 		return UserOpFrame(&testTarget, nil, nil, FrameLimits{Execution: 30_000})
 	}
 
-	postTx := func() *Frame {
-		return PostTxFrame(assertions, []byte{0x01}, FrameLimits{Execution: 20_000})
+	assert := func() *Frame {
+		return AssertFrame(assertions, []byte{0x01}, FrameLimits{Execution: 20_000})
 	}
 
-	// A trailing suffix of POST_TX frames is valid.
-	valid := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(), postTx(), postTx())
+	// A trailing suffix of ASSERT frames is valid.
+	valid := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(), assert(), assert())
 	if err := valid.ValidatePayload(); err != nil {
-		t.Fatalf("a trailing POST_TX suffix should be valid: %v", err)
+		t.Fatalf("a trailing ASSERT suffix should be valid: %v", err)
 	}
 
 	if err := valid.ValidateMempoolPrefix(); err != nil {
-		t.Fatalf("POST_TX frames sit outside the validation prefix: %v", err)
+		t.Fatalf("ASSERT frames sit outside the validation prefix: %v", err)
 	}
 
-	if species := valid.Frames[2].Species(sender); species != SpeciesPostTx {
-		t.Fatalf("POST_TX frame classified as %s", species)
+	if species := valid.Frames[2].Species(sender); species != SpeciesAssert {
+		t.Fatalf("ASSERT frame classified as %s", species)
 	}
 
-	if idx := valid.PostTxIndex(); idx != 2 {
-		t.Fatalf("PostTxIndex = %d, want 2", idx)
+	if idx := valid.AssertIndex(); idx != 2 {
+		t.Fatalf("AssertIndex = %d, want 2", idx)
 	}
 
-	// A non-POST_TX frame after a POST_TX frame is invalid.
-	interleaved := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), postTx(), userOp())
+	// A non-ASSERT frame after an ASSERT frame is invalid.
+	interleaved := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), assert(), userOp())
 	if err := interleaved.ValidatePayload(); err == nil {
-		t.Fatal("a frame following a POST_TX frame should be rejected")
+		t.Fatal("a frame following an ASSERT frame should be rejected")
 	}
 
 	// Mode 4 remains unknown.
@@ -1028,17 +1057,17 @@ func TestFramePostTxMode(t *testing.T) {
 		t.Fatal("mode 4 should be rejected")
 	}
 
-	// A POST_TX frame carrying value is rejected, as for any non-SENDER frame.
-	valued := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), postTx())
+	// An ASSERT frame carrying value is rejected, as for any non-SENDER frame.
+	valued := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), assert())
 	valued.Frames[1].Value = uint256.NewInt(1)
 
 	if err := valued.ValidatePayload(); err == nil {
-		t.Fatal("a POST_TX frame carrying value should be rejected")
+		t.Fatal("an ASSERT frame carrying value should be rejected")
 	}
 }
 
 // TestDurableFrames checks which frames' effects survive, which a frame's own status
-// does not answer: an unrolled atomic batch and a failed POST_TX both discard the
+// does not answer: an unrolled atomic batch and a failed ASSERT both discard the
 // effects of frames that report success.
 func TestDurableFrames(t *testing.T) {
 	sender := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
@@ -1089,15 +1118,15 @@ func TestDurableFrames(t *testing.T) {
 		}
 	})
 
-	t.Run("post-tx reverts the body", func(t *testing.T) {
-		// Every frame reports success except the POST_TX one, yet nothing after the
+	t.Run("assert reverts the body", func(t *testing.T) {
+		// Every frame reports success except the ASSERT one, yet nothing after the
 		// validation prefix survives.
 		tx := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(), userOp(),
-			PostTxFrame(assertions, nil, FrameLimits{Execution: 20_000}))
+			AssertFrame(assertions, nil, FrameLimits{Execution: 20_000}))
 		extra := statuses(1, 1, 1, 0)
 
-		if !extra.PostTxReverted(tx) {
-			t.Fatal("a failed POST_TX frame should revert the body")
+		if !extra.AssertReverted(tx) {
+			t.Fatal("a failed ASSERT frame should revert the body")
 		}
 
 		got := extra.DurableFrames(tx)
@@ -1110,13 +1139,13 @@ func TestDurableFrames(t *testing.T) {
 		}
 	})
 
-	t.Run("post-tx succeeds", func(t *testing.T) {
+	t.Run("assert succeeds", func(t *testing.T) {
 		tx := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(),
-			PostTxFrame(assertions, nil, FrameLimits{Execution: 20_000}))
+			AssertFrame(assertions, nil, FrameLimits{Execution: 20_000}))
 		extra := statuses(1, 1, 1)
 
-		if extra.PostTxReverted(tx) {
-			t.Fatal("a successful POST_TX frame should not revert the body")
+		if extra.AssertReverted(tx) {
+			t.Fatal("a successful ASSERT frame should not revert the body")
 		}
 
 		for i, ok := range extra.DurableFrames(tx) {

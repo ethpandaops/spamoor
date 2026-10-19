@@ -197,10 +197,19 @@ func TestRecentRootVerifierFrame(t *testing.T) {
 	verify := func() *Frame { return SelfVerifyFrame(FrameLimits{Execution: 5_000}) }
 	userOp := func() *Frame { return UserOpFrame(&sender, nil, nil, FrameLimits{Execution: 30_000}) }
 
-	// The frame's execution budget is excluded from the verification gas cap: a frame
-	// that alone would exceed it stays mempool-legal.
-	oversized := roots()
-	oversized.Limits.Execution = MaxVerifyGas + 1
+	// The frame's execution budget counts toward the verification gas cap: a prefix
+	// whose budgets plus signature cost exceed it by one is refused, at the cap it is
+	// accepted (EIP-8272's test table).
+	sigGas, err := build().SignatureVerificationGas()
+	if err != nil {
+		t.Fatalf("signature gas: %v", err)
+	}
+
+	atCap := roots()
+	atCap.Limits.Execution = MaxVerifyGas - sigGas - 5_000
+
+	overCap := roots()
+	overCap.Limits.Execution = MaxVerifyGas - sigGas - 5_000 + 1
 
 	for name, tc := range map[string]struct {
 		tx    *FrameTx
@@ -208,7 +217,8 @@ func TestRecentRootVerifierFrame(t *testing.T) {
 	}{
 		"leading":          {build(roots(), verify(), userOp()), true},
 		"after expiry":     {build(ExpiryFrame(1, 5_000), roots(), verify(), userOp()), true},
-		"over verify gas":  {build(oversized, verify(), userOp()), true},
+		"at verify gas":    {build(atCap, verify(), userOp()), true},
+		"over verify gas":  {build(overCap, verify(), userOp()), false},
 		"before expiry":    {build(roots(), ExpiryFrame(1, 5_000), verify(), userOp()), false},
 		"after validation": {build(verify(), roots(), userOp()), false},
 		"twice":            {build(roots(), roots(), verify(), userOp()), false},
@@ -256,9 +266,25 @@ func TestFrameTxUsesAccountNonce(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "key zero aliases the account nonce",
-			tx:   (&FrameTx{}).WithNonceKeys([]*uint256.Int{uint256.NewInt(0)}, 3),
+			name: "empty key set is the account nonce",
+			tx:   (&FrameTx{}).WithNonceKeys(nil, 3),
 			want: true,
+		},
+		{
+			name: "key zero is an independent domain",
+			tx:   (&FrameTx{}).WithNonceKeys([]*uint256.Int{uint256.NewInt(0)}, 3),
+			want: false,
+		},
+		{
+			name: "key zero aliases the account nonce under the key-zero revision",
+			tx: (&FrameTx{Extensions: FrameExtLegacyNonceKeyZero}).
+				WithNonceKeys([]*uint256.Int{uint256.NewInt(0)}, 3),
+			want: true,
+		},
+		{
+			name: "empty key set is not the account nonce under the key-zero revision",
+			tx:   (&FrameTx{Extensions: FrameExtLegacyNonceKeyZero}).WithNonceKeys(nil, 3),
+			want: false,
 		},
 		{
 			name: "non-zero key is an independent domain",

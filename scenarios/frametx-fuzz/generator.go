@@ -340,20 +340,20 @@ func (s *Scenario) buildBody(env *environment, recipe *Recipe, result *build) er
 	s.appendPendingFundings(env, recipe, result)
 	s.appendWipeFrame(env, result)
 
-	// The frames above ride along after the body, but POST_TX frames must stay a
+	// The frames above ride along after the body, but ASSERT frames must stay a
 	// trailing suffix.
-	result.frames = postTxLast(result.frames)
+	result.frames = assertLast(result.frames)
 
 	return nil
 }
 
-// postTxLast moves POST_TX frames to the end, keeping the order within both groups.
-func postTxLast(frames []*txtypes.Frame) []*txtypes.Frame {
+// assertLast moves ASSERT frames to the end, keeping the order within both groups.
+func assertLast(frames []*txtypes.Frame) []*txtypes.Frame {
 	ordered := make([]*txtypes.Frame, 0, len(frames))
 	suffix := make([]*txtypes.Frame, 0, len(frames))
 
 	for _, frame := range frames {
-		if frame.Mode == txtypes.FrameModePostTx {
+		if frame.Mode == txtypes.FrameModeAssert {
 			suffix = append(suffix, frame)
 		} else {
 			ordered = append(ordered, frame)
@@ -605,14 +605,14 @@ func (s *Scenario) buildBodyFrame(env *environment, recipe *Recipe, result *buil
 		return txtypes.UserOpFrame(&target, s.amount(recipe), data, limits), nil
 	case KindPostOp:
 		return txtypes.PostOpFrame(target, data, limits), nil
-	case KindPostTx:
-		if !env.allowPostTx {
-			// The chain refused a POST_TX probe at startup, so the frame is downgraded
+	case KindAssert:
+		if !env.allowAssert {
+			// The chain refused an ASSERT probe at startup, so the frame is downgraded
 			// rather than generating transactions that cannot land.
 			return txtypes.UserOpFrame(&target, nil, data, limits), nil
 		}
 
-		return txtypes.PostTxFrame(target, data, limits), nil
+		return txtypes.AssertFrame(target, data, limits), nil
 	default:
 		return txtypes.UserOpFrame(&target, nil, data, limits), nil
 	}
@@ -744,18 +744,18 @@ func (s *Scenario) buildScript(env *environment, recipe *Recipe, result *build, 
 		return nil, nil
 	}
 
-	// A POST_TX frame is where EIP-7906's assertion instructions exist, and nowhere
+	// An ASSERT frame is where EIP-7906's assertion instructions exist, and nowhere
 	// else, so the sweep for them rides on the assertion frames rather than the probe
-	// frames. A chain that refused POST_TX at startup downgrades the frame to an
+	// frames. A chain that refused ASSERT at startup downgrades the frame to an
 	// ordinary call, where those instructions would only halt.
-	if spec.Kind == KindPostTx {
-		if !recipe.Reads || spec.Target != TargetProbe || !env.allowPostTx {
+	if spec.Kind == KindAssert {
+		if !recipe.Reads || spec.Target != TargetProbe || !env.allowAssert {
 			return nil, nil
 		}
 
 		script := NewProbeScript()
-		appendPostTxReads(script, recipe, result.senderAddr)
-		result.cover("post-tx-reads")
+		appendAssertReads(script, recipe, result.senderAddr)
+		result.cover("assert-reads")
 
 		return script, nil
 	}
@@ -821,8 +821,21 @@ func (s *Scenario) applyNonceKeys(ctx context.Context, client *spamoor.Client, e
 	// prefix already costs. Deriving the headroom rather than assuming a fixed budget
 	// is what keeps a transaction that also carries a P256 entry or a sponsored prefix
 	// from tipping over the cap.
-	sel, err := env.nonces.selectKeys(ctx, client, result.senderAddr, recipe.NonceKeys,
-		s.firstUseHeadroom(result))
+	var (
+		sel *selection
+		err error
+	)
+
+	if recipe.SingleUseNonce {
+		// Single-use keys are fresh by definition, so every one is a first use and
+		// the headroom bounds how many the prefix can afford.
+		sel, err = env.nonces.selectSingleUseKeys(ctx, client, result.senderAddr, recipe.Index,
+			recipe.NonceKeys, s.firstUseHeadroom(result))
+	} else {
+		sel, err = env.nonces.selectKeys(ctx, client, result.senderAddr, recipe.NonceKeys,
+			s.firstUseHeadroom(result))
+	}
+
 	if err != nil {
 		return err
 	}
@@ -834,6 +847,10 @@ func (s *Scenario) applyNonceKeys(ctx context.Context, client *spamoor.Client, e
 	result.nonces = sel
 	result.tx.WithNonceKeys(sel.keys, sel.sequence)
 	result.cover("keyed-nonces")
+
+	if sel.sequence == txtypes.MaxNonceSeq {
+		result.cover("keyed-nonce-single-use")
+	}
 
 	if sel.firstUses > 0 {
 		result.cover("keyed-nonce-first-use")
@@ -872,8 +889,9 @@ func (s *Scenario) firstUseHeadroom(result *build) int {
 //
 // The frame is the only thing EIP-8272 adds to a transaction: a VERIFY frame calling the
 // recent root contract with the packed references, which reverts unless every one names
-// a root its source committed within the usable window. The public mempool excludes its
-// execution budget from the verification gas cap.
+// a root its source committed within the usable window. Its execution budget counts
+// toward the public mempool's verification gas cap like every other prefix frame's, so
+// it is sized from the contract's bytecode rather than generously.
 func (s *Scenario) appendRecentRootFrame(env *environment, recipe *Recipe, result *build) {
 	if recipe.RecentRoots == 0 || env.roots == nil {
 		return

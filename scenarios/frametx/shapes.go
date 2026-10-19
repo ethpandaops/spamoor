@@ -25,9 +25,15 @@ const (
 	shapeAtomic       shapeName = "atomic"
 	shapeAtomicFail   shapeName = "atomic-fail"
 	shapeExpiry       shapeName = "expiry"
-	shapePostTx       shapeName = "post-tx"
-	shapePostTxRevert shapeName = "post-tx-revert"
+	shapeAssert       shapeName = "assert"
+	shapeAssertRevert shapeName = "assert-revert"
 )
+
+// shapeAliases maps the names shapes had before EIP-7906 renamed POST_TX to ASSERT.
+var shapeAliases = map[shapeName]shapeName{
+	"post-tx":        shapeAssert,
+	"post-tx-revert": shapeAssertRevert,
+}
 
 // defaultShapes are the shapes "all" enables: everything EIP-8141 defines on its own.
 var defaultShapes = []shapeName{
@@ -46,8 +52,8 @@ var defaultShapes = []shapeName{
 // a chain without EIP-7906 rejects mode 3, and quietly sending transactions that
 // cannot succeed is worse than requiring one word of configuration.
 var optInShapes = []shapeName{
-	shapePostTx,
-	shapePostTxRevert,
+	shapeAssert,
+	shapeAssertRevert,
 }
 
 // allShapes is every shape the scenario can build, for validation and help text.
@@ -73,7 +79,7 @@ type builtShape struct {
 	frames         []*txtypes.Frame
 	expectedStatus []uint64
 
-	// expectBodyReverted marks a shape whose POST_TX frame fails, so everything after
+	// expectBodyReverted marks a shape whose ASSERT frame fails, so everything after
 	// the validation prefix is discarded regardless of the per-frame statuses.
 	expectBodyReverted bool
 }
@@ -184,10 +190,10 @@ func buildShape(name shapeName, p shapeParams) (*builtShape, error) {
 			},
 		}, nil
 
-	case shapePostTx:
+	case shapeAssert:
 		// The expiry verifier predeploy doubles as a deterministic assertion
 		// contract: with an 8-byte deadline in the future it stops successfully, so
-		// no contract has to be deployed to exercise a passing POST_TX frame.
+		// no contract has to be deployed to exercise a passing ASSERT frame.
 		deadline := make([]byte, txtypes.ExpiryDataLength)
 		binary.BigEndian.PutUint64(deadline, p.expiryAt)
 
@@ -196,7 +202,7 @@ func buildShape(name shapeName, p shapeParams) (*builtShape, error) {
 			frames: []*txtypes.Frame{
 				txtypes.SelfVerifyFrame(verifyLimits),
 				userOp(nil, 0),
-				txtypes.PostTxFrame(txtypes.ExpiryVerifier, deadline,
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, deadline,
 					txtypes.FrameLimits{Execution: p.verifyGas}),
 			},
 			expectedStatus: []uint64{
@@ -206,9 +212,9 @@ func buildShape(name shapeName, p shapeParams) (*builtShape, error) {
 			},
 		}, nil
 
-	case shapePostTxRevert:
+	case shapeAssertRevert:
 		// The same predeploy reverts on any calldata length other than 8, which makes
-		// a POST_TX failure reproducible without a contract. Its failure reverts the
+		// an ASSERT failure reproducible without a contract. Its failure reverts the
 		// whole execution body, so the user operation's effects are discarded even
 		// though its receipt still reports success -- the case a consumer reading
 		// statuses alone gets wrong.
@@ -217,7 +223,7 @@ func buildShape(name shapeName, p shapeParams) (*builtShape, error) {
 			frames: []*txtypes.Frame{
 				txtypes.SelfVerifyFrame(verifyLimits),
 				userOp(nil, 0),
-				txtypes.PostTxFrame(txtypes.ExpiryVerifier, []byte{0x01},
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, []byte{0x01},
 					txtypes.FrameLimits{Execution: p.verifyGas}),
 			},
 			expectedStatus: []uint64{
@@ -291,6 +297,10 @@ func parseShapes(spec string) (*weightedShapes, error) {
 			weight = parsed
 		}
 
+		if canonical, ok := shapeAliases[shapeName(name)]; ok {
+			name = string(canonical)
+		}
+
 		if !isKnownShape(shapeName(name)) {
 			return nil, fmt.Errorf("unknown frame shape %q, known shapes: %s", name, strings.Join(shapeNames(), ", "))
 		}
@@ -350,8 +360,8 @@ func shapeNames() []string {
 	return names
 }
 
-// requiresPostTx reports whether a selection includes an EIP-7906 shape.
-func (w *weightedShapes) requiresPostTx() bool {
+// requiresAssert reports whether a selection includes an EIP-7906 shape.
+func (w *weightedShapes) requiresAssert() bool {
 	for _, name := range w.names {
 		for _, optIn := range optInShapes {
 			if name == optIn {
@@ -366,12 +376,17 @@ func (w *weightedShapes) requiresPostTx() bool {
 // envelopeChoice maps the --envelope option to a set of extensions.
 //
 // The zero-extension "base" shape is EIP-8141 on its own; "keyed" adds EIP-8250 keyed
-// nonces. "full" is kept as the name for every extension there is, which is currently
-// the same thing. EIP-8272 is not an envelope choice: its verifier is an ordinary frame.
+// nonces as the current EIP text defines them, with the account nonce selected by an
+// empty key set. "keyed-key0" is the EIP-8250 revision before 2026-10-16, in which [0]
+// selected the account nonce; nothing on chain tells the two apart, so a chain whose
+// clients still implement it has to be told. "full" is kept as the name for every
+// extension there is, which is currently the same as "keyed". EIP-8272 is not an
+// envelope choice: its verifier is an ordinary frame.
 var envelopeChoices = map[string]txtypes.FrameExtensions{
-	"base":  0,
-	"keyed": txtypes.FrameExtKeyedNonces,
-	"full":  txtypes.FrameExtAll,
+	"base":       0,
+	"keyed":      txtypes.FrameExtKeyedNonces,
+	"keyed-key0": txtypes.FrameExtKeyedNonces | txtypes.FrameExtLegacyNonceKeyZero,
+	"full":       txtypes.FrameExtAll,
 }
 
 // parseEnvelope resolves the --envelope option. An empty value or "auto" defers to

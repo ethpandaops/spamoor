@@ -35,7 +35,7 @@ func renderStatuses(extra *txtypes.FrameReceiptExtra) string {
 // renderDurable renders which frames' effects survived.
 //
 // A frame can report success and still have been discarded, by an unrolled atomic batch
-// or by a failing POST_TX frame reverting the execution body, so the two are worth
+// or by a failing ASSERT frame reverting the execution body, so the two are worth
 // showing side by side.
 func renderDurable(extra *txtypes.FrameReceiptExtra, tx *txtypes.FrameTx) string {
 	if tx == nil {

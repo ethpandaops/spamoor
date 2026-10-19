@@ -137,7 +137,7 @@ var violations = []violation{
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
 			frame := txtypes.UserOpFrame(nil, nil, nil, txtypes.FrameLimits{Execution: 21_000})
-			frame.Mode = txtypes.FrameModePostTx + 1
+			frame.Mode = txtypes.FrameModeAssert + 1
 			tx.Frames = append(tx.Frames, frame)
 
 			return nil
@@ -188,13 +188,39 @@ var violations = []violation{
 		},
 	},
 	{
-		name:          "post-tx-not-suffix",
+		name:          "assert-not-suffix",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
 			tx.Frames = append(tx.Frames,
-				txtypes.PostTxFrame(txtypes.ExpiryVerifier, expiryData(1<<40), txtypes.FrameLimits{Execution: 5_000}),
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, expiryData(1<<40), txtypes.FrameLimits{Execution: 5_000}),
 				txtypes.UserOpFrame(nil, nil, nil, txtypes.FrameLimits{Execution: 21_000}),
 			)
+
+			return nil
+		},
+	},
+	{
+		// The atomic batch flag is only valid with DEFAULT and SENDER, and an ASSERT
+		// failure reverts the whole body anyway.
+		name:          "assert-batched",
+		alwaysInvalid: true,
+		apply: func(tx *txtypes.FrameTx) error {
+			tx.Frames = append(tx.Frames,
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, expiryData(1<<40), txtypes.FrameLimits{Execution: 5_000}).WithAtomicBatch(),
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, expiryData(1<<40), txtypes.FrameLimits{Execution: 5_000}),
+			)
+
+			return nil
+		},
+	},
+	{
+		// Nor may the frame directly before an ASSERT frame batch into it.
+		name:          "batch-into-assert",
+		alwaysInvalid: true,
+		apply: func(tx *txtypes.FrameTx) error {
+			tx.Frames[len(tx.Frames)-1].WithAtomicBatch()
+			tx.Frames = append(tx.Frames,
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, expiryData(1<<40), txtypes.FrameLimits{Execution: 5_000}))
 
 			return nil
 		},
@@ -204,6 +230,19 @@ var violations = []violation{
 		alwaysInvalid: false, // mempool policy, not block validity
 		apply: func(tx *txtypes.FrameTx) error {
 			tx.Frames[0].Limits.Execution = txtypes.MaxVerifyGas + 1
+
+			return nil
+		},
+	},
+	{
+		// A recent root verifier frame counts toward the verification gas cap like every
+		// other prefix frame, so one that alone fills the cap pushes the prefix over it.
+		// Still mempool policy: the frame itself executes normally.
+		name:          "recent-root-frame-over-verify-gas",
+		alwaysInvalid: false,
+		apply: func(tx *txtypes.FrameTx) error {
+			frame := txtypes.RecentRootVerifyFrame([]*txtypes.RecentRootReference{{}}, txtypes.MaxVerifyGas)
+			tx.Frames = append([]*txtypes.Frame{frame}, tx.Frames...)
 
 			return nil
 		},
@@ -240,10 +279,13 @@ var violations = []violation{
 		},
 	},
 	{
+		// Under the key-zero revision of EIP-8250 the zero key aliases the account nonce
+		// and may not be combined; the current revision makes [0, 7] an ordinary key
+		// set, so there the case does not exist.
 		name:          "zero-key-mixed",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
-			if !tx.HasKeyedNonces() {
+			if !tx.HasKeyedNonces() || !tx.Extensions.Has(txtypes.FrameExtLegacyNonceKeyZero) {
 				return errViolationNotApplicable
 			}
 
@@ -253,7 +295,25 @@ var violations = []violation{
 		},
 	},
 	{
+		// The key-zero revision requires at least one key; the current revision reads an
+		// empty key set as the account nonce.
 		name:          "empty-nonce-keys",
+		alwaysInvalid: true,
+		apply: func(tx *txtypes.FrameTx) error {
+			if !tx.HasKeyedNonces() || !tx.Extensions.Has(txtypes.FrameExtLegacyNonceKeyZero) {
+				return errViolationNotApplicable
+			}
+
+			tx.NonceKeys = nil
+
+			return nil
+		},
+	},
+	{
+		// The single-use sequence selects nothing with an empty key set: the account
+		// nonce can never be MAX_NONCE_SEQ. Under the key-zero revision the sequence is
+		// out of range whatever the keys, which the same mutation also exercises.
+		name:          "single-use-without-keys",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
 			if !tx.HasKeyedNonces() {
@@ -261,6 +321,7 @@ var violations = []violation{
 			}
 
 			tx.NonceKeys = nil
+			tx.NonceSeq = txtypes.MaxNonceSeq
 
 			return nil
 		},

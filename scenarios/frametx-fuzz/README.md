@@ -3,7 +3,7 @@
 Fuzzes [EIP-8141](https://eips.ethereum.org/EIPS/eip-8141) frame transactions and everything
 stacked on them — [EIP-8250](https://eips.ethereum.org/EIPS/eip-8250) keyed nonces,
 [EIP-8272](https://eips.ethereum.org/EIPS/eip-8272) recent roots and
-[EIP-7906](https://eips.ethereum.org/EIPS/eip-7906) POST_TX frames — by generating transactions
+[EIP-7906](https://eips.ethereum.org/EIPS/eip-7906) ASSERT frames — by generating transactions
 across every dimension they define and reporting what was reached.
 
 This is the generated counterpart to `frametx`, which sends a fixed list of shapes and checks each
@@ -66,9 +66,9 @@ axis with equal weight. An axis whose EIP the chain does not run is disabled aut
 | `batches` | Atomic batch runs, holding and unrolling |
 | `failures` | Frames built to fail: a revert, or a budget too small for the frame-entry charge |
 | `signatures` | ARBITRARY witnesses and P256 entries alongside the sender's own |
-| `nonces` | EIP-8250 keyed nonce domains, including how many see their first use |
+| `nonces` | EIP-8250 keyed nonce domains, including how many see their first use, and the single-use form |
 | `roots` | EIP-8272 recent root verifier frames, including the window edges and the cases that must be refused |
-| `posttx` | EIP-7906 assertion frames, and the `TXTRACE`/`TXDIFF`/`EVENTDATACOPY` sweep that only exists inside them |
+| `assert` | EIP-7906 `ASSERT` frames, and the `TXTRACE`/`TXDIFF`/`EVENTDATACOPY` sweep that only exists inside them (`posttx` is still accepted) |
 | `probe` | Calls into the fixed probe contract, including the introspection sweep |
 | `code` | Deploying fuzzed contracts from one frame and calling them from another, and the fuzzed sender and paymaster roles |
 | `deploy` | The deploy-led validation prefixes, which create the sender's account in the transaction that uses it |
@@ -81,10 +81,9 @@ introduces would ever execute. Two contracts do that work.
 **A fixed probe contract**, deployed once through the CREATE2 factory, whose calldata is a
 script: revert, write storage, emit a log, burn gas, `APPROVE`, and execute each
 introspection instruction. The read operations discard their results — the point is to
-reach the instruction, not to decide what it should have returned. Opcode bytes follow the
-frame-transaction family registry EIP-8141 carries for its dependents: EIP-7906's `TXTRACE`,
-`TXDIFF` and `EVENTDATACOPY` sit at `0xb7`-`0xb9` and are only defined inside a `POST_TX`
-frame, which is where the probe runs them.
+reach the instruction, not to decide what it should have returned. Opcode bytes are those the
+EIPs assign: EIP-7906's `TXTRACE`, `TXDIFF` and `EVENTDATACOPY` sit at `0xb6`-`0xb8` and are
+only defined inside an `ASSERT` frame, which is where the probe runs them.
 
 The same code plays paymaster and contract sender through an EIP-7702 delegation, because
 EIP-8141's own answer (a deploy frame) costs ~224k gas against the 100k execution cap on
@@ -208,8 +207,12 @@ spamoor frametx-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -t 10
   account code a deploy-led prefix creates)
 
 ### Frame settings
-- `--envelope` — Pin the payload shape: `auto` (default), `base`, `keyed`, `full`
-- `--post-tx` — EIP-7906 frames: `auto` (probe the chain), `on`, `off`
+- `--envelope` — Pin the payload shape: `auto` (default), `base`, `keyed`, `keyed-key0`, `full`.
+  `keyed` is EIP-8250 as currently written (an empty key set selects the account nonce);
+  `keyed-key0` is its revision before 2026-10-16 (`[0]` selects it). Nothing on chain tells them
+  apart, so `auto` assumes `spamoor.KeyedNonceRevision`
+- `--assert-frames` — EIP-7906 `ASSERT` frames: `auto` (probe the chain), `on`, `off` (`--post-tx` is
+  the deprecated former name)
 - `--user-op-gas`, `--verify-gas`, `--state-gas`, `--amount`, `--expiry-offset`, `--data`
 
 ### Wallets, fees and clients
@@ -234,10 +237,10 @@ The contracts are ordinary contracts and devnet genesis files carry them from bl
 activates, so finding them does not mean frame transactions are accepted yet. Before probing
 capabilities or generating anything, the scenario lands a baseline frame transaction from the prober
 wallet, retrying every 12 seconds while the chain refuses it. Without that wait a spammer started
-before the fork would probe `POST_TX` against a chain that refuses every frame transaction, conclude
+before the fork would probe `ASSERT` frames against a chain that refuses every frame transaction, conclude
 it is unsupported for the whole run, and fill the coverage report with pre-fork refusals.
 
-`--post-tx auto` settles EIP-7906 support by sending one transaction with a `POST_TX` frame and one
+`--assert-frames auto` settles EIP-7906 support by sending one transaction with an `ASSERT` frame and one
 without, from a dedicated prober wallet. A client that does not implement the feature may accept the
 transaction into its mempool and never build a block with it, so a probe that is still missing five
 blocks after submission counts as unsupported.

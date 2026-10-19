@@ -35,7 +35,7 @@ func formatStatuses(extra *txtypes.FrameReceiptExtra) string {
 
 // formatDurable renders which frames' effects survived, e.g. "yes,no,no". A frame can
 // report success and still have been discarded, by an unrolled atomic batch or a
-// failed POST_TX frame reverting the execution body.
+// failed ASSERT frame reverting the execution body.
 func formatDurable(extra *txtypes.FrameReceiptExtra, tx *txtypes.FrameTx) string {
 	if tx == nil {
 		return "?"

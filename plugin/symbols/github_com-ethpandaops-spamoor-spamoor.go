@@ -23,6 +23,7 @@ func init() {
 		"GetDefaultLogFn":              reflect.ValueOf(spamoor.GetDefaultLogFn),
 		"GetDefaultWalletConfig":       reflect.ValueOf(spamoor.GetDefaultWalletConfig),
 		"InitRootWallet":               reflect.ValueOf(spamoor.InitRootWallet),
+		"KeyedNonceRevision":           reflect.ValueOf(&spamoor.KeyedNonceRevision).Elem(),
 		"LoadPrivateKey":               reflect.ValueOf(spamoor.LoadPrivateKey),
 		"NewClient":                    reflect.ValueOf(spamoor.NewClient),
 		"NewClientPool":                reflect.ValueOf(spamoor.NewClientPool),

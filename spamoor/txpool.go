@@ -608,6 +608,10 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 			continue
 		}
 
+		// A decoded frame transaction does not know which EIP-8250 revision the chain
+		// runs, and the nonce bookkeeping below depends on it.
+		ApplyKeyedNonceRevision(tx)
+
 		txHash := tx.Hash()
 		pool.fireHashWatcher(txHash, tx, receipt)
 

@@ -62,7 +62,14 @@ func SignTx(tx *Transaction, chainID *big.Int, key *ecdsa.PrivateKey) (*Transact
 	}
 
 	signed := NewTx(inner)
-	signed.SetFrom(crypto.PubkeyToAddress(key.PublicKey))
+
+	// A frame transaction names its sender explicitly, and the key that signed it may
+	// belong to a co-signer such as a paymaster. The sender is what From must report.
+	if explicit, ok := inner.(ExplicitSenderTx); ok {
+		signed.SetFrom(explicit.GetSender())
+	} else {
+		signed.SetFrom(crypto.PubkeyToAddress(key.PublicKey))
+	}
 
 	return signed, nil
 }
