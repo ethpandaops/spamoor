@@ -1,0 +1,54 @@
+{
+  "type": "0x6",
+  "nonceKeys": [
+    "0x0"
+  ],
+  "frames": [
+    {
+      "mode": "0x1",
+      "flags": "0x3",
+      "executionGas": "0x1388",
+      "stateGas": "0x0",
+      "value": "0x0",
+      "data": "0x"
+    },
+    {
+      "mode": "0x2",
+      "flags": "0x0",
+      "target": "0xfa2e7c74a448fe9edd428bb5ca3695054450ab96",
+      "executionGas": "0x7530",
+      "stateGas": "0x0",
+      "value": "0x0",
+      "data": "0x"
+    }
+  ],
+  "signatures": [
+    {
+      "scheme": "0x1",
+      "msg": "0x",
+      "signature": "0x01842608e844753fa27d74ed30adca3216e1323e7e613cf048716d72d2cf5497e05944b1cb741d7bc6486dbfc1c1ac59ae36dd95c0165d6490a5d8b9d9a788e9b3"
+    }
+  ],
+  "maxFeePerBlobGas": "0x0",
+  "blobVersionedHashes": [],
+  "maxPriorityFeePerGas": "0x77359400",
+  "maxFeePerGas": "0x4a817c800",
+  "accessList": [],
+  "yParity": "0x0",
+  "chainId": "0x1a38c5b87",
+  "nonce": "0x46",
+  "to": null,
+  "from": "0x1434d9e03a373f733a24078c725a0e933e30301b",
+  "value": "0x0",
+  "input": "0x",
+  "gasPrice": "0x77359407",
+  "v": "0x0",
+  "r": "0x0",
+  "s": "0x0",
+  "hash": "0x7c5979486bb8790c6edae76379b0e046b4c72ccaed8c504f078950547eb68374",
+  "transactionIndex": "0x0",
+  "blockHash": "0x5721cc6a16a7915cc1c2cb9bd760de1208d45939b74af740439923843900f246",
+  "blockNumber": "0x6f5c",
+  "blockTimestamp": "0x6ad629ec",
+  "gas": "0x88b8"
+}

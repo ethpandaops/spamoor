@@ -50,13 +50,14 @@ type ScenarioOptions struct {
 }
 
 type Scenario struct {
-	options    ScenarioOptions
-	logger     *logrus.Entry
-	walletPool *spamoor.WalletPool
-	shapes     *weightedShapes
-	callData   []byte
-	extensions txtypes.FrameExtensions
-	autoDetect bool
+	options     ScenarioOptions
+	logger      *logrus.Entry
+	walletPool  *spamoor.WalletPool
+	shapes      *weightedShapes
+	callData    []byte
+	extensions  txtypes.FrameExtensions
+	autoDetect  bool
+	walletSlots []chan struct{}
 
 	// Conformance counters: how many confirmed transactions had frame receipts that
 	// matched the shape's expectation, and how many did not.
@@ -208,6 +209,14 @@ func (s *Scenario) Run(ctx context.Context) error {
 		s.logger.Warnf("EIP-7906 POST_TX shapes were selected; a chain without EIP-7906 rejects frame mode 3")
 	}
 
+	// Frame mempools admit only one transaction per sender. Hold a wallet's
+	// slot through confirmation, not just through the send RPC, so a fast
+	// submission cannot advance its nonce ahead of the chain.
+	s.walletSlots = make([]chan struct{}, s.walletPool.GetWalletCount())
+	for i := range s.walletSlots {
+		s.walletSlots[i] = make(chan struct{}, 1)
+	}
+
 	maxPending := s.options.MaxPending
 	if maxPending == 0 {
 		maxPending = s.options.Throughput * 10
@@ -230,6 +239,12 @@ func (s *Scenario) Run(ctx context.Context) error {
 
 		Logger: s.logger,
 		ProcessNextTxFn: func(ctx context.Context, params *scenario.ProcessNextTxParams) error {
+			release, err := s.acquireWallet(ctx, params.TxIdx)
+			if err != nil {
+				return err
+			}
+			defer release()
+
 			logger := s.logger
 			receiptChan, tx, client, wallet, err := s.sendTx(ctx, params.TxIdx)
 
@@ -274,6 +289,19 @@ func (s *Scenario) Run(ctx context.Context) error {
 	}
 
 	return err
+}
+
+func (s *Scenario) acquireWallet(ctx context.Context, txIdx uint64) (func(), error) {
+	if len(s.walletSlots) == 0 {
+		return nil, scenario.ErrNoWallet
+	}
+	slot := s.walletSlots[txIdx%uint64(len(s.walletSlots))]
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // checkFrameTxSupport establishes what the chain supports before the scenario sends

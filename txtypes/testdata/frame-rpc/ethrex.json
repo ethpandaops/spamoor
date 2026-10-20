@@ -1,0 +1,46 @@
+{
+  "blobVersionedHashes": [],
+  "blockHash": "0x5721cc6a16a7915cc1c2cb9bd760de1208d45939b74af740439923843900f246",
+  "blockNumber": "0x6f5c",
+  "chainId": "0x1a38c5b87",
+  "frames": [
+    {
+      "data": "0x",
+      "flags": "0x3",
+      "gasLimit": "0x1388",
+      "mode": "0x1",
+      "stateGasLimit": "0x0",
+      "to": null,
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x0",
+      "gasLimit": "0x7530",
+      "mode": "0x2",
+      "stateGasLimit": "0x0",
+      "to": "0xfa2e7c74a448fe9edd428bb5ca3695054450ab96",
+      "value": "0x0"
+    }
+  ],
+  "from": "0x1434d9e03a373f733a24078c725a0e933e30301b",
+  "hash": "0x7c5979486bb8790c6edae76379b0e046b4c72ccaed8c504f078950547eb68374",
+  "maxFeePerBlobGas": "0x0",
+  "maxFeePerGas": "0x4a817c800",
+  "maxPriorityFeePerGas": "0x77359400",
+  "nonce": "0x46",
+  "nonceKeys": [
+    "0x0"
+  ],
+  "sender": "0x1434d9e03a373f733a24078c725a0e933e30301b",
+  "signatures": [
+    {
+      "msg": "0x",
+      "scheme": "0x1",
+      "signature": "0x01842608e844753fa27d74ed30adca3216e1323e7e613cf048716d72d2cf5497e05944b1cb741d7bc6486dbfc1c1ac59ae36dd95c0165d6490a5d8b9d9a788e9b3",
+      "signer": null
+    }
+  ],
+  "transactionIndex": "0x0",
+  "type": "0x6"
+}
