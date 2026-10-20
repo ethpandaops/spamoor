@@ -1,9 +1,13 @@
 package txtypes
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 // These are responses for the same confirmed transaction on bogota-devnet-1,
@@ -64,5 +68,68 @@ func TestFrameRPCNonceSeqPrecedence(t *testing.T) {
 	}
 	if tx.Nonce() != 0 {
 		t.Fatalf("explicit sequence ignored: %d", tx.Nonce())
+	}
+}
+
+func TestFrameRPCSignerLengths(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/frame-rpc/geth.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, size := range []int{0, 1, 19, 20, 21, 32} {
+		t.Run(fmt.Sprintf("%d_bytes", size), func(t *testing.T) {
+			var object map[string]any
+			if err := json.Unmarshal(fixture, &object); err != nil {
+				t.Fatal(err)
+			}
+			signer := bytes.Repeat([]byte{0x11}, size)
+			object["signatures"].([]any)[0].(map[string]any)["signer"] = hexutil.Encode(signer)
+			raw, err := json.Marshal(object)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields JSONTxFields
+			if err := json.Unmarshal(raw, &fields); err != nil {
+				t.Fatal(err)
+			}
+			fields.Raw = raw
+			var frame FrameTx
+			err = frame.DecodeJSONTx(&fields)
+			if size != 0 && size != 20 {
+				if err == nil {
+					t.Fatal("malformed signer length accepted by frame decoder")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(frame.Signatures[0].Signer, signer) {
+				t.Fatal("signer bytes changed during decoding")
+			}
+
+			encoded := make(map[string]any)
+			frame.EncodeJSONTx(encoded)
+			raw, err = json.Marshal(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var roundTripFields JSONTxFields
+			if err := json.Unmarshal(raw, &roundTripFields); err != nil {
+				t.Fatal(err)
+			}
+			roundTripFields.Raw = raw
+			var roundTrip FrameTx
+			if err := roundTrip.DecodeJSONTx(&roundTripFields); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(roundTrip.Signatures[0].Signer, signer) {
+				t.Fatal("signer bytes changed across JSON round-trip")
+			}
+			if NewTx(&frame).Hash() != NewTx(&roundTrip).Hash() {
+				t.Fatal("transaction hash changed across JSON round-trip")
+			}
+		})
 	}
 }

@@ -1182,15 +1182,18 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 
 	tx.Signatures = make([]*FrameSignature, 0, len(dec.Signatures))
 
-	for _, sig := range dec.Signatures {
-		entry := &FrameSignature{
-			Scheme:    FrameSigScheme(jsonUint64(sig.Scheme)),
-			Msg:       jsonBytes(sig.Msg),
-			Signature: jsonBytes(sig.Signature),
+	for i, sig := range dec.Signatures {
+		signer := jsonBytes(sig.Signer)
+		if len(signer) != 0 && len(signer) != common.AddressLength {
+			return fmt.Errorf("frame signature %d: signer must be empty or %d bytes, got %d",
+				i, common.AddressLength, len(signer))
 		}
 
-		if sig.Signer != nil {
-			entry.Signer = jsonBytes(sig.Signer)
+		entry := &FrameSignature{
+			Scheme:    FrameSigScheme(jsonUint64(sig.Scheme)),
+			Signer:    signer,
+			Msg:       jsonBytes(sig.Msg),
+			Signature: jsonBytes(sig.Signature),
 		}
 
 		tx.Signatures = append(tx.Signatures, entry)
