@@ -1161,7 +1161,7 @@ func TestDurableFrames(t *testing.T) {
 // every frame from the other build with a state limit of zero, which changes the
 // transaction's hash on re-encoding and is invisible in a round trip against ourselves.
 func TestFrameJSONStateLimitSpellings(t *testing.T) {
-	for _, key := range []string{"stateLimit", "stateGasLimit"} {
+	for _, key := range []string{"stateLimit", "stateGasLimit", "stateGas"} {
 		t.Run(key, func(t *testing.T) {
 			raw := []byte(`{"mode":"0x2","flags":"0x0","gasLimit":"0x3d090","` + key + `":"0x2710","value":"0x0","data":"0x"}`)
 
