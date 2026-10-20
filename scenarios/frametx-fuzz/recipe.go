@@ -250,13 +250,6 @@ func ParseRecipe(encoded string) (*Recipe, error) {
 		return nil, fmt.Errorf("could not parse the recipe: %w", err)
 	}
 
-	// Recipes reported before EIP-7906 renamed the mode spell the kind "post_tx".
-	for i := range recipe.Body {
-		if recipe.Body[i].Kind == "post_tx" {
-			recipe.Body[i].Kind = KindAssert
-		}
-	}
-
 	return recipe, nil
 }
 

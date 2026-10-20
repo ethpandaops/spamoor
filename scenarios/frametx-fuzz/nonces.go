@@ -20,11 +20,6 @@ import (
 // The ledger therefore hands out subsets that share a sequence, and reports how many of
 // them are new so the caller can budget the surcharge. A slot read at MaxNonceSeq is an
 // exhausted key, consumed single-use or advanced to its bound, and is never offered.
-//
-// The ledger deliberately runs concurrent keyed transactions per sender on disjoint key
-// sets, which the protocol allows. The public mempool rules keep one pending frame
-// transaction per sender regardless of keys, so a public pool drops all but one of them;
-// the refusals are part of what the run reports, not a defect to work around.
 type nonceLedger struct {
 	mutex sync.Mutex
 

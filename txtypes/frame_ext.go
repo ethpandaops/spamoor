@@ -25,15 +25,11 @@ const (
 
 	// KeyedNonceAccessCost is the execution gas each key of a non-empty key set pays in
 	// both the intrinsic cost and the calldata floor: COLD_STORAGE_ACCESS + STORAGE_WRITE
-	// (EIP-8038) for the protocol's cold read and write of its NONCE_MANAGER slot. Key
-	// zero is an ordinary key and pays it like any other; only the empty key set, which
-	// selects the account nonce, pays nothing.
+	// (EIP-8038) for the protocol's cold read and write of its NONCE_MANAGER slot.
 	KeyedNonceAccessCost = 2_100 + 10_000
 
-	// MaxNonceSeq is EIP-8250's inclusive bound on nonce_seq, and with a non-empty key
-	// set it is the single-use marker: every selected key must read 0 and consumption
-	// writes MaxNonceSeq, exhausting the key for good. With an empty key set it is
-	// invalid, since the legacy account nonce can never reach it.
+	// MaxNonceSeq is EIP-8250's inclusive bound on nonce_seq; with a non-empty key set
+	// it marks the single-use form, which exhausts every selected key.
 	MaxNonceSeq = uint64(1<<64 - 1)
 )
 
@@ -62,10 +58,8 @@ var (
 // NonceManagerSlot returns the NonceManager storage slot holding the sequence of one
 // keyed nonce domain, keccak256(pad32(sender) || pad32(key)).
 //
-// Every key, including zero, has a slot; the account nonce is selected by an empty key
-// set and lives in the account itself. An absent slot reads as 0 and the protocol never
-// writes 0, so a zero read means the key has never been used. A slot at MaxNonceSeq is
-// an exhausted key.
+// The slot is only meaningful for a keyed domain; the account nonce lives in the
+// account itself. A slot at MaxNonceSeq is an exhausted key.
 func NonceManagerSlot(sender common.Address, key *uint256.Int) common.Hash {
 	var buf [64]byte
 
@@ -105,10 +99,9 @@ func NonceKeysHash(keys []*uint256.Int) common.Hash {
 // WithNonceKeys selects an EIP-8250 key set and its shared sequence number.
 //
 // Every selected key must currently sit at seq, and a successful payment approval moves
-// all of them to seq+1 together. Keys must be strictly increasing; key zero is an
-// ordinary key. An empty key set selects the account nonce, for which seq is the
-// account nonce (see WithLegacyNonce). A seq of MaxNonceSeq is the single-use form
-// (see WithSingleUseNonceKeys).
+// all of them to seq+1 together. Keys must be strictly increasing. An empty key set
+// selects the account nonce (see WithLegacyNonce), a seq of MaxNonceSeq the single-use
+// form (see WithSingleUseNonceKeys).
 func (tx *FrameTx) WithNonceKeys(keys []*uint256.Int, seq uint64) *FrameTx {
 	tx.Extensions |= FrameExtKeyedNonces
 	tx.NonceKeys = keys
@@ -117,25 +110,20 @@ func (tx *FrameTx) WithNonceKeys(keys []*uint256.Int, seq uint64) *FrameTx {
 	return tx
 }
 
-// WithSingleUseNonceKeys selects an EIP-8250 key set in its single-use form: nonce_seq
-// is MaxNonceSeq, every selected key must never have been used, and a successful
-// payment approval exhausts all of them so none can be selected again. Each key is a
-// first use and so costs KeyedNonceFirstUseStateGas from the approving frame's state
-// budget. The key set must be non-empty.
+// WithSingleUseNonceKeys selects a non-empty EIP-8250 key set in its single-use form:
+// every key must be unused, and a successful payment approval exhausts all of them.
 func (tx *FrameTx) WithSingleUseNonceKeys(keys []*uint256.Int) *FrameTx {
 	return tx.WithNonceKeys(keys, MaxNonceSeq)
 }
 
-// WithLegacyNonce selects the sender's account nonce as the sequence domain, in the form
-// the transaction's envelope revision spells it: an empty key set, or [0] under
-// FrameExtLegacyNonceKeyZero. NonceSeq is left for the caller to set to the account
-// nonce. It is a no-op for a transaction without keyed nonces.
+// WithLegacyNonce selects the sender's account nonce: an empty key set, or [0] under
+// LegacyNonceKeyZero. NonceSeq is left for the caller to set.
 func (tx *FrameTx) WithLegacyNonce() *FrameTx {
 	if !tx.HasKeyedNonces() {
 		return tx
 	}
 
-	if tx.Extensions.Has(FrameExtLegacyNonceKeyZero) {
+	if LegacyNonceKeyZero {
 		tx.NonceKeys = []*uint256.Int{new(uint256.Int)}
 	} else {
 		tx.NonceKeys = nil

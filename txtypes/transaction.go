@@ -325,13 +325,7 @@ func (tx *Transaction) RawSignatureValues() (v, r, s *big.Int) {
 }
 
 // Cost returns the maximum wei the transaction can consume: gas budget times fee cap
-// plus value. Blob fees are charged from a separate market and are not included for any
-// type.
-//
-// For a frame transaction the two terms fall on different accounts: the payer, who may
-// be a paymaster rather than the sender, is charged FrameTx.MaxCost up front, while the
-// sender pays FrameTx.SenderValue from its own balance. Cost is their sum and is only
-// the sender's worst case when the sender pays for itself.
+// plus value. Blob fees are charged from a separate market and are not included.
 func (tx *Transaction) Cost() *big.Int {
 	total := new(big.Int).Mul(tx.GasFeeCap(), new(big.Int).SetUint64(tx.Gas()))
 

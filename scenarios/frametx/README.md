@@ -33,8 +33,7 @@ EIP-7906 and are selected by name.
 | `assert` | `[self_verify, user_op, assert]` | EIP-7906 `ASSERT` frames that pass |
 | `assert-revert` | as above, with the assertion failing | Whole-body revert: the user operation reports success but its effects are discarded, while the transaction stays valid |
 
-The `assert` shapes (formerly `post-tx`, which is still accepted) use the expiry verifier predeploy as
-their assertion contract, so they need
+The `assert` shapes use the expiry verifier predeploy as their assertion contract, so they need
 nothing deployed: with an 8-byte future deadline it succeeds, and with any other calldata length it
 reverts. EIP-7906 installs no predeploy, so there is no chain state saying whether it is active;
 these shapes are therefore excluded from `all` and must be named explicitly. A chain without
@@ -57,7 +56,7 @@ run. Use `--verify-frames=false` to send load without checking.
 
 ### Frame Settings
 - `--shapes` - Weighted list of frame shapes to send (default: `all`)
-- `--envelope` - Envelope shape to encode: `auto` (default), `full`, `keyed`, `keyed-key0`, `base`
+- `--envelope` - Envelope shape to encode: `auto` (default), `full`, `keyed`, `base`
 - `--frames-per-tx` - Number of user operation frames for the `batch` shape (default: 4)
 - `--user-op-gas` - Execution gas limit per user operation frame (default: 30000)
 - `--verify-gas` - Execution gas limit for validation frames (default: 5000)
@@ -97,15 +96,11 @@ wrong one fails to decode entirely:
 | `--envelope` | payload | fields |
 |---|---|---|
 | `base` | EIP-8141 alone, scalar nonce | 7 |
-| `keyed` | + EIP-8250 keyed nonces; an empty key set selects the account nonce | 8 |
-| `keyed-key0` | EIP-8250 as written before 2026-10-16: `[0]` selects the account nonce | 8 |
+| `keyed` | + EIP-8250 keyed nonces | 8 |
 | `full` | every extension, currently the same as `keyed` | 8 |
 
-`auto`, the default, probes the chain at startup and reports which shape it found. The two keyed
-revisions share the same contract and cannot be told apart on chain, so `auto` assumes the
-revision configured in `spamoor.KeyedNonceRevision` (currently `keyed-key0`, until the devnet
-clients implement the current text); name the envelope to override it. Set it explicitly to
-exercise a shape the chain would not otherwise receive. EIP-8272 recent roots do
+`auto`, the default, probes the chain at startup and reports which shape it found. Set it
+explicitly to exercise a shape the chain would not otherwise receive. EIP-8272 recent roots do
 not change the envelope: they are verified by an ordinary `VERIFY` frame calling the recent root
 contract, which `frametx-fuzz` exercises.
 

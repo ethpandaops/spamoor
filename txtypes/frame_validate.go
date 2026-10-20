@@ -29,11 +29,6 @@ const (
 	// SpeciesRecentRootVerify is EIP-8272's canonical frame: VERIFY, flags 0x0, target
 	// RECENT_ROOT_ADDRESS, whole tuples as data.
 	SpeciesRecentRootVerify FrameSpecies = "recent_root_verify"
-
-	// SpeciesPostTx is the former name of SpeciesAssert.
-	//
-	// Deprecated: EIP-7906 renamed the mode to ASSERT; use SpeciesAssert.
-	SpeciesPostTx = SpeciesAssert
 )
 
 // Species classifies the frame for mempool prefix matching.
@@ -147,8 +142,8 @@ func (tx *FrameTx) validateExpiryFrames() error {
 
 // validateNonce checks the EIP-8250 keyed nonce constraints: at most MaxNonceKeys keys,
 // strictly increasing, and the single-use sequence only with a non-empty key set. Under
-// FrameExtLegacyNonceKeyZero the older rules apply instead: at least one key, the zero
-// key alone, and a sequence below MaxNonceSeq.
+// LegacyNonceKeyZero the older rules apply instead: at least one key, the zero key
+// alone, and a sequence below MaxNonceSeq.
 func (tx *FrameTx) validateNonce() error {
 	if !tx.HasKeyedNonces() {
 		// EIP-8141's scalar nonce: there are no keys to check, and carrying any
@@ -174,7 +169,7 @@ func (tx *FrameTx) validateNonce() error {
 		}
 	}
 
-	if tx.Extensions.Has(FrameExtLegacyNonceKeyZero) {
+	if LegacyNonceKeyZero {
 		if len(tx.NonceKeys) == 0 {
 			return fmt.Errorf("%w: nonce key set is empty; this revision selects the account nonce with [0]", ErrInvalidFrameTx)
 		}
@@ -292,8 +287,6 @@ func validateCurveValues(index int, r, s, order *big.Int) error {
 
 // validateFrames checks per-frame constraints and the aggregate gas limits.
 func (tx *FrameTx) validateFrames() error {
-	// total_frame_gas is accumulated with explicit carry checks: the limits are
-	// attacker-chosen 64-bit values, and a wrapped total would pass every cap below.
 	totalGas := uint64(0)
 
 	for i, frame := range tx.Frames {
@@ -326,11 +319,8 @@ func (tx *FrameTx) validateFrames() error {
 		}
 
 		if frame.IsAtomicBatch() {
-			// The flag is valid with DEFAULT and SENDER only: a VERIFY frame's revert
-			// invalidates the transaction and an ASSERT frame's revert discards the
-			// whole body, so neither has anything a batch could roll back. The frame
-			// it batches with has the same constraint, which also keeps a batch from
-			// running into the ASSERT suffix.
+			// The flag is only valid with DEFAULT and SENDER, on the frame itself and
+			// on the one it batches with (EIP-7906).
 			if !batchable(frame.Mode) {
 				return fmt.Errorf("%w: frame %d batches in mode %d", ErrInvalidFrameTx, i, frame.Mode)
 			}
@@ -354,7 +344,6 @@ func (tx *FrameTx) validateFrames() error {
 		return err
 	}
 
-	// ExecutionGas saturates rather than wraps, so an overflowing sum lands here.
 	if executionGas := tx.ExecutionGas(); executionGas > TxMaxGasLimit {
 		return fmt.Errorf("%w: execution gas %d exceeds the per-transaction cap %d",
 			ErrInvalidFrameTx, executionGas, TxMaxGasLimit)
@@ -399,20 +388,9 @@ func (tx *FrameTx) AssertIndex() int {
 	return -1
 }
 
-// PostTxIndex is the former name of AssertIndex.
-//
-// Deprecated: EIP-7906 renamed the mode to ASSERT; use AssertIndex.
-func (tx *FrameTx) PostTxIndex() int { return tx.AssertIndex() }
-
 // ValidationPrefixLength returns the number of leading frames that make up the
 // validation prefix: the shortest prefix whose successful execution sets the payer.
 // It returns 0 when no frame in the transaction approves payment.
-//
-// This is a static approximation. EIP-8141 defines the prefix at runtime as the frames
-// up to the one after whose execution the payer is set, and a frame may carry a payment
-// scope without approving, or approve and then revert, in which case a later frame ends
-// the prefix. The first payment-scoped frame is where a well-formed transaction's prefix
-// ends and is what the public mempool shapes assume.
 func (tx *FrameTx) ValidationPrefixLength() int {
 	for i, frame := range tx.Frames {
 		if frame.ApprovalScope()&ApprovePayment != 0 {
@@ -527,12 +505,8 @@ func (tx *FrameTx) validateProtocolVerifierPlacement() error {
 	return nil
 }
 
-// validatePrefixGas checks the verification gas caps over the validation prefix: the
-// signature verification cost plus every prefix frame's execution budget against
-// MaxVerifyGas, and the summed state budgets against MaxVerifyStateGas.
-//
-// The protocol verifier frames count like any other. EIP-8272 says so explicitly for the
-// recent root verifier frame, and the expiry frame is simulated prefix work as well.
+// validatePrefixGas checks the verification gas caps over the validation prefix. Every
+// prefix frame counts, including EIP-8272's recent root verifier frame.
 func (tx *FrameTx) validatePrefixGas(prefixLen int) error {
 	sigGas, err := tx.SignatureVerificationGas()
 	if err != nil {
@@ -595,8 +569,8 @@ func matchesRecognizedPrefix(shape []FrameSpecies) bool {
 
 // VerifySignatures checks every protocol-validated signature entry against the digest
 // it authorizes, which is what a client does before executing any frame: SECP256K1
-// entries by recovery against their resolved signer, P256 entries by P256VERIFY over
-// the public key they carry. ARBITRARY entries are not protocol-validated.
+// entries by recovery, P256 entries by P256VERIFY. ARBITRARY entries are not
+// protocol-validated.
 //
 // It is kept separate from ValidatePayload because it does curve arithmetic, while
 // ValidatePayload only checks what is decidable from the encoded fields.

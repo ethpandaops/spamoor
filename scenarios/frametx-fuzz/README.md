@@ -68,7 +68,7 @@ axis with equal weight. An axis whose EIP the chain does not run is disabled aut
 | `signatures` | ARBITRARY witnesses and P256 entries alongside the sender's own |
 | `nonces` | EIP-8250 keyed nonce domains, including how many see their first use, and the single-use form |
 | `roots` | EIP-8272 recent root verifier frames, including the window edges and the cases that must be refused |
-| `assert` | EIP-7906 `ASSERT` frames, and the `TXTRACE`/`TXDIFF`/`EVENTDATACOPY` sweep that only exists inside them (`posttx` is still accepted) |
+| `assert` | EIP-7906 `ASSERT` frames, and the `TXTRACE`/`TXDIFF`/`EVENTDATACOPY` sweep that only exists inside them |
 | `probe` | Calls into the fixed probe contract, including the introspection sweep |
 | `code` | Deploying fuzzed contracts from one frame and calling them from another, and the fuzzed sender and paymaster roles |
 | `deploy` | The deploy-led validation prefixes, which create the sender's account in the transaction that uses it |
@@ -207,12 +207,8 @@ spamoor frametx-fuzz -p "<PRIVKEY>" -h http://rpc-host:8545 -t 10
   account code a deploy-led prefix creates)
 
 ### Frame settings
-- `--envelope` — Pin the payload shape: `auto` (default), `base`, `keyed`, `keyed-key0`, `full`.
-  `keyed` is EIP-8250 as currently written (an empty key set selects the account nonce);
-  `keyed-key0` is its revision before 2026-10-16 (`[0]` selects it). Nothing on chain tells them
-  apart, so `auto` assumes `spamoor.KeyedNonceRevision`
-- `--assert-frames` — EIP-7906 `ASSERT` frames: `auto` (probe the chain), `on`, `off` (`--post-tx` is
-  the deprecated former name)
+- `--envelope` — Pin the payload shape: `auto` (default), `base`, `keyed`, `full`
+- `--assert-frames` — EIP-7906 `ASSERT` frames: `auto` (probe the chain), `on`, `off`
 - `--user-op-gas`, `--verify-gas`, `--state-gas`, `--amount`, `--expiry-offset`, `--data`
 
 ### Wallets, fees and clients

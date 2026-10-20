@@ -2,13 +2,10 @@ package txtypes
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/rlp"
 )
 
 // Frame receipt status codes. Skipped is new in EIP-8141 and marks a frame that was
@@ -201,9 +198,6 @@ func decodeFrameReceipt(receipt *Receipt, raw json.RawMessage) error {
 		receipt.Status = extra.DerivedStatus()
 	}
 
-	// Every known client reports gasUsed. Should one omit it, the frame sums are a lower
-	// bound only: they leave out the intrinsic cost, the calldata floor and the storage
-	// refund, so the transaction's gas_used does not generally equal them.
 	if receipt.GasUsed == 0 {
 		receipt.GasUsed = extra.TotalExecutionGas() + extra.TotalStateGas()
 	}
@@ -317,89 +311,8 @@ func (e *FrameReceiptExtra) EncodeReceiptJSON(fields map[string]any) {
 	fields["frameReceipts"] = frames
 }
 
-// frameReceiptRLP is the consensus ReceiptPayload of a frame transaction:
-// [cumulative_gas_used, payer, [[status, [execution, state], logs], ...]].
-type frameReceiptRLP struct {
-	CumulativeGasUsed uint64
-	Payer             common.Address
-	Frames            []*frameReceiptEntryRLP
-}
-
-// frameReceiptEntryRLP is one frame receipt in the consensus encoding.
-type frameReceiptEntryRLP struct {
-	Status  uint64
-	GasUsed [2]uint64
-	Logs    []*Log
-}
-
-// EncodeFrameReceiptRLP returns the typed consensus encoding of a frame transaction
-// receipt, 0x06 || rlp([cumulative_gas_used, payer, frame_receipts]), as it appears in
-// the receipts trie and in the Receipts network message.
-func EncodeFrameReceiptRLP(cumulativeGasUsed uint64, extra *FrameReceiptExtra) ([]byte, error) {
-	payload := &frameReceiptRLP{
-		CumulativeGasUsed: cumulativeGasUsed,
-		Payer:             extra.Payer,
-		Frames:            make([]*frameReceiptEntryRLP, 0, len(extra.Frames)),
-	}
-
-	for _, frame := range extra.Frames {
-		logs := frame.Logs
-		if logs == nil {
-			logs = []*Log{}
-		}
-
-		payload.Frames = append(payload.Frames, &frameReceiptEntryRLP{
-			Status:  frame.Status,
-			GasUsed: [2]uint64{frame.ExecutionGas, frame.StateGas},
-			Logs:    logs,
-		})
-	}
-
-	encoded, err := rlp.EncodeToBytes(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	return append([]byte{FrameTxType}, encoded...), nil
-}
-
-// DecodeFrameReceiptRLP parses a frame transaction receipt from its consensus encoding,
-// with or without the leading type byte. Only the consensus fields of each log are
-// carried, so block, transaction and index positions stay zero.
-func DecodeFrameReceiptRLP(data []byte) (cumulativeGasUsed uint64, extra *FrameReceiptExtra, err error) {
-	if len(data) == 0 {
-		return 0, nil, errors.New("empty frame receipt")
-	}
-
-	if data[0] == FrameTxType {
-		data = data[1:]
-	}
-
-	var payload frameReceiptRLP
-	if err := rlp.DecodeBytes(data, &payload); err != nil {
-		return 0, nil, fmt.Errorf("invalid frame receipt: %w", err)
-	}
-
-	extra = &FrameReceiptExtra{
-		Payer:  payload.Payer,
-		Frames: make([]*FrameReceipt, 0, len(payload.Frames)),
-	}
-
-	for _, frame := range payload.Frames {
-		extra.Frames = append(extra.Frames, &FrameReceipt{
-			Status:       frame.Status,
-			ExecutionGas: frame.GasUsed[0],
-			StateGas:     frame.GasUsed[1],
-			Logs:         frame.Logs,
-		})
-	}
-
-	return payload.CumulativeGasUsed, extra, nil
-}
-
 // AssertReverted reports whether an ASSERT frame failed, which under EIP-7906 reverts
-// the whole execution body rather than one atomic batch while keeping the transaction
-// valid. The failing frame reports status 0, the ASSERT frames after it status 2.
+// the whole execution body rather than one atomic batch.
 //
 // The receipt alone cannot answer this: frame modes live on the transaction, so the
 // transaction has to be supplied.
@@ -418,11 +331,6 @@ func (e *FrameReceiptExtra) AssertReverted(tx *FrameTx) bool {
 	return false
 }
 
-// PostTxReverted is the former name of AssertReverted.
-//
-// Deprecated: EIP-7906 renamed the mode to ASSERT; use AssertReverted.
-func (e *FrameReceiptExtra) PostTxReverted(tx *FrameTx) bool { return e.AssertReverted(tx) }
-
 // DurableFrames reports, per frame, whether that frame's state changes survived the
 // transaction.
 //
@@ -434,15 +342,8 @@ func (e *FrameReceiptExtra) PostTxReverted(tx *FrameTx) bool { return e.AssertRe
 //   - a failing ASSERT frame (EIP-7906) reverts the entire execution body, so every
 //     frame after the validation prefix loses its effects.
 //
-// In both cases the receipts of the discarded frames keep their status and execution
-// gas but lose their logs and state gas, which this function does not model. Frames of
-// the validation prefix are always durable: their changes are committed even when the
-// body reverts.
-//
-// The prefix boundary is the static ValidationPrefixLength, so a payment-scoped frame
-// that reverted without approving, or an ASSERT frame carrying approval flags, shifts
-// the boundary at runtime in a way the receipt does not reveal. The result is exact for
-// the public-mempool shapes and an approximation beyond them.
+// Frames of the validation prefix are always durable: their changes are committed even
+// when the body reverts.
 func (e *FrameReceiptExtra) DurableFrames(tx *FrameTx) []bool {
 	durable := make([]bool, len(e.Frames))
 

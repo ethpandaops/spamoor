@@ -72,24 +72,6 @@ var (
 	RecentRootAddress = common.HexToAddress("0x8272D9679689Ea2f307140CdF9002D27dC00Ffff")
 )
 
-// Runtime code of the protocol contracts. All three are ordinary contracts installed by
-// keyless deployment transactions rather than by the protocol at activation, and the
-// public mempool rules identify them by code: a verifier frame whose target carries
-// different code is just a frame calling some contract.
-var (
-	// ExpiryVerifierCode is EIP-8141's expiry verifier: reverts unless the calldata is
-	// an 8-byte deadline at or after block.timestamp.
-	ExpiryVerifierCode = common.FromHex("0x60083614600a575f5ffd5b5f3560c01c4211601657005b5f5ffd")
-
-	// NonceManagerCode is EIP-8250's NONCE_MANAGER: revert(0, 0), so every ordinary call
-	// fails and only the protocol writes its storage.
-	NonceManagerCode = common.FromHex("0x60006000fd")
-
-	// RecentRootCode is EIP-8272's recent root contract, selecting the write or the
-	// validation operation by calldata length.
-	RecentRootCode = common.FromHex("0x346100ba57366040146100c05736604836066100ba5780156100ba5761048081116100ba574b60005b602081013560c01c828110156100ba5780830361200011156100ba577f8f42481679c8e6fefa040974b3c905e0ce3f2e464ba93acdb074a41181617efc60005260488260203760686000207fbdc897da2177d260ff5f4be5d4b2aad43f89c3347a305b584fa5a2546d053daa60005290611fff1660c01b60405260486000205414156100ba5760480182811061002857005b60006000fd5b33600052602060006020376034600c20807f8f42481679c8e6fefa040974b3c905e0ce3f2e464ba93acdb074a41181617efc6040524b606852606052602060206088376068604020817fbdc897da2177d260ff5f4be5d4b2aad43f89c3347a305b584fa5a2546d053daa60a852611fff4b1660d05260c852604860a8205500")
-)
-
 // FrameMode is a frame's execution context.
 type FrameMode uint8
 
@@ -99,25 +81,17 @@ const (
 	FrameModeVerify  FrameMode = 1 // STATICCALL semantics, must not revert
 	FrameModeSender  FrameMode = 2 // caller is tx.sender, may carry value
 
-	// FrameModeAssert is EIP-7906's ASSERT mode: STATICCALL semantics with no APPROVE
-	// exception, restricted to a trailing suffix of the frame list, and the only place
-	// TXTRACE, TXDIFF and EVENTDATACOPY are defined. Its failure reverts the whole
-	// execution body rather than one atomic batch, without invalidating the
-	// transaction.
+	// FrameModeAssert is EIP-7906's ASSERT mode: STATICCALL semantics with no
+	// APPROVE exception, restricted to a trailing suffix of the frame list. Its
+	// failure reverts the whole execution body rather than one atomic batch.
 	FrameModeAssert FrameMode = 3
-
-	// FrameModePostTx is the former name of FrameModeAssert.
-	//
-	// Deprecated: EIP-7906 renamed the mode to ASSERT; use FrameModeAssert.
-	FrameModePostTx = FrameModeAssert
 )
 
 // FrameExtensions records which envelope extensions a frame transaction uses.
 //
 // EIP-8250 amends EIP-8141's payload, so a chain may run either shape. The set has to
-// travel with the transaction because it decides the wire layout. It also carries the
-// one revision marker below, which changes how a layout is read rather than the layout
-// itself.
+// travel with the transaction: it decides the wire layout, and it distinguishes a
+// chain without keyed nonces from one whose transaction happened to use key zero.
 //
 // EIP-8272 is not an envelope extension: it verifies recent roots through a canonical
 // VERIFY frame, so a chain running it changes nothing about the payload layout.
@@ -125,38 +99,28 @@ type FrameExtensions uint8
 
 // Envelope extensions.
 const (
-	// FrameExtKeyedNonces is EIP-8250: nonce becomes nonce_keys, nonce_seq. An empty
-	// key set selects the account nonce; every key, including zero, is an independent
-	// domain in NONCE_MANAGER.
+	// FrameExtKeyedNonces is EIP-8250: nonce becomes nonce_keys, nonce_seq.
 	FrameExtKeyedNonces FrameExtensions = 1 << iota
-
-	// FrameExtLegacyNonceKeyZero selects the EIP-8250 revision before 2026-10-16, in
-	// which nonce_keys [0] aliased the account nonce, an empty key set was invalid, key
-	// zero could not be combined with other keys and nonce_seq had to stay below
-	// MaxNonceSeq. It changes no wire layout, so it cannot be read off an encoded
-	// transaction and decoders never set it; a decoded [0] is read as the current
-	// spec's key zero. It exists so transactions can still be built for chains whose
-	// clients implement that revision, and does nothing without FrameExtKeyedNonces.
-	FrameExtLegacyNonceKeyZero
 )
 
-// FrameExtAll enables every envelope extension as the current EIP texts define it. The
-// revision marker is not an extension and is not part of it.
+// FrameExtAll enables every envelope extension, the shape current devnets run.
 const FrameExtAll = FrameExtKeyedNonces
+
+// LegacyNonceKeyZero selects the EIP-8250 revision before 2026-10-16, in which the
+// account nonce was selected by nonce_keys [0] rather than by an empty key set, key
+// zero could not be combined with other keys and there was no single-use form. The
+// devnet clients still implement it; set it to false once they ship the current text.
+var LegacyNonceKeyZero = true
 
 // Has reports whether every extension in want is present.
 func (e FrameExtensions) Has(want FrameExtensions) bool { return e&want == want }
 
 // String names the active extensions.
 func (e FrameExtensions) String() string {
-	switch e &^ FrameExtLegacyNonceKeyZero {
+	switch e {
 	case 0:
 		return "8141"
 	case FrameExtKeyedNonces:
-		if e.Has(FrameExtLegacyNonceKeyZero) {
-			return "8141+8250/key0"
-		}
-
 		return "8141+8250"
 	default:
 		return fmt.Sprintf("8141+unknown(0x%02x)", uint8(e))
@@ -242,13 +206,7 @@ type FrameFees struct {
 // NonceKeys selects the sender's ordinary account nonce, which is what a transaction
 // that does not use independent nonce domains carries; every key, including zero, is an
 // independent sequence in NONCE_MANAGER. A NonceSeq of MaxNonceSeq with a non-empty
-// key set is the single-use form.
-//
-// Fees: the payer, who need not be the sender, is charged MaxCost up front and refunded
-// at settlement; the sender separately pays the value of its SENDER frames (see
-// SenderValue). Gas: the transaction reserves ExecutionReservation in the block's
-// execution dimension and StateReservation in its state dimension; MaxGas, which GetGas
-// returns, is the payer's charge basis and not a single block counter.
+// key set is the single-use form. Under LegacyNonceKeyZero the account nonce is [0].
 type FrameTx struct {
 	ChainID    *uint256.Int
 	NonceKeys  []*uint256.Int
@@ -312,8 +270,8 @@ type frameEnvelopeKeyed struct {
 
 // envelope returns the transaction in the layout its extensions select.
 func (tx *FrameTx) envelope() any {
-	switch {
-	case tx.Extensions.Has(FrameExtKeyedNonces):
+	switch tx.Extensions {
+	case FrameExtKeyedNonces:
 		return &frameEnvelopeKeyed{
 			ChainID: tx.ChainID, NonceKeys: tx.NonceKeys, NonceSeq: tx.NonceSeq,
 			Sender: tx.Sender, Frames: tx.Frames, Signatures: tx.Signatures,
@@ -329,8 +287,7 @@ func (tx *FrameTx) envelope() any {
 }
 
 // decodeEnvelope parses the payload in whichever shape it is encoded and records the
-// extensions it found. Only the layout is observable, so the result never carries
-// FrameExtLegacyNonceKeyZero: a decoded key set is read by the current EIP-8250 text.
+// extensions it found.
 func (tx *FrameTx) decodeEnvelope(b []byte) error {
 	extensions, err := detectFrameExtensions(b)
 	if err != nil {
@@ -564,9 +521,8 @@ func (tx *FrameTx) CopyTx() TxData {
 // GetChainID returns the destination chain id.
 func (tx *FrameTx) GetChainID() *big.Int { return u256ToBig(tx.ChainID) }
 
-// GetNonce returns the nonce sequence number. It is the sender's account nonce only when
-// UsesLegacyNonce reports true; otherwise it is the shared sequence of the selected key
-// set, or MaxNonceSeq for the single-use form.
+// GetNonce returns the nonce sequence number. For the legacy key set this is the
+// sender's account nonce, which is what the engine tracks.
 func (tx *FrameTx) GetNonce() uint64 { return tx.NonceSeq }
 
 // HasKeyedNonces reports whether the transaction uses EIP-8250's keyed nonce fields
@@ -576,14 +532,14 @@ func (tx *FrameTx) HasKeyedNonces() bool {
 }
 
 // UsesLegacyNonce reports whether NonceSeq is the sender's ordinary account nonce:
-// either the transaction predates keyed nonces, or its key set is empty. Under
-// FrameExtLegacyNonceKeyZero the account nonce is selected by [0] instead.
+// either the transaction predates keyed nonces, or its key set is empty ([0] under
+// LegacyNonceKeyZero).
 func (tx *FrameTx) UsesLegacyNonce() bool {
 	if !tx.HasKeyedNonces() {
 		return true
 	}
 
-	if tx.Extensions.Has(FrameExtLegacyNonceKeyZero) {
+	if LegacyNonceKeyZero {
 		return len(tx.NonceKeys) == 1 && tx.NonceKeys[0] != nil && tx.NonceKeys[0].IsZero()
 	}
 
@@ -591,11 +547,10 @@ func (tx *FrameTx) UsesLegacyNonce() bool {
 }
 
 // UsesSingleUseNonce reports whether the transaction is in EIP-8250's single-use form:
-// a non-empty key set with NonceSeq at MaxNonceSeq, valid only while every selected key
-// is unused and exhausting all of them on approval.
+// a non-empty key set with NonceSeq at MaxNonceSeq, which approval exhausts for good.
+// The key-zero revision has no such form.
 func (tx *FrameTx) UsesSingleUseNonce() bool {
-	if !tx.HasKeyedNonces() || tx.Extensions.Has(FrameExtLegacyNonceKeyZero) {
-		// The key-zero revision has no single-use form; MaxNonceSeq is out of range.
+	if !tx.HasKeyedNonces() || LegacyNonceKeyZero {
 		return false
 	}
 
@@ -606,14 +561,8 @@ func (tx *FrameTx) UsesSingleUseNonce() bool {
 // implements IndependentNonceTx for the engine's nonce tracking.
 func (tx *FrameTx) UsesAccountNonce() bool { return tx.UsesLegacyNonce() }
 
-// GetGas returns MaxGas: the gas the payer is charged against up front, spanning both
-// EIP-8037 dimensions.
-//
-// It is not what the transaction occupies in a block. Block packing is two-dimensional,
-// with ExecutionReservation counted against the execution limit and StateReservation
-// against the state limit; summing GetGas into one counter over-reserves the
-// execution dimension by the state budget. Values are saturated at math.MaxUint64 rather
-// than wrapped, and ValidatePayload rejects any transaction whose totals do not fit.
+// GetGas returns the maximum gas the transaction can consume, which is the budget the
+// payer is charged against.
 func (tx *FrameTx) GetGas() uint64 { return tx.MaxGas() }
 
 // GetGasPrice returns the fee cap.
@@ -640,28 +589,12 @@ func (tx *FrameTx) GetTo() *common.Address {
 	return nil
 }
 
-// GetValue returns the sum of all frame values, which is SenderValue for a valid
-// transaction since only SENDER frames may carry value.
+// GetValue returns the sum of all frame values.
 func (tx *FrameTx) GetValue() *big.Int {
 	total := new(big.Int)
 
 	for _, frame := range tx.Frames {
 		if frame.Value != nil {
-			total.Add(total, frame.Value.ToBig())
-		}
-	}
-
-	return total
-}
-
-// SenderValue returns the wei the sender transfers through its SENDER frames. It is paid
-// by the sender from its own balance as each frame runs, separately from the fees the
-// payer is charged (see MaxCost); a sponsored transaction's payer never covers it.
-func (tx *FrameTx) SenderValue() *big.Int {
-	total := new(big.Int)
-
-	for _, frame := range tx.Frames {
-		if frame.Mode == FrameModeSender && frame.Value != nil {
 			total.Add(total, frame.Value.ToBig())
 		}
 	}
@@ -696,8 +629,7 @@ func (tx *FrameTx) GetBlobSidecar() *BlobSidecar { return tx.Sidecar }
 func (tx *FrameTx) SetBlobSidecar(sidecar *BlobSidecar) { tx.Sidecar = sidecar }
 
 // GetStateGas returns the sum of the declared frame state gas budgets, which is the
-// transaction's reservation against the EIP-8037 block state gas dimension. The same
-// value is available as StateReservation.
+// transaction's reservation against the EIP-8037 block state gas dimension.
 func (tx *FrameTx) GetStateGas() uint64 {
 	total := uint64(0)
 
@@ -707,15 +639,6 @@ func (tx *FrameTx) GetStateGas() uint64 {
 
 	return total
 }
-
-// StateReservation returns the state gas a block must have free to include the
-// transaction: the sum of the frames' state budgets.
-func (tx *FrameTx) StateReservation() uint64 { return tx.GetStateGas() }
-
-// ExecutionReservation returns the execution gas a block must have free to include the
-// transaction: the intrinsic cost plus the frames' execution budgets, or the calldata
-// floor when that is higher. It is ExecutionGas under its block-packing name.
-func (tx *FrameTx) ExecutionReservation() uint64 { return tx.ExecutionGas() }
 
 // EncodePayload writes the canonical payload, without the blob sidecar, in the shape
 // the transaction's extensions select.
@@ -826,10 +749,6 @@ func (tx *FrameTx) SigHash() common.Hash {
 // An entry qualifies when it carries no signature yet and its signer is either empty
 // (resolving to the sender) or the key's own address. Entries for other parties, such
 // as a paymaster's, are signed with SignEntry.
-//
-// Entries with an explicit msg are signed first. Their signature bytes are part of the
-// canonical signature hash, so signing one after an empty-msg entry would leave that
-// entry signed over a hash the transaction no longer has.
 func (tx *FrameTx) SignPayload(chainID *big.Int, key *ecdsa.PrivateKey) error {
 	if chainID != nil && chainID.Sign() != 0 {
 		converted, overflow := uint256.FromBig(chainID)
@@ -843,26 +762,20 @@ func (tx *FrameTx) SignPayload(chainID *big.Int, key *ecdsa.PrivateKey) error {
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	signed := 0
 
-	for _, explicitMsg := range []bool{true, false} {
-		for i, sig := range tx.Signatures {
-			if sig.Scheme != SigSchemeSecp256k1 || len(sig.Signature) != 0 {
-				continue
-			}
-
-			if (len(sig.Msg) != 0) != explicitMsg {
-				continue
-			}
-
-			if len(sig.Signer) != 0 && common.BytesToAddress(sig.Signer) != address {
-				continue
-			}
-
-			if err := tx.SignEntry(i, key); err != nil {
-				return err
-			}
-
-			signed++
+	for i, sig := range tx.Signatures {
+		if sig.Scheme != SigSchemeSecp256k1 || len(sig.Signature) != 0 {
+			continue
 		}
+
+		if len(sig.Signer) != 0 && common.BytesToAddress(sig.Signer) != address {
+			continue
+		}
+
+		if err := tx.SignEntry(i, key); err != nil {
+			return err
+		}
+
+		signed++
 	}
 
 	if signed == 0 {
@@ -875,9 +788,8 @@ func (tx *FrameTx) SignPayload(chainID *big.Int, key *ecdsa.PrivateKey) error {
 // SignEntry signs a single signature entry with key.
 //
 // The digest is the entry's explicit msg when it carries one, and the canonical
-// signature hash otherwise. Because the canonical hash covers every entry's metadata and
-// the signature bytes of explicit-msg entries, entries must be fully populated and
-// explicit-msg entries signed before any empty-msg entry is signed.
+// signature hash otherwise. Because the canonical hash covers every entry's metadata,
+// entries must be fully populated before any of them is signed.
 func (tx *FrameTx) SignEntry(index int, key *ecdsa.PrivateKey) error {
 	if index < 0 || index >= len(tx.Signatures) {
 		return fmt.Errorf("signature index %d out of range", index)
@@ -912,10 +824,6 @@ func (tx *FrameTx) SignEntry(index int, key *ecdsa.PrivateKey) error {
 
 // SignEntryP256 signs a signature entry with a NIST P-256 key, filling in both the
 // signature and the derived signer address.
-//
-// The signer is part of the canonical signature hash, so P256 entries have to be signed
-// before any entry that signs the canonical hash: it is an error to call this once such
-// an entry carries a signature, because that signature would no longer verify.
 func (tx *FrameTx) SignEntryP256(index int, key *ecdsa.PrivateKey) error {
 	if index < 0 || index >= len(tx.Signatures) {
 		return fmt.Errorf("signature index %d out of range", index)
@@ -930,19 +838,10 @@ func (tx *FrameTx) SignEntryP256(index int, key *ecdsa.PrivateKey) error {
 		return errors.New("key is not on the P-256 curve")
 	}
 
-	signer := P256Signer(key.X, key.Y).Bytes()
-
-	if !bytes.Equal(sig.Signer, signer) {
-		for i, other := range tx.Signatures {
-			if i != index && len(other.Msg) == 0 && len(other.Signature) != 0 {
-				return fmt.Errorf("signature entry %d already signs the canonical hash; sign P256 entries first", i)
-			}
-		}
-	}
-
-	// Filling the signer in afterwards would leave the entry signed over a hash the
-	// transaction no longer has.
-	sig.Signer = signer
+	// The signer is part of the canonical signature hash, so it has to be in place
+	// before the digest is computed: filling it in afterwards would leave the entry
+	// signed over a hash the transaction no longer has.
+	sig.Signer = P256Signer(key.X, key.Y).Bytes()
 
 	digest, err := tx.entryDigest(sig)
 	if err != nil {
@@ -1009,8 +908,7 @@ func (tx *FrameTx) SignatureVerificationGas() (uint64, error) {
 }
 
 // IntrinsicGas returns the transaction's intrinsic cost, which is derivable from the
-// transaction fields alone and charged entirely in the execution dimension. Like every
-// gas helper it saturates at math.MaxUint64 instead of wrapping.
+// transaction fields alone and charged entirely in the execution dimension.
 func (tx *FrameTx) IntrinsicGas() uint64 {
 	sigGas, err := tx.SignatureVerificationGas()
 	if err != nil {
@@ -1095,9 +993,8 @@ func (tx *FrameTx) CalldataFloorGas() uint64 {
 	return saturatingAdd(gas, saturatingMul(TotalCostFloorPerToken, tokens))
 }
 
-// ExecutionGas returns the intrinsic cost plus the declared frame execution budgets, or
-// the calldata floor when that is higher: the transaction's reservation against the
-// block execution gas dimension, also available as ExecutionReservation.
+// ExecutionGas returns the intrinsic cost plus the declared frame execution budgets,
+// which is the transaction's reservation against the block execution gas dimension.
 func (tx *FrameTx) ExecutionGas() uint64 {
 	gas := tx.IntrinsicGas()
 
@@ -1112,8 +1009,7 @@ func (tx *FrameTx) ExecutionGas() uint64 {
 	return gas
 }
 
-// MaxGas returns the maximum gas the transaction can consume across both dimensions,
-// which is what the payer's up-front charge is computed from.
+// MaxGas returns the maximum gas the transaction can consume across both dimensions.
 func (tx *FrameTx) MaxGas() uint64 {
 	standard := tx.IntrinsicGas()
 	stateGas := tx.GetStateGas()
@@ -1131,18 +1027,15 @@ func (tx *FrameTx) MaxGas() uint64 {
 	return standard
 }
 
-// MaxCost returns the amount the payer is charged up front when payment is approved:
-// MaxGas at the fee cap plus the blob gas at the block's blob base fee. The payer is the
-// resolved target of the frame that approved payment, which need not be the sender, and
-// is refunded the unused part at settlement. The sender's own outlay is SenderValue.
+// MaxCost returns the amount the payer is charged up front when payment is approved.
 func (tx *FrameTx) MaxCost(blobBaseFee *big.Int) *big.Int {
 	cost := new(big.Int).Mul(new(big.Int).SetUint64(tx.MaxGas()), u256ToBig(tx.Fees.GasFeeCap))
 
 	return cost.Add(cost, tx.blobGasCost(blobBaseFee))
 }
 
-// saturatingAdd returns a+b, or math.MaxUint64 when the sum does not fit. Gas totals
-// are summed from attacker-chosen 64-bit limits, so a wrapped sum would pass every cap.
+// saturatingAdd returns a+b, or math.MaxUint64 when the sum does not fit, so that a
+// wrapped gas total can never pass a cap.
 func saturatingAdd(a, b uint64) uint64 {
 	sum, carry := bits.Add64(a, b, 0)
 	if carry != 0 {

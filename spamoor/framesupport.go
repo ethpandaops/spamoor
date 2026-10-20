@@ -17,38 +17,6 @@ import (
 // retried.
 const frameSupportRetryInterval = 30 * time.Second
 
-// KeyedNonceRevision is the EIP-8250 revision a probed chain is assumed to run, added to
-// the detected extensions whenever the NONCE_MANAGER contract is present.
-//
-// EIP-8250 changed on 2026-10-16: the account nonce is now selected by an empty key set
-// instead of [0], and key zero became an ordinary keyed domain. Nothing on chain tells
-// the two revisions apart, since the contract and its code are the same, so the
-// assumption has to be configured. It is left at the pre-change revision until the
-// devnet clients are known to implement the current text; a transaction built for the
-// wrong revision is refused at admission or, worse, has its nonce tracked in the wrong
-// domain. Set it to 0 to build the current spec's form. Scenarios override it through
-// their --envelope option.
-var KeyedNonceRevision = txtypes.FrameExtLegacyNonceKeyZero
-
-// ApplyKeyedNonceRevision stamps the configured EIP-8250 revision onto a frame transaction
-// decoded from a block or a node response.
-//
-// The revision is not on the wire, so a decoded keyed envelope carries none and is read by
-// the current EIP text, under which [0] is key zero rather than the account nonce. The pool
-// matches confirmations by what the decoded transaction says about its nonce domain, so
-// without the stamp every legacy-nonce frame transaction on a key-zero chain would be
-// filed as hash-tracked and miss its nonce channel. The hash is unaffected: the revision
-// changes how the key set is read, not how it is encoded.
-func ApplyKeyedNonceRevision(tx *txtypes.Transaction) {
-	if KeyedNonceRevision == 0 || tx == nil {
-		return
-	}
-
-	if inner, ok := tx.Inner().(*txtypes.FrameTx); ok && inner.HasKeyedNonces() {
-		inner.Extensions |= KeyedNonceRevision
-	}
-}
-
 // FrameSupport describes a chain's EIP-8141 frame transaction capability, derived from
 // the contracts the three EIPs deploy with keyless deployment transactions:
 //
@@ -152,7 +120,7 @@ func probeFrameSupport(ctx context.Context, client *Client) (FrameSupport, error
 	}
 
 	if keyed {
-		support.Extensions |= txtypes.FrameExtKeyedNonces | KeyedNonceRevision
+		support.Extensions |= txtypes.FrameExtKeyedNonces
 	}
 
 	roots, err := predeployActive(ctx, client, txtypes.RecentRootAddress)
@@ -165,10 +133,8 @@ func probeFrameSupport(ctx context.Context, client *Client) (FrameSupport, error
 	return support, nil
 }
 
-// predeployActive reports whether a predeploy account has been installed. The EIPs now
-// fix all three codes (txtypes.ExpiryVerifierCode, NonceManagerCode, RecentRootCode),
-// but the nonce is accepted as well so that a devnet genesis carrying the account with
-// an older code still counts as running the EIP.
+// predeployActive reports whether a predeploy account has been installed. Nonce is
+// checked as well as code so that a genesis carrying an older code still counts.
 func predeployActive(ctx context.Context, client *Client, address common.Address) (bool, error) {
 	code, err := client.GetCodeAt(ctx, address)
 	if err != nil {

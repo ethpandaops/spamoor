@@ -29,12 +29,6 @@ const (
 	shapeAssertRevert shapeName = "assert-revert"
 )
 
-// shapeAliases maps the names shapes had before EIP-7906 renamed POST_TX to ASSERT.
-var shapeAliases = map[shapeName]shapeName{
-	"post-tx":        shapeAssert,
-	"post-tx-revert": shapeAssertRevert,
-}
-
 // defaultShapes are the shapes "all" enables: everything EIP-8141 defines on its own.
 var defaultShapes = []shapeName{
 	shapeSelfVerify,
@@ -297,10 +291,6 @@ func parseShapes(spec string) (*weightedShapes, error) {
 			weight = parsed
 		}
 
-		if canonical, ok := shapeAliases[shapeName(name)]; ok {
-			name = string(canonical)
-		}
-
 		if !isKnownShape(shapeName(name)) {
 			return nil, fmt.Errorf("unknown frame shape %q, known shapes: %s", name, strings.Join(shapeNames(), ", "))
 		}
@@ -376,17 +366,12 @@ func (w *weightedShapes) requiresAssert() bool {
 // envelopeChoice maps the --envelope option to a set of extensions.
 //
 // The zero-extension "base" shape is EIP-8141 on its own; "keyed" adds EIP-8250 keyed
-// nonces as the current EIP text defines them, with the account nonce selected by an
-// empty key set. "keyed-key0" is the EIP-8250 revision before 2026-10-16, in which [0]
-// selected the account nonce; nothing on chain tells the two apart, so a chain whose
-// clients still implement it has to be told. "full" is kept as the name for every
-// extension there is, which is currently the same as "keyed". EIP-8272 is not an
-// envelope choice: its verifier is an ordinary frame.
+// nonces. "full" is kept as the name for every extension there is, which is currently
+// the same thing. EIP-8272 is not an envelope choice: its verifier is an ordinary frame.
 var envelopeChoices = map[string]txtypes.FrameExtensions{
-	"base":       0,
-	"keyed":      txtypes.FrameExtKeyedNonces,
-	"keyed-key0": txtypes.FrameExtKeyedNonces | txtypes.FrameExtLegacyNonceKeyZero,
-	"full":       txtypes.FrameExtAll,
+	"base":  0,
+	"keyed": txtypes.FrameExtKeyedNonces,
+	"full":  txtypes.FrameExtAll,
 }
 
 // parseEnvelope resolves the --envelope option. An empty value or "auto" defers to

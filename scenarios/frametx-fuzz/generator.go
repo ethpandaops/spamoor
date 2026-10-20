@@ -890,8 +890,7 @@ func (s *Scenario) firstUseHeadroom(result *build) int {
 // The frame is the only thing EIP-8272 adds to a transaction: a VERIFY frame calling the
 // recent root contract with the packed references, which reverts unless every one names
 // a root its source committed within the usable window. Its execution budget counts
-// toward the public mempool's verification gas cap like every other prefix frame's, so
-// it is sized from the contract's bytecode rather than generously.
+// toward the public mempool's verification gas cap.
 func (s *Scenario) appendRecentRootFrame(env *environment, recipe *Recipe, result *build) {
 	if recipe.RecentRoots == 0 || env.roots == nil {
 		return

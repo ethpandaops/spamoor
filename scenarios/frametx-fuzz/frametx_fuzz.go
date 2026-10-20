@@ -143,14 +143,8 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.Recipe, "recipe", ScenarioDefaultOptions.Recipe, "Replay a single recipe, as reported with a finding")
 	flags.StringVar(&s.options.Axes, "axes", ScenarioDefaultOptions.Axes,
 		fmt.Sprintf("Weighted list of dimensions to fuzz, e.g. 'nonces:5,roots:2'. Known axes: %s", strings.Join(axisNamesText(), ", ")))
-	flags.StringVar(&s.options.Envelope, "envelope", ScenarioDefaultOptions.Envelope, "Envelope shape to encode: auto, full, keyed, keyed-key0, base")
+	flags.StringVar(&s.options.Envelope, "envelope", ScenarioDefaultOptions.Envelope, "Envelope shape to encode: auto, full, keyed, base")
 	flags.StringVar(&s.options.AssertFrames, "assert-frames", ScenarioDefaultOptions.AssertFrames, "EIP-7906 ASSERT frames: auto (probe the chain), on, off")
-	flags.StringVar(&s.options.AssertFrames, "post-tx", ScenarioDefaultOptions.AssertFrames, "Former name of --assert-frames")
-
-	if err := flags.MarkDeprecated("post-tx", "EIP-7906 renamed POST_TX frames to ASSERT; use --assert-frames"); err != nil {
-		return err
-	}
-
 	flags.Uint64Var(&s.options.MaxFrames, "max-frames", ScenarioDefaultOptions.MaxFrames, "Maximum number of body frames per transaction")
 	flags.Float64Var(&s.options.InvalidRatio, "invalid-ratio", ScenarioDefaultOptions.InvalidRatio,
 		fmt.Sprintf("Share of the stream carrying a deliberate violation. Known violations: %s", strings.Join(violationNames(), ", ")))
@@ -302,14 +296,10 @@ func (s *Scenario) setWalletCount() {
 // parseEnvelope resolves the --envelope option, which pins the payload shape instead of
 // taking the one the chain's predeploys imply.
 func (s *Scenario) parseEnvelope() error {
-	// "keyed" is EIP-8250 as currently written (empty key set = account nonce);
-	// "keyed-key0" is its revision before 2026-10-16 ([0] = account nonce), which no
-	// predeploy distinguishes and so has to be named for a chain still running it.
 	choices := map[string]txtypes.FrameExtensions{
-		"base":       0,
-		"keyed":      txtypes.FrameExtKeyedNonces,
-		"keyed-key0": txtypes.FrameExtKeyedNonces | txtypes.FrameExtLegacyNonceKeyZero,
-		"full":       txtypes.FrameExtAll,
+		"base":  0,
+		"keyed": txtypes.FrameExtKeyedNonces,
+		"full":  txtypes.FrameExtAll,
 	}
 
 	spec := strings.ToLower(strings.TrimSpace(s.options.Envelope))
@@ -319,7 +309,7 @@ func (s *Scenario) parseEnvelope() error {
 
 	extensions, ok := choices[spec]
 	if !ok {
-		return fmt.Errorf("unknown envelope %q, known: auto, base, keyed, keyed-key0, full", spec)
+		return fmt.Errorf("unknown envelope %q, known: auto, base, keyed, full", spec)
 	}
 
 	s.pinnedExtensions = &extensions
@@ -432,7 +422,7 @@ func (s *Scenario) recipeFor(txIdx uint64) *Recipe {
 		AllowProbe:    s.env.probe != nil,
 
 		// The key-zero revision of EIP-8250 has no single-use form.
-		AllowSingleUseNonce: s.env.nonces != nil && !s.env.extensions.Has(txtypes.FrameExtLegacyNonceKeyZero),
+		AllowSingleUseNonce: s.env.nonces != nil && !txtypes.LegacyNonceKeyZero,
 		AllowCode:           s.env.factory != (common.Address{}),
 		AllowFuzzedAccount:  s.env.accounts.available(),
 
@@ -773,11 +763,6 @@ func parseAxes(spec string) (axisWeights, error) {
 			}
 
 			weight = parsed
-		}
-
-		// The EIP-7906 axis was named after the mode's former name.
-		if name == "posttx" {
-			name = string(axisAssert)
 		}
 
 		if !knownAxis(axis(name)) {

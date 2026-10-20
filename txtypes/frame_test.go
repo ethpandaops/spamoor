@@ -263,8 +263,8 @@ func TestFrameIntrinsicGas(t *testing.T) {
 	// The user op carries value to a foreign target.
 	want += TxValueCost
 	// The envelope extension prices its own encoding as transaction data. The default
-	// empty key set encodes as rlp([]) || rlp(0) = c0 80: two non-zero bytes.
-	extensionTokens := uint64(2 * 4)
+	// [0] key set encodes as rlp([0]) || rlp(0) = c1 80 80: three non-zero bytes.
+	extensionTokens := uint64(3 * 4)
 	want += StandardTokenCost * extensionTokens
 
 	if got := tx.IntrinsicGas(); got != want {
@@ -622,37 +622,8 @@ func TestFrameTxJSONNonceField(t *testing.T) {
 		t.Fatalf("nonce %d, expected %d", tx.Nonce(), 0x29a)
 	}
 
-	// The key set is kept as reported. Under the current EIP-8250 text [0] is key zero,
-	// an independent domain, not the account nonce the chain this came from read it as.
-	inner, _ := tx.Inner().(*FrameTx)
-	if len(inner.NonceKeys) != 1 || !inner.NonceKeys[0].IsZero() {
-		t.Fatalf("nonce keys %v, expected [0]", inner.NonceKeys)
-	}
-
-	if tx.UsesAccountNonce() {
-		t.Fatal("key zero is not the account nonce under the current revision")
-	}
-
-	// An empty key set stays empty and is the account nonce.
-	raw = `{"from":"0xd23e74bc0622087c685981e9974a426d89701053","gas":"0xe051",
-		"maxFeePerGas":"0x4a817c800","maxPriorityFeePerGas":"0x77359400","maxFeePerBlobGas":"0x0",
-		"hash":"0x9bc7aee18912f786f04fea5eaead7ffcb66b6582994c4a76ce4a3fb39cb9ede4","input":"0x",
-		"nonce":"0x29a","nonceKeys":[],"to":null,"value":"0x0","type":"0x6",
-		"chainId":"0x1a38c5b87","frames":[{"mode":"0x1","flags":"0x3","executionGas":"0x1388","stateGas":"0x0",
-		"value":"0x0","data":"0x"}],"signatures":[{"scheme":"0x1","msg":"0x","signature":"0x01"}]}`
-
-	tx, err = UnmarshalJSONTx([]byte(raw))
-	if err != nil {
-		t.Fatalf("failed decoding: %v", err)
-	}
-
-	inner, _ = tx.Inner().(*FrameTx)
-	if len(inner.NonceKeys) != 0 || !inner.HasKeyedNonces() {
-		t.Fatalf("nonce keys %v with extensions %s, expected an empty keyed set", inner.NonceKeys, inner.Extensions)
-	}
-
 	if !tx.UsesAccountNonce() {
-		t.Fatal("the empty key set should use the account nonce")
+		t.Fatal("the legacy key set should use the account nonce")
 	}
 }
 

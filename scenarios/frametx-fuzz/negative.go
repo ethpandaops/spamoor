@@ -279,13 +279,12 @@ var violations = []violation{
 		},
 	},
 	{
-		// Under the key-zero revision of EIP-8250 the zero key aliases the account nonce
-		// and may not be combined; the current revision makes [0, 7] an ordinary key
-		// set, so there the case does not exist.
+		// Only under the key-zero revision; the current text makes [0, 7] an ordinary
+		// key set.
 		name:          "zero-key-mixed",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
-			if !tx.HasKeyedNonces() || !tx.Extensions.Has(txtypes.FrameExtLegacyNonceKeyZero) {
+			if !tx.HasKeyedNonces() || !txtypes.LegacyNonceKeyZero {
 				return errViolationNotApplicable
 			}
 
@@ -295,12 +294,12 @@ var violations = []violation{
 		},
 	},
 	{
-		// The key-zero revision requires at least one key; the current revision reads an
-		// empty key set as the account nonce.
+		// Only under the key-zero revision; the current text reads an empty key set as
+		// the account nonce.
 		name:          "empty-nonce-keys",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
-			if !tx.HasKeyedNonces() || !tx.Extensions.Has(txtypes.FrameExtLegacyNonceKeyZero) {
+			if !tx.HasKeyedNonces() || !txtypes.LegacyNonceKeyZero {
 				return errViolationNotApplicable
 			}
 
@@ -310,9 +309,8 @@ var violations = []violation{
 		},
 	},
 	{
-		// The single-use sequence selects nothing with an empty key set: the account
-		// nonce can never be MAX_NONCE_SEQ. Under the key-zero revision the sequence is
-		// out of range whatever the keys, which the same mutation also exercises.
+		// The single-use sequence needs a non-empty key set; under the key-zero
+		// revision it is out of range altogether.
 		name:          "single-use-without-keys",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {

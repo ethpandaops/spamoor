@@ -10,19 +10,28 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// Tests for the EIP text as of 2026-10-18: EIP-8250's empty legacy key set and
+// Tests for the EIP texts as of 2026-10-18: EIP-8250's empty legacy key set and
 // single-use form, EIP-7906's ASSERT batch rules, EIP-8272's verification gas, and the
-// static validation and signing issues found while aligning with them.
+// static validation issues found while aligning with them.
 
-// signedKeyedTx builds a self-relayed transaction in the given envelope revision with the
-// given key set and sequence, signed by key.
-func signedKeyedTx(t *testing.T, key *ecdsa.PrivateKey, extensions FrameExtensions, keys []*uint256.Int, seq uint64) *FrameTx {
+// setLegacyNonceKeyZero selects the EIP-8250 revision for the test's duration.
+func setLegacyNonceKeyZero(t *testing.T, value bool) {
+	t.Helper()
+
+	previous := LegacyNonceKeyZero
+	LegacyNonceKeyZero = value
+
+	t.Cleanup(func() { LegacyNonceKeyZero = previous })
+}
+
+// signedKeyedTx builds a self-relayed transaction with the given key set and sequence,
+// signed by key.
+func signedKeyedTx(t *testing.T, key *ecdsa.PrivateKey, keys []*uint256.Int, seq uint64) *FrameTx {
 	t.Helper()
 
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 
-	tx := NewFrameTxWithExtensions(extensions, testChainID, sender, 0,
-		FrameFees{GasFeeCap: uint256.NewInt(1e9)},
+	tx := NewFrameTx(testChainID, sender, 0, FrameFees{GasFeeCap: uint256.NewInt(1e9)},
 		[]*Frame{
 			SelfVerifyFrame(FrameLimits{Execution: 5_000}),
 			UserOpFrame(&testTarget, nil, nil, FrameLimits{Execution: 30_000}),
@@ -63,11 +72,9 @@ func TestFrameNonceForms(t *testing.T) {
 
 	seventeen := append(append([]*uint256.Int{}, sixteen...), uint256.NewInt(MaxNonceKeys))
 
-	const keyZero = FrameExtKeyedNonces | FrameExtLegacyNonceKeyZero
-
 	cases := []struct {
 		name       string
-		extensions FrameExtensions
+		keyZero    bool
 		keys       []*uint256.Int
 		seq        uint64
 		valid      bool
@@ -75,26 +82,28 @@ func TestFrameNonceForms(t *testing.T) {
 		singleUse  bool
 		accessCost uint64
 	}{
-		{"empty set is the account nonce", FrameExtKeyedNonces, nil, 3, true, true, false, 0},
-		{"key zero is an ordinary key", FrameExtKeyedNonces, keys(0), 3, true, false, false, 12_100},
-		{"key zero combines with others", FrameExtKeyedNonces, keys(0, 5), 3, true, false, false, 2 * 12_100},
-		{"sixteen keys", FrameExtKeyedNonces, sixteen, 0, true, false, false, 16 * 12_100},
-		{"seventeen keys", FrameExtKeyedNonces, seventeen, 0, false, false, false, 17 * 12_100},
-		{"unsorted keys", FrameExtKeyedNonces, keys(9, 7), 0, false, false, false, 2 * 12_100},
-		{"duplicate keys", FrameExtKeyedNonces, keys(7, 7), 0, false, false, false, 2 * 12_100},
-		{"single use", FrameExtKeyedNonces, keys(7), MaxNonceSeq, true, false, true, 12_100},
-		{"single use without keys", FrameExtKeyedNonces, nil, MaxNonceSeq, false, true, false, 0},
+		{"empty set is the account nonce", false, nil, 3, true, true, false, 0},
+		{"key zero is an ordinary key", false, keys(0), 3, true, false, false, 12_100},
+		{"key zero combines with others", false, keys(0, 5), 3, true, false, false, 2 * 12_100},
+		{"sixteen keys", false, sixteen, 0, true, false, false, 16 * 12_100},
+		{"seventeen keys", false, seventeen, 0, false, false, false, 17 * 12_100},
+		{"unsorted keys", false, keys(9, 7), 0, false, false, false, 2 * 12_100},
+		{"duplicate keys", false, keys(7, 7), 0, false, false, false, 2 * 12_100},
+		{"single use", false, keys(7), MaxNonceSeq, true, false, true, 12_100},
+		{"single use without keys", false, nil, MaxNonceSeq, false, true, false, 0},
 
-		{"key-zero revision: [0] is the account nonce", keyZero, keys(0), 3, true, true, false, 0},
-		{"key-zero revision: empty set is invalid", keyZero, nil, 3, false, false, false, 0},
-		{"key-zero revision: zero must be alone", keyZero, keys(0, 5), 3, false, false, false, 2 * 12_100},
-		{"key-zero revision: no single use", keyZero, keys(7), MaxNonceSeq, false, false, false, 12_100},
-		{"key-zero revision: ordinary key", keyZero, keys(7), 3, true, false, false, 12_100},
+		{"key-zero revision: [0] is the account nonce", true, keys(0), 3, true, true, false, 0},
+		{"key-zero revision: empty set is invalid", true, nil, 3, false, false, false, 0},
+		{"key-zero revision: zero must be alone", true, keys(0, 5), 3, false, false, false, 2 * 12_100},
+		{"key-zero revision: no single use", true, keys(7), MaxNonceSeq, false, false, false, 12_100},
+		{"key-zero revision: ordinary key", true, keys(7), 3, true, false, false, 12_100},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tx := signedKeyedTx(t, key, tc.extensions, tc.keys, tc.seq)
+			setLegacyNonceKeyZero(t, tc.keyZero)
+
+			tx := signedKeyedTx(t, key, tc.keys, tc.seq)
 
 			err := tx.ValidatePayload()
 			if tc.valid && err != nil {
@@ -119,8 +128,9 @@ func TestFrameNonceForms(t *testing.T) {
 		})
 	}
 
-	// WithSingleUseNonceKeys is the single-use form.
-	single := signedKeyedTx(t, key, FrameExtKeyedNonces, nil, 0).WithSingleUseNonceKeys(keys(7, 9))
+	setLegacyNonceKeyZero(t, false)
+
+	single := signedKeyedTx(t, key, nil, 0).WithSingleUseNonceKeys(keys(7, 9))
 	if !single.UsesSingleUseNonce() || single.NonceSeq != MaxNonceSeq {
 		t.Fatal("WithSingleUseNonceKeys did not select the single-use form")
 	}
@@ -136,34 +146,31 @@ func TestFrameLegacyNonceEncoding(t *testing.T) {
 
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 
-	build := func(extensions FrameExtensions) *FrameTx {
-		return NewFrameTxWithExtensions(extensions, testChainID, sender, 7,
-			FrameFees{GasFeeCap: uint256.NewInt(1e9)},
+	build := func(keyZero bool) *FrameTx {
+		setLegacyNonceKeyZero(t, keyZero)
+
+		tx := NewFrameTx(testChainID, sender, 7, FrameFees{GasFeeCap: uint256.NewInt(1e9)},
 			[]*Frame{SelfVerifyFrame(FrameLimits{Execution: 5_000})},
 			[]*FrameSignature{SenderSignature()})
+
+		if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
+			t.Fatalf("failed signing: %v", err)
+		}
+
+		return tx
 	}
 
-	current := build(FrameExtKeyedNonces)
+	current := build(false)
 	if len(current.NonceKeys) != 0 || !current.UsesLegacyNonce() {
 		t.Fatalf("current revision built keys %v", current.NonceKeys)
 	}
 
-	keyZero := build(FrameExtKeyedNonces | FrameExtLegacyNonceKeyZero)
+	keyZero := build(true)
 	if len(keyZero.NonceKeys) != 1 || !keyZero.NonceKeys[0].IsZero() || !keyZero.UsesLegacyNonce() {
 		t.Fatalf("key-zero revision built keys %v", keyZero.NonceKeys)
 	}
 
-	if current.Extensions.String() != "8141+8250" || keyZero.Extensions.String() != "8141+8250/key0" {
-		t.Fatalf("extension names %q and %q", current.Extensions, keyZero.Extensions)
-	}
-
 	// The same account nonce in the two spellings is two different transactions.
-	for _, tx := range []*FrameTx{current, keyZero} {
-		if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
-			t.Fatalf("failed signing: %v", err)
-		}
-	}
-
 	if NewTx(current).Hash() == NewTx(keyZero).Hash() {
 		t.Fatal("[] and [0] must not hash alike")
 	}
@@ -180,14 +187,8 @@ func TestFrameLegacyNonceEncoding(t *testing.T) {
 		}
 
 		back, _ := decoded.Inner().(*FrameTx)
-
 		if len(back.NonceKeys) != len(tx.NonceKeys) {
 			t.Fatalf("%s: decoded %d keys, sent %d", name, len(back.NonceKeys), len(tx.NonceKeys))
-		}
-
-		// The revision marker is not on the wire: a decoded [0] is read as key zero.
-		if back.Extensions != FrameExtKeyedNonces {
-			t.Fatalf("%s: decoded extensions %s", name, back.Extensions)
 		}
 
 		if decoded.Hash() != NewTx(tx).Hash() {
@@ -210,17 +211,17 @@ func TestFrameLegacyNonceEncoding(t *testing.T) {
 		}
 	}
 
-	// WithLegacyNonce spells the account nonce for the transaction's revision.
-	relabelled := build(FrameExtKeyedNonces|FrameExtLegacyNonceKeyZero).WithNonceKeys(keys(7), 1)
-	relabelled.WithLegacyNonce()
+	// WithLegacyNonce spells the account nonce for the selected revision.
+	setLegacyNonceKeyZero(t, true)
 
+	relabelled := build(true).WithNonceKeys(keys(7), 1).WithLegacyNonce()
 	if len(relabelled.NonceKeys) != 1 || !relabelled.UsesLegacyNonce() {
 		t.Fatalf("WithLegacyNonce under the key-zero revision gave %v", relabelled.NonceKeys)
 	}
 
-	relabelled.Extensions = FrameExtKeyedNonces
-	relabelled.WithLegacyNonce()
+	setLegacyNonceKeyZero(t, false)
 
+	relabelled.WithLegacyNonce()
 	if len(relabelled.NonceKeys) != 0 || !relabelled.UsesLegacyNonce() {
 		t.Fatalf("WithLegacyNonce under the current revision gave %v", relabelled.NonceKeys)
 	}
@@ -229,15 +230,17 @@ func TestFrameLegacyNonceEncoding(t *testing.T) {
 // TestFrameNonceFloorTokensAreFlat checks that the nonce encoding is priced with weighted
 // tokens in the intrinsic cost but flat ones in the calldata floor, as EIP-8250 does.
 func TestFrameNonceFloorTokensAreFlat(t *testing.T) {
+	setLegacyNonceKeyZero(t, false)
+
 	key, err := crypto.GenerateKey()
 	if err != nil {
 		t.Fatalf("failed generating key: %v", err)
 	}
 
-	legacy := signedKeyedTx(t, key, FrameExtKeyedNonces, nil, 0)
+	legacy := signedKeyedTx(t, key, nil, 0)
 
 	// rlp([0x0100]) || rlp(0) = c3 82 01 00 80: one zero byte among five.
-	keyed := signedKeyedTx(t, key, FrameExtKeyedNonces, keys(0x0100), 0)
+	keyed := signedKeyedTx(t, key, keys(0x0100), 0)
 
 	// The two signatures differ in their zero bytes, which the weighted intrinsic cost
 	// prices; only the nonce encoding is under test here.
@@ -259,9 +262,8 @@ func TestFrameNonceFloorTokensAreFlat(t *testing.T) {
 	}
 }
 
-// TestFrameGasOverflowRejected reproduces the wrapped-sum validity hole: frame limits
-// that overflow 64 bits must be rejected, and the gas helpers must saturate rather than
-// report a small wrapped total.
+// TestFrameGasOverflowRejected checks that frame limits overflowing 64 bits are
+// rejected and that the gas helpers saturate rather than report a small wrapped total.
 func TestFrameGasOverflowRejected(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	if err != nil {
@@ -356,8 +358,7 @@ func TestFrameAssertBatchRules(t *testing.T) {
 }
 
 // TestFrameP256Verification checks that VerifySignatures verifies P256 entries, not just
-// their encoding, and that P256 entries have to be signed before the canonical-hash
-// entries whose digest they change.
+// their encoding.
 func TestFrameP256Verification(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	if err != nil {
@@ -371,13 +372,10 @@ func TestFrameP256Verification(t *testing.T) {
 
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 
-	build := func() *FrameTx {
-		return NewFrameTx(testChainID, sender, 0, FrameFees{GasFeeCap: uint256.NewInt(1e9)},
-			[]*Frame{SelfVerifyFrame(FrameLimits{Execution: 5_000})},
-			[]*FrameSignature{SenderSignature(), {Scheme: SigSchemeP256}})
-	}
+	tx := NewFrameTx(testChainID, sender, 0, FrameFees{GasFeeCap: uint256.NewInt(1e9)},
+		[]*Frame{SelfVerifyFrame(FrameLimits{Execution: 5_000})},
+		[]*FrameSignature{SenderSignature(), {Scheme: SigSchemeP256}})
 
-	tx := build()
 	if err := tx.SignEntryP256(1, p256Key); err != nil {
 		t.Fatalf("failed signing P256 entry: %v", err)
 	}
@@ -412,79 +410,6 @@ func TestFrameP256Verification(t *testing.T) {
 	if err := offCurve.VerifySignatures(); err == nil {
 		t.Fatal("a public key off the curve verified")
 	}
-
-	// Signing the secp256k1 entry first leaves it over a hash the P256 signer changes.
-	late := build()
-	if err := late.SignPayload(testChainID.ToBig(), key); err != nil {
-		t.Fatalf("failed signing: %v", err)
-	}
-
-	if err := late.SignEntryP256(1, p256Key); err == nil {
-		t.Fatal("signing a P256 entry after a canonical-hash entry was allowed")
-	}
-}
-
-// TestFrameSignPayloadOrder checks that one key owning both an explicit-msg entry and a
-// canonical-hash entry ends up with both verifying: the explicit one has to be signed
-// first because its bytes are part of the canonical hash.
-func TestFrameSignPayloadOrder(t *testing.T) {
-	key, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatalf("failed generating key: %v", err)
-	}
-
-	sender := crypto.PubkeyToAddress(key.PublicKey)
-	digest := common.HexToHash("0x1122334455667788112233445566778811223344556677881122334455667788")
-
-	tx := NewFrameTx(testChainID, sender, 0, FrameFees{GasFeeCap: uint256.NewInt(1e9)},
-		[]*Frame{SelfVerifyFrame(FrameLimits{Execution: 5_000})},
-		[]*FrameSignature{
-			SenderSignature(),
-			{Scheme: SigSchemeSecp256k1, Signer: sender.Bytes(), Msg: digest.Bytes()},
-		})
-
-	if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
-		t.Fatalf("failed signing: %v", err)
-	}
-
-	if err := tx.VerifySignatures(); err != nil {
-		t.Fatalf("signatures do not verify: %v", err)
-	}
-}
-
-// TestSignTxKeepsExplicitSender checks that signing with a co-signer's key does not make
-// From report the co-signer.
-func TestSignTxKeepsExplicitSender(t *testing.T) {
-	senderKey, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatalf("failed generating key: %v", err)
-	}
-
-	paymasterKey, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatalf("failed generating key: %v", err)
-	}
-
-	sender := crypto.PubkeyToAddress(senderKey.PublicKey)
-	paymaster := crypto.PubkeyToAddress(paymasterKey.PublicKey)
-
-	tx := NewFrameTx(testChainID, sender, 0, FrameFees{GasFeeCap: uint256.NewInt(1e9)},
-		[]*Frame{OnlyVerifyFrame(FrameLimits{Execution: 5_000}), PayFrame(paymaster, nil, FrameLimits{Execution: 5_000})},
-		[]*FrameSignature{SenderSignature(), SignerSignature(paymaster)})
-
-	signed, err := SignTx(NewTx(tx), testChainID.ToBig(), paymasterKey)
-	if err != nil {
-		t.Fatalf("failed signing: %v", err)
-	}
-
-	from, err := signed.From(testChainID.ToBig())
-	if err != nil {
-		t.Fatalf("From: %v", err)
-	}
-
-	if from != sender {
-		t.Fatalf("From = %s, want the sender %s", from, sender)
-	}
 }
 
 // TestRecentRootVerifyGasFitsCap checks that a full recent root frame still leaves room
@@ -502,8 +427,7 @@ func TestRecentRootVerifyGasFitsCap(t *testing.T) {
 		references = append(references, &RecentRootReference{Slot: uint64(i + 1)})
 	}
 
-	// Sixteen cold tuples cost 3119 + 16*2396 = 41455 by the bytecode; the budget must
-	// cover that with room, without crowding the account validation out of the cap.
+	// Sixteen cold tuples cost 3119 + 16*2396 = 41455 by the bytecode.
 	budget := RecentRootVerifyGas(MaxRecentRootReferences)
 	if budget < 41_455 || budget > 45_000 {
 		t.Fatalf("budget for sixteen tuples = %d", budget)
@@ -523,53 +447,5 @@ func TestRecentRootVerifyGasFitsCap(t *testing.T) {
 
 	if err := tx.ValidateMempoolPrefix(); err != nil {
 		t.Fatalf("a full recent root frame does not fit the cap: %v", err)
-	}
-}
-
-// TestFrameReceiptRLPRoundTrip checks the consensus receipt encoding.
-func TestFrameReceiptRLPRoundTrip(t *testing.T) {
-	extra := &FrameReceiptExtra{
-		Payer: common.HexToAddress("0xdddd000000000000000000000000000000000004"),
-		Frames: []*FrameReceipt{
-			{Status: FrameStatusSuccess, ExecutionGas: 2_600, StateGas: 0},
-			{Status: FrameStatusSuccess, ExecutionGas: 30_000, StateGas: 1_000, Logs: []*Log{{
-				Address: testTarget,
-				Topics:  []common.Hash{common.HexToHash("0x01")},
-				Data:    []byte{0xaa},
-			}}},
-			{Status: FrameStatusSkipped},
-		},
-	}
-
-	encoded, err := EncodeFrameReceiptRLP(0x1234, extra)
-	if err != nil {
-		t.Fatalf("failed encoding: %v", err)
-	}
-
-	if encoded[0] != FrameTxType {
-		t.Fatalf("type byte 0x%02x", encoded[0])
-	}
-
-	for name, data := range map[string][]byte{"typed": encoded, "payload": encoded[1:]} {
-		cumulative, back, err := DecodeFrameReceiptRLP(data)
-		if err != nil {
-			t.Fatalf("%s: failed decoding: %v", name, err)
-		}
-
-		if cumulative != 0x1234 || back.Payer != extra.Payer || len(back.Frames) != 3 {
-			t.Fatalf("%s: decoded %d, %s, %d frames", name, cumulative, back.Payer, len(back.Frames))
-		}
-
-		if back.Frames[1].ExecutionGas != 30_000 || back.Frames[1].StateGas != 1_000 || len(back.Frames[1].Logs) != 1 {
-			t.Fatalf("%s: frame 1 decoded as %+v", name, back.Frames[1])
-		}
-
-		if back.Frames[1].Logs[0].Address != testTarget || back.Frames[1].Logs[0].Data[0] != 0xaa {
-			t.Fatalf("%s: log did not survive", name)
-		}
-
-		if !back.Frames[2].Skipped() {
-			t.Fatalf("%s: frame 2 should be skipped", name)
-		}
 	}
 }
