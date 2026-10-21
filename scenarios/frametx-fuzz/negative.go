@@ -137,7 +137,7 @@ var violations = []violation{
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
 			frame := txtypes.UserOpFrame(nil, nil, nil, txtypes.FrameLimits{Execution: 21_000})
-			frame.Mode = txtypes.FrameModePostTx + 1
+			frame.Mode = txtypes.FrameModeAssert + 1
 			tx.Frames = append(tx.Frames, frame)
 
 			return nil
@@ -188,13 +188,39 @@ var violations = []violation{
 		},
 	},
 	{
-		name:          "post-tx-not-suffix",
+		name:          "assert-not-suffix",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
 			tx.Frames = append(tx.Frames,
-				txtypes.PostTxFrame(txtypes.ExpiryVerifier, expiryData(1<<40), txtypes.FrameLimits{Execution: 5_000}),
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, expiryData(1<<40), txtypes.FrameLimits{Execution: 5_000}),
 				txtypes.UserOpFrame(nil, nil, nil, txtypes.FrameLimits{Execution: 21_000}),
 			)
+
+			return nil
+		},
+	},
+	{
+		// The atomic batch flag is only valid with DEFAULT and SENDER, and an ASSERT
+		// failure reverts the whole body anyway.
+		name:          "assert-batched",
+		alwaysInvalid: true,
+		apply: func(tx *txtypes.FrameTx) error {
+			tx.Frames = append(tx.Frames,
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, expiryData(1<<40), txtypes.FrameLimits{Execution: 5_000}).WithAtomicBatch(),
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, expiryData(1<<40), txtypes.FrameLimits{Execution: 5_000}),
+			)
+
+			return nil
+		},
+	},
+	{
+		// Nor may the frame directly before an ASSERT frame batch into it.
+		name:          "batch-into-assert",
+		alwaysInvalid: true,
+		apply: func(tx *txtypes.FrameTx) error {
+			tx.Frames[len(tx.Frames)-1].WithAtomicBatch()
+			tx.Frames = append(tx.Frames,
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, expiryData(1<<40), txtypes.FrameLimits{Execution: 5_000}))
 
 			return nil
 		},
@@ -204,6 +230,19 @@ var violations = []violation{
 		alwaysInvalid: false, // mempool policy, not block validity
 		apply: func(tx *txtypes.FrameTx) error {
 			tx.Frames[0].Limits.Execution = txtypes.MaxVerifyGas + 1
+
+			return nil
+		},
+	},
+	{
+		// A recent root verifier frame counts toward the verification gas cap like every
+		// other prefix frame, so one that alone fills the cap pushes the prefix over it.
+		// Still mempool policy: the frame itself executes normally.
+		name:          "recent-root-frame-over-verify-gas",
+		alwaysInvalid: false,
+		apply: func(tx *txtypes.FrameTx) error {
+			frame := txtypes.RecentRootVerifyFrame([]*txtypes.RecentRootReference{{}}, txtypes.MaxVerifyGas)
+			tx.Frames = append([]*txtypes.Frame{frame}, tx.Frames...)
 
 			return nil
 		},
@@ -240,10 +279,12 @@ var violations = []violation{
 		},
 	},
 	{
+		// Only under the key-zero revision; the current text makes [0, 7] an ordinary
+		// key set.
 		name:          "zero-key-mixed",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
-			if !tx.HasKeyedNonces() {
+			if !tx.HasKeyedNonces() || !txtypes.LegacyNonceKeyZero {
 				return errViolationNotApplicable
 			}
 
@@ -253,7 +294,24 @@ var violations = []violation{
 		},
 	},
 	{
+		// Only under the key-zero revision; the current text reads an empty key set as
+		// the account nonce.
 		name:          "empty-nonce-keys",
+		alwaysInvalid: true,
+		apply: func(tx *txtypes.FrameTx) error {
+			if !tx.HasKeyedNonces() || !txtypes.LegacyNonceKeyZero {
+				return errViolationNotApplicable
+			}
+
+			tx.NonceKeys = nil
+
+			return nil
+		},
+	},
+	{
+		// The single-use sequence needs a non-empty key set; under the key-zero
+		// revision it is out of range altogether.
+		name:          "single-use-without-keys",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
 			if !tx.HasKeyedNonces() {
@@ -261,6 +319,7 @@ var violations = []violation{
 			}
 
 			tx.NonceKeys = nil
+			tx.NonceSeq = txtypes.MaxNonceSeq
 
 			return nil
 		},

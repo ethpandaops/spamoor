@@ -43,7 +43,7 @@ type ScenarioOptions struct {
 	Recipe       string  `yaml:"recipe"`
 	Axes         string  `yaml:"axes"`
 	Envelope     string  `yaml:"envelope"`
-	PostTx       string  `yaml:"post_tx"`
+	AssertFrames string  `yaml:"assert_frames"`
 	MaxFrames    uint64  `yaml:"max_frames"`
 	InvalidRatio float64 `yaml:"invalid_ratio"`
 	LogFrames    bool    `yaml:"log_frames"`
@@ -95,7 +95,7 @@ var ScenarioDefaultOptions = ScenarioOptions{
 	TxIdOffset:   0,
 	Axes:         "all",
 	Envelope:     "auto",
-	PostTx:       "auto",
+	AssertFrames: "auto",
 	MaxFrames:    6,
 	InvalidRatio: 0.05,
 	LogFrames:    false,
@@ -144,7 +144,7 @@ func (s *Scenario) Flags(flags *pflag.FlagSet) error {
 	flags.StringVar(&s.options.Axes, "axes", ScenarioDefaultOptions.Axes,
 		fmt.Sprintf("Weighted list of dimensions to fuzz, e.g. 'nonces:5,roots:2'. Known axes: %s", strings.Join(axisNamesText(), ", ")))
 	flags.StringVar(&s.options.Envelope, "envelope", ScenarioDefaultOptions.Envelope, "Envelope shape to encode: auto, full, keyed, base")
-	flags.StringVar(&s.options.PostTx, "post-tx", ScenarioDefaultOptions.PostTx, "EIP-7906 POST_TX frames: auto (probe the chain), on, off")
+	flags.StringVar(&s.options.AssertFrames, "assert-frames", ScenarioDefaultOptions.AssertFrames, "EIP-7906 ASSERT frames: auto (probe the chain), on, off")
 	flags.Uint64Var(&s.options.MaxFrames, "max-frames", ScenarioDefaultOptions.MaxFrames, "Maximum number of body frames per transaction")
 	flags.Float64Var(&s.options.InvalidRatio, "invalid-ratio", ScenarioDefaultOptions.InvalidRatio,
 		fmt.Sprintf("Share of the stream carrying a deliberate violation. Known violations: %s", strings.Join(violationNames(), ", ")))
@@ -182,10 +182,10 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		return err
 	}
 
-	switch s.options.PostTx {
+	switch s.options.AssertFrames {
 	case "auto", "on", "off":
 	default:
-		return fmt.Errorf("unknown --post-tx value %q, expected auto, on or off", s.options.PostTx)
+		return fmt.Errorf("unknown --assert-frames value %q, expected auto, on or off", s.options.AssertFrames)
 	}
 
 	if s.options.Recipe != "" {
@@ -226,7 +226,7 @@ func (s *Scenario) Init(options *scenario.Options) error {
 		})
 	}
 
-	if s.options.PostTx == "auto" && s.axes.enabled(axisPostTx) {
+	if s.options.AssertFrames == "auto" && s.axes.enabled(axisAssert) {
 		// Capability probes run on their own wallet: a probe the chain neither rejects
 		// nor includes stays in the mempool for good, and that must not be a fuzzing
 		// wallet whose every later transaction would queue behind it.
@@ -413,15 +413,18 @@ func (s *Scenario) recipeFor(txIdx uint64) *Recipe {
 	rng := utils.NewDeterministicRNGWithSeed(index, s.seed)
 
 	return Draw(rng, index, DrawOptions{
-		Axes:               s.axes,
-		MaxBodyFrames:      int(s.options.MaxFrames),
-		AllowPostTx:        s.env.allowPostTx,
-		AllowContract:      s.env.contractCount > 0,
-		AllowRoots:         s.env.roots != nil,
-		AllowKeyed:         s.env.nonces != nil,
-		AllowProbe:         s.env.probe != nil,
-		AllowCode:          s.env.factory != (common.Address{}),
-		AllowFuzzedAccount: s.env.accounts.available(),
+		Axes:          s.axes,
+		MaxBodyFrames: int(s.options.MaxFrames),
+		AllowAssert:   s.env.allowAssert,
+		AllowContract: s.env.contractCount > 0,
+		AllowRoots:    s.env.roots != nil,
+		AllowKeyed:    s.env.nonces != nil,
+		AllowProbe:    s.env.probe != nil,
+
+		// The key-zero revision of EIP-8250 has no single-use form.
+		AllowSingleUseNonce: s.env.nonces != nil && !txtypes.LegacyNonceKeyZero,
+		AllowCode:           s.env.factory != (common.Address{}),
+		AllowFuzzedAccount:  s.env.accounts.available(),
 
 		AllowDeploySender:    s.axes.enabled(axisDeploy) && s.env.factory != (common.Address{}) && s.env.pending.available(),
 		AllowDeployPaymaster: s.axes.enabled(axisDeploy) && s.env.factory != (common.Address{}) && s.env.probe != nil,

@@ -25,8 +25,8 @@ const (
 	shapeAtomic       shapeName = "atomic"
 	shapeAtomicFail   shapeName = "atomic-fail"
 	shapeExpiry       shapeName = "expiry"
-	shapePostTx       shapeName = "post-tx"
-	shapePostTxRevert shapeName = "post-tx-revert"
+	shapeAssert       shapeName = "assert"
+	shapeAssertRevert shapeName = "assert-revert"
 )
 
 // defaultShapes are the shapes "all" enables: everything EIP-8141 defines on its own.
@@ -46,8 +46,8 @@ var defaultShapes = []shapeName{
 // a chain without EIP-7906 rejects mode 3, and quietly sending transactions that
 // cannot succeed is worse than requiring one word of configuration.
 var optInShapes = []shapeName{
-	shapePostTx,
-	shapePostTxRevert,
+	shapeAssert,
+	shapeAssertRevert,
 }
 
 // allShapes is every shape the scenario can build, for validation and help text.
@@ -73,7 +73,7 @@ type builtShape struct {
 	frames         []*txtypes.Frame
 	expectedStatus []uint64
 
-	// expectBodyReverted marks a shape whose POST_TX frame fails, so everything after
+	// expectBodyReverted marks a shape whose ASSERT frame fails, so everything after
 	// the validation prefix is discarded regardless of the per-frame statuses.
 	expectBodyReverted bool
 }
@@ -184,10 +184,10 @@ func buildShape(name shapeName, p shapeParams) (*builtShape, error) {
 			},
 		}, nil
 
-	case shapePostTx:
+	case shapeAssert:
 		// The expiry verifier predeploy doubles as a deterministic assertion
 		// contract: with an 8-byte deadline in the future it stops successfully, so
-		// no contract has to be deployed to exercise a passing POST_TX frame.
+		// no contract has to be deployed to exercise a passing ASSERT frame.
 		deadline := make([]byte, txtypes.ExpiryDataLength)
 		binary.BigEndian.PutUint64(deadline, p.expiryAt)
 
@@ -196,7 +196,7 @@ func buildShape(name shapeName, p shapeParams) (*builtShape, error) {
 			frames: []*txtypes.Frame{
 				txtypes.SelfVerifyFrame(verifyLimits),
 				userOp(nil, 0),
-				txtypes.PostTxFrame(txtypes.ExpiryVerifier, deadline,
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, deadline,
 					txtypes.FrameLimits{Execution: p.verifyGas}),
 			},
 			expectedStatus: []uint64{
@@ -206,9 +206,9 @@ func buildShape(name shapeName, p shapeParams) (*builtShape, error) {
 			},
 		}, nil
 
-	case shapePostTxRevert:
+	case shapeAssertRevert:
 		// The same predeploy reverts on any calldata length other than 8, which makes
-		// a POST_TX failure reproducible without a contract. Its failure reverts the
+		// an ASSERT failure reproducible without a contract. Its failure reverts the
 		// whole execution body, so the user operation's effects are discarded even
 		// though its receipt still reports success -- the case a consumer reading
 		// statuses alone gets wrong.
@@ -217,7 +217,7 @@ func buildShape(name shapeName, p shapeParams) (*builtShape, error) {
 			frames: []*txtypes.Frame{
 				txtypes.SelfVerifyFrame(verifyLimits),
 				userOp(nil, 0),
-				txtypes.PostTxFrame(txtypes.ExpiryVerifier, []byte{0x01},
+				txtypes.AssertFrame(txtypes.ExpiryVerifier, []byte{0x01},
 					txtypes.FrameLimits{Execution: p.verifyGas}),
 			},
 			expectedStatus: []uint64{
@@ -350,8 +350,8 @@ func shapeNames() []string {
 	return names
 }
 
-// requiresPostTx reports whether a selection includes an EIP-7906 shape.
-func (w *weightedShapes) requiresPostTx() bool {
+// requiresAssert reports whether a selection includes an EIP-7906 shape.
+func (w *weightedShapes) requiresAssert() bool {
 	for _, name := range w.names {
 		for _, optIn := range optInShapes {
 			if name == optIn {

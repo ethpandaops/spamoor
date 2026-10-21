@@ -72,7 +72,7 @@ func ExpiryFrame(deadline uint64, executionGas uint64) *Frame {
 // every one is a root its source committed within the usable window.
 //
 // In a public-mempool transaction it sits directly after the optional expiry frame and
-// before everything else; its execution budget is excluded from the MaxVerifyGas cap.
+// before everything else, and its execution budget counts toward the MaxVerifyGas cap.
 func RecentRootVerifyFrame(references []*RecentRootReference, executionGas uint64) *Frame {
 	target := RecentRootAddress
 
@@ -89,15 +89,14 @@ func RecentRootVerifyFrame(references []*RecentRootReference, executionGas uint6
 // RecentRootVerifyGas returns an execution budget for a recent root verifier frame
 // checking count references.
 //
-// RECENT_ROOT_CODE is still TBD in the EIP, so this prices what the validation
-// operation must do rather than a known bytecode: the cold target access at frame
-// entry, then per tuple a cold SLOAD, two keccaks and the arithmetic around them, with
-// headroom. The mempool does not count it, so erring high only raises the up-front
-// max cost.
+// It is priced from the EIP's bytecode: the cold target access at frame entry, a short
+// prologue, then per tuple a cold SLOAD, two keccaks and a CALLDATACOPY (2396 gas when
+// the slot is cold). The budget counts toward MaxVerifyGas, so the headroom is small;
+// sixteen tuples fit under 44k.
 func RecentRootVerifyGas(count int) uint64 {
 	const (
-		entryGas    = 2_600 + 2_000
-		perTupleGas = 2_100 + 2*(30+6*4) + 600
+		entryGas    = 3_000 + 107 + 12 + 281
+		perTupleGas = 2_396 + 104
 	)
 
 	return entryGas + uint64(count)*perTupleGas
@@ -133,15 +132,15 @@ func DeployFrame(factory common.Address, data []byte, limits FrameLimits) *Frame
 	}
 }
 
-// PostTxFrame builds an EIP-7906 POST_TX assertion frame.
+// AssertFrame builds an EIP-7906 ASSERT frame.
 //
 // Not to be confused with PostOpFrame: that is a DEFAULT frame a paymaster uses to
 // settle up, this is a STATICCALL-semantics assertion that may not APPROVE and whose
-// failure reverts the whole execution body. POST_TX frames must be a trailing suffix
-// of the frame list.
-func PostTxFrame(target common.Address, data []byte, limits FrameLimits) *Frame {
+// failure reverts the whole execution body. ASSERT frames must be a trailing suffix of
+// the frame list and may not take part in an atomic batch.
+func AssertFrame(target common.Address, data []byte, limits FrameLimits) *Frame {
 	return &Frame{
-		Mode:   FrameModePostTx,
+		Mode:   FrameModeAssert,
 		Flags:  ApproveNone,
 		Target: &target,
 		Limits: limits,
@@ -209,9 +208,9 @@ func DefaultCodeVerifyLimits(senderExists bool) FrameLimits {
 // NewFrameTx assembles a frame transaction from its parts, filling in the zero values
 // the encoder requires.
 //
-// It builds the envelope shape current devnets run, with both extensions active and
-// the nonce in EIP-8250's [0] key set, which is the sender's ordinary account nonce.
-// Use NewFrameTxWithExtensions for a chain running a different combination.
+// It builds the envelope shape current devnets run, with every extension active and
+// the nonce selecting the sender's ordinary account nonce. Use NewFrameTxWithExtensions
+// for a chain running a different combination.
 func NewFrameTx(chainID *uint256.Int, sender common.Address, nonce uint64, fees FrameFees, frames []*Frame, signatures []*FrameSignature) *FrameTx {
 	return NewFrameTxWithExtensions(FrameExtAll, chainID, sender, nonce, fees, frames, signatures)
 }
@@ -250,9 +249,5 @@ func NewFrameTxWithExtensions(extensions FrameExtensions, chainID *uint256.Int, 
 		Extensions: extensions,
 	}
 
-	if extensions.Has(FrameExtKeyedNonces) {
-		tx.NonceKeys = []*uint256.Int{new(uint256.Int)}
-	}
-
-	return tx
+	return tx.WithLegacyNonce()
 }
