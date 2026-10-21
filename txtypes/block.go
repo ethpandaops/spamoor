@@ -28,6 +28,9 @@ type Header struct {
 	// StateGasUsed is the EIP-8037 state gas dimension, zero on chains that do not
 	// report it.
 	StateGasUsed uint64
+
+	// SlotNumber is the EIP-7843 beacon slot, zero on chains that do not report it.
+	SlotNumber uint64
 }
 
 // Block is a block header together with its transactions.
@@ -52,6 +55,7 @@ type jsonHeader struct {
 	BlobGasUsed   *hexutil.Uint64 `json:"blobGasUsed"`
 	ExcessBlobGas *hexutil.Uint64 `json:"excessBlobGas"`
 	StateGasUsed  *hexutil.Uint64 `json:"stateGasUsed"`
+	SlotNumber    *hexutil.Uint64 `json:"slotNumber"`
 }
 
 // UnmarshalJSON decodes a header from a JSON-RPC block response.
@@ -103,6 +107,10 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 
 	if dec.StateGasUsed != nil {
 		h.StateGasUsed = uint64(*dec.StateGasUsed)
+	}
+
+	if dec.SlotNumber != nil {
+		h.SlotNumber = uint64(*dec.SlotNumber)
 	}
 
 	return nil

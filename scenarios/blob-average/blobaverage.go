@@ -197,8 +197,6 @@ func (s *Scenario) processBlock(blockNumber uint64, globalBlockStats *spamoor.Gl
 
 // runBlobAverageLoop runs the main loop that sends blob transactions to maintain the target average
 func (s *Scenario) runBlobAverageLoop(ctx context.Context) error {
-	slotDuration := scenario.GlobalSlotDuration
-
 	pendingCount := atomic.Int64{}
 	txIdxCounter := atomic.Uint64{}
 
@@ -217,7 +215,7 @@ outer:
 			// Wait for pending transactions to complete before exiting
 			break outer
 		case <-s.blockChan:
-		case <-time.After(slotDuration * 2): // Fallback timeout if block notification missed
+		case <-time.After(scenario.SlotDuration(s.walletPool) * 2): // Fallback timeout if block notification missed
 		}
 
 		// Check if we need to send more blobs

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/ethpandaops/spamoor/txtypes"
 )
 
@@ -77,5 +79,24 @@ func TestSendTransactionReleasesWaitGroupWhenContextCancelled(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("wait group was never released after the context was cancelled")
+	}
+}
+
+func TestUpdateSlotDuration(t *testing.T) {
+	pool := &TxPool{options: &TxPoolOptions{Logger: logrus.NewEntry(logrus.New())}}
+
+	pool.updateSlotDuration(&BlockInfo{Timestamp: 1000}, &BlockInfo{Timestamp: 1012})
+	if pool.GetSlotDuration() != 0 {
+		t.Fatalf("expected no slot duration without slot numbers, got %v", pool.GetSlotDuration())
+	}
+
+	pool.updateSlotDuration(&BlockInfo{Timestamp: 1000, SlotNumber: 100}, &BlockInfo{Timestamp: 1012, SlotNumber: 101})
+	if pool.GetSlotDuration() != 12*time.Second {
+		t.Fatalf("expected 12s, got %v", pool.GetSlotDuration())
+	}
+
+	pool.updateSlotDuration(&BlockInfo{Timestamp: 2000, SlotNumber: 200}, &BlockInfo{Timestamp: 2027, SlotNumber: 203})
+	if pool.GetSlotDuration() != 9*time.Second {
+		t.Fatalf("expected 9s across missed slots, got %v", pool.GetSlotDuration())
 	}
 }

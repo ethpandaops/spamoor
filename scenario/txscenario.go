@@ -15,7 +15,21 @@ import (
 // GlobalSlotDuration is the global setting for slot/block duration used in rate limiting.
 // This can be set via CLI flag (--slot-duration) and applies to all scenarios.
 // For L1 chains, this is typically 12s. For L2s like Arbitrum, it can be 250ms or less.
+// It is the fallback for chains that do not report EIP-7843 slot numbers.
 var GlobalSlotDuration time.Duration = 12 * time.Second
+
+// SlotDuration returns the chain's slot duration derived from EIP-7843 block slot
+// numbers, falling back to GlobalSlotDuration.
+func SlotDuration(walletPool *spamoor.WalletPool) time.Duration {
+	if walletPool != nil {
+		if txPool := walletPool.GetTxPool(); txPool != nil {
+			if duration := txPool.GetSlotDuration(); duration > 0 {
+				return duration
+			}
+		}
+	}
+	return GlobalSlotDuration
+}
 
 // TransactionScenarioOptions configures how the transaction scenario is executed.
 type TransactionScenarioOptions struct {
@@ -56,8 +70,7 @@ type ProcessNextTxParams struct {
 // Returns an error only if the scenario cannot be started. Transaction failures
 // should be handled within ProcessNextTxFn.
 func RunTransactionScenario(ctx context.Context, options TransactionScenarioOptions) error {
-	// Use global slot duration for rate limiting
-	slotDuration := GlobalSlotDuration
+	slotDuration := SlotDuration(options.WalletPool)
 
 	txIdxCounter := uint64(0)
 	pendingCount := atomic.Int64{}
@@ -122,11 +135,16 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 		pendingCond = sync.NewCond(&pendingMutex)
 	}
 
-	initialRate := rate.Limit(float64(options.Throughput) / slotDuration.Seconds())
-	if initialRate == 0 {
-		initialRate = rate.Inf
+	throughput := float64(options.Throughput)
+	var throughputMutex sync.Mutex
+
+	slotRate := func() rate.Limit {
+		if throughput == 0 {
+			return rate.Inf
+		}
+		return rate.Limit(throughput / slotDuration.Seconds())
 	}
-	limiter := rate.NewLimiter(initialRate, 1)
+	limiter := rate.NewLimiter(slotRate(), 1)
 
 	isErrorMode := atomic.Bool{}
 	errorLimiter := rate.NewLimiter(rate.Limit(0.5), 1) // 2 sec interval when in error mode
@@ -136,6 +154,13 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	if options.WalletPool != nil && options.WalletPool.GetTxPool() != nil {
 		txPool := options.WalletPool.GetTxPool()
 		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats *spamoor.WalletPoolBlockStats) {
+			throughputMutex.Lock()
+			if newSlotDuration := SlotDuration(options.WalletPool); newSlotDuration != slotDuration {
+				slotDuration = newSlotDuration
+				limiter.SetLimit(slotRate())
+			}
+			throughputMutex.Unlock()
+
 			pendingCount := uint64(0)
 			submittedCount := uint64(0)
 			for _, wallet := range options.WalletPool.GetAllWallets() {
@@ -179,14 +204,16 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			for {
 				select {
 				case <-ticker.C:
-					throughput := limiter.Limit() * rate.Limit(slotDuration.Seconds())
-					newThroughput := throughput + 1
-					newMaxPending := uint64(float64(newThroughput) * pendingRatio)
+					throughputMutex.Lock()
+					oldThroughput := throughput
+					throughput++
+					newMaxPending := uint64(throughput * pendingRatio)
 
 					options.Logger.Infof("Increasing throughput from %.3f to %.3f and max pending from %d to %d",
-						throughput, newThroughput, maxPending.Load(), newMaxPending)
+						oldThroughput, throughput, maxPending.Load(), newMaxPending)
 
-					limiter.SetLimit(rate.Limit(float64(newThroughput) / slotDuration.Seconds()))
+					limiter.SetLimit(slotRate())
+					throughputMutex.Unlock()
 					maxPending.Store(newMaxPending)
 
 					// Signal one waiting goroutine that capacity has increased

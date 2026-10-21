@@ -25,6 +25,7 @@ func init() {
 		"RunTransactionScenario": reflect.ValueOf(scenario.RunTransactionScenario),
 		"ScenarioSourceNative":   reflect.ValueOf(scenario.ScenarioSourceNative),
 		"ScenarioSourcePlugin":   reflect.ValueOf(scenario.ScenarioSourcePlugin),
+		"SlotDuration":           reflect.ValueOf(scenario.SlotDuration),
 		"ValidateScenarioConfig": reflect.ValueOf(scenario.ValidateScenarioConfig),
 
 		// type definitions
