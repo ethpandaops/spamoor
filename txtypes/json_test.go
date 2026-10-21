@@ -201,6 +201,7 @@ func TestBlockDecode(t *testing.T) {
 		"blobGasUsed": "0x20000",
 		"excessBlobGas": "0x40000",
 		"stateGasUsed": "0x1e8480",
+		"slotNumber": "0x184",
 		"transactions": [
 			{"type":"0x0","nonce":"0x1","gas":"0x5208","gasPrice":"0x7","value":"0x0","input":"0x","hash":"0xcccc000000000000000000000000000000000000000000000000000000000003","from":"0x1111111111111111111111111111111111111111","to":"0x2222222222222222222222222222222222222222","v":"0x1b","r":"0x1","s":"0x2"},
 			{"type":"0x63","nonce":"0x2","gas":"0x5208","value":"0x0","input":"0x","hash":"0xdddd000000000000000000000000000000000000000000000000000000000004","from":"0x3333333333333333333333333333333333333333"}
@@ -222,6 +223,10 @@ func TestBlockDecode(t *testing.T) {
 
 	if block.StateGasUsed != 2_000_000 {
 		t.Fatalf("wrong state gas: %d", block.StateGasUsed)
+	}
+
+	if block.SlotNumber != 388 {
+		t.Fatalf("wrong slot number: %d", block.SlotNumber)
 	}
 
 	if len(block.Transactions) != 2 {

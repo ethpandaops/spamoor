@@ -330,13 +330,11 @@ func (s *Scenario) sendTx(ctx context.Context, txIdx uint64) (scenario.ReceiptCh
 // runReplenisher periodically tops up the market's NFT inventory and coin float
 // until the scenario context is cancelled.
 func (s *Scenario) runReplenisher(ctx context.Context) {
-	ticker := time.NewTicker(scenario.GlobalSlotDuration)
-	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(s.walletPool.GetTxPool().GetSlotDuration()):
 			client := s.walletPool.GetClient(
 				spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 				spamoor.WithClientGroup(s.deployClientGroup()),

@@ -98,9 +98,6 @@ func RunCommand(args []string) {
 		}
 	}
 
-	// Set global slot duration for rate limiting
-	scenario.GlobalSlotDuration = cliArgs.slotDuration
-
 	// Create context
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -212,10 +209,11 @@ func RunCommand(args []string) {
 
 	// Initialize transaction pool
 	txpool := spamoor.NewTxPool(&spamoor.TxPoolOptions{
-		Context:    ctx,
-		Logger:     logger.WithField("module", "txpool"),
-		ClientPool: clientPool,
-		ChainId:    clientPool.GetChainId(),
+		Context:      ctx,
+		Logger:       logger.WithField("module", "txpool"),
+		ClientPool:   clientPool,
+		ChainId:      clientPool.GetChainId(),
+		SlotDuration: cliArgs.slotDuration,
 	})
 
 	// Initialize root wallet

@@ -268,6 +268,17 @@ func (s *Scenario) Init(options *scenario.Options) error {
 	return nil
 }
 
+// blobRate returns the blob tx rate for --max-blob-tx-per-slot at the current slot duration.
+func (s *Scenario) blobRate() rate.Limit {
+	return rate.Limit(float64(s.options.MaxBlobTxPerSlot) / s.walletPool.GetTxPool().GetSlotDuration().Seconds())
+}
+
+// allowBlob reports whether a blob tx may be sent now under the blob rate limit.
+func (s *Scenario) allowBlob() bool {
+	s.blobLimiter.SetLimit(s.blobRate())
+	return s.blobLimiter.Allow()
+}
+
 func (s *Scenario) Run(ctx context.Context) error {
 	s.logger.Infof("starting scenario: %s", ScenarioName)
 	defer s.logger.Infof("scenario %s finished.", ScenarioName)
@@ -302,7 +313,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	// Blob txs are additionally rate limited: chain blob capacity is far lower
 	// than tx capacity, so unrestricted blob fuzzing would hoard pending slots.
 	if s.options.MaxBlobTxPerSlot > 0 {
-		s.blobLimiter = rate.NewLimiter(rate.Limit(float64(s.options.MaxBlobTxPerSlot)/scenario.GlobalSlotDuration.Seconds()), int(s.options.MaxBlobTxPerSlot))
+		s.blobLimiter = rate.NewLimiter(s.blobRate(), int(s.options.MaxBlobTxPerSlot))
 	}
 
 	var timeout time.Duration
@@ -485,7 +496,7 @@ func (s *Scenario) sendFuzzedTx(ctx context.Context, txIdx uint64) (scenario.Rec
 	// Blob txs are rate limited separately (chain blob capacity is far lower
 	// than tx capacity). When the slot's blob budget is exhausted, re-fuzz the
 	// envelope as a non-blob kind instead of blocking the worker.
-	if ftx.kind == kindBlob && !s.blobOnly && s.blobLimiter != nil && !s.blobLimiter.Allow() {
+	if ftx.kind == kindBlob && !s.blobOnly && s.blobLimiter != nil && !s.allowBlob() {
 		ftx = s.fuzzer.generateNonBlob(txIdx + s.options.TxIdOffset)
 	}
 

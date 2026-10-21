@@ -37,6 +37,7 @@ type BlockInfo struct {
 	ParentHash common.Hash
 	Timestamp  uint64
 	GasLimit   uint64
+	SlotNumber uint64
 }
 
 // BlockWithHash represents a block with its hash.
@@ -100,6 +101,7 @@ type TxPool struct {
 	options          *TxPoolOptions
 	processStaleChan chan uint64
 	lastBlockNumber  uint64
+	slotDuration     atomic.Int64
 
 	// wallet and wallet pool tracking
 	walletsMutex sync.RWMutex
@@ -164,6 +166,9 @@ type TxPoolOptions struct {
 	ReorgDepth          int // Number of blocks to keep in memory for reorg tracking
 	ChainId             *big.Int
 	ExternalBlockSource *ExternalBlockSource
+	// SlotDuration is the slot duration used while the chain reports no EIP-7843
+	// slot numbers (pre-Amsterdam chains, L2s). Defaults to 12s.
+	SlotDuration time.Duration
 	// PreAmsterdamFeeModel forces the legacy (pre-EIP-8037) gas/fee model.
 	// When false (default) spamoor uses the Amsterdam fee model, which is
 	// safe to keep on non-Amsterdam chains because its gas budgets are
@@ -206,6 +211,10 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 
 	if options.ReorgDepth > 0 {
 		pool.reorgDepth = options.ReorgDepth
+	}
+
+	if options.SlotDuration <= 0 {
+		options.SlotDuration = 12 * time.Second
 	}
 
 	// Block stats (gas limit, base fee) are loaded by the caller via
@@ -550,6 +559,10 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 		ParentHash: blockWithHash.Block.ParentHash,
 		Timestamp:  blockWithHash.Block.Timestamp,
 		GasLimit:   blockWithHash.Block.GasLimit,
+		SlotNumber: blockWithHash.Block.SlotNumber,
+	}
+	if hasLastBlock && lastBlock.Hash == blockWithHash.Block.ParentHash {
+		pool.updateSlotDuration(lastBlock, pool.blocks[blockNumber])
 	}
 
 	// Update current gas limit and recent block gas tracking
@@ -1577,6 +1590,29 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	}
 
 	return nil
+}
+
+// updateSlotDuration derives the slot duration from the EIP-7843 slot numbers and
+// timestamps of two consecutive blocks.
+func (pool *TxPool) updateSlotDuration(parent *BlockInfo, block *BlockInfo) {
+	if parent.SlotNumber == 0 || block.SlotNumber <= parent.SlotNumber || block.Timestamp <= parent.Timestamp {
+		return
+	}
+
+	duration := time.Duration(block.Timestamp-parent.Timestamp) * time.Second / time.Duration(block.SlotNumber-parent.SlotNumber)
+	if time.Duration(pool.slotDuration.Swap(int64(duration))) != duration {
+		pool.options.Logger.Infof("slot duration changed to %v (slot %v)", duration, block.SlotNumber)
+	}
+}
+
+// GetSlotDuration returns the slot duration derived from EIP-7843 block slot numbers,
+// or the configured fallback while the chain does not report slot numbers.
+func (pool *TxPool) GetSlotDuration() time.Duration {
+	if duration := time.Duration(pool.slotDuration.Load()); duration > 0 {
+		return duration
+	}
+
+	return pool.options.SlotDuration
 }
 
 // GetCurrentGasLimit returns the current gas limit of the chain.

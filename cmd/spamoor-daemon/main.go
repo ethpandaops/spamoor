@@ -14,7 +14,6 @@ import (
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/plugin"
-	"github.com/ethpandaops/spamoor/scenario"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/utils"
@@ -88,9 +87,6 @@ func main() {
 		"buildtime": utils.BuildTime,
 	}).Infof("starting spamoor daemon")
 
-	// Set global slot duration for rate limiting
-	scenario.GlobalSlotDuration = cliArgs.slotDuration
-
 	// Initialize registries and plugin loader
 	pluginRegistry, scenarioRegistry := scenarios.InitRegistries()
 	pluginLoader := plugin.NewPluginLoader(logger, pluginRegistry, scenarioRegistry)
@@ -147,6 +143,7 @@ func main() {
 		Logger:               logger.WithField("module", "txpool"),
 		ClientPool:           clientPool,
 		ChainId:              clientPool.GetChainId(),
+		SlotDuration:         cliArgs.slotDuration,
 		PreAmsterdamFeeModel: cliArgs.preAmsterdamFeeModel,
 	})
 

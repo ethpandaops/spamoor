@@ -158,9 +158,6 @@ func main() {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
-	// Set global slot duration for rate limiting
-	scenario.GlobalSlotDuration = cliArgs.slotDuration
-
 	// start client pool
 	rpcHosts := []string{}
 	for _, rpcHost := range strings.Split(strings.Join(cliArgs.rpchosts, ","), ",") {
@@ -202,6 +199,7 @@ func main() {
 		Logger:               logger.WithField("module", "txpool"),
 		ClientPool:           clientPool,
 		ChainId:              clientPool.GetChainId(),
+		SlotDuration:         cliArgs.slotDuration,
 		PreAmsterdamFeeModel: cliArgs.preAmsterdamFeeModel,
 	})
 

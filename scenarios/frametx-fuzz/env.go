@@ -369,10 +369,6 @@ func (s *Scenario) baselineFrames() []*txtypes.Frame {
 	}
 }
 
-// frameAcceptanceRetryInterval is how long to wait between attempts to land the
-// baseline frame transaction while the chain still refuses it.
-const frameAcceptanceRetryInterval = 12 * time.Second
-
 // awaitFrameAcceptance blocks until the chain includes a baseline frame transaction.
 //
 // The frame-family contracts are ordinary contracts and can be in state before the fork
@@ -412,14 +408,14 @@ func (s *Scenario) awaitFrameAcceptance(ctx context.Context, env *environment) e
 		}
 
 		if reason := err.Error(); reason != lastReason {
-			s.logger.Infof("the chain does not take frame transactions yet (%v), retrying every %v", err, frameAcceptanceRetryInterval)
+			s.logger.Infof("the chain does not take frame transactions yet (%v), retrying every slot", err)
 			lastReason = reason
 		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(frameAcceptanceRetryInterval):
+		case <-time.After(s.walletPool.GetTxPool().GetSlotDuration()):
 		}
 	}
 }
