@@ -196,7 +196,7 @@ func (s *Scenario) buildDeployTx(ctx context.Context, client *spamoor.Client, de
 // created by initReserves). Each phase is mined before the next is built.
 func (s *Scenario) DeployAaveMarket(ctx context.Context) (*DeploymentInfo, error) {
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.options.DeployClientGroup),
 	)
 	if client == nil {
@@ -516,7 +516,7 @@ func (s *Scenario) deployTokenImpls(ctx context.Context, client *spamoor.Client,
 // for static calls and transaction building.
 func (s *Scenario) bindContracts(info *DeploymentInfo) error {
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithoutBuilder(),
 	)
 	if client == nil {
@@ -544,7 +544,7 @@ func (s *Scenario) bindContracts(info *DeploymentInfo) error {
 // find liquidatable positions.
 func (s *Scenario) bindReserveTokens(ctx context.Context, info *DeploymentInfo) error {
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithoutBuilder(),
 	)
 	if client == nil {
@@ -735,7 +735,7 @@ func (s *Scenario) FundAndApproveWallets(ctx context.Context, info *DeploymentIn
 
 	wallets := s.walletPool.GetAllWallets()
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {

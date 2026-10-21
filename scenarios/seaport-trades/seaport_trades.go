@@ -336,7 +336,7 @@ func (s *Scenario) runReplenisher(ctx context.Context) {
 			return
 		case <-time.After(s.walletPool.GetTxPool().GetSlotDuration()):
 			client := s.walletPool.GetClient(
-				spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+				spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 				spamoor.WithClientGroup(s.deployClientGroup()),
 			)
 			if client == nil {

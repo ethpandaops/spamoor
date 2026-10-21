@@ -442,6 +442,9 @@ func (pool *TxPool) runExternalBlockSourceLoop() {
 		case <-pool.options.Context.Done():
 			return
 		case blockEvent := <-blockChan:
+			for _, client := range blockEvent.Clients {
+				client.recordBlockHeight(blockEvent.Number)
+			}
 
 			if blockEvent.Number > highestBlockNumber {
 				// Skip processing historical blocks on startup unless blockchain is young (< 10 blocks)

@@ -38,7 +38,7 @@ type DeploymentInfo struct {
 // re-uses the already-deployed addresses instead of redeploying.
 func (s *Scenario) DeployContracts(ctx context.Context, redeploy bool) (*DeploymentInfo, error) {
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {
@@ -177,7 +177,7 @@ func (s *Scenario) ensurePaymasterDeposit(ctx context.Context, minBalance, topUp
 	}
 
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {

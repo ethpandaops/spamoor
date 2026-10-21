@@ -143,7 +143,7 @@ func executorCreate2Addr(executor common.Address, initcode []byte) common.Addres
 // the same stack without redeploying or re-wiring anything.
 func (s *Scenario) DeployContracts(ctx context.Context) (*DeploymentInfo, error) {
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.deployClientGroup()),
 	)
 	if client == nil {

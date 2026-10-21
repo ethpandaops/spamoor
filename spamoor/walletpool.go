@@ -1236,7 +1236,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 // targets reserve enough for the EIP-2780/EIP-8037 state gas charge.
 func (pool *WalletPool) buildWalletFundingTx(req *FundingRequest, client *Client) (*txtypes.Transaction, error) {
 	if client == nil {
-		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
+		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientProxy))
 		if client == nil {
 			return nil, fmt.Errorf("no client available")
 		}
@@ -1283,7 +1283,7 @@ func (pool *WalletPool) buildWalletFundingTx(req *FundingRequest, client *Client
 // and builds a transaction to the batcher contract with appropriate gas limits.
 func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, client *Client, batcher *TxBatcher) (*txtypes.Transaction, error) {
 	if client == nil {
-		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
+		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientProxy))
 		if client == nil {
 			return nil, fmt.Errorf("no client available")
 		}
@@ -1349,7 +1349,7 @@ type reclaimTx struct {
 // Returns nil if the wallet doesn't have enough balance to cover fees.
 func (pool *WalletPool) buildWalletReclaimTx(ctx context.Context, childWallet *Wallet, client *Client, target common.Address) (*txtypes.Transaction, error) {
 	if client == nil {
-		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0))
+		client = pool.clientPool.GetClient(WithClientSelectionMode(SelectClientProxy))
 		if client == nil {
 			return nil, fmt.Errorf("no client available")
 		}
