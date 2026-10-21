@@ -23,12 +23,13 @@ const (
 	// mempool-legal transaction may open.
 	KeyedNonceFirstUseStateGas = StateBytesPerStorageSet * CostPerStateByte
 
-	// KeyedNonceAccessCost is the execution gas each non-zero nonce key pays in both
-	// the intrinsic cost and the calldata floor: COLD_STORAGE_ACCESS + STORAGE_WRITE
+	// KeyedNonceAccessCost is the execution gas each key of a non-empty key set pays in
+	// both the intrinsic cost and the calldata floor: COLD_STORAGE_ACCESS + STORAGE_WRITE
 	// (EIP-8038) for the protocol's cold read and write of its NONCE_MANAGER slot.
 	KeyedNonceAccessCost = 2_100 + 10_000
 
-	// MaxNonceSeq is EIP-8250's exclusive bound on nonce_seq.
+	// MaxNonceSeq is EIP-8250's inclusive bound on nonce_seq; with a non-empty key set
+	// it marks the single-use form, which exhausts every selected key.
 	MaxNonceSeq = uint64(1<<64 - 1)
 )
 
@@ -57,8 +58,8 @@ var (
 // NonceManagerSlot returns the NonceManager storage slot holding the sequence of one
 // keyed nonce domain, keccak256(pad32(sender) || pad32(key)).
 //
-// The slot is only meaningful for a non-zero key: key zero aliases the sender's
-// ordinary account nonce and is never stored here.
+// The slot is only meaningful for a keyed domain; the account nonce lives in the
+// account itself. A slot at MaxNonceSeq is an exhausted key.
 func NonceManagerSlot(sender common.Address, key *uint256.Int) common.Hash {
 	var buf [64]byte
 
@@ -98,12 +99,35 @@ func NonceKeysHash(keys []*uint256.Int) common.Hash {
 // WithNonceKeys selects an EIP-8250 key set and its shared sequence number.
 //
 // Every selected key must currently sit at seq, and a successful payment approval moves
-// all of them to seq+1 together. Keys must be strictly increasing and the zero key may
-// only appear alone.
+// all of them to seq+1 together. Keys must be strictly increasing. An empty key set
+// selects the account nonce (see WithLegacyNonce), a seq of MaxNonceSeq the single-use
+// form (see WithSingleUseNonceKeys).
 func (tx *FrameTx) WithNonceKeys(keys []*uint256.Int, seq uint64) *FrameTx {
 	tx.Extensions |= FrameExtKeyedNonces
 	tx.NonceKeys = keys
 	tx.NonceSeq = seq
+
+	return tx
+}
+
+// WithSingleUseNonceKeys selects a non-empty EIP-8250 key set in its single-use form:
+// every key must be unused, and a successful payment approval exhausts all of them.
+func (tx *FrameTx) WithSingleUseNonceKeys(keys []*uint256.Int) *FrameTx {
+	return tx.WithNonceKeys(keys, MaxNonceSeq)
+}
+
+// WithLegacyNonce selects the sender's account nonce: an empty key set, or [0] under
+// LegacyNonceKeyZero. NonceSeq is left for the caller to set.
+func (tx *FrameTx) WithLegacyNonce() *FrameTx {
+	if !tx.HasKeyedNonces() {
+		return tx
+	}
+
+	if LegacyNonceKeyZero {
+		tx.NonceKeys = []*uint256.Int{new(uint256.Int)}
+	} else {
+		tx.NonceKeys = nil
+	}
 
 	return tx
 }

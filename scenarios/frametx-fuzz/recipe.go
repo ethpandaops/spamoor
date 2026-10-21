@@ -44,6 +44,11 @@ type Recipe struct {
 	// legacy account nonce.
 	NonceKeys int `json:"nonceKeys"`
 
+	// SingleUseNonce selects EIP-8250's single-use form for the drawn keys: fresh keys
+	// at nonce_seq MAX_NONCE_SEQ, which approval exhausts for good. Only meaningful
+	// with NonceKeys above zero, and only under the current revision of the EIP.
+	SingleUseNonce bool `json:"singleUseNonce,omitempty"`
+
 	// RecentRoots is how many references the transaction's EIP-8272 recent root
 	// verifier frame carries. Zero means no such frame.
 	RecentRoots int `json:"recentRoots"`
@@ -128,8 +133,8 @@ const (
 	// KindPostOp is a DEFAULT frame with flags, the settlement species.
 	KindPostOp FrameKind = "post_op"
 
-	// KindPostTx is an EIP-7906 assertion frame, restricted to a trailing suffix.
-	KindPostTx FrameKind = "post_tx"
+	// KindAssert is an EIP-7906 assertion frame, restricted to a trailing suffix.
+	KindAssert FrameKind = "assert"
 
 	// KindDeployCode is a SENDER frame that deploys generated contract code through
 	// the CREATE2 factory, so a later frame in the same transaction can call it.
@@ -215,8 +220,8 @@ var recentRootEdgeNames = []string{
 // cases rather than a plain, landable reference.
 const recentRootEdgeChance = 0.2
 
-// emitsLog reports whether a body frame before the POST_TX suffix runs the probe's log
-// script with a budget that lets it complete, so a POST_TX sweep may expect an event.
+// emitsLog reports whether a body frame before the ASSERT suffix runs the probe's log
+// script with a budget that lets it complete, so an ASSERT sweep may expect an event.
 func (r *Recipe) emitsLog() bool {
 	for _, frame := range r.Body {
 		if frame.Kind == KindProbe && frame.Script == ScriptLog && frame.Budget != BudgetStarved {
@@ -259,7 +264,7 @@ const (
 	axisSignature axis = "signatures"
 	axisNonces    axis = "nonces"
 	axisRoots     axis = "roots"
-	axisPostTx    axis = "posttx"
+	axisAssert    axis = "assert"
 	axisProbe     axis = "probe"
 	axisCode      axis = "code"
 	axisDeploy    axis = "deploy"
@@ -268,7 +273,7 @@ const (
 // axisNames lists the axes in a stable order for help text and validation.
 var axisNames = []axis{
 	axisPrefix, axisBatches, axisFailures, axisSignature,
-	axisNonces, axisRoots, axisPostTx, axisProbe, axisCode, axisDeploy,
+	axisNonces, axisRoots, axisAssert, axisProbe, axisCode, axisDeploy,
 }
 
 // axisWeights is a validated axis selection.
@@ -308,15 +313,19 @@ func (w axisWeights) draws(rng *utils.DeterministicRNG, name axis) bool {
 
 // DrawOptions bounds what a draw may produce.
 type DrawOptions struct {
-	Axes               axisWeights
-	MaxBodyFrames      int
-	AllowPostTx        bool
-	AllowContract      bool
-	AllowRoots         bool
-	AllowKeyed         bool
-	AllowProbe         bool
-	AllowCode          bool
-	AllowFuzzedAccount bool
+	Axes          axisWeights
+	MaxBodyFrames int
+	AllowAssert   bool
+	AllowContract bool
+	AllowRoots    bool
+	AllowKeyed    bool
+
+	// AllowSingleUseNonce reports whether the chain's EIP-8250 revision has the
+	// single-use form, which the key-zero revision does not.
+	AllowSingleUseNonce bool
+	AllowProbe          bool
+	AllowCode           bool
+	AllowFuzzedAccount  bool
 
 	// AllowDeploySender reports whether a funded, undeployed account is waiting, which
 	// is what the self-paying deploy prefix needs.
@@ -351,6 +360,7 @@ func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 
 	nonceKeyDraw := rng.Intn(4) + 1
 	nonceDraw := rng.Float64()
+	singleUseDraw := rng.Float64()
 
 	rootCountDraw := rng.Intn(3) + 1
 	rootEdgePick := rng.Intn(len(recentRootEdgeNames))
@@ -364,8 +374,8 @@ func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 		body = append(body, drawBodyFrame(rng, opts))
 	}
 
-	postTxCount := rng.Intn(2)
-	postTxDraw := rng.Float64()
+	assertFrameCount := rng.Intn(2)
+	assertFrameDraw := rng.Float64()
 	invalidDraw := rng.Float64()
 	invalidPick := rng.Intn(max(len(opts.Violations), 1))
 
@@ -408,6 +418,10 @@ func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 
 	if opts.AllowKeyed && opts.Axes.draws(rng, axisNonces) && nonceDraw < 0.6 {
 		recipe.NonceKeys = nonceKeyDraw
+
+		// The single-use form is the nullifier case EIP-8250 was written for; one in
+		// four keyed transactions takes it when the chain's revision has it.
+		recipe.SingleUseNonce = opts.AllowSingleUseNonce && singleUseDraw < 0.25
 	}
 
 	if opts.AllowRoots && opts.Axes.draws(rng, axisRoots) && rootDraw < 0.6 {
@@ -420,10 +434,10 @@ func Draw(rng *utils.DeterministicRNG, index uint64, opts DrawOptions) *Recipe {
 
 	recipe.Body = body
 
-	if opts.AllowPostTx && opts.Axes.enabled(axisPostTx) && postTxDraw < 0.3*opts.Axes.chance(axisPostTx) {
-		for i := 0; i <= postTxCount; i++ {
+	if opts.AllowAssert && opts.Axes.enabled(axisAssert) && assertFrameDraw < 0.3*opts.Axes.chance(axisAssert) {
+		for i := 0; i <= assertFrameCount; i++ {
 			recipe.Body = append(recipe.Body, BodyFrame{
-				Kind:   KindPostTx,
+				Kind:   KindAssert,
 				Target: TargetProbe,
 				Budget: BudgetAmple,
 				Script: ScriptNone,
@@ -508,14 +522,14 @@ func drawBodyFrame(rng *utils.DeterministicRNG, opts DrawOptions) BodyFrame {
 // format forbids, so that a recipe always describes a well-formed transaction and the
 // negative tier stays the only source of invalid ones.
 func (r *Recipe) normalize(opts DrawOptions) {
-	// POST_TX frames must be a trailing suffix, so anything drawn after one moves in
+	// ASSERT frames must be a trailing suffix, so anything drawn after one moves in
 	// front of it.
 	ordinary := make([]BodyFrame, 0, len(r.Body))
-	postTx := make([]BodyFrame, 0, len(r.Body))
+	asserts := make([]BodyFrame, 0, len(r.Body))
 
 	for _, frame := range r.Body {
-		if frame.Kind == KindPostTx {
-			postTx = append(postTx, frame)
+		if frame.Kind == KindAssert {
+			asserts = append(asserts, frame)
 
 			continue
 		}
@@ -523,27 +537,27 @@ func (r *Recipe) normalize(opts DrawOptions) {
 		ordinary = append(ordinary, frame)
 	}
 
-	r.Body = append(ordinary, postTx...)
+	r.Body = append(ordinary, asserts...)
 
 	for i := range r.Body {
 		frame := &r.Body[i]
 
 		// Only SENDER frames may carry value.
 		if frame.Kind != KindTransfer && frame.Kind != KindCall && frame.Kind != KindProbe {
-			frame.StateGas = frame.StateGas && frame.Kind != KindPostTx
+			frame.StateGas = frame.StateGas && frame.Kind != KindAssert
 		}
 
-		// A batched frame may not be the last one, and a POST_TX frame's failure
+		// A batched frame may not be the last one, and an ASSERT frame's failure
 		// overrides batching anyway, so the flag is meaningless on one. EIP-7906 also
-		// forbids it on the frame directly before a POST_TX frame.
-		if i == len(r.Body)-1 || frame.Kind == KindPostTx || r.Body[i+1].Kind == KindPostTx {
+		// forbids it on the frame directly before an ASSERT frame.
+		if i == len(r.Body)-1 || frame.Kind == KindAssert || r.Body[i+1].Kind == KindAssert {
 			frame.Batch = false
 		}
 	}
 
-	// A POST_TX frame executes as a static call, so it cannot write.
+	// An ASSERT frame executes as a static call, so it cannot write.
 	for i := range r.Body {
-		if r.Body[i].Kind == KindPostTx {
+		if r.Body[i].Kind == KindAssert {
 			r.Body[i].Script = ScriptNone
 			r.Body[i].StateGas = false
 		}
@@ -593,7 +607,7 @@ func (r *Recipe) normalize(opts DrawOptions) {
 		}
 	}
 
-	// A deploy frame writes code, so it cannot be a static POST_TX frame, and a frame
+	// A deploy frame writes code, so it cannot be a static ASSERT frame, and a frame
 	// that deploys has nothing to say about a value transfer.
 	for i := range r.Body {
 		if r.Body[i].Kind == KindDeployCode {

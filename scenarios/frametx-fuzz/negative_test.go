@@ -172,17 +172,17 @@ func TestRewriteViolationsReportWhenNotApplicable(t *testing.T) {
 	}
 }
 
-// TestPostTxLastKeepsTheSuffix checks that frames appended after the body move in front
-// of the POST_TX suffix, keeping their order.
-func TestPostTxLastKeepsTheSuffix(t *testing.T) {
+// TestAssertLastKeepsTheSuffix checks that frames appended after the body move in front
+// of the ASSERT suffix, keeping their order.
+func TestAssertLastKeepsTheSuffix(t *testing.T) {
 	limits := txtypes.FrameLimits{Execution: 21_000}
 	verify := txtypes.SelfVerifyFrame(limits)
 	body := txtypes.UserOpFrame(nil, nil, nil, limits)
-	post := txtypes.PostTxFrame(txtypes.ExpiryVerifier, nil, limits)
+	post := txtypes.AssertFrame(txtypes.ExpiryVerifier, nil, limits)
 	rideAlong1 := txtypes.UserOpFrame(nil, nil, nil, limits)
 	rideAlong2 := txtypes.UserOpFrame(nil, nil, nil, limits)
 
-	got := postTxLast([]*txtypes.Frame{verify, body, post, rideAlong1, rideAlong2})
+	got := assertLast([]*txtypes.Frame{verify, body, post, rideAlong1, rideAlong2})
 	want := []*txtypes.Frame{verify, body, rideAlong1, rideAlong2, post}
 
 	for i := range want {

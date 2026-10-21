@@ -373,7 +373,7 @@ func TestFrameValidatePayload(t *testing.T) {
 		}},
 		{"reserved flag bits", func(tx *FrameTx) { tx.Frames[1].Flags = 0x8 }},
 		{"value outside SENDER mode", func(tx *FrameTx) { tx.Frames[0].Value = uint256.NewInt(1) }},
-		{"unknown mode", func(tx *FrameTx) { tx.Frames[1].Mode = 3 }},
+		{"unknown mode", func(tx *FrameTx) { tx.Frames[1].Mode = 4 }},
 		{"unknown signature scheme", func(tx *FrameTx) { tx.Signatures[0].Scheme = 0x7 }},
 		{"arbitrary entry with signer", func(tx *FrameTx) {
 			tx.Signatures[0].Scheme = SigSchemeArbitrary
@@ -965,9 +965,9 @@ func TestFrameExtensionMismatch(t *testing.T) {
 	}
 }
 
-// TestFramePostTxMode checks EIP-7906's POST_TX mode: it is a valid mode, it must form
+// TestFrameAssertMode checks EIP-7906's ASSERT mode: it is a valid mode, it must form
 // a trailing suffix, and it is classified for display.
-func TestFramePostTxMode(t *testing.T) {
+func TestFrameAssertMode(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	if err != nil {
 		t.Fatalf("failed generating key: %v", err)
@@ -992,32 +992,32 @@ func TestFramePostTxMode(t *testing.T) {
 		return UserOpFrame(&testTarget, nil, nil, FrameLimits{Execution: 30_000})
 	}
 
-	postTx := func() *Frame {
-		return PostTxFrame(assertions, []byte{0x01}, FrameLimits{Execution: 20_000})
+	assert := func() *Frame {
+		return AssertFrame(assertions, []byte{0x01}, FrameLimits{Execution: 20_000})
 	}
 
-	// A trailing suffix of POST_TX frames is valid.
-	valid := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(), postTx(), postTx())
+	// A trailing suffix of ASSERT frames is valid.
+	valid := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(), assert(), assert())
 	if err := valid.ValidatePayload(); err != nil {
-		t.Fatalf("a trailing POST_TX suffix should be valid: %v", err)
+		t.Fatalf("a trailing ASSERT suffix should be valid: %v", err)
 	}
 
 	if err := valid.ValidateMempoolPrefix(); err != nil {
-		t.Fatalf("POST_TX frames sit outside the validation prefix: %v", err)
+		t.Fatalf("ASSERT frames sit outside the validation prefix: %v", err)
 	}
 
-	if species := valid.Frames[2].Species(sender); species != SpeciesPostTx {
-		t.Fatalf("POST_TX frame classified as %s", species)
+	if species := valid.Frames[2].Species(sender); species != SpeciesAssert {
+		t.Fatalf("ASSERT frame classified as %s", species)
 	}
 
-	if idx := valid.PostTxIndex(); idx != 2 {
-		t.Fatalf("PostTxIndex = %d, want 2", idx)
+	if idx := valid.AssertIndex(); idx != 2 {
+		t.Fatalf("AssertIndex = %d, want 2", idx)
 	}
 
-	// A non-POST_TX frame after a POST_TX frame is invalid.
-	interleaved := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), postTx(), userOp())
+	// A non-ASSERT frame after an ASSERT frame is invalid.
+	interleaved := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), assert(), userOp())
 	if err := interleaved.ValidatePayload(); err == nil {
-		t.Fatal("a frame following a POST_TX frame should be rejected")
+		t.Fatal("a frame following an ASSERT frame should be rejected")
 	}
 
 	// Mode 4 remains unknown.
@@ -1028,17 +1028,17 @@ func TestFramePostTxMode(t *testing.T) {
 		t.Fatal("mode 4 should be rejected")
 	}
 
-	// A POST_TX frame carrying value is rejected, as for any non-SENDER frame.
-	valued := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), postTx())
+	// An ASSERT frame carrying value is rejected, as for any non-SENDER frame.
+	valued := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), assert())
 	valued.Frames[1].Value = uint256.NewInt(1)
 
 	if err := valued.ValidatePayload(); err == nil {
-		t.Fatal("a POST_TX frame carrying value should be rejected")
+		t.Fatal("an ASSERT frame carrying value should be rejected")
 	}
 }
 
 // TestDurableFrames checks which frames' effects survive, which a frame's own status
-// does not answer: an unrolled atomic batch and a failed POST_TX both discard the
+// does not answer: an unrolled atomic batch and a failed ASSERT both discard the
 // effects of frames that report success.
 func TestDurableFrames(t *testing.T) {
 	sender := common.HexToAddress("0xaaaa000000000000000000000000000000000001")
@@ -1089,15 +1089,15 @@ func TestDurableFrames(t *testing.T) {
 		}
 	})
 
-	t.Run("post-tx reverts the body", func(t *testing.T) {
-		// Every frame reports success except the POST_TX one, yet nothing after the
+	t.Run("assert reverts the body", func(t *testing.T) {
+		// Every frame reports success except the ASSERT one, yet nothing after the
 		// validation prefix survives.
 		tx := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(), userOp(),
-			PostTxFrame(assertions, nil, FrameLimits{Execution: 20_000}))
+			AssertFrame(assertions, nil, FrameLimits{Execution: 20_000}))
 		extra := statuses(1, 1, 1, 0)
 
-		if !extra.PostTxReverted(tx) {
-			t.Fatal("a failed POST_TX frame should revert the body")
+		if !extra.AssertReverted(tx) {
+			t.Fatal("a failed ASSERT frame should revert the body")
 		}
 
 		got := extra.DurableFrames(tx)
@@ -1110,13 +1110,13 @@ func TestDurableFrames(t *testing.T) {
 		}
 	})
 
-	t.Run("post-tx succeeds", func(t *testing.T) {
+	t.Run("assert succeeds", func(t *testing.T) {
 		tx := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp(),
-			PostTxFrame(assertions, nil, FrameLimits{Execution: 20_000}))
+			AssertFrame(assertions, nil, FrameLimits{Execution: 20_000}))
 		extra := statuses(1, 1, 1)
 
-		if extra.PostTxReverted(tx) {
-			t.Fatal("a successful POST_TX frame should not revert the body")
+		if extra.AssertReverted(tx) {
+			t.Fatal("a successful ASSERT frame should not revert the body")
 		}
 
 		for i, ok := range extra.DurableFrames(tx) {

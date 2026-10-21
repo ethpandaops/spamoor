@@ -68,9 +68,9 @@ type environment struct {
 	contractsMutex sync.Mutex
 	contracts      []common.Address
 
-	// allowPostTx records what the startup probe found, so a recipe asking for
-	// POST_TX frames on a chain that refuses them is downgraded rather than sent.
-	allowPostTx bool
+	// allowAssert records what the startup probe found, so a recipe asking for
+	// ASSERT frames on a chain that refuses them is downgraded rather than sent.
+	allowAssert bool
 }
 
 // plainWallet returns a wallet with no code, for recipes validated by default code.
@@ -294,21 +294,21 @@ func (s *Scenario) fees(client *spamoor.Client) (*big.Int, *big.Int, error) {
 // transactions that differ only in the feature: if the plain one lands and the other does
 // not, the feature is unsupported. The signal is accept/reject, never error text.
 func (s *Scenario) probeCapabilities(ctx context.Context, env *environment) {
-	if s.options.PostTx == "off" || !s.axes.enabled(axisPostTx) {
-		env.allowPostTx = false
-	} else if s.options.PostTx == "on" {
-		env.allowPostTx = true
+	if s.options.AssertFrames == "off" || !s.axes.enabled(axisAssert) {
+		env.allowAssert = false
+	} else if s.options.AssertFrames == "on" {
+		env.allowAssert = true
 	} else {
-		s.logger.Infof("probing EIP-7906 POST_TX support, this takes up to %v blocks per probe transaction", probeInclusionBlocks)
+		s.logger.Infof("probing EIP-7906 ASSERT support, this takes up to %v blocks per probe transaction", probeInclusionBlocks)
 
-		env.allowPostTx = s.abProbe(ctx, env, "POST_TX", func(frames []*txtypes.Frame) []*txtypes.Frame {
-			return append(frames, txtypes.PostTxFrame(txtypes.ExpiryVerifier, expiryData(s.deadline()),
+		env.allowAssert = s.abProbe(ctx, env, "ASSERT", func(frames []*txtypes.Frame) []*txtypes.Frame {
+			return append(frames, txtypes.AssertFrame(txtypes.ExpiryVerifier, expiryData(s.deadline()),
 				txtypes.FrameLimits{Execution: s.options.VerifyGas}))
 		})
 	}
 
-	if s.options.PostTx == "auto" && s.axes.enabled(axisPostTx) {
-		s.logger.Infof("EIP-7906 POST_TX frames are %s on this chain", supportWord(env.allowPostTx))
+	if s.options.AssertFrames == "auto" && s.axes.enabled(axisAssert) {
+		s.logger.Infof("EIP-7906 ASSERT frames are %s on this chain", supportWord(env.allowAssert))
 	}
 }
 

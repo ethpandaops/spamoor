@@ -276,7 +276,7 @@ func (s *ProbeScript) ReadSigData(sigIndex int, offset uint64) *ProbeScript {
 
 // ReadTxTrace executes EIP-7906's TXTRACE and discards the result.
 //
-// Defined only inside a POST_TX frame, so never prefix-safe: anywhere else it is an
+// Defined only inside an ASSERT frame, so never prefix-safe: anywhere else it is an
 // exceptional halt. The index is the position in the table the parameter enumerates, and
 // must be zero for the count parameters.
 func (s *ProbeScript) ReadTxTrace(param uint8, index uint64) *ProbeScript {
@@ -293,7 +293,7 @@ func (s *ProbeScript) ReadTxTrace(param uint8, index uint64) *ProbeScript {
 // key is the storage slot for the slot parameters, a per-address index for the index
 // parameters, and must be zero otherwise.
 //
-// Defined only inside a POST_TX frame. The live-state parameters cost a cold access
+// Defined only inside an ASSERT frame. The live-state parameters cost a cold access
 // when the address or slot has not been touched, so the budget assumes cold.
 func (s *ProbeScript) ReadTxDiff(param uint8, address common.Address, key common.Hash) *ProbeScript {
 	return s.add(record{
@@ -302,14 +302,14 @@ func (s *ProbeScript) ReadTxDiff(param uint8, address common.Address, key common
 		b:       common.BytesToHash(address.Bytes()),
 		c:       key,
 		name:    "read_txdiff",
-		execGas: 2_700,
+		execGas: 3_100,
 	})
 }
 
 // ReadEventData executes EIP-7906's EVENTDATACOPY against one emitted event. It halts
 // when the event does not exist or the range runs past its data.
 //
-// Defined only inside a POST_TX frame.
+// Defined only inside an ASSERT frame.
 func (s *ProbeScript) ReadEventData(eventIndex, dataOffset, length uint64) *ProbeScript {
 	return s.add(record{
 		op:      opReadEventData,
