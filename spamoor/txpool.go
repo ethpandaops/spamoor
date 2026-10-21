@@ -37,6 +37,7 @@ type BlockInfo struct {
 	ParentHash common.Hash
 	Timestamp  uint64
 	GasLimit   uint64
+	SlotNumber uint64
 }
 
 // BlockWithHash represents a block with its hash.
@@ -100,6 +101,7 @@ type TxPool struct {
 	options          *TxPoolOptions
 	processStaleChan chan uint64
 	lastBlockNumber  uint64
+	slotDuration     atomic.Int64
 
 	// wallet and wallet pool tracking
 	walletsMutex sync.RWMutex
@@ -547,6 +549,10 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 		ParentHash: blockWithHash.Block.ParentHash,
 		Timestamp:  blockWithHash.Block.Timestamp,
 		GasLimit:   blockWithHash.Block.GasLimit,
+		SlotNumber: blockWithHash.Block.SlotNumber,
+	}
+	if hasLastBlock && lastBlock.Hash == blockWithHash.Block.ParentHash {
+		pool.updateSlotDuration(lastBlock, pool.blocks[blockNumber])
 	}
 
 	// Update current gas limit and recent block gas tracking
@@ -1574,6 +1580,28 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	}
 
 	return nil
+}
+
+// updateSlotDuration derives the slot duration from the EIP-7843 slot numbers and
+// timestamps of two consecutive blocks.
+func (pool *TxPool) updateSlotDuration(parent *BlockInfo, block *BlockInfo) {
+	if parent.SlotNumber == 0 || block.SlotNumber <= parent.SlotNumber || block.Timestamp <= parent.Timestamp {
+		return
+	}
+
+	duration := time.Duration(block.Timestamp-parent.Timestamp) * time.Second / time.Duration(block.SlotNumber-parent.SlotNumber)
+	if duration <= 0 || time.Duration(pool.slotDuration.Swap(int64(duration))) == duration {
+		return
+	}
+
+	pool.options.Logger.Infof("slot duration changed to %v (slot %v)", duration, block.SlotNumber)
+	pool.options.ClientPool.setSlotDuration(duration)
+}
+
+// GetSlotDuration returns the slot duration derived from EIP-7843 block slot numbers,
+// or 0 if the chain does not report slot numbers.
+func (pool *TxPool) GetSlotDuration() time.Duration {
+	return time.Duration(pool.slotDuration.Load())
 }
 
 // GetCurrentGasLimit returns the current gas limit of the chain.

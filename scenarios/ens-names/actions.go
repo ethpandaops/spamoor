@@ -97,14 +97,14 @@ func (s *Scenario) buildActionTx(ctx context.Context, client *spamoor.Client, wa
 // already considers the commitment mature.
 func (s *Scenario) commitmentMature(name *nameState) bool {
 	minAge := time.Duration(s.options.MinCommitmentAge) * time.Second
-	return time.Since(name.commitTime) > minAge+scenario.GlobalSlotDuration+2*time.Second
+	return time.Since(name.commitTime) > minAge+scenario.SlotDuration(s.walletPool)+2*time.Second
 }
 
 // commitmentExpired reports whether the commitment aged past the controller's
 // max commitment age (minus a slot of margin).
 func (s *Scenario) commitmentExpired(name *nameState) bool {
 	maxAge := time.Duration(s.options.MaxCommitmentAge) * time.Second
-	return time.Since(name.commitTime) > maxAge-12*time.Second
+	return time.Since(name.commitTime) > maxAge-scenario.SlotDuration(s.walletPool)
 }
 
 // buildCommitTx starts the commit-reveal pipeline for a fresh name: it builds
