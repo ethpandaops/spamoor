@@ -19,7 +19,7 @@ spamoor frametx [flags]
 ## Frame shapes
 
 `--shapes` takes a weighted list, e.g. `--shapes self-verify:10,atomic:2`. The default, `all`,
-enables every shape that EIP-8141 defines on its own, with equal weight. The `post-tx` shapes need
+enables every shape that EIP-8141 defines on its own, with equal weight. The `assert` shapes need
 EIP-7906 and are selected by name.
 
 | Shape | Frames | What it exercises |
@@ -30,10 +30,10 @@ EIP-7906 and are selected by name.
 | `atomic` | `[self_verify, user_op(atomic) × 2, user_op]` | Atomic batching where every frame succeeds |
 | `atomic-fail` | as above, with the middle frame starved of gas | Batch rollback, and the `skipped` frame status that only a rollback produces |
 | `expiry` | `[expiry_verify, self_verify, user_op]` | The expiry verifier predeploy at `0x8141` and mempool deadline handling |
-| `post-tx` | `[self_verify, user_op, post_tx]` | EIP-7906 assertion frames that pass |
-| `post-tx-revert` | as above, with the assertion failing | Whole-body revert: the user operation reports success but its effects are discarded |
+| `assert` | `[self_verify, user_op, assert]` | EIP-7906 `ASSERT` frames that pass |
+| `assert-revert` | as above, with the assertion failing | Whole-body revert: the user operation reports success but its effects are discarded, while the transaction stays valid |
 
-The `post-tx` shapes use the expiry verifier predeploy as their assertion contract, so they need
+The `assert` shapes use the expiry verifier predeploy as their assertion contract, so they need
 nothing deployed: with an 8-byte future deadline it succeeds, and with any other calldata length it
 reverts. EIP-7906 installs no predeploy, so there is no chain state saying whether it is active;
 these shapes are therefore excluded from `all` and must be named explicitly. A chain without
@@ -153,9 +153,9 @@ early client may report a shape the decoder does not recognize.
 The expectations are deliberately strict: a mismatch keeps being reported until the client
 implements the behavior.
 
-Beyond the per-frame statuses, the scenario checks whether a `POST_TX` failure reverted the whole
+Beyond the per-frame statuses, the scenario checks whether an `ASSERT` failure reverted the whole
 execution body, which the statuses alone do not show — a frame can report success and still have
-had its effects discarded, by an unrolled atomic batch or a failed `POST_TX` frame. The confirm log
+had its effects discarded, by an unrolled atomic batch or a failed `ASSERT` frame. The confirm log
 reports both, as `frames:` and `durable:`.
 
 **"validation prefix is not a recognized shape"** - the local mempool policy check rejected the

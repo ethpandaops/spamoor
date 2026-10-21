@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
+	"math/bits"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -68,9 +70,6 @@ var (
 
 	// RecentRootAddress stores the recent roots of EIP-8272.
 	RecentRootAddress = common.HexToAddress("0x8272D9679689Ea2f307140CdF9002D27dC00Ffff")
-
-	// LegacyNonceKey selects the sender's ordinary account nonce sequence.
-	LegacyNonceKey = uint256.NewInt(0)
 )
 
 // FrameMode is a frame's execution context.
@@ -82,10 +81,10 @@ const (
 	FrameModeVerify  FrameMode = 1 // STATICCALL semantics, must not revert
 	FrameModeSender  FrameMode = 2 // caller is tx.sender, may carry value
 
-	// FrameModePostTx is EIP-7906's assertion mode: STATICCALL semantics with no
+	// FrameModeAssert is EIP-7906's ASSERT mode: STATICCALL semantics with no
 	// APPROVE exception, restricted to a trailing suffix of the frame list. Its
 	// failure reverts the whole execution body rather than one atomic batch.
-	FrameModePostTx FrameMode = 3
+	FrameModeAssert FrameMode = 3
 )
 
 // FrameExtensions records which envelope extensions a frame transaction uses.
@@ -106,6 +105,12 @@ const (
 
 // FrameExtAll enables every envelope extension, the shape current devnets run.
 const FrameExtAll = FrameExtKeyedNonces
+
+// LegacyNonceKeyZero selects the EIP-8250 revision before 2026-10-16, in which the
+// account nonce was selected by nonce_keys [0] rather than by an empty key set, key
+// zero could not be combined with other keys and there was no single-use form. The
+// devnet clients still implement it; set it to false once they ship the current text.
+var LegacyNonceKeyZero = true
 
 // Has reports whether every extension in want is present.
 func (e FrameExtensions) Has(want FrameExtensions) bool { return e&want == want }
@@ -197,9 +202,11 @@ type FrameFees struct {
 // Its sender is an explicit field rather than something recovered from a signature,
 // and its signature list is validated by the protocol before any frame executes.
 //
-// EIP-8250 replaces EIP-8141's single nonce with NonceKeys and NonceSeq. NonceKeys of
-// exactly [0] selects the sender's ordinary account nonce, which is what a transaction
-// that does not use independent nonce domains carries.
+// EIP-8250 replaces EIP-8141's single nonce with NonceKeys and NonceSeq. An empty
+// NonceKeys selects the sender's ordinary account nonce, which is what a transaction
+// that does not use independent nonce domains carries; every key, including zero, is an
+// independent sequence in NONCE_MANAGER. A NonceSeq of MaxNonceSeq with a non-empty
+// key set is the single-use form. Under LegacyNonceKeyZero the account nonce is [0].
 type FrameTx struct {
 	ChainID    *uint256.Int
 	NonceKeys  []*uint256.Int
@@ -514,8 +521,8 @@ func (tx *FrameTx) CopyTx() TxData {
 // GetChainID returns the destination chain id.
 func (tx *FrameTx) GetChainID() *big.Int { return u256ToBig(tx.ChainID) }
 
-// GetNonce returns the nonce sequence number. For the ordinary [0] key set this is
-// the sender's account nonce, which is what the engine tracks.
+// GetNonce returns the nonce sequence number. For the legacy key set this is the
+// sender's account nonce, which is what the engine tracks.
 func (tx *FrameTx) GetNonce() uint64 { return tx.NonceSeq }
 
 // HasKeyedNonces reports whether the transaction uses EIP-8250's keyed nonce fields
@@ -525,13 +532,29 @@ func (tx *FrameTx) HasKeyedNonces() bool {
 }
 
 // UsesLegacyNonce reports whether NonceSeq is the sender's ordinary account nonce:
-// either the transaction predates keyed nonces, or it selects only key zero.
+// either the transaction predates keyed nonces, or its key set is empty ([0] under
+// LegacyNonceKeyZero).
 func (tx *FrameTx) UsesLegacyNonce() bool {
 	if !tx.HasKeyedNonces() {
 		return true
 	}
 
-	return len(tx.NonceKeys) == 1 && tx.NonceKeys[0] != nil && tx.NonceKeys[0].IsZero()
+	if LegacyNonceKeyZero {
+		return len(tx.NonceKeys) == 1 && tx.NonceKeys[0] != nil && tx.NonceKeys[0].IsZero()
+	}
+
+	return len(tx.NonceKeys) == 0
+}
+
+// UsesSingleUseNonce reports whether the transaction is in EIP-8250's single-use form:
+// a non-empty key set with NonceSeq at MaxNonceSeq, which approval exhausts for good.
+// The key-zero revision has no such form.
+func (tx *FrameTx) UsesSingleUseNonce() bool {
+	if !tx.HasKeyedNonces() || LegacyNonceKeyZero {
+		return false
+	}
+
+	return len(tx.NonceKeys) > 0 && tx.NonceSeq == MaxNonceSeq
 }
 
 // UsesAccountNonce reports whether NonceSeq addresses the sender's account nonce, which
@@ -611,7 +634,7 @@ func (tx *FrameTx) GetStateGas() uint64 {
 	total := uint64(0)
 
 	for _, frame := range tx.Frames {
-		total += frame.Limits.State
+		total = saturatingAdd(total, frame.Limits.State)
 	}
 
 	return total
@@ -878,7 +901,7 @@ func (tx *FrameTx) SignatureVerificationGas() (uint64, error) {
 			return 0, err
 		}
 
-		total += gas
+		total = saturatingAdd(total, gas)
 	}
 
 	return total, nil
@@ -892,29 +915,31 @@ func (tx *FrameTx) IntrinsicGas() uint64 {
 		sigGas = 0
 	}
 
-	gas := uint64(FrameTxIntrinsicCost) + uint64(len(tx.Frames))*FrameTxPerFrameCost + sigGas
+	gas := saturatingAdd(uint64(FrameTxIntrinsicCost)+sigGas, saturatingMul(uint64(len(tx.Frames)), FrameTxPerFrameCost))
 
 	for _, frame := range tx.Frames {
-		gas += calldataCost(frame.Data)
-		gas += tx.valueCost(frame)
+		gas = saturatingAdd(gas, calldataCost(frame.Data))
+		gas = saturatingAdd(gas, tx.valueCost(frame))
 	}
 
 	for _, sig := range tx.Signatures {
-		gas += calldataCost(sig.Signer) + calldataCost(sig.Msg) + calldataCost(sig.Signature)
+		gas = saturatingAdd(gas, calldataCost(sig.Signer)+calldataCost(sig.Msg)+calldataCost(sig.Signature))
 	}
 
-	return gas + calldataCost(tx.extensionCalldata()) + tx.keyedNonceAccessCost()
+	gas = saturatingAdd(gas, calldataCost(tx.extensionCalldata()))
+
+	return saturatingAdd(gas, tx.keyedNonceAccessCost())
 }
 
 // keyedNonceAccessCost returns EIP-8250's keyed_nonce_access_cost, charged in both the
-// intrinsic cost and the calldata floor. The legacy key set uses the account nonce and
-// pays nothing.
+// intrinsic cost and the calldata floor: KeyedNonceAccessCost per selected key. The
+// account nonce, selected by the legacy key set, pays nothing.
 func (tx *FrameTx) keyedNonceAccessCost() uint64 {
 	if tx.UsesLegacyNonce() {
 		return 0
 	}
 
-	return uint64(len(tx.NonceKeys)) * KeyedNonceAccessCost
+	return saturatingMul(uint64(len(tx.NonceKeys)), KeyedNonceAccessCost)
 }
 
 // extensionCalldata returns the encoding the envelope extension prices as transaction
@@ -947,24 +972,25 @@ func (tx *FrameTx) CalldataFloorGas() uint64 {
 	tokens := uint64(0)
 
 	for _, frame := range tx.Frames {
-		tokens += uint64(len(frame.Data)) * StandardTokenCost
+		tokens = saturatingAdd(tokens, floorTokens(frame.Data))
 	}
 
 	for _, sig := range tx.Signatures {
-		tokens += uint64(len(sig.Signer)+len(sig.Msg)+len(sig.Signature)) * StandardTokenCost
+		tokens = saturatingAdd(tokens, floorTokens(sig.Signer)+floorTokens(sig.Msg)+floorTokens(sig.Signature))
 	}
 
 	// The envelope extension prices its own encoding alongside the other transaction
-	// data, contributing its weighted token count.
-	tokens += weightedTokens(tx.extensionCalldata())
+	// data: weighted tokens in the intrinsic cost, flat floor tokens here.
+	tokens = saturatingAdd(tokens, floorTokens(tx.extensionCalldata()))
 
-	gas := uint64(FrameTxIntrinsicCost) + uint64(len(tx.Frames))*FrameTxPerFrameCost + sigGas + tx.keyedNonceAccessCost()
+	gas := saturatingAdd(uint64(FrameTxIntrinsicCost)+sigGas, saturatingMul(uint64(len(tx.Frames)), FrameTxPerFrameCost))
+	gas = saturatingAdd(gas, tx.keyedNonceAccessCost())
 
 	for _, frame := range tx.Frames {
-		gas += tx.valueCost(frame)
+		gas = saturatingAdd(gas, tx.valueCost(frame))
 	}
 
-	return gas + TotalCostFloorPerToken*tokens
+	return saturatingAdd(gas, saturatingMul(TotalCostFloorPerToken, tokens))
 }
 
 // ExecutionGas returns the intrinsic cost plus the declared frame execution budgets,
@@ -973,7 +999,7 @@ func (tx *FrameTx) ExecutionGas() uint64 {
 	gas := tx.IntrinsicGas()
 
 	for _, frame := range tx.Frames {
-		gas += frame.Limits.Execution
+		gas = saturatingAdd(gas, frame.Limits.Execution)
 	}
 
 	if floor := tx.CalldataFloorGas(); floor > gas {
@@ -989,12 +1015,12 @@ func (tx *FrameTx) MaxGas() uint64 {
 	stateGas := tx.GetStateGas()
 
 	for _, frame := range tx.Frames {
-		standard += frame.Limits.Execution
+		standard = saturatingAdd(standard, frame.Limits.Execution)
 	}
 
-	standard += stateGas
+	standard = saturatingAdd(standard, stateGas)
 
-	if floor := tx.CalldataFloorGas() + stateGas; floor > standard {
+	if floor := saturatingAdd(tx.CalldataFloorGas(), stateGas); floor > standard {
 		return floor
 	}
 
@@ -1006,6 +1032,27 @@ func (tx *FrameTx) MaxCost(blobBaseFee *big.Int) *big.Int {
 	cost := new(big.Int).Mul(new(big.Int).SetUint64(tx.MaxGas()), u256ToBig(tx.Fees.GasFeeCap))
 
 	return cost.Add(cost, tx.blobGasCost(blobBaseFee))
+}
+
+// saturatingAdd returns a+b, or math.MaxUint64 when the sum does not fit, so that a
+// wrapped gas total can never pass a cap.
+func saturatingAdd(a, b uint64) uint64 {
+	sum, carry := bits.Add64(a, b, 0)
+	if carry != 0 {
+		return math.MaxUint64
+	}
+
+	return sum
+}
+
+// saturatingMul returns a*b, or math.MaxUint64 when the product does not fit.
+func saturatingMul(a, b uint64) uint64 {
+	hi, lo := bits.Mul64(a, b)
+	if hi != 0 {
+		return math.MaxUint64
+	}
+
+	return lo
 }
 
 // valueCost returns the static charge for a value-bearing frame.
@@ -1039,6 +1086,12 @@ func weightedTokens(data []byte) uint64 {
 	}
 
 	return tokens
+}
+
+// floorTokens returns the EIP-7976 floor token count of a byte string, which prices
+// every byte alike.
+func floorTokens(data []byte) uint64 {
+	return uint64(len(data)) * StandardTokenCost
 }
 
 // jsonFrame is a frame as reported by JSON-RPC. EIP-8141 does not specify a JSON
@@ -1146,13 +1199,11 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 	}
 
 	if tx.HasKeyedNonces() {
+		// An empty list stays empty: it is the legacy form, and a decoded transaction
+		// must re-encode to the hash the chain carried.
 		tx.NonceKeys = make([]*uint256.Int, 0, len(dec.NonceKeys))
 		for _, key := range dec.NonceKeys {
 			tx.NonceKeys = append(tx.NonceKeys, jsonU256(key))
-		}
-
-		if len(tx.NonceKeys) == 0 {
-			tx.NonceKeys = []*uint256.Int{new(uint256.Int)}
 		}
 	} else {
 		tx.NonceKeys = nil

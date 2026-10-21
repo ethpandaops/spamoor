@@ -8,10 +8,9 @@ import (
 // Generated contracts: fuzzed EVM code that one frame deploys and another calls, built
 // by evm-fuzz's stack-aware generator with the frame instructions added to its table.
 
-// Frame instruction opcodes, as the frame-transaction family registry in EIP-8141
-// allocates them. The EIP-7906 instructions only exist inside a POST_TX frame; generated
-// code runs in SENDER frames, so they halt there, which is one more thing the generator
-// reaches.
+// Frame instruction opcodes, as EIP-8141 and EIP-7906 assign them. The EIP-7906
+// instructions only exist inside an ASSERT frame; generated code runs in SENDER frames,
+// so they halt there, which is one more thing the generator reaches.
 const (
 	opcodeApprove       = 0xaa
 	opcodeTxParam       = 0xb0
@@ -20,9 +19,9 @@ const (
 	opcodeFrameParam    = 0xb3
 	opcodeSigParam      = 0xb4
 	opcodeSigDataCopy   = 0xb5
-	opcodeTxTrace       = 0xb7
-	opcodeTxDiff        = 0xb8
-	opcodeEventDataCopy = 0xb9
+	opcodeTxTrace       = OpTxTrace
+	opcodeTxDiff        = OpTxDiff
+	opcodeEventDataCopy = OpEventDataCopy
 )
 
 // push1 emits a single-byte push.
@@ -101,20 +100,24 @@ func frameOpcodeDefinitions(rng *utils.DeterministicRNG) []*evmfuzz.OpcodeInfo {
 			},
 		},
 		{
-			Name: "TXTRACE", Opcode: opcodeTxTrace, StackInput: 0, StackOutput: 1, GasCost: 3,
+			// Every TXTRACE read costs WARM_STORAGE_READ_COST (100 under EIP-8038).
+			Name: "TXTRACE", Opcode: opcodeTxTrace, StackInput: 0, StackOutput: 1, GasCost: 100,
 			Probability: 0.4,
 			Template: func() []byte {
-				// param is second from top, index on top; 0x16 is one past the end.
-				return concat(push1(byte(rng.Intn(0x17))), push1(byte(rng.Intn(4))), []byte{opcodeTxTrace})
+				// Deepest first: index, then param on top; 0x16 is one past the end.
+				return concat(push1(byte(rng.Intn(4))), push1(byte(rng.Intn(0x17))), []byte{opcodeTxTrace})
 			},
 		},
 		{
-			Name: "TXDIFF", Opcode: opcodeTxDiff, StackInput: 0, StackOutput: 1, GasCost: 3,
+			// The live-state parameters cost a cold account access when the address is
+			// untouched (3000 under EIP-8038); the view parameters a warm read.
+			Name: "TXDIFF", Opcode: opcodeTxDiff, StackInput: 0, StackOutput: 1, GasCost: 3_000,
 			Probability: 0.4,
 			Template: func() []byte {
-				// Deepest first: param, address, key. Small addresses are the precompiles
-				// and the family's predeploys, which is as good a lookup as any.
-				return concat(push1(byte(rng.Intn(0x0c))), push1(byte(rng.Intn(0x10))), push1(byte(rng.Intn(4))),
+				// Deepest first: key, address, then param on top. Small addresses are
+				// the precompiles and the family's predeploys, which is as good a lookup
+				// as any; 0x0d is one past the end.
+				return concat(push1(byte(rng.Intn(4))), push1(byte(rng.Intn(0x10))), push1(byte(rng.Intn(0x0e))),
 					[]byte{opcodeTxDiff})
 			},
 		},

@@ -6,9 +6,8 @@ package frametxfuzz
 // transaction: only code written to run inside a frame encodes them. The probe contract
 // emits these bytes, and the assertion helpers name these indices.
 //
-// The opcode bytes follow the frame-transaction family registry EIP-8141 carries for
-// its dependents: 0xB0-0xBF is reserved for the family, and a byte in it that no
-// enabled EIP allocates is an invalid instruction.
+// The opcode bytes are those the EIPs assign: EIP-8141 takes 0xB0-0xB5 and EIP-7906
+// 0xB6-0xB8. A byte above them that no enabled EIP allocates is an invalid instruction.
 
 // Instruction opcodes.
 const (
@@ -35,16 +34,16 @@ const (
 	OpSigDataCopy = 0xb5
 
 	// OpTxTrace is EIP-7906's TXTRACE: the transaction's state diff, enumerated. Valid
-	// only inside a POST_TX frame.
-	OpTxTrace = 0xb7
+	// only inside an ASSERT frame.
+	OpTxTrace = 0xb6
 
 	// OpTxDiff is EIP-7906's TXDIFF: the state diff looked up by address and slot.
-	// Valid only inside a POST_TX frame.
-	OpTxDiff = 0xb8
+	// Valid only inside an ASSERT frame.
+	OpTxDiff = 0xb7
 
 	// OpEventDataCopy is EIP-7906's EVENTDATACOPY: an emitted event's data, copied to
-	// memory. Valid only inside a POST_TX frame.
-	OpEventDataCopy = 0xb9
+	// memory. Valid only inside an ASSERT frame.
+	OpEventDataCopy = 0xb8
 )
 
 // TXPARAM parameter indices (EIP-8141).
@@ -123,23 +122,28 @@ const (
 	TxTraceEventAddress      = 0x0d
 	TxTraceEventTopicCount   = 0x0e
 	TxTraceEventTopic0       = 0x0f
+	TxTraceEventTopic1       = 0x10
+	TxTraceEventTopic2       = 0x11
+	TxTraceEventTopic3       = 0x12
 	TxTraceEventDataLength   = 0x13
 	TxTraceGasPreCharge      = 0x14
 	TxTraceGasPayer          = 0x15
 )
 
 // TXDIFF parameters (EIP-7906), keyed by address and, for the slot parameters, a slot
-// key or a per-address index.
+// key or a per-address index; the topic parameters are keyed by a topic value instead.
 const (
-	TxDiffSlotBefore     = 0x00
-	TxDiffSlotAfter      = 0x01
-	TxDiffBalanceBefore  = 0x02
-	TxDiffBalanceAfter   = 0x03
-	TxDiffCodeHashBefore = 0x04
-	TxDiffCodeHashAfter  = 0x05
-	TxDiffSlotCount      = 0x06
-	TxDiffSlotIndex      = 0x07
-	TxDiffEventCount     = 0x08
-	TxDiffEventIndex     = 0x09
-	TxDiffChangeFlags    = 0x0a
+	TxDiffSlotBefore      = 0x00
+	TxDiffSlotAfter       = 0x01
+	TxDiffBalanceBefore   = 0x02
+	TxDiffBalanceAfter    = 0x03
+	TxDiffCodeHashBefore  = 0x04
+	TxDiffCodeHashAfter   = 0x05
+	TxDiffSlotCount       = 0x06
+	TxDiffSlotIndex       = 0x07
+	TxDiffEventCount      = 0x08
+	TxDiffEventIndex      = 0x09
+	TxDiffChangeFlags     = 0x0a
+	TxDiffTopicEventCount = 0x0b
+	TxDiffTopicEventIndex = 0x0c
 )
