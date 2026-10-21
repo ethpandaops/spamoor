@@ -4,14 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/ethpandaops/spamoor/txtypes"
 )
-
-const batchClientSyncTimeout = 30 * time.Second
 
 // TxConfirmFn is a callback function called when a transaction is confirmed or fails.
 // It receives the transaction, receipt (if successful), and any error that occurred.
@@ -463,58 +460,5 @@ func (p *TxPool) SendMultiTransactionBatch(ctx context.Context, walletTxs map[*W
 		}
 	}
 
-	if firstError == nil {
-		p.awaitClientsAtBlock(ctx, maxReceiptBlock(receipts))
-	}
-
 	return receipts, firstError
-}
-
-// maxReceiptBlock returns the highest block number among the given receipts.
-func maxReceiptBlock(receipts map[*Wallet][]*txtypes.Receipt) uint64 {
-	highest := uint64(0)
-	for _, walletReceipts := range receipts {
-		for _, receipt := range walletReceipts {
-			if receipt != nil && receipt.BlockNumber != nil && receipt.BlockNumber.Uint64() > highest {
-				highest = receipt.BlockNumber.Uint64()
-			}
-		}
-	}
-	return highest
-}
-
-// awaitClientsAtBlock waits up to batchClientSyncTimeout for every good non-builder
-// client to reach blockNumber.
-func (p *TxPool) awaitClientsAtBlock(ctx context.Context, blockNumber uint64) {
-	if blockNumber == 0 || p.options.ClientPool == nil {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, batchClientSyncTimeout)
-	defer cancel()
-
-	var wg sync.WaitGroup
-	for _, client := range p.options.ClientPool.GetAllGoodClients() {
-		if client.IsBuilder() || !client.IsEnabled() {
-			continue
-		}
-
-		wg.Add(1)
-		go func(client *Client) {
-			defer wg.Done()
-			for {
-				if head, err := client.GetBlockNumber(ctx); err == nil && head >= blockNumber {
-					return
-				}
-
-				select {
-				case <-ctx.Done():
-					p.options.Logger.Debugf("client %v did not reach block %v after batch", client.GetName(), blockNumber)
-					return
-				case <-time.After(500 * time.Millisecond):
-				}
-			}
-		}(client)
-	}
-	wg.Wait()
 }

@@ -60,7 +60,7 @@ func (f *DeploymentFactory) lazyInit(ctx context.Context) error {
 		return nil
 	}
 
-	client := f.txpool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0), WithoutBuilder())
+	client := f.txpool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientProxy), WithoutBuilder())
 	if client == nil {
 		return fmt.Errorf("no client available")
 	}
@@ -194,7 +194,7 @@ func (f *DeploymentFactory) GetContractDeployment(ctx context.Context, initcode 
 	contractAddr := crypto.CreateAddress2(f.factoryAddr, salt, contractInitHash)
 
 	if client == nil {
-		client = f.txpool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, 0), WithoutBuilder())
+		client = f.txpool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientProxy), WithoutBuilder())
 		if client == nil {
 			return common.Address{}, nil, fmt.Errorf("no client available")
 		}

@@ -235,7 +235,7 @@ func (s *Scenario) sendDeploymentTx(ctx context.Context) (*txtypes.Receipt, *spa
 	}
 
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(deployClientGroup),
 	)
 	wallet := s.walletPool.GetWellKnownWallet("deployer")

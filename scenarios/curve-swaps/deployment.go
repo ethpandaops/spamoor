@@ -105,7 +105,7 @@ func (c *Curve) setupConcurrency() int {
 // minting rights to each pool and seeds balanced liquidity.
 func (c *Curve) DeployCurvePools() (*CurveDeploymentInfo, error) {
 	client := c.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(c.options.ClientGroup),
 	)
 	if client == nil {
@@ -276,7 +276,7 @@ func (c *Curve) DeployCurvePools() (*CurveDeploymentInfo, error) {
 // client and stores the deployment for the swap phase.
 func (c *Curve) InitializeContracts(info *CurveDeploymentInfo) error {
 	client := c.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithoutBuilder(), // avoid using builders for eth_calls
 	)
 	if client == nil {
@@ -325,7 +325,7 @@ func (c *Curve) FundAndApproveWallets() error {
 	fundingAmount := c.options.WalletFunding.ToBig()
 
 	client := c.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(c.options.ClientGroup),
 	)
 	if client == nil {

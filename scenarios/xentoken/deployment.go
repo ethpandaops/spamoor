@@ -31,7 +31,7 @@ type DeploymentInfo struct {
 
 func (s *Scenario) DeployContracts(ctx context.Context, xenTokenAddress *common.Address, redeploy bool) (*DeploymentInfo, error) {
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {

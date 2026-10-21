@@ -45,7 +45,7 @@ type ProbeDeployment struct {
 // addresses the same contract, and a chain that already has it costs nothing.
 func SetupProbe(ctx context.Context, logger logrus.FieldLogger, walletPool *spamoor.WalletPool, clientGroup string, feeCap, tipCap *big.Int) (*ProbeDeployment, error) {
 	client := walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(clientGroup),
 	)
 	if client == nil {
@@ -118,7 +118,7 @@ const delegationGasPerAuthorization = 80_000
 // increment. Wallets that already carry the delegation are skipped, so a rerun is free.
 func DelegateProbe(ctx context.Context, logger logrus.FieldLogger, walletPool *spamoor.WalletPool, clientGroup string, target common.Address, wallets []*spamoor.Wallet, feeCap, tipCap *big.Int) error {
 	client := walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(clientGroup),
 	)
 	if client == nil {

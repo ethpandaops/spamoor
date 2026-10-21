@@ -75,7 +75,7 @@ func (s *Scenario) runNamingService(ctx context.Context) {
 // them, returning the number of successfully named wallets.
 func (s *Scenario) namingServiceTick(ctx context.Context, nameSvcWallet *spamoor.Wallet, seen map[common.Address]bool, retries map[common.Address]int) (int, error) {
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {

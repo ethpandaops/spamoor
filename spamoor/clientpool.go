@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +23,10 @@ var (
 	SelectClientRandom ClientSelectionMode = 1
 	// SelectClientRoundRobin selects clients in round-robin fashion.
 	SelectClientRoundRobin ClientSelectionMode = 2
+	// SelectClientProxy returns a proxy client that forwards each call to a client
+	// at the pool's highest known block, so reads after a confirmation never hit a
+	// lagging client.
+	SelectClientProxy ClientSelectionMode = 3
 )
 
 // ClientSelectionOption represents an option that can be passed to GetClient.
@@ -112,6 +118,8 @@ type ClientPool struct {
 	chainId        *big.Int
 	selectionMutex sync.Mutex
 	rrClientIdx    int
+	proxyClients   map[string]*Client
+	proxyRRIdx     int
 }
 
 // NewClientPool creates a new ClientPool with the specified RPC hosts and logger.
@@ -306,8 +314,40 @@ func (pool *ClientPool) GetClient(options ...ClientSelectionOption) *Client {
 		option.apply(opts)
 	}
 
-	// Build list of candidate clients
-	clientCandidates := make([]*Client, 0)
+	clientCandidates := pool.clientCandidates(opts)
+	if len(clientCandidates) == 0 {
+		return nil
+	}
+
+	// Select client based on mode
+	var selectedIndex int
+	switch opts.selectionMode {
+	case SelectClientProxy:
+		return pool.proxyClient(opts)
+	case SelectClientByIndex:
+		selectedIndex = opts.index % len(clientCandidates)
+	case SelectClientRandom:
+		selectedIndex = rand.Intn(len(clientCandidates))
+	default:
+		// Round-robin (also the fallback for any unrecognized mode). The cursor is
+		// shared across calls that can each see a differently sized candidate set
+		// (different group, different exclusions, clients toggling enabled), so it
+		// has to be clamped to the current candidate list before it is used, not
+		// just after advancing it.
+		if pool.rrClientIdx >= len(clientCandidates) {
+			pool.rrClientIdx = 0
+		}
+		selectedIndex = pool.rrClientIdx
+		pool.rrClientIdx++
+	}
+
+	return clientCandidates[selectedIndex]
+}
+
+// clientCandidates returns the enabled good clients matching the group and type
+// filters. The caller must hold selectionMutex.
+func (pool *ClientPool) clientCandidates(opts *clientSelectionOptions) []*Client {
+	clientCandidates := make([]*Client, 0, len(pool.goodClients))
 
 	for _, client := range pool.goodClients {
 		// Check if client is enabled
@@ -336,31 +376,85 @@ func (pool *ClientPool) GetClient(options ...ClientSelectionOption) *Client {
 		clientCandidates = append(clientCandidates, client)
 	}
 
-	if len(clientCandidates) == 0 {
+	return clientCandidates
+}
+
+// proxyClient returns the proxy client for the given filters, creating it on first
+// use. The caller must hold selectionMutex.
+func (pool *ClientPool) proxyClient(opts *clientSelectionOptions) *Client {
+	excluded := make([]string, 0, len(opts.excludeTypes))
+	for clientType := range opts.excludeTypes {
+		excluded = append(excluded, string(clientType))
+	}
+	sort.Strings(excluded)
+	key := opts.group + "|" + strings.Join(excluded, ",")
+
+	if client, ok := pool.proxyClients[key]; ok {
+		return client
+	}
+
+	client, err := newProxyClient(pool, opts)
+	if err != nil {
+		pool.logger.Errorf("failed creating proxy client: %v", err)
 		return nil
 	}
 
-	// Select client based on mode
-	var selectedIndex int
-	switch opts.selectionMode {
-	case SelectClientByIndex:
-		selectedIndex = opts.index % len(clientCandidates)
-	case SelectClientRandom:
-		selectedIndex = rand.Intn(len(clientCandidates))
-	default:
-		// Round-robin (also the fallback for any unrecognized mode). The cursor is
-		// shared across calls that can each see a differently sized candidate set
-		// (different group, different exclusions, clients toggling enabled), so it
-		// has to be clamped to the current candidate list before it is used, not
-		// just after advancing it.
-		if pool.rrClientIdx >= len(clientCandidates) {
-			pool.rrClientIdx = 0
-		}
-		selectedIndex = pool.rrClientIdx
-		pool.rrClientIdx++
+	if pool.proxyClients == nil {
+		pool.proxyClients = make(map[string]*Client, 4)
+	}
+	pool.proxyClients[key] = client
+
+	return client
+}
+
+// selectReadyClient picks, round-robin, a candidate whose last observed head is the
+// highest head any good client has reported. Heads are recorded by the txpool's
+// block polling, so a client counts as ready for the block the pool last
+// processed. When every candidate lags the pool (a group of slow nodes), the
+// least stale candidates are used instead; builders have no head and are only
+// used when nothing else matches.
+func (pool *ClientPool) selectReadyClient(opts *clientSelectionOptions) *Client {
+	pool.selectionMutex.Lock()
+	defer pool.selectionMutex.Unlock()
+
+	candidates := pool.clientCandidates(opts)
+	if len(candidates) == 0 {
+		return nil
 	}
 
-	return clientCandidates[selectedIndex]
+	poolHead := uint64(0)
+	for _, client := range pool.goodClients {
+		if head, _ := client.GetLastBlockHeight(); head > poolHead {
+			poolHead = head
+		}
+	}
+
+	candidateHead := uint64(0)
+	for _, client := range candidates {
+		if head, _ := client.GetLastBlockHeight(); !client.IsBuilder() && head > candidateHead {
+			candidateHead = head
+		}
+	}
+
+	targetHead := min(poolHead, candidateHead)
+
+	ready := make([]*Client, 0, len(candidates))
+	for _, client := range candidates {
+		if head, _ := client.GetLastBlockHeight(); !client.IsBuilder() && head >= targetHead {
+			ready = append(ready, client)
+		}
+	}
+	if len(ready) == 0 {
+		ready = candidates
+	}
+
+	if pool.proxyRRIdx >= len(ready) {
+		pool.proxyRRIdx = 0
+	}
+	client := ready[pool.proxyRRIdx]
+	pool.proxyRRIdx++
+
+	return client
 }
 
 // GetAllClients returns a copy of all clients in the pool, regardless of their health status.
