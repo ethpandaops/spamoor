@@ -1,9 +1,11 @@
 package txtypes
 
 import (
+	"crypto/ecdsa"
 	"crypto/elliptic"
 	"fmt"
 	"math/big"
+	"math/bits"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -21,7 +23,7 @@ const (
 	SpeciesDeploy       FrameSpecies = "deploy"        // DEFAULT, flags 0x0
 	SpeciesUserOp       FrameSpecies = "user_op"       // SENDER
 	SpeciesPostOp       FrameSpecies = "post_op"       // DEFAULT with flags
-	SpeciesPostTx       FrameSpecies = "post_tx"       // POST_TX (EIP-7906)
+	SpeciesAssert       FrameSpecies = "assert"        // ASSERT (EIP-7906)
 	SpeciesOther        FrameSpecies = "other"
 
 	// SpeciesRecentRootVerify is EIP-8272's canonical frame: VERIFY, flags 0x0, target
@@ -62,8 +64,8 @@ func (f *Frame) Species(sender common.Address) FrameSpecies {
 	case FrameModeSender:
 		return SpeciesUserOp
 
-	case FrameModePostTx:
-		return SpeciesPostTx
+	case FrameModeAssert:
+		return SpeciesAssert
 	}
 
 	return SpeciesOther
@@ -138,9 +140,10 @@ func (tx *FrameTx) validateExpiryFrames() error {
 	return nil
 }
 
-// validateNonce checks the EIP-8250 keyed nonce constraints. The key set must be
-// non-empty, bounded, strictly increasing, and the zero key may only appear alone
-// because it aliases the sender's ordinary account nonce.
+// validateNonce checks the EIP-8250 keyed nonce constraints: at most MaxNonceKeys keys,
+// strictly increasing, and the single-use sequence only with a non-empty key set. Under
+// LegacyNonceKeyZero the older rules apply instead: at least one key, the zero key
+// alone, and a sequence below MaxNonceSeq.
 func (tx *FrameTx) validateNonce() error {
 	if !tx.HasKeyedNonces() {
 		// EIP-8141's scalar nonce: there are no keys to check, and carrying any
@@ -152,9 +155,8 @@ func (tx *FrameTx) validateNonce() error {
 		return nil
 	}
 
-	if len(tx.NonceKeys) < 1 || len(tx.NonceKeys) > MaxNonceKeys {
-		return fmt.Errorf("%w: nonce key count %d must be between 1 and %d",
-			ErrInvalidFrameTx, len(tx.NonceKeys), MaxNonceKeys)
+	if len(tx.NonceKeys) > MaxNonceKeys {
+		return fmt.Errorf("%w: nonce key count %d exceeds %d", ErrInvalidFrameTx, len(tx.NonceKeys), MaxNonceKeys)
 	}
 
 	for i, key := range tx.NonceKeys {
@@ -165,10 +167,26 @@ func (tx *FrameTx) validateNonce() error {
 		if i > 0 && key.Cmp(tx.NonceKeys[i-1]) <= 0 {
 			return fmt.Errorf("%w: nonce keys must be strictly increasing", ErrInvalidFrameTx)
 		}
+	}
 
-		if key.IsZero() && len(tx.NonceKeys) != 1 {
-			return fmt.Errorf("%w: the zero nonce key must be used alone", ErrInvalidFrameTx)
+	if LegacyNonceKeyZero {
+		if len(tx.NonceKeys) == 0 {
+			return fmt.Errorf("%w: nonce key set is empty; this revision selects the account nonce with [0]", ErrInvalidFrameTx)
 		}
+
+		if tx.NonceKeys[0].IsZero() && len(tx.NonceKeys) != 1 {
+			return fmt.Errorf("%w: the zero nonce key must be used alone in this revision", ErrInvalidFrameTx)
+		}
+
+		if tx.NonceSeq == MaxNonceSeq {
+			return fmt.Errorf("%w: nonce sequence %d is out of range in this revision", ErrInvalidFrameTx, tx.NonceSeq)
+		}
+
+		return nil
+	}
+
+	if len(tx.NonceKeys) == 0 && tx.NonceSeq == MaxNonceSeq {
+		return fmt.Errorf("%w: the single-use nonce sequence needs a non-empty key set", ErrInvalidFrameTx)
 	}
 
 	return nil
@@ -272,7 +290,7 @@ func (tx *FrameTx) validateFrames() error {
 	totalGas := uint64(0)
 
 	for i, frame := range tx.Frames {
-		if frame.Mode > FrameModePostTx {
+		if frame.Mode > FrameModeAssert {
 			return fmt.Errorf("%w: frame %d has unknown mode %d", ErrInvalidFrameTx, i, frame.Mode)
 		}
 
@@ -284,12 +302,15 @@ func (tx *FrameTx) validateFrames() error {
 			return fmt.Errorf("%w: frame %d carries value outside SENDER mode", ErrInvalidFrameTx, i)
 		}
 
-		nextGas := totalGas + frame.Limits.Execution + frame.Limits.State
-		if nextGas < totalGas {
-			return fmt.Errorf("%w: total frame gas overflows 64 bits", ErrInvalidFrameTx)
+		frameGas, carry := bits.Add64(frame.Limits.Execution, frame.Limits.State, 0)
+		if carry != 0 {
+			return fmt.Errorf("%w: frame %d gas limits overflow 64 bits", ErrInvalidFrameTx, i)
 		}
 
-		totalGas = nextGas
+		totalGas, carry = bits.Add64(totalGas, frameGas, 0)
+		if carry != 0 {
+			return fmt.Errorf("%w: total frame gas overflows 64 bits", ErrInvalidFrameTx)
+		}
 
 		// Approving execution commits the sender's account, so only the sender may
 		// be the target.
@@ -298,16 +319,18 @@ func (tx *FrameTx) validateFrames() error {
 		}
 
 		if frame.IsAtomicBatch() {
-			if frame.Mode == FrameModeVerify {
-				return fmt.Errorf("%w: frame %d batches in VERIFY mode", ErrInvalidFrameTx, i)
+			// The flag is only valid with DEFAULT and SENDER, on the frame itself and
+			// on the one it batches with (EIP-7906).
+			if !batchable(frame.Mode) {
+				return fmt.Errorf("%w: frame %d batches in mode %d", ErrInvalidFrameTx, i, frame.Mode)
 			}
 
 			if i+1 >= len(tx.Frames) {
 				return fmt.Errorf("%w: frame %d batches but is the last frame", ErrInvalidFrameTx, i)
 			}
 
-			if tx.Frames[i+1].Mode == FrameModeVerify {
-				return fmt.Errorf("%w: frame %d batches with a VERIFY frame", ErrInvalidFrameTx, i)
+			if next := tx.Frames[i+1].Mode; !batchable(next) {
+				return fmt.Errorf("%w: frame %d batches with a mode %d frame", ErrInvalidFrameTx, i, next)
 			}
 		}
 
@@ -317,7 +340,7 @@ func (tx *FrameTx) validateFrames() error {
 		}
 	}
 
-	if err := tx.validatePostTxSuffix(); err != nil {
+	if err := tx.validateAssertSuffix(); err != nil {
 		return err
 	}
 
@@ -329,17 +352,23 @@ func (tx *FrameTx) validateFrames() error {
 	return nil
 }
 
-// validatePostTxSuffix checks EIP-7906's placement rule: once a frame has mode
-// POST_TX, every later frame must too.
-func (tx *FrameTx) validatePostTxSuffix() error {
+// batchable reports whether the atomic batch flag may sit on, or point at, a frame of
+// the given mode.
+func batchable(mode FrameMode) bool {
+	return mode == FrameModeDefault || mode == FrameModeSender
+}
+
+// validateAssertSuffix checks EIP-7906's placement rule: once a frame has mode ASSERT,
+// every later frame must too.
+func (tx *FrameTx) validateAssertSuffix() error {
 	seen := false
 
 	for i, frame := range tx.Frames {
 		switch {
-		case frame.Mode == FrameModePostTx:
+		case frame.Mode == FrameModeAssert:
 			seen = true
 		case seen:
-			return fmt.Errorf("%w: frame %d follows a POST_TX frame but is mode %d; POST_TX frames must be a trailing suffix",
+			return fmt.Errorf("%w: frame %d follows an ASSERT frame but is mode %d; ASSERT frames must be a trailing suffix",
 				ErrInvalidFrameTx, i, frame.Mode)
 		}
 	}
@@ -347,11 +376,11 @@ func (tx *FrameTx) validatePostTxSuffix() error {
 	return nil
 }
 
-// PostTxIndex returns the index of the first POST_TX frame, or -1 when the
-// transaction has none.
-func (tx *FrameTx) PostTxIndex() int {
+// AssertIndex returns the index of the first ASSERT frame, or -1 when the transaction
+// has none.
+func (tx *FrameTx) AssertIndex() int {
 	for i, frame := range tx.Frames {
-		if frame.Mode == FrameModePostTx {
+		if frame.Mode == FrameModeAssert {
 			return i
 		}
 	}
@@ -476,10 +505,8 @@ func (tx *FrameTx) validateProtocolVerifierPlacement() error {
 	return nil
 }
 
-// validatePrefixGas checks the verification gas caps over the validation prefix.
-//
-// EIP-8272 excludes its verifier frame's execution budget from the MaxVerifyGas cap: its
-// work is bounded by its own shape instead. Its state budget is zero by definition.
+// validatePrefixGas checks the verification gas caps over the validation prefix. Every
+// prefix frame counts, including EIP-8272's recent root verifier frame.
 func (tx *FrameTx) validatePrefixGas(prefixLen int) error {
 	sigGas, err := tx.SignatureVerificationGas()
 	if err != nil {
@@ -490,12 +517,8 @@ func (tx *FrameTx) validatePrefixGas(prefixLen int) error {
 	stateGas := uint64(0)
 
 	for i := 0; i < prefixLen; i++ {
-		if tx.Frames[i].IsRecentRootVerifier() {
-			continue
-		}
-
-		executionGas += tx.Frames[i].Limits.Execution
-		stateGas += tx.Frames[i].Limits.State
+		executionGas = saturatingAdd(executionGas, tx.Frames[i].Limits.Execution)
+		stateGas = saturatingAdd(stateGas, tx.Frames[i].Limits.State)
 	}
 
 	if executionGas > MaxVerifyGas {
@@ -545,17 +568,17 @@ func matchesRecognizedPrefix(shape []FrameSpecies) bool {
 }
 
 // VerifySignatures checks every protocol-validated signature entry against the digest
-// it authorizes, which is what a client does before executing any frame.
+// it authorizes, which is what a client does before executing any frame: SECP256K1
+// entries by recovery, P256 entries by P256VERIFY. ARBITRARY entries are not
+// protocol-validated.
 //
-// It is kept separate from ValidatePayload because it recovers public keys, while
+// It is kept separate from ValidatePayload because it does curve arithmetic, while
 // ValidatePayload only checks what is decidable from the encoded fields.
 func (tx *FrameTx) VerifySignatures() error {
 	sigHash := tx.SigHash()
 
 	for i, sig := range tx.Signatures {
-		if sig.Scheme != SigSchemeSecp256k1 {
-			// P256 entries need the P256VERIFY precompile, and ARBITRARY entries are
-			// not protocol-validated at all.
+		if sig.Scheme == SigSchemeArbitrary {
 			continue
 		}
 
@@ -568,25 +591,65 @@ func (tx *FrameTx) VerifySignatures() error {
 			digest = common.BytesToHash(sig.Msg)
 		}
 
-		// go-ethereum's recovery wants r || s || v, the entry carries v || r || s.
-		raw := make([]byte, 65)
-		copy(raw[:64], sig.Signature[1:])
-		raw[64] = sig.Signature[0]
+		switch sig.Scheme {
+		case SigSchemeSecp256k1:
+			if err := verifySecp256k1Entry(i, sig, digest, tx.Sender); err != nil {
+				return err
+			}
 
-		pub, err := crypto.Ecrecover(digest[:], raw)
-		if err != nil {
-			return fmt.Errorf("%w: signature %d could not be recovered: %v", ErrInvalidFrameTx, i, err)
+		case SigSchemeP256:
+			if err := verifyP256Entry(i, sig, digest); err != nil {
+				return err
+			}
 		}
+	}
 
-		var recovered common.Address
+	return nil
+}
 
-		copy(recovered[:], crypto.Keccak256(pub[1:])[12:])
+// verifySecp256k1Entry recovers the entry's signer and compares it with the resolved one.
+func verifySecp256k1Entry(index int, sig *FrameSignature, digest common.Hash, sender common.Address) error {
+	// go-ethereum's recovery wants r || s || v, the entry carries v || r || s.
+	raw := make([]byte, 65)
+	copy(raw[:64], sig.Signature[1:])
+	raw[64] = sig.Signature[0]
 
-		expected, _ := sig.ResolvedSigner(tx.Sender)
-		if recovered != expected {
-			return fmt.Errorf("%w: signature %d recovered %s, expected %s",
-				ErrInvalidFrameTx, i, recovered, expected)
-		}
+	pub, err := crypto.Ecrecover(digest[:], raw)
+	if err != nil {
+		return fmt.Errorf("%w: signature %d could not be recovered: %v", ErrInvalidFrameTx, index, err)
+	}
+
+	var recovered common.Address
+
+	copy(recovered[:], crypto.Keccak256(pub[1:])[12:])
+
+	expected, _ := sig.ResolvedSigner(sender)
+	if recovered != expected {
+		return fmt.Errorf("%w: signature %d recovered %s, expected %s",
+			ErrInvalidFrameTx, index, recovered, expected)
+	}
+
+	return nil
+}
+
+// verifyP256Entry checks the entry's signature over the public key it carries, which is
+// what P256VERIFY does. The signer address was already matched against that key by
+// validateSignatureBytes, so a passing signature binds the resolved signer.
+func verifyP256Entry(index int, sig *FrameSignature, digest common.Hash) error {
+	// The uncompressed point encoding is 0x04 || qx || qy; parsing it performs the
+	// on-curve check.
+	point := append([]byte{0x04}, sig.Signature[64:128]...)
+
+	pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), point)
+	if err != nil {
+		return fmt.Errorf("%w: signature %d carries an invalid P-256 public key: %v", ErrInvalidFrameTx, index, err)
+	}
+
+	r := new(big.Int).SetBytes(sig.Signature[0:32])
+	s := new(big.Int).SetBytes(sig.Signature[32:64])
+
+	if !ecdsa.Verify(pub, digest[:], r, s) {
+		return fmt.Errorf("%w: signature %d does not verify under P-256", ErrInvalidFrameTx, index)
 	}
 
 	return nil

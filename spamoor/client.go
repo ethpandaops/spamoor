@@ -88,6 +88,9 @@ type Client struct {
 	clientVersion     string
 	clientVersionTime time.Time
 
+	// proxy is set on proxy clients, which forward every call to a ready pool client.
+	proxy *clientProxy
+
 	// Request statistics
 	statsMutex       sync.Mutex
 	totalRequests    uint64
@@ -371,6 +374,15 @@ func (client *Client) getContext(ctx context.Context) (context.Context, context.
 // callRPC performs a JSON-RPC call with the client's timeout and records request
 // statistics. isTxRequest marks submission calls, which are counted separately.
 func (client *Client) callRPC(ctx context.Context, isTxRequest bool, result any, method string, args ...any) error {
+	if client.proxy != nil {
+		backend, err := client.proxy.backend()
+		if err != nil {
+			return err
+		}
+
+		return backend.callRPC(ctx, isTxRequest, result, method, args...)
+	}
+
 	ctx, cancel := client.getContext(ctx)
 	defer cancel()
 
@@ -661,7 +673,21 @@ func (client *Client) GetBlockNumber(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 
+	client.recordBlockHeight(uint64(result))
+
 	return uint64(result), nil
+}
+
+// recordBlockHeight stores an observed head when it is newer than the cached one.
+// The cached head is what the client pool uses to judge readiness.
+func (client *Client) recordBlockHeight(blockHeight uint64) {
+	client.blockHeightMutex.Lock()
+	defer client.blockHeightMutex.Unlock()
+
+	if blockHeight > client.blockHeight {
+		client.blockHeight = blockHeight
+		client.blockHeightTime = time.Now()
+	}
 }
 
 // GetLastBlockHeight returns the last cached block height and the time it was retrieved.
@@ -677,9 +703,7 @@ func (client *Client) GetClientVersion(ctx context.Context) (string, error) {
 	}
 
 	var result string
-	err := client.rpcClient.CallContext(ctx, &result, "web3_clientVersion")
-	client.incrementRequestStats(false, err != nil)
-	if err != nil {
+	if err := client.callRPC(ctx, false, &result, "web3_clientVersion"); err != nil {
 		return client.clientVersion, err
 	}
 

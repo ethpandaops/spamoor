@@ -134,7 +134,7 @@ func probeFrameSupport(ctx context.Context, client *Client) (FrameSupport, error
 }
 
 // predeployActive reports whether a predeploy account has been installed. Nonce is
-// checked as well as code because one of these codes is still TBD in its EIP.
+// checked as well as code so that a genesis carrying an older code still counts.
 func predeployActive(ctx context.Context, client *Client, address common.Address) (bool, error) {
 	code, err := client.GetCodeAt(ctx, address)
 	if err != nil {

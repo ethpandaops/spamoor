@@ -52,7 +52,7 @@ type safeSpec struct {
 // scenarios) so a restarted scenario re-uses the already-deployed addresses.
 func (s *Scenario) DeployContracts(ctx context.Context) (*DeploymentInfo, error) {
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.deployClientGroup()),
 	)
 	if client == nil {
@@ -145,7 +145,7 @@ func (s *Scenario) DeployContracts(ctx context.Context) (*DeploymentInfo, error)
 // per-executor safe pools used by the transaction loop.
 func (s *Scenario) setupSafes(ctx context.Context) error {
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.deployClientGroup()),
 	)
 	if client == nil {

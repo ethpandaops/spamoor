@@ -234,7 +234,7 @@ func (s *Scenario) deployContract(ctx context.Context) (*txtypes.Receipt, error)
 
 	// Get a client for deployment
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {

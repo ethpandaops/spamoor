@@ -464,8 +464,8 @@ func (wallet *Wallet) BuildSetCodeTx(txData *txtypes.SetCodeTx) (*txtypes.Transa
 // secp256k1 signature entry belonging to this wallet.
 //
 // The nonce is assigned to the sequence of the EIP-8250 key set the caller selected.
-// A transaction left with the default [0] key set uses the wallet's account nonce, so
-// it stays in the pool's ordinary nonce tracking; other key sets are sequenced
+// A transaction left with the legacy key set uses the wallet's account nonce, so it
+// stays in the pool's ordinary nonce tracking; other key sets are sequenced
 // independently and the caller owns their numbering.
 func (wallet *Wallet) BuildFrameTx(txData *txtypes.FrameTx) (*txtypes.Transaction, error) {
 	return wallet.BuildFrameTxWithSigners(txData)
@@ -499,7 +499,7 @@ func (wallet *Wallet) PrepareFrameTx(txData *txtypes.FrameTx) error {
 	txData.Sender = wallet.address
 
 	if txData.HasKeyedNonces() && len(txData.NonceKeys) == 0 {
-		txData.NonceKeys = []*uint256.Int{new(uint256.Int)}
+		txData.WithLegacyNonce()
 	}
 
 	if txData.UsesLegacyNonce() {
@@ -723,7 +723,7 @@ func (wallet *Wallet) ReplaceFrameTx(txData *txtypes.FrameTx, nonce uint64) (*tx
 	txData.Sender = wallet.address
 
 	if txData.HasKeyedNonces() && len(txData.NonceKeys) == 0 {
-		txData.NonceKeys = []*uint256.Int{new(uint256.Int)}
+		txData.WithLegacyNonce()
 	}
 
 	txData.NonceSeq = nonce

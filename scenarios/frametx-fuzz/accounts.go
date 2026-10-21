@@ -165,7 +165,7 @@ func prepareKeylessFrameTx(frameTx *txtypes.FrameTx, sender common.Address, chai
 	frameTx.Sender = sender
 
 	if frameTx.HasKeyedNonces() && len(frameTx.NonceKeys) == 0 {
-		frameTx.NonceKeys = []*uint256.Int{new(uint256.Int)}
+		frameTx.WithLegacyNonce()
 	}
 
 	if frameTx.UsesLegacyNonce() {

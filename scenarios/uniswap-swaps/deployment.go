@@ -45,7 +45,7 @@ type PairDeploymentInfo struct {
 
 func (u *Uniswap) DeployUniswapPairs(redeploy bool) (*DeploymentInfo, error) {
 	client := u.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(u.options.ClientGroup),
 	)
 	if client == nil {

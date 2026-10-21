@@ -16,7 +16,7 @@ func testDrawOptions() DrawOptions {
 	return DrawOptions{
 		Axes:          axes,
 		MaxBodyFrames: 6,
-		AllowPostTx:   true,
+		AllowAssert:   true,
 		AllowContract: true,
 		AllowRoots:    true,
 		AllowKeyed:    true,
@@ -76,7 +76,7 @@ func TestDrawRoundTripsThroughJSON(t *testing.T) {
 // for reasons that have nothing to do with the client.
 func TestDrawRespectsGates(t *testing.T) {
 	opts := testDrawOptions()
-	opts.AllowPostTx = false
+	opts.AllowAssert = false
 	opts.AllowRoots = false
 	opts.AllowKeyed = false
 	opts.AllowProbe = false
@@ -98,8 +98,8 @@ func TestDrawRespectsGates(t *testing.T) {
 		}
 
 		for _, frame := range recipe.Body {
-			if frame.Kind == KindPostTx {
-				t.Fatalf("index %d generated a POST_TX frame with EIP-7906 disabled", index)
+			if frame.Kind == KindAssert {
+				t.Fatalf("index %d generated an ASSERT frame with EIP-7906 disabled", index)
 			}
 
 			if frame.Kind == KindProbe {
@@ -116,31 +116,31 @@ func TestDrawNormalizesFormatConstraints(t *testing.T) {
 	for index := uint64(0); index < 256; index++ {
 		recipe := Draw(utils.NewDeterministicRNGWithSeed(index, "0x03"), index, testDrawOptions())
 
-		seenPostTx := false
+		seenAssert := false
 
 		for i, frame := range recipe.Body {
-			if frame.Kind == KindPostTx {
-				seenPostTx = true
-			} else if seenPostTx {
-				t.Fatalf("index %d places frame %d after a POST_TX frame", index, i)
+			if frame.Kind == KindAssert {
+				seenAssert = true
+			} else if seenAssert {
+				t.Fatalf("index %d places frame %d after an ASSERT frame", index, i)
 			}
 
 			if frame.Batch && i == len(recipe.Body)-1 {
 				t.Fatalf("index %d batches its last frame", index)
 			}
 
-			if frame.Kind == KindPostTx && frame.Batch {
-				t.Fatalf("index %d batches a POST_TX frame", index)
+			if frame.Kind == KindAssert && frame.Batch {
+				t.Fatalf("index %d batches an ASSERT frame", index)
 			}
 
 			// EIP-7906: the atomic batch flag is not valid on a frame directly before a
-			// POST_TX frame.
-			if frame.Batch && i+1 < len(recipe.Body) && recipe.Body[i+1].Kind == KindPostTx {
-				t.Fatalf("index %d batches frame %d directly before a POST_TX frame", index, i)
+			// ASSERT frame.
+			if frame.Batch && i+1 < len(recipe.Body) && recipe.Body[i+1].Kind == KindAssert {
+				t.Fatalf("index %d batches frame %d directly before an ASSERT frame", index, i)
 			}
 
-			if frame.Kind == KindPostTx && frame.Script != ScriptNone {
-				t.Fatalf("index %d gives a POST_TX frame a writing script", index)
+			if frame.Kind == KindAssert && frame.Script != ScriptNone {
+				t.Fatalf("index %d gives an ASSERT frame a writing script", index)
 			}
 		}
 	}

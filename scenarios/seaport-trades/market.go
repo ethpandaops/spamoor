@@ -134,7 +134,7 @@ func (m *Market) seededTokenCount() uint64 {
 // in-memory inventory from chain instead.
 func (m *Market) Seed(ctx context.Context) error {
 	client := m.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(m.options.ClientGroup),
 		spamoor.WithoutBuilder(),
 	)

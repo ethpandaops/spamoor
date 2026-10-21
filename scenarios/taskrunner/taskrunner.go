@@ -245,7 +245,7 @@ func (s *Scenario) executeInitTasks(ctx context.Context) error {
 	// Use the registered well-known wallet for init tasks to avoid conflicts with numbered wallets
 	wallet := s.walletPool.GetWellKnownWallet("taskrunner-init")
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {

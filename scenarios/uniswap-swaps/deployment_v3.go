@@ -60,7 +60,7 @@ const liquidityBudgetBps = 9990
 // full-range position.
 func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 	client := u.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(u.options.ClientGroup),
 	)
 	if client == nil {
@@ -312,7 +312,7 @@ func (u *Uniswap) DeployUniswapV3() (*V3DeploymentInfo, error) {
 // call client and stores the deployment for the swap phase.
 func (u *Uniswap) InitializeContractsV3(info *V3DeploymentInfo) error {
 	client := u.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithoutBuilder(), // avoid using builders for eth_calls
 	)
 	if client == nil {

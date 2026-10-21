@@ -99,7 +99,7 @@ func (u *Uniswap) InitializeContracts(deploymentInfo *DeploymentInfo) error {
 	u.deploymentInfo = deploymentInfo
 
 	client := u.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithoutBuilder(), // avoid using builders for eth_calls
 	)
 	if client == nil {
@@ -271,7 +271,7 @@ func (u *Uniswap) SetUnlimitedAllowances() error {
 
 	// Get a client for fee calculation
 	client := u.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(u.options.ClientGroup),
 	)
 	if client == nil {

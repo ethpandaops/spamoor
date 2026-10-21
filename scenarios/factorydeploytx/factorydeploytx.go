@@ -269,7 +269,7 @@ func (s *Scenario) deployFactory(ctx context.Context) (common.Address, error) {
 	}
 
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(deployClientGroup),
 	)
 	if client == nil {

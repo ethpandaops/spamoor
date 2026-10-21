@@ -179,7 +179,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 	defer s.logger.Infof("scenario %s finished", ScenarioName)
 
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 	)
 	wallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
@@ -415,7 +415,7 @@ func (s *Scenario) Run(ctx context.Context) error {
 		// Send all transactions in parallel using SendMultiTransactionBatch
 		s.logger.Infof("sending %d transactions in parallel from %d wallets", len(txBatches), len(walletTxMap))
 
-		client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
+		client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientProxy))
 
 		receipts, err := s.walletPool.GetTxPool().SendMultiTransactionBatch(ctx, walletTxMap, &spamoor.BatchOptions{
 			SendTransactionOptions: spamoor.SendTransactionOptions{
@@ -578,7 +578,7 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 		return nil // No distribution needed if only using deployer wallet
 	}
 
-	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
+	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientProxy))
 	deployerWallet := s.walletPool.GetWallet(spamoor.SelectWalletByIndex, 0)
 
 	// 10 million tokens per wallet (with 18 decimals)
@@ -661,7 +661,7 @@ func (s *Scenario) distributeTokensToWallets(ctx context.Context, numWallets int
 }
 
 func (s *Scenario) deployContract(ctx context.Context) (*txtypes.Receipt, *txtypes.Transaction, error) {
-	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
+	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientProxy))
 	if client == nil {
 		return nil, nil, fmt.Errorf("no client available")
 	}
@@ -717,7 +717,7 @@ func (s *Scenario) deployContract(ctx context.Context) (*txtypes.Receipt, *txtyp
 // buildBloatTx builds a bloating transaction without sending it.
 // nextAddressIndex is the starting address index (matching contract's nextStorageSlot semantics).
 func (s *Scenario) buildBloatTx(ctx context.Context, wallet *spamoor.Wallet, startAddressIndex uint64, numAddresses uint64) (*txtypes.Transaction, error) {
-	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0))
+	client := s.walletPool.GetClient(spamoor.WithClientSelectionMode(spamoor.SelectClientProxy))
 	if client == nil {
 		return nil, fmt.Errorf("no client available")
 	}

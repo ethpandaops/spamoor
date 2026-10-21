@@ -12,7 +12,7 @@ import "github.com/ethereum/go-ethereum/common"
 //   - SIGPARAM's resolved signer halts on an ARBITRARY entry and its raw length halts on
 //     every other scheme;
 //   - SIGDATACOPY is defined for ARBITRARY entries only;
-//   - TXTRACE, TXDIFF and EVENTDATACOPY exist only inside a POST_TX frame, and their
+//   - TXTRACE, TXDIFF and EVENTDATACOPY exist only inside an ASSERT frame, and their
 //     indexed parameters halt past the end of the table they index.
 
 // appendReads adds the introspection sweep for a frame at the given index.
@@ -85,7 +85,7 @@ func appendSigParamReads(script *ProbeScript, recipe *Recipe) {
 	script.ReadSigData(witnessIndex, 0)
 }
 
-// appendPostTxReads sweeps EIP-7906's assertion instructions from inside a POST_TX
+// appendAssertReads sweeps EIP-7906's assertion instructions from inside an ASSERT
 // frame, against the transaction's own sender.
 //
 // The count parameters and the per-address lookups are defined for any transaction. The
@@ -93,7 +93,7 @@ func appendSigParamReads(script *ProbeScript, recipe *Recipe) {
 // so its index 0 is safe to read. The event table is only read when an earlier probe
 // frame emitted a log, and even then a batch unroll can have discarded it: a halt there
 // is the whole-body revert EIP-7906 specifies, which is as much a case as the read.
-func appendPostTxReads(script *ProbeScript, recipe *Recipe, sender common.Address) {
+func appendAssertReads(script *ProbeScript, recipe *Recipe, sender common.Address) {
 	for _, param := range []uint8{
 		TxTraceBalancesChanged, TxTraceSlotsChanged, TxTraceContractsDeployed,
 		TxTraceEventCount, TxTraceGasPreCharge, TxTraceGasPayer,

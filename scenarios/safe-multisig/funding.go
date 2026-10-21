@@ -36,18 +36,12 @@ func (s *Scenario) runSafeTopUp(ctx context.Context) {
 	if slots == 0 {
 		slots = 1
 	}
-	interval := time.Duration(slots) * scenario.GlobalSlotDuration
-	if interval <= 0 {
-		interval = 32 * 12 * time.Second
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(time.Duration(slots) * s.walletPool.GetTxPool().GetSlotDuration()):
 			if err := s.topUpSafes(ctx); err != nil && ctx.Err() == nil {
 				s.logger.Warnf("could not top up safe balances: %v", err)
 			}
@@ -72,7 +66,7 @@ func (s *Scenario) topUpSafes(ctx context.Context) error {
 	}
 
 	client := s.walletPool.GetClient(
-		spamoor.WithClientSelectionMode(spamoor.SelectClientByIndex, 0),
+		spamoor.WithClientSelectionMode(spamoor.SelectClientProxy),
 		spamoor.WithClientGroup(s.options.ClientGroup),
 	)
 	if client == nil {

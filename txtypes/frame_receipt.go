@@ -311,18 +311,18 @@ func (e *FrameReceiptExtra) EncodeReceiptJSON(fields map[string]any) {
 	fields["frameReceipts"] = frames
 }
 
-// PostTxReverted reports whether a POST_TX frame failed, which under EIP-7906 reverts
+// AssertReverted reports whether an ASSERT frame failed, which under EIP-7906 reverts
 // the whole execution body rather than one atomic batch.
 //
 // The receipt alone cannot answer this: frame modes live on the transaction, so the
 // transaction has to be supplied.
-func (e *FrameReceiptExtra) PostTxReverted(tx *FrameTx) bool {
-	postTx := tx.PostTxIndex()
-	if postTx < 0 {
+func (e *FrameReceiptExtra) AssertReverted(tx *FrameTx) bool {
+	assert := tx.AssertIndex()
+	if assert < 0 {
 		return false
 	}
 
-	for i := postTx; i < len(e.Frames) && i < len(tx.Frames); i++ {
+	for i := assert; i < len(e.Frames) && i < len(tx.Frames); i++ {
 		if e.Frames[i].Status == FrameStatusFailed {
 			return true
 		}
@@ -339,7 +339,7 @@ func (e *FrameReceiptExtra) PostTxReverted(tx *FrameTx) bool {
 //
 //   - an atomic batch that fails is unrolled, so the frames before the failure inside
 //     it lose their state changes and logs while keeping their status;
-//   - a failing POST_TX frame (EIP-7906) reverts the entire execution body, so every
+//   - a failing ASSERT frame (EIP-7906) reverts the entire execution body, so every
 //     frame after the validation prefix loses its effects.
 //
 // Frames of the validation prefix are always durable: their changes are committed even
@@ -348,7 +348,7 @@ func (e *FrameReceiptExtra) DurableFrames(tx *FrameTx) []bool {
 	durable := make([]bool, len(e.Frames))
 
 	prefix := tx.ValidationPrefixLength()
-	bodyReverted := e.PostTxReverted(tx)
+	bodyReverted := e.AssertReverted(tx)
 
 	for i := range e.Frames {
 		switch {
