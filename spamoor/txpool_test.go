@@ -83,11 +83,11 @@ func TestSendTransactionReleasesWaitGroupWhenContextCancelled(t *testing.T) {
 }
 
 func TestUpdateSlotDuration(t *testing.T) {
-	pool := &TxPool{options: &TxPoolOptions{Logger: logrus.NewEntry(logrus.New())}}
+	pool := &TxPool{options: &TxPoolOptions{Logger: logrus.NewEntry(logrus.New()), SlotDuration: 6 * time.Second}}
 
 	pool.updateSlotDuration(&BlockInfo{Timestamp: 1000}, &BlockInfo{Timestamp: 1012})
-	if pool.GetSlotDuration() != 0 {
-		t.Fatalf("expected no slot duration without slot numbers, got %v", pool.GetSlotDuration())
+	if pool.GetSlotDuration() != 6*time.Second {
+		t.Fatalf("expected the configured fallback without slot numbers, got %v", pool.GetSlotDuration())
 	}
 
 	pool.updateSlotDuration(&BlockInfo{Timestamp: 1000, SlotNumber: 100}, &BlockInfo{Timestamp: 1012, SlotNumber: 101})

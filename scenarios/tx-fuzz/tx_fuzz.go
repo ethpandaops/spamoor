@@ -270,7 +270,7 @@ func (s *Scenario) Init(options *scenario.Options) error {
 
 // blobRate returns the blob tx rate for --max-blob-tx-per-slot at the current slot duration.
 func (s *Scenario) blobRate() rate.Limit {
-	return rate.Limit(float64(s.options.MaxBlobTxPerSlot) / scenario.SlotDuration(s.walletPool).Seconds())
+	return rate.Limit(float64(s.options.MaxBlobTxPerSlot) / s.walletPool.GetTxPool().GetSlotDuration().Seconds())
 }
 
 // allowBlob reports whether a blob tx may be sent now under the blob rate limit.

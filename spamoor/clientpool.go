@@ -363,16 +363,6 @@ func (pool *ClientPool) GetClient(options ...ClientSelectionOption) *Client {
 	return clientCandidates[selectedIndex]
 }
 
-// setSlotDuration propagates the chain's slot duration to all clients.
-func (pool *ClientPool) setSlotDuration(duration time.Duration) {
-	if pool == nil {
-		return
-	}
-	for _, client := range pool.allClients {
-		client.slotDuration.Store(int64(duration))
-	}
-}
-
 // GetAllClients returns a copy of all clients in the pool, regardless of their health status.
 func (pool *ClientPool) GetAllClients() []*Client {
 	clients := make([]*Client, len(pool.allClients))

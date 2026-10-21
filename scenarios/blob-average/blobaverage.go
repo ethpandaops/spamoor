@@ -215,7 +215,7 @@ outer:
 			// Wait for pending transactions to complete before exiting
 			break outer
 		case <-s.blockChan:
-		case <-time.After(scenario.SlotDuration(s.walletPool) * 2): // Fallback timeout if block notification missed
+		case <-time.After(s.walletPool.GetTxPool().GetSlotDuration() * 2): // Fallback timeout if block notification missed
 		}
 
 		// Check if we need to send more blobs

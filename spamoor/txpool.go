@@ -166,6 +166,9 @@ type TxPoolOptions struct {
 	ReorgDepth          int // Number of blocks to keep in memory for reorg tracking
 	ChainId             *big.Int
 	ExternalBlockSource *ExternalBlockSource
+	// SlotDuration is the slot duration used while the chain reports no EIP-7843
+	// slot numbers (pre-Amsterdam chains, L2s). Defaults to 12s.
+	SlotDuration time.Duration
 	// PreAmsterdamFeeModel forces the legacy (pre-EIP-8037) gas/fee model.
 	// When false (default) spamoor uses the Amsterdam fee model, which is
 	// safe to keep on non-Amsterdam chains because its gas budgets are
@@ -208,6 +211,10 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 
 	if options.ReorgDepth > 0 {
 		pool.reorgDepth = options.ReorgDepth
+	}
+
+	if options.SlotDuration <= 0 {
+		options.SlotDuration = 12 * time.Second
 	}
 
 	// Block stats (gas limit, base fee) are loaded by the caller via
@@ -1590,18 +1597,19 @@ func (pool *TxPool) updateSlotDuration(parent *BlockInfo, block *BlockInfo) {
 	}
 
 	duration := time.Duration(block.Timestamp-parent.Timestamp) * time.Second / time.Duration(block.SlotNumber-parent.SlotNumber)
-	if duration <= 0 || time.Duration(pool.slotDuration.Swap(int64(duration))) == duration {
-		return
+	if time.Duration(pool.slotDuration.Swap(int64(duration))) != duration {
+		pool.options.Logger.Infof("slot duration changed to %v (slot %v)", duration, block.SlotNumber)
 	}
-
-	pool.options.Logger.Infof("slot duration changed to %v (slot %v)", duration, block.SlotNumber)
-	pool.options.ClientPool.setSlotDuration(duration)
 }
 
 // GetSlotDuration returns the slot duration derived from EIP-7843 block slot numbers,
-// or 0 if the chain does not report slot numbers.
+// or the configured fallback while the chain does not report slot numbers.
 func (pool *TxPool) GetSlotDuration() time.Duration {
-	return time.Duration(pool.slotDuration.Load())
+	if duration := time.Duration(pool.slotDuration.Load()); duration > 0 {
+		return duration
+	}
+
+	return pool.options.SlotDuration
 }
 
 // GetCurrentGasLimit returns the current gas limit of the chain.

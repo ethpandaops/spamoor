@@ -415,7 +415,7 @@ func (s *Scenario) awaitFrameAcceptance(ctx context.Context, env *environment) e
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(scenario.SlotDuration(s.walletPool)):
+		case <-time.After(s.walletPool.GetTxPool().GetSlotDuration()):
 		}
 	}
 }

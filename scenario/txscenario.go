@@ -12,25 +12,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// GlobalSlotDuration is the global setting for slot/block duration used in rate limiting.
-// This can be set via CLI flag (--slot-duration) and applies to all scenarios.
-// For L1 chains, this is typically 12s. For L2s like Arbitrum, it can be 250ms or less.
-// It is the fallback for chains that do not report EIP-7843 slot numbers.
-var GlobalSlotDuration time.Duration = 12 * time.Second
-
-// SlotDuration returns the chain's slot duration derived from EIP-7843 block slot
-// numbers, falling back to GlobalSlotDuration.
-func SlotDuration(walletPool *spamoor.WalletPool) time.Duration {
-	if walletPool != nil {
-		if txPool := walletPool.GetTxPool(); txPool != nil {
-			if duration := txPool.GetSlotDuration(); duration > 0 {
-				return duration
-			}
-		}
-	}
-	return GlobalSlotDuration
-}
-
 // TransactionScenarioOptions configures how the transaction scenario is executed.
 type TransactionScenarioOptions struct {
 	TotalCount                  uint64
@@ -70,7 +51,15 @@ type ProcessNextTxParams struct {
 // Returns an error only if the scenario cannot be started. Transaction failures
 // should be handled within ProcessNextTxFn.
 func RunTransactionScenario(ctx context.Context, options TransactionScenarioOptions) error {
-	slotDuration := SlotDuration(options.WalletPool)
+	var txPool *spamoor.TxPool
+	if options.WalletPool != nil {
+		txPool = options.WalletPool.GetTxPool()
+	}
+
+	slotDuration := 12 * time.Second
+	if txPool != nil {
+		slotDuration = txPool.GetSlotDuration()
+	}
 
 	txIdxCounter := uint64(0)
 	pendingCount := atomic.Int64{}
@@ -151,11 +140,10 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 
 	// Subscribe to block updates for stats reporting
 	var lastSubmittedCount uint64
-	if options.WalletPool != nil && options.WalletPool.GetTxPool() != nil {
-		txPool := options.WalletPool.GetTxPool()
+	if txPool != nil {
 		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats *spamoor.WalletPoolBlockStats) {
 			throughputMutex.Lock()
-			if newSlotDuration := SlotDuration(options.WalletPool); newSlotDuration != slotDuration {
+			if newSlotDuration := txPool.GetSlotDuration(); newSlotDuration != slotDuration {
 				slotDuration = newSlotDuration
 				limiter.SetLimit(slotRate())
 			}

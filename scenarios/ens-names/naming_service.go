@@ -54,7 +54,7 @@ func (s *Scenario) runNamingService(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(scenario.SlotDuration(s.walletPool)):
+		case <-time.After(s.walletPool.GetTxPool().GetSlotDuration()):
 			named, err := s.namingServiceTick(ctx, nameSvcWallet, seen, retries)
 			if err != nil {
 				s.logger.Warnf("naming service: %v", err)

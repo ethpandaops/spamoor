@@ -41,7 +41,7 @@ func (s *Scenario) runSafeTopUp(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Duration(slots) * scenario.SlotDuration(s.walletPool)):
+		case <-time.After(time.Duration(slots) * s.walletPool.GetTxPool().GetSlotDuration()):
 			if err := s.topUpSafes(ctx); err != nil && ctx.Err() == nil {
 				s.logger.Warnf("could not top up safe balances: %v", err)
 			}

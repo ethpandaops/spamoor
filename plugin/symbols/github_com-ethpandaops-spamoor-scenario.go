@@ -17,7 +17,6 @@ func init() {
 		"ErrNoClients":           reflect.ValueOf(&scenario.ErrNoClients).Elem(),
 		"ErrNoWallet":            reflect.ValueOf(&scenario.ErrNoWallet).Elem(),
 		"GetScenarioValidFields": reflect.ValueOf(scenario.GetScenarioValidFields),
-		"GlobalSlotDuration":     reflect.ValueOf(&scenario.GlobalSlotDuration).Elem(),
 		"GroupScenarioName":      reflect.ValueOf(constant.MakeFromLiteral("\"group\"", token.STRING, 0)),
 		"NewConfigValidator":     reflect.ValueOf(scenario.NewConfigValidator),
 		"NewRegistry":            reflect.ValueOf(scenario.NewRegistry),
@@ -25,7 +24,6 @@ func init() {
 		"RunTransactionScenario": reflect.ValueOf(scenario.RunTransactionScenario),
 		"ScenarioSourceNative":   reflect.ValueOf(scenario.ScenarioSourceNative),
 		"ScenarioSourcePlugin":   reflect.ValueOf(scenario.ScenarioSourcePlugin),
-		"SlotDuration":           reflect.ValueOf(scenario.SlotDuration),
 		"ValidateScenarioConfig": reflect.ValueOf(scenario.ValidateScenarioConfig),
 
 		// type definitions

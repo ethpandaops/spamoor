@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
@@ -58,8 +57,6 @@ func (ct ClientType) IsValid() bool {
 	}
 }
 
-const defaultSlotDuration = 12 * time.Second
-
 // Client represents an Ethereum RPC client with additional functionality for transaction management,
 // gas estimation caching, and block height tracking. Engine calls go through the raw
 // JSON-RPC client so that spamoor's own encoding and decoding applies.
@@ -87,8 +84,6 @@ type Client struct {
 	blockHeight      uint64
 	blockHeightTime  time.Time
 	blockHeightMutex sync.Mutex
-
-	slotDuration atomic.Int64
 
 	clientVersion     string
 	clientVersionTime time.Time
@@ -473,7 +468,7 @@ func (client *Client) GetSuggestedFee(ctx context.Context) (*big.Int, *big.Int, 
 	client.gasSuggestionMutex.Lock()
 	defer client.gasSuggestionMutex.Unlock()
 
-	if time.Since(client.lastGasSuggestion) < client.getSlotDuration() {
+	if time.Since(client.lastGasSuggestion) < 12*time.Second {
 		return client.lastGasCap, client.lastTipCap, nil
 	}
 
@@ -582,7 +577,7 @@ func (client *Client) GetBlockHeight(ctx context.Context) (uint64, error) {
 	client.blockHeightMutex.Lock()
 	defer client.blockHeightMutex.Unlock()
 
-	if time.Since(client.blockHeightTime) < client.getSlotDuration() {
+	if time.Since(client.blockHeightTime) < 12*time.Second {
 		return client.blockHeight, nil
 	}
 
@@ -667,14 +662,6 @@ func (client *Client) GetBlockNumber(ctx context.Context) (uint64, error) {
 	}
 
 	return uint64(result), nil
-}
-
-// getSlotDuration returns the chain's slot duration, or defaultSlotDuration while it is unknown.
-func (client *Client) getSlotDuration() time.Duration {
-	if duration := time.Duration(client.slotDuration.Load()); duration > 0 {
-		return duration
-	}
-	return defaultSlotDuration
 }
 
 // GetLastBlockHeight returns the last cached block height and the time it was retrieved.
