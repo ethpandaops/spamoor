@@ -17,7 +17,6 @@ func init() {
 		"ErrNoClients":           reflect.ValueOf(&scenario.ErrNoClients).Elem(),
 		"ErrNoWallet":            reflect.ValueOf(&scenario.ErrNoWallet).Elem(),
 		"GetScenarioValidFields": reflect.ValueOf(scenario.GetScenarioValidFields),
-		"GlobalSlotDuration":     reflect.ValueOf(&scenario.GlobalSlotDuration).Elem(),
 		"GroupScenarioName":      reflect.ValueOf(constant.MakeFromLiteral("\"group\"", token.STRING, 0)),
 		"NewConfigValidator":     reflect.ValueOf(scenario.NewConfigValidator),
 		"NewRegistry":            reflect.ValueOf(scenario.NewRegistry),

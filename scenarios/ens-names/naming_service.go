@@ -50,14 +50,11 @@ func (s *Scenario) runNamingService(ctx context.Context) {
 	retries := make(map[common.Address]int, 16)
 	namedCount := 0
 
-	ticker := time.NewTicker(scenario.GlobalSlotDuration)
-	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(s.walletPool.GetTxPool().GetSlotDuration()):
 			named, err := s.namingServiceTick(ctx, nameSvcWallet, seen, retries)
 			if err != nil {
 				s.logger.Warnf("naming service: %v", err)
