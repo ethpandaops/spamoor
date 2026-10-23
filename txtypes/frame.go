@@ -469,6 +469,19 @@ func (f *Frame) ExpiryDeadline() (uint64, bool) {
 	return binary.BigEndian.Uint64(f.Data), true
 }
 
+// ExpiryDeadline returns the deadline of the transaction's expiry verifier frame, if it
+// carries one. It satisfies ExpiringTx: a transaction past this deadline is refused by the
+// expiry verifier, so it can never be included again.
+func (tx *FrameTx) ExpiryDeadline() (uint64, bool) {
+	for _, frame := range tx.Frames {
+		if deadline, ok := frame.ExpiryDeadline(); ok {
+			return deadline, true
+		}
+	}
+
+	return 0, false
+}
+
 // IsRecentRootVerifier reports whether the frame is an EIP-8272 recent root verifier
 // frame: a VERIFY frame targeting RECENT_ROOT_ADDRESS with zero flags, value and state
 // budget, whose data is one to MaxRecentRootReferences whole tuples.
@@ -1315,30 +1328,42 @@ func floorTokens(data []byte) uint64 {
 }
 
 // jsonFrame is a frame as reported by JSON-RPC. EIP-8141 does not specify a JSON
-// encoding; these key names follow ethrex, the first client to ship the type.
+// encoding, so every field is read in each spelling and each number format clients use:
+// a quantity string or a bare JSON number, which nethermind writes for a frame's mode and
+// flags where the others quote them.
 type jsonFrame struct {
-	Mode         *hexutil.Uint64 `json:"mode"`
-	Flags        *hexutil.Uint64 `json:"flags"`
-	To           *common.Address `json:"to"`
-	Target       *common.Address `json:"target"`
-	GasLimit     *hexutil.Uint64 `json:"gasLimit"`
-	ExecutionGas *hexutil.Uint64 `json:"executionGas"`
-	Value        *hexutil.Big    `json:"value"`
-	Data         *hexutil.Bytes  `json:"data"`
+	Mode   *flexUint64     `json:"mode"`
+	Flags  *flexUint64     `json:"flags"`
+	To     *common.Address `json:"to"`
+	Target *common.Address `json:"target"`
+	Value  *hexutil.Big    `json:"value"`
+	Data   *hexutil.Bytes  `json:"data"`
+
+	// The execution gas limit follows whichever name the client gives the dimension:
+	// gasLimit for reth and ethrex, executionGasLimit for nethermind, matching the
+	// executionGasUsed it reports on a receipt; executionGas for some ethrex builds.
+	GasLimit          *flexUint64 `json:"gasLimit"`
+	ExecutionGasLimit *flexUint64 `json:"executionGasLimit"`
+	ExecutionGas      *flexUint64 `json:"executionGas"`
 
 	// ethrex has shipped both spellings of the state gas limit. Reading only one of
 	// them decodes every frame from the other build with a state limit of zero and
 	// nothing says so, which changes the transaction's hash on re-encoding.
-	StateLimit    *hexutil.Uint64 `json:"stateLimit"`
-	StateGasLimit *hexutil.Uint64 `json:"stateGasLimit"`
-	StateGas      *hexutil.Uint64 `json:"stateGas"`
+	StateLimit    *flexUint64 `json:"stateLimit"`
+	StateGasLimit *flexUint64 `json:"stateGasLimit"`
+	StateGas      *flexUint64 `json:"stateGas"`
 }
 
+// executionLimit returns whichever spelling the client used.
 func (f *jsonFrame) executionLimit() uint64 {
-	if f.GasLimit != nil {
+	switch {
+	case f.GasLimit != nil:
 		return uint64(*f.GasLimit)
+	case f.ExecutionGasLimit != nil:
+		return uint64(*f.ExecutionGasLimit)
 	}
-	return jsonUint64(f.ExecutionGas)
+
+	return flexValue(f.ExecutionGas)
 }
 
 // stateLimit returns whichever spelling the client used.
@@ -1350,15 +1375,16 @@ func (f *jsonFrame) stateLimit() uint64 {
 	if f.StateGasLimit != nil {
 		return uint64(*f.StateGasLimit)
 	}
-	return jsonUint64(f.StateGas)
+
+	return flexValue(f.StateGas)
 }
 
 // jsonFrameSignature is a signature entry as reported by JSON-RPC.
 type jsonFrameSignature struct {
-	Scheme    *hexutil.Uint64 `json:"scheme"`
-	Signer    *hexutil.Bytes  `json:"signer"`
-	Msg       *hexutil.Bytes  `json:"msg"`
-	Signature *hexutil.Bytes  `json:"signature"`
+	Scheme    *flexUint64    `json:"scheme"`
+	Signer    *hexutil.Bytes `json:"signer"`
+	Msg       *hexutil.Bytes `json:"msg"`
+	Signature *hexutil.Bytes `json:"signature"`
 }
 
 // jsonFrameTx holds the frame-specific fields of a JSON-RPC transaction object.
@@ -1366,7 +1392,7 @@ type jsonFrameTx struct {
 	Sender     *common.Address       `json:"sender"`
 	MaxFee     *hexutil.Big          `json:"maxFee"`
 	NonceKeys  []*hexutil.Big        `json:"nonceKeys"`
-	NonceSeq   *hexutil.Uint64       `json:"nonceSeq"`
+	NonceSeq   *flexUint64           `json:"nonceSeq"`
 	Frames     []*jsonFrame          `json:"frames"`
 	Signatures []*jsonFrameSignature `json:"signatures"`
 }
@@ -1395,26 +1421,29 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 
 	// Clients report the EIP-8250 sequence as "nonce"; "nonceSeq" is what EncodeJSONTx
 	// writes, so accept both.
-	nonceSeq := dec.NonceSeq
-	if nonceSeq == nil {
-		nonceSeq = fields.Nonce
+	tx.NonceSeq = jsonUint64(fields.Nonce)
+	if dec.NonceSeq != nil {
+		tx.NonceSeq = uint64(*dec.NonceSeq)
 	}
 
-	tx.NonceSeq = jsonUint64(nonceSeq)
-
-	// A max_fee budget is reported as "maxFee" in place of the per-gas caps.
-	tx.LegacyFees = dec.MaxFee == nil
-	if tx.LegacyFees {
+	// A max_fee budget is reported as "maxFee" in place of the per-gas caps. A node that
+	// reports neither leaves the layout, and with it the hash, undecidable.
+	switch {
+	case dec.MaxFee != nil:
+		tx.LegacyFees = false
+		tx.Fees = FrameFees{
+			MaxFee:    jsonU256(dec.MaxFee),
+			GasTipCap: jsonU256(fields.MaxPriorityFeePerGas),
+		}
+	case fields.MaxFeePerGas != nil:
+		tx.LegacyFees = true
 		tx.Fees = FrameFees{
 			GasTipCap:  jsonU256(fields.MaxPriorityFeePerGas),
 			GasFeeCap:  jsonU256(fields.MaxFeePerGas),
 			BlobFeeCap: jsonU256(fields.MaxFeePerBlobGas),
 		}
-	} else {
-		tx.Fees = FrameFees{
-			MaxFee:    jsonU256(dec.MaxFee),
-			GasTipCap: jsonU256(fields.MaxPriorityFeePerGas),
-		}
+	default:
+		return errors.New("frame transaction object carries neither maxFee nor maxFeePerGas")
 	}
 	tx.BlobHashes = fields.BlobVersionedHashes
 
@@ -1450,8 +1479,8 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 		}
 
 		tx.Frames = append(tx.Frames, &Frame{
-			Mode:   FrameMode(jsonUint64(frame.Mode)),
-			Flags:  uint8(jsonUint64(frame.Flags)),
+			Mode:   FrameMode(flexValue(frame.Mode)),
+			Flags:  uint8(flexValue(frame.Flags)),
 			Target: copyAddressPtr(target),
 			Limits: FrameLimits{
 				Execution: frame.executionLimit(),
@@ -1472,7 +1501,7 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 		}
 
 		entry := &FrameSignature{
-			Scheme:    FrameSigScheme(jsonUint64(sig.Scheme)),
+			Scheme:    FrameSigScheme(flexValue(sig.Scheme)),
 			Signer:    signer,
 			Msg:       jsonBytes(sig.Msg),
 			Signature: jsonBytes(sig.Signature),
