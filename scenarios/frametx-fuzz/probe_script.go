@@ -27,6 +27,7 @@ const (
 	opWriteRoot      = 0x0e
 	opStoreTxParam   = 0x0f
 	opReadSLoad      = 0x10
+	opReadTxDiff     = 0x11
 	opReadEventData  = 0x12
 )
 
@@ -285,6 +286,23 @@ func (s *ProbeScript) ReadTxTrace(param uint8, index uint64) *ProbeScript {
 		b:       hashFromUint64(index),
 		name:    "read_txtrace",
 		execGas: 100,
+	})
+}
+
+// ReadTxDiff executes EIP-7906's TXDIFF for one address and discards the result. The
+// key is the storage slot for the slot parameters, a per-address index for the index
+// parameters, and must be zero otherwise. Only bogota-devnet-1's revision has TXDIFF.
+//
+// Defined only inside an ASSERT frame. The live-state parameters cost a cold access
+// when the address or slot has not been touched, so the budget assumes cold.
+func (s *ProbeScript) ReadTxDiff(param uint8, address common.Address, key common.Hash) *ProbeScript {
+	return s.add(record{
+		op:      opReadTxDiff,
+		a:       hashFromUint64(uint64(param)),
+		b:       common.BytesToHash(address.Bytes()),
+		c:       key,
+		name:    "read_txdiff",
+		execGas: 3_100,
 	})
 }
 

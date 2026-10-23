@@ -754,7 +754,7 @@ func (s *Scenario) buildScript(env *environment, recipe *Recipe, result *build, 
 		}
 
 		script := NewProbeScript()
-		appendAssertReads(script, recipe)
+		appendAssertReads(script, recipe, result.senderAddr)
 		result.cover("assert-reads")
 
 		return script, nil

@@ -126,7 +126,7 @@ func TestFrameSigHashElision(t *testing.T) {
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 	tx := buildTransferTx(t, sender)
 
-	before := tx.SigHash()
+	before := sigHash(t, tx)
 
 	if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
 		t.Fatalf("failed signing: %v", err)
@@ -136,7 +136,7 @@ func TestFrameSigHashElision(t *testing.T) {
 		t.Fatalf("secp256k1 entry should be 65 bytes, got %d", len(tx.Signatures[0].Signature))
 	}
 
-	if after := tx.SigHash(); after != before {
+	if after := sigHash(t, tx); after != before {
 		t.Fatal("signing an empty-msg entry changed the signature hash")
 	}
 
@@ -149,11 +149,11 @@ func TestFrameSigHashElision(t *testing.T) {
 		Msg:    digest.Bytes(),
 	})
 
-	withEmpty := tx.SigHash()
+	withEmpty := sigHash(t, tx)
 
 	tx.Signatures[1].Signature = bytes.Repeat([]byte{0xaa}, 65)
 
-	if withFilled := tx.SigHash(); withFilled == withEmpty {
+	if withFilled := sigHash(t, tx); withFilled == withEmpty {
 		t.Fatal("an explicit-digest entry's signature bytes should be covered by the hash")
 	}
 }
@@ -168,7 +168,7 @@ func TestFrameSignatureRecovery(t *testing.T) {
 
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 	tx := buildTransferTx(t, sender)
-	digest := tx.SigHash()
+	digest := sigHash(t, tx)
 
 	if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
 		t.Fatalf("failed signing: %v", err)
@@ -230,7 +230,7 @@ func TestFrameP256Signature(t *testing.T) {
 	// The signer is part of the canonical signature hash, so the entry has to verify
 	// against the hash the finished transaction has rather than the one it had while
 	// the signer field was still empty.
-	digest := tx.SigHash()
+	digest := sigHash(t, tx)
 	r := new(big.Int).SetBytes(tx.Signatures[1].Signature[0:32])
 	s := new(big.Int).SetBytes(tx.Signatures[1].Signature[32:64])
 

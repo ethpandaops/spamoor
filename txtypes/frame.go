@@ -845,15 +845,18 @@ func (tx *FrameTx) DecodePayload(b []byte) error {
 // their length (EIPs#12502), or by empty bytes under LegacyFees; entries carrying an
 // explicit digest keep theirs. An unsigned SECP256K1 or P256 entry counts at the length
 // its signature will have, and an unset max_fee as the budget signing will derive.
-func (tx *FrameTx) SigHash() common.Hash {
+func (tx *FrameTx) SigHash() (common.Hash, error) {
 	hashed := tx
 
 	if !tx.LegacyFees && tx.Fees.MaxFee == nil {
-		if maxFee, err := tx.budgetFromCaps(); err == nil {
-			derived := *tx
-			derived.Fees.MaxFee = maxFee
-			hashed = &derived
+		maxFee, err := tx.budgetFromCaps()
+		if err != nil {
+			return common.Hash{}, err
 		}
+
+		derived := *tx
+		derived.Fees.MaxFee = maxFee
+		hashed = &derived
 	}
 
 	signatures := make([]any, len(tx.Signatures))
@@ -869,7 +872,7 @@ func (tx *FrameTx) SigHash() common.Hash {
 		}
 	}
 
-	return prefixedRlpHash(FrameTxType, hashed.envelopeWith(signatures))
+	return prefixedRlpHash(FrameTxType, hashed.envelopeWith(signatures)), nil
 }
 
 // SignatureLength returns the length of the entry's signature bytes, or the length a
@@ -953,20 +956,23 @@ func (tx *FrameTx) SignPayload(chainID *big.Int, key *ecdsa.PrivateKey) error {
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	signed := 0
 
-	for i, sig := range tx.Signatures {
-		if sig.Scheme != SigSchemeSecp256k1 || len(sig.Signature) != 0 {
-			continue
-		}
+	// Explicit-msg entries first: the canonical hash commits their raw bytes.
+	for _, explicit := range []bool{true, false} {
+		for i, sig := range tx.Signatures {
+			if (len(sig.Msg) != 0) != explicit || sig.Scheme != SigSchemeSecp256k1 || len(sig.Signature) != 0 {
+				continue
+			}
 
-		if len(sig.Signer) != 0 && common.BytesToAddress(sig.Signer) != address {
-			continue
-		}
+			if len(sig.Signer) != 0 && common.BytesToAddress(sig.Signer) != address {
+				continue
+			}
 
-		if err := tx.SignEntry(i, key); err != nil {
-			return err
-		}
+			if err := tx.SignEntry(i, key); err != nil {
+				return err
+			}
 
-		signed++
+			signed++
+		}
 	}
 
 	if signed == 0 {
@@ -1078,7 +1084,15 @@ func (tx *FrameTx) entryDigest(sig *FrameSignature) (common.Hash, error) {
 
 	switch len(sig.Msg) {
 	case 0:
-		return tx.SigHash(), nil
+		// The canonical hash commits the raw bytes of explicit-msg entries, so one that
+		// is still unsigned would leave this signature over a hash the transaction loses.
+		for i, other := range tx.Signatures {
+			if len(other.Msg) != 0 && len(other.Signature) == 0 && other.Scheme != SigSchemeArbitrary {
+				return common.Hash{}, fmt.Errorf("signature %d carries an explicit msg and is unsigned; sign it before any canonical-hash entry", i)
+			}
+		}
+
+		return tx.SigHash()
 	case 32:
 		return common.BytesToHash(sig.Msg), nil
 	default:

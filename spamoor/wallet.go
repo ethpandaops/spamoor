@@ -717,10 +717,21 @@ func (wallet *Wallet) ReplaceSetCodeTx(txData *txtypes.SetCodeTx, nonce uint64) 
 }
 
 // ReplaceFrameTx builds a replacement frame transaction with a specific nonce.
-// This is useful for replacing stuck transactions with higher gas prices.
+// This is useful for replacing stuck transactions with higher gas prices: max_fee is
+// derived again from the per-gas caps, which the caller raises, since the pools only
+// take a replacement that raises max_fee as well.
 func (wallet *Wallet) ReplaceFrameTx(txData *txtypes.FrameTx, nonce uint64) (*txtypes.Transaction, error) {
 	txData.ChainID = uint256.MustFromBig(wallet.chainid)
 	txData.Sender = wallet.address
+	txData.Fees.MaxFee = nil
+
+	// The new nonce and fees change the signature hash, so the sender's entries are
+	// signed again rather than skipped as already signed.
+	for _, sig := range txData.Signatures {
+		if sig.Scheme == txtypes.SigSchemeSecp256k1 && (len(sig.Signer) == 0 || common.BytesToAddress(sig.Signer) == wallet.address) {
+			sig.Signature = nil
+		}
+	}
 
 	if txData.HasKeyedNonces() && len(txData.NonceKeys) == 0 {
 		txData.WithLegacyNonce()

@@ -1,5 +1,7 @@
 package frametxfuzz
 
+import "github.com/ethpandaops/spamoor/txtypes"
+
 // Instructions and parameter indices introduced by the frame transaction EIPs.
 //
 // They live here rather than in txtypes because they describe the EVM, not the
@@ -128,3 +130,58 @@ const (
 	TxTraceGasPreCharge    = 0x19
 	TxTraceGasPayer        = 0x1a
 )
+
+// assertTable is the part of EIP-7906 the probe and the generator encode. bogota-devnet-2
+// changed it (EIPs#12530): TXDIFF is gone, EVENTDATACOPY moved down to its byte and
+// TXTRACE gained the code and nonce tables. bogota-devnet-1 runs the earlier table.
+type assertTable struct {
+	txDiff        byte // zero where the revision has no TXDIFF
+	eventDataCopy byte
+
+	traceParamEnd uint8   // one past the last TXTRACE parameter
+	traceCounts   []uint8 // TXTRACE parameters that take a zero index
+	traceBalance  []uint8 // balance table: address, before, after
+	traceEvent    []uint8 // event table: address, topic count, topic0, data length
+
+	diffAccount []uint8 // TXDIFF parameters keyed by address alone
+	diffSlot    []uint8 // TXDIFF parameters keyed by address and slot
+	diffParams  uint8   // one past the last TXDIFF parameter
+}
+
+var currentAssertTable = assertTable{
+	eventDataCopy: OpEventDataCopy,
+	traceParamEnd: TxTraceGasPayer + 1,
+	traceCounts: []uint8{
+		TxTraceBalancesChanged, TxTraceSlotsChanged, TxTraceCodesChanged, TxTraceNoncesChanged,
+		TxTraceEventCount, TxTraceGasPreCharge, TxTraceGasPayer,
+	},
+	traceBalance: []uint8{TxTraceBalanceAddress, TxTraceBalanceBefore, TxTraceBalanceAfter},
+	traceEvent:   []uint8{TxTraceEventAddress, TxTraceEventTopicCount, TxTraceEventTopic0, TxTraceEventDataLength},
+}
+
+// legacyAssertTable is EIP-7906 at 4be9e59f, the text bogota-devnet-1 runs.
+var legacyAssertTable = assertTable{
+	txDiff:        0xb7,
+	eventDataCopy: 0xb8,
+	traceParamEnd: 0x16,
+	traceCounts:   []uint8{0x00, 0x01, 0x02, 0x0c, 0x14, 0x15}, // balances, slots, deployed, events, pre-charge, payer
+	traceBalance:  []uint8{0x03, 0x04, 0x05},
+	traceEvent:    []uint8{0x0d, 0x0e, 0x0f, 0x13},
+	diffAccount:   []uint8{0x02, 0x03, 0x04, 0x05, 0x06, 0x08, 0x0a}, // balance, code hash, slot and event counts, change flags
+	diffSlot:      []uint8{0x00, 0x01},
+	diffParams:    0x0d,
+}
+
+// assertOps returns the table for the revision the builders produce, which
+// --legacy-frame-fees selects together with the envelope.
+func assertOps() *assertTable {
+	if txtypes.LegacyFrameFees {
+		return &legacyAssertTable
+	}
+
+	return &currentAssertTable
+}
+
+// legacyTxParamReads are the TXPARAM indices only the per-gas fee revision defines:
+// max_fee_per_blob_gas and max cost. 0x04 is max_fee_per_gas there and max_fee now.
+var legacyTxParamReads = []uint8{0x05, 0x06}

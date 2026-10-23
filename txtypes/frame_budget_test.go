@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/holiman/uint256"
@@ -95,7 +96,7 @@ func TestFrameFeeRevisionsRoundTrip(t *testing.T) {
 		}
 
 		back, _ := decoded.Inner().(*FrameTx)
-		if back.LegacyFees != legacy || decoded.Hash() != sent.Hash() || back.SigHash() != tx.SigHash() {
+		if back.LegacyFees != legacy || decoded.Hash() != sent.Hash() || sigHash(t, back) != sigHash(t, tx) {
 			t.Fatalf("legacy=%v: decoded LegacyFees=%v, hash or sig hash changed", legacy, back.LegacyFees)
 		}
 
@@ -131,15 +132,15 @@ func TestFrameSigHashCommitsToLength(t *testing.T) {
 		tx := buildTransferTx(t, sender)
 		tx.Signatures = append(tx.Signatures, ArbitrarySignature(bytes.Repeat([]byte{0x01}, 32)))
 
-		base := tx.SigHash()
+		base := sigHash(t, tx)
 
 		tx.Signatures[1].Signature = bytes.Repeat([]byte{0x02}, 32)
-		if tx.SigHash() != base {
+		if sigHash(t, tx) != base {
 			t.Fatalf("legacy=%v: rewriting elided bytes changed the hash", legacy)
 		}
 
 		tx.Signatures[1].Signature = bytes.Repeat([]byte{0x02}, 33)
-		if changed := tx.SigHash() != base; changed == legacy {
+		if changed := sigHash(t, tx) != base; changed == legacy {
 			t.Fatalf("legacy=%v: padding the elided bytes changed the hash: %v", legacy, changed)
 		}
 	}
@@ -176,8 +177,8 @@ func TestFrameSigHashMatchesSpec(t *testing.T) {
 		t.Fatalf("failed encoding preimage: %v", err)
 	}
 
-	if want := crypto.Keccak256Hash(append([]byte{FrameTxType}, encoded...)); tx.SigHash() != want {
-		t.Fatalf("sig hash = %s, want %s", tx.SigHash(), want)
+	if want := crypto.Keccak256Hash(append([]byte{FrameTxType}, encoded...)); sigHash(t, tx) != want {
+		t.Fatalf("sig hash = %s, want %s", sigHash(t, tx), want)
 	}
 }
 
@@ -221,13 +222,13 @@ func TestFrameDerivedMaxFeeCoversSigning(t *testing.T) {
 	tx := buildTransferTx(t, crypto.PubkeyToAddress(key.PublicKey))
 	tx.BlobHashes = nil
 
-	before := tx.SigHash()
+	before := sigHash(t, tx)
 
 	if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
 		t.Fatalf("failed signing: %v", err)
 	}
 
-	if tx.SigHash() != before {
+	if sigHash(t, tx) != before {
 		t.Fatal("signing changed the signature hash")
 	}
 
@@ -291,6 +292,17 @@ func TestFrameSingleUseNonceSeqUnpriced(t *testing.T) {
 	}
 }
 
+func sigHash(t *testing.T, tx *FrameTx) common.Hash {
+	t.Helper()
+
+	hash, err := tx.SigHash()
+	if err != nil {
+		t.Fatalf("failed computing the signature hash: %v", err)
+	}
+
+	return hash
+}
+
 func mustKey(t *testing.T) *ecdsa.PrivateKey {
 	t.Helper()
 
@@ -300,4 +312,118 @@ func mustKey(t *testing.T) *ecdsa.PrivateKey {
 	}
 
 	return key
+}
+
+// TestFrameMaxFeeBelowRequired checks that a budget below the worst-case base fee
+// charge is refused at that base fee: there is nothing for APPROVE to collect.
+func TestFrameMaxFeeBelowRequired(t *testing.T) {
+	key := mustKey(t)
+	tx := buildTransferTx(t, crypto.PubkeyToAddress(key.PublicKey))
+
+	if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
+		t.Fatalf("failed signing: %v", err)
+	}
+
+	// The budget was derived at a 20 gwei cap, so it covers exactly that base fee.
+	if tx.MaxCost(big.NewInt(20e9), nil) == nil {
+		t.Fatal("max_fee at the required max fee was refused")
+	}
+
+	if cost := tx.MaxCost(big.NewInt(20e9+1), nil); cost != nil {
+		t.Fatalf("max_fee below the required max fee collects %s", cost)
+	}
+}
+
+// TestFramePaddedSignatureInvalidates is EIPs#12502's case: padding an empty-msg
+// ARBITRARY witness after the sender signed changes the signature hash, so the sender's
+// signature no longer verifies. Under LegacyFees the padding goes unnoticed.
+func TestFramePaddedSignatureInvalidates(t *testing.T) {
+	key := mustKey(t)
+
+	for _, legacy := range []bool{false, true} {
+		setLegacyFrameFees(t, legacy)
+
+		tx := buildTransferTx(t, crypto.PubkeyToAddress(key.PublicKey))
+		tx.Signatures = append(tx.Signatures, ArbitrarySignature(bytes.Repeat([]byte{0x01}, 32)))
+
+		if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
+			t.Fatalf("legacy=%v: failed signing: %v", legacy, err)
+		}
+
+		before := tx.IntrinsicGas()
+		tx.Signatures[1].Signature = append(tx.Signatures[1].Signature, make([]byte, 64)...)
+
+		if err := tx.VerifySignatures(); (err == nil) == !legacy {
+			t.Fatalf("legacy=%v: padded transaction verifies: %v", legacy, err == nil)
+		}
+
+		if tx.IntrinsicGas() <= before {
+			t.Fatalf("legacy=%v: padding did not raise the intrinsic gas", legacy)
+		}
+	}
+}
+
+// TestFrameMixedSignatureShapes checks that a key signing both an explicit-msg entry
+// and a canonical-hash entry signs the explicit one first, since the canonical hash
+// commits its bytes, and that signing out of that order is refused.
+func TestFrameMixedSignatureShapes(t *testing.T) {
+	key := mustKey(t)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+
+	explicit := func() *FrameSignature {
+		entry := SignerSignature(sender)
+		entry.Msg = bytes.Repeat([]byte{0x42}, 32)
+
+		return entry
+	}
+
+	tx := buildTransferTx(t, sender)
+	tx.Signatures = append(tx.Signatures, explicit())
+
+	if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
+		t.Fatalf("failed signing: %v", err)
+	}
+
+	if err := tx.VerifySignatures(); err != nil {
+		t.Fatalf("mixed entries do not verify: %v", err)
+	}
+
+	// Another party's explicit entry still unsigned: the canonical entry must wait.
+	other := buildTransferTx(t, sender)
+	pending := SignerSignature(testTarget)
+	pending.Msg = bytes.Repeat([]byte{0x42}, 32)
+	other.Signatures = append(other.Signatures, pending)
+
+	if err := other.SignEntry(0, key); err == nil {
+		t.Fatal("signed the canonical hash while an explicit-msg entry is unsigned")
+	}
+}
+
+// TestFrameFeeListShapes checks that the decoder reads the two fee layouts as what they
+// are and refuses any other length rather than guessing.
+func TestFrameFeeListShapes(t *testing.T) {
+	for count, want := range map[int]string{1: "error", 2: "budget", 3: "legacy", 4: "error"} {
+		fields := make([]*uint256.Int, count)
+		for i := range fields {
+			fields[i] = uint256.NewInt(uint64(i + 1))
+		}
+
+		raw, err := rlp.EncodeToBytes(fields)
+		if err != nil {
+			t.Fatalf("failed encoding: %v", err)
+		}
+
+		tx := &FrameTx{}
+
+		got := "budget"
+		if err := tx.decodeFees(raw); err != nil {
+			got = "error"
+		} else if tx.LegacyFees {
+			got = "legacy"
+		}
+
+		if got != want {
+			t.Errorf("%d-field fee list decoded as %s, want %s", count, got, want)
+		}
+	}
 }

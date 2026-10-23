@@ -575,7 +575,10 @@ func matchesRecognizedPrefix(shape []FrameSpecies) bool {
 // It is kept separate from ValidatePayload because it does curve arithmetic, while
 // ValidatePayload only checks what is decidable from the encoded fields.
 func (tx *FrameTx) VerifySignatures() error {
-	sigHash := tx.SigHash()
+	sigHash, err := tx.SigHash()
+	if err != nil {
+		return err
+	}
 
 	for i, sig := range tx.Signatures {
 		if sig.Scheme == SigSchemeArbitrary {

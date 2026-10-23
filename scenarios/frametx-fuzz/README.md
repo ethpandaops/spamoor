@@ -82,7 +82,8 @@ introduces would ever execute. Two contracts do that work.
 script: revert, write storage, emit a log, burn gas, `APPROVE`, and execute each
 introspection instruction. The read operations discard their results — the point is to
 reach the instruction, not to decide what it should have returned. Opcode bytes are those the
-EIPs assign: EIP-7906's `TXTRACE` and `EVENTDATACOPY` sit at `0xb6`-`0xb7` and are
+EIPs assign: EIP-7906's `TXTRACE` and `EVENTDATACOPY` sit at `0xb6`-`0xb7` (with
+`--legacy-frame-fees`, bogota-devnet-1's `TXTRACE`, `TXDIFF`, `EVENTDATACOPY` at `0xb6`-`0xb8`) and are
 only defined inside an `ASSERT` frame, which is where the probe runs them.
 
 The same code plays paymaster and contract sender through an EIP-7702 delegation, because
