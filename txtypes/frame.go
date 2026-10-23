@@ -110,7 +110,12 @@ const FrameExtAll = FrameExtKeyedNonces
 // account nonce was selected by nonce_keys [0] rather than by an empty key set, key
 // zero could not be combined with other keys and there was no single-use form. The
 // devnet clients still implement it; set it to false once they ship the current text.
+// It only applies to transactions with LegacyFees: the fee budget revision came after.
 var LegacyNonceKeyZero = true
+
+// LegacyFrameFees makes the builders produce transactions with LegacyFees, the shape
+// bogota-devnet-1 runs. Decoded transactions carry whichever shape they were encoded in.
+var LegacyFrameFees = false
 
 // Has reports whether every extension in want is present.
 func (e FrameExtensions) Has(want FrameExtensions) bool { return e&want == want }
@@ -150,6 +155,9 @@ const (
 	sigGasArbitrary = 100
 	sigGasSecp256k1 = 2800
 	sigGasP256      = 6700
+
+	secp256k1SignatureLength = 65  // v || r || s
+	p256SignatureLength      = 128 // r || s || qx || qy
 )
 
 var (
@@ -189,11 +197,23 @@ type FrameSignature struct {
 	Signature []byte
 }
 
-// FrameFees holds a frame transaction's EIP-1559 and blob fee parameters.
+// FrameFees holds a frame transaction's fee parameters.
+//
+// The wire carries fees = [max_fee, max_priority_fee_per_gas] (EIPs#12414), or the
+// per-gas caps [max_priority_fee_per_gas, max_fee_per_gas, max_fee_per_blob_gas] under
+// LegacyFees. A builder may leave MaxFee nil and set the per-gas caps instead: signing
+// then fills in the budget they buy (see DeriveMaxFee).
 type FrameFees struct {
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
 	BlobFeeCap *uint256.Int
+	MaxFee     *uint256.Int `rlp:"-"`
+}
+
+// frameFeeBudget is the wire form of FrameFees outside LegacyFees.
+type frameFeeBudget struct {
+	MaxFee    *uint256.Int
+	GasTipCap *uint256.Int
 }
 
 // FrameTx is an EIP-8141 frame transaction, with the envelope extension of EIP-8250
@@ -220,6 +240,12 @@ type FrameTx struct {
 	// Extensions selects the envelope shape. It is not itself encoded.
 	Extensions FrameExtensions `rlp:"-"`
 
+	// LegacyFees selects the EIP-8141 revision before EIPs#12414 and #12502, which
+	// bogota-devnet-1 runs: per-gas fee caps, signatures with empty msg elided to empty
+	// bytes and priced by content, and LegacyNonceKeyZero. Like Extensions it decides
+	// the wire layout and is read off a decoded payload.
+	LegacyFees bool `rlp:"-"`
+
 	// Sidecar is wire-only data, excluded from the canonical encoding and the hash.
 	Sidecar *BlobSidecar `rlp:"-"`
 }
@@ -244,8 +270,8 @@ type frameTxWithSidecar struct {
 	Proofs      []kzg4844.Proof
 }
 
-// The two envelope shapes. EIP-8141 defines the base; EIP-8250 replaces nonce with
-// nonce_keys and nonce_seq.
+// The two envelope shapes, as decoded. EIP-8141 defines the base; EIP-8250 replaces
+// nonce with nonce_keys and nonce_seq. Fees stay raw until their revision is known.
 
 type frameEnvelope struct {
 	ChainID    *uint256.Int
@@ -253,7 +279,7 @@ type frameEnvelope struct {
 	Sender     common.Address
 	Frames     []*Frame
 	Signatures []*FrameSignature
-	Fees       FrameFees
+	Fees       rlp.RawValue
 	BlobHashes []common.Hash
 }
 
@@ -264,26 +290,32 @@ type frameEnvelopeKeyed struct {
 	Sender     common.Address
 	Frames     []*Frame
 	Signatures []*FrameSignature
-	Fees       FrameFees
+	Fees       rlp.RawValue
 	BlobHashes []common.Hash
 }
 
-// envelope returns the transaction in the layout its extensions select.
-func (tx *FrameTx) envelope() any {
-	switch tx.Extensions {
-	case FrameExtKeyedNonces:
-		return &frameEnvelopeKeyed{
-			ChainID: tx.ChainID, NonceKeys: tx.NonceKeys, NonceSeq: tx.NonceSeq,
-			Sender: tx.Sender, Frames: tx.Frames, Signatures: tx.Signatures,
-			Fees: tx.Fees, BlobHashes: tx.BlobHashes,
-		}
-	default:
-		return &frameEnvelope{
-			ChainID: tx.ChainID, Nonce: tx.NonceSeq,
-			Sender: tx.Sender, Frames: tx.Frames, Signatures: tx.Signatures,
-			Fees: tx.Fees, BlobHashes: tx.BlobHashes,
-		}
+// envelope returns the transaction in the layout its extensions and fee revision select.
+func (tx *FrameTx) envelope() []any {
+	return tx.envelopeWith(tx.Signatures)
+}
+
+// envelopeWith returns the envelope with the signature list replaced, which is how the
+// signature hash elides signature bytes.
+func (tx *FrameTx) envelopeWith(signatures any) []any {
+	fields := []any{tx.ChainID}
+
+	if tx.Extensions.Has(FrameExtKeyedNonces) {
+		fields = append(fields, tx.NonceKeys, tx.NonceSeq)
+	} else {
+		fields = append(fields, tx.NonceSeq)
 	}
+
+	var fees any = &frameFeeBudget{MaxFee: tx.Fees.MaxFee, GasTipCap: tx.Fees.GasTipCap}
+	if tx.LegacyFees {
+		fees = &tx.Fees
+	}
+
+	return append(fields, tx.Sender, tx.Frames, signatures, fees, tx.BlobHashes)
 }
 
 // decodeEnvelope parses the payload in whichever shape it is encoded and records the
@@ -294,6 +326,8 @@ func (tx *FrameTx) decodeEnvelope(b []byte) error {
 		return err
 	}
 
+	var fees rlp.RawValue
+
 	switch extensions {
 	case FrameExtKeyedNonces:
 		var env frameEnvelopeKeyed
@@ -303,7 +337,7 @@ func (tx *FrameTx) decodeEnvelope(b []byte) error {
 
 		tx.ChainID, tx.NonceKeys, tx.NonceSeq = env.ChainID, env.NonceKeys, env.NonceSeq
 		tx.Sender, tx.Frames, tx.Signatures = env.Sender, env.Frames, env.Signatures
-		tx.Fees, tx.BlobHashes = env.Fees, env.BlobHashes
+		fees, tx.BlobHashes = env.Fees, env.BlobHashes
 
 	default:
 		var env frameEnvelope
@@ -313,10 +347,47 @@ func (tx *FrameTx) decodeEnvelope(b []byte) error {
 
 		tx.ChainID, tx.NonceKeys, tx.NonceSeq = env.ChainID, nil, env.Nonce
 		tx.Sender, tx.Frames, tx.Signatures = env.Sender, env.Frames, env.Signatures
-		tx.Fees, tx.BlobHashes = env.Fees, env.BlobHashes
+		fees, tx.BlobHashes = env.Fees, env.BlobHashes
 	}
 
 	tx.Extensions = extensions
+
+	return tx.decodeFees(fees)
+}
+
+// decodeFees parses the fee list, telling the two revisions apart by its length.
+func (tx *FrameTx) decodeFees(b []byte) error {
+	content, _, err := rlp.SplitList(b)
+	if err != nil {
+		return err
+	}
+
+	count, err := rlp.CountValues(content)
+	if err != nil {
+		return err
+	}
+
+	switch count {
+	case 2:
+		var fees frameFeeBudget
+		if err := rlp.DecodeBytes(b, &fees); err != nil {
+			return err
+		}
+
+		tx.Fees = FrameFees{MaxFee: fees.MaxFee, GasTipCap: fees.GasTipCap}
+		tx.LegacyFees = false
+
+	case 3:
+		tx.Fees = FrameFees{}
+		if err := rlp.DecodeBytes(b, &tx.Fees); err != nil {
+			return err
+		}
+
+		tx.LegacyFees = true
+
+	default:
+		return fmt.Errorf("%w: fee list has %d fields, expected 2 or 3", ErrInvalidFrameTx, count)
+	}
 
 	return nil
 }
@@ -396,6 +467,19 @@ func (f *Frame) ExpiryDeadline() (uint64, bool) {
 	}
 
 	return binary.BigEndian.Uint64(f.Data), true
+}
+
+// ExpiryDeadline returns the deadline of the transaction's expiry verifier frame, if it
+// carries one. It satisfies ExpiringTx: a transaction past this deadline is refused by the
+// expiry verifier, so it can never be included again.
+func (tx *FrameTx) ExpiryDeadline() (uint64, bool) {
+	for _, frame := range tx.Frames {
+		if deadline, ok := frame.ExpiryDeadline(); ok {
+			return deadline, true
+		}
+	}
+
+	return 0, false
 }
 
 // IsRecentRootVerifier reports whether the frame is an EIP-8272 recent root verifier
@@ -487,6 +571,7 @@ func (tx *FrameTx) CopyTx() TxData {
 		Signatures: make([]*FrameSignature, len(tx.Signatures)),
 		BlobHashes: make([]common.Hash, len(tx.BlobHashes)),
 		Extensions: tx.Extensions,
+		LegacyFees: tx.LegacyFees,
 		Sidecar:    tx.Sidecar,
 		ChainID:    new(uint256.Int),
 		Fees: FrameFees{
@@ -494,6 +579,10 @@ func (tx *FrameTx) CopyTx() TxData {
 			GasFeeCap:  new(uint256.Int),
 			BlobFeeCap: new(uint256.Int),
 		},
+	}
+
+	if tx.Fees.MaxFee != nil {
+		cpy.Fees.MaxFee = new(uint256.Int).Set(tx.Fees.MaxFee)
 	}
 
 	for i, key := range tx.NonceKeys {
@@ -531,6 +620,12 @@ func (tx *FrameTx) HasKeyedNonces() bool {
 	return tx.Extensions.Has(FrameExtKeyedNonces)
 }
 
+// UsesLegacyNonceKeyZero reports whether the transaction follows the EIP-8250 revision
+// that selects the account nonce with [0]. Only LegacyFees transactions can.
+func (tx *FrameTx) UsesLegacyNonceKeyZero() bool {
+	return tx.LegacyFees && LegacyNonceKeyZero
+}
+
 // UsesLegacyNonce reports whether NonceSeq is the sender's ordinary account nonce:
 // either the transaction predates keyed nonces, or its key set is empty ([0] under
 // LegacyNonceKeyZero).
@@ -539,7 +634,7 @@ func (tx *FrameTx) UsesLegacyNonce() bool {
 		return true
 	}
 
-	if LegacyNonceKeyZero {
+	if tx.UsesLegacyNonceKeyZero() {
 		return len(tx.NonceKeys) == 1 && tx.NonceKeys[0] != nil && tx.NonceKeys[0].IsZero()
 	}
 
@@ -550,7 +645,7 @@ func (tx *FrameTx) UsesLegacyNonce() bool {
 // a non-empty key set with NonceSeq at MaxNonceSeq, which approval exhausts for good.
 // The key-zero revision has no such form.
 func (tx *FrameTx) UsesSingleUseNonce() bool {
-	if !tx.HasKeyedNonces() || LegacyNonceKeyZero {
+	if !tx.HasKeyedNonces() || tx.UsesLegacyNonceKeyZero() {
 		return false
 	}
 
@@ -566,10 +661,35 @@ func (tx *FrameTx) UsesAccountNonce() bool { return tx.UsesLegacyNonce() }
 func (tx *FrameTx) GetGas() uint64 { return tx.MaxGas() }
 
 // GetGasPrice returns the fee cap.
-func (tx *FrameTx) GetGasPrice() *big.Int { return u256ToBig(tx.Fees.GasFeeCap) }
+func (tx *FrameTx) GetGasPrice() *big.Int { return tx.GetGasFeeCap() }
 
-// GetGasFeeCap returns the maximum fee per gas.
-func (tx *FrameTx) GetGasFeeCap() *big.Int { return u256ToBig(tx.Fees.GasFeeCap) }
+// GetGasFeeCap returns the maximum fee per gas. A max_fee budget has no per-gas cap; it
+// reports the budget spread over MaxGas, rounded up so that GetGas times it covers
+// max_fee.
+func (tx *FrameTx) GetGasFeeCap() *big.Int {
+	if tx.LegacyFees {
+		return u256ToBig(tx.Fees.GasFeeCap)
+	}
+
+	maxGas := new(big.Int).SetUint64(tx.MaxGas())
+	if maxGas.Sign() == 0 {
+		return u256ToBig(tx.Fees.MaxFee)
+	}
+
+	perGas := new(big.Int).Add(u256ToBig(tx.Fees.MaxFee), maxGas)
+	perGas.Sub(perGas, big.NewInt(1))
+
+	return perGas.Div(perGas, maxGas)
+}
+
+// GetMaxFee returns the max_fee budget, or nil for a LegacyFees transaction.
+func (tx *FrameTx) GetMaxFee() *big.Int {
+	if tx.LegacyFees {
+		return nil
+	}
+
+	return u256ToBig(tx.Fees.MaxFee)
+}
 
 // GetGasTipCap returns the maximum priority fee per gas.
 func (tx *FrameTx) GetGasTipCap() *big.Int { return u256ToBig(tx.Fees.GasTipCap) }
@@ -619,8 +739,15 @@ func (tx *FrameTx) GetSender() common.Address { return tx.Sender }
 // GetBlobHashes returns the blob versioned hashes.
 func (tx *FrameTx) GetBlobHashes() []common.Hash { return tx.BlobHashes }
 
-// GetBlobGasFeeCap returns the maximum fee per blob gas.
-func (tx *FrameTx) GetBlobGasFeeCap() *big.Int { return u256ToBig(tx.Fees.BlobFeeCap) }
+// GetBlobGasFeeCap returns the maximum fee per blob gas. A max_fee budget pays blob gas
+// from the same budget and reports zero.
+func (tx *FrameTx) GetBlobGasFeeCap() *big.Int {
+	if !tx.LegacyFees {
+		return new(big.Int)
+	}
+
+	return u256ToBig(tx.Fees.BlobFeeCap)
+}
 
 // GetBlobSidecar returns the attached sidecar, or nil.
 func (tx *FrameTx) GetBlobSidecar() *BlobSidecar { return tx.Sidecar }
@@ -714,34 +841,101 @@ func (tx *FrameTx) DecodePayload(b []byte) error {
 
 // SigHash returns the canonical signature hash.
 //
-// Signature entries that sign the canonical digest have their own raw bytes elided
-// from the preimage; entries carrying an explicit digest keep theirs.
-func (tx *FrameTx) SigHash() common.Hash {
-	elided := &FrameTx{
-		ChainID:    tx.ChainID,
-		NonceKeys:  tx.NonceKeys,
-		NonceSeq:   tx.NonceSeq,
-		Sender:     tx.Sender,
-		Frames:     tx.Frames,
-		Signatures: make([]*FrameSignature, len(tx.Signatures)),
-		Fees:       tx.Fees,
-		BlobHashes: tx.BlobHashes,
-		Extensions: tx.Extensions,
+// Signature entries that sign the canonical digest have their own raw bytes replaced by
+// their length (EIPs#12502), or by empty bytes under LegacyFees; entries carrying an
+// explicit digest keep theirs. An unsigned SECP256K1 or P256 entry counts at the length
+// its signature will have, and an unset max_fee as the budget signing will derive.
+func (tx *FrameTx) SigHash() (common.Hash, error) {
+	hashed := tx
+
+	if !tx.LegacyFees && tx.Fees.MaxFee == nil {
+		maxFee, err := tx.budgetFromCaps()
+		if err != nil {
+			return common.Hash{}, err
+		}
+
+		derived := *tx
+		derived.Fees.MaxFee = maxFee
+		hashed = &derived
 	}
 
+	signatures := make([]any, len(tx.Signatures))
+
 	for i, sig := range tx.Signatures {
-		if len(sig.Msg) == 0 {
-			elided.Signatures[i] = &FrameSignature{
-				Scheme: sig.Scheme,
-				Signer: sig.Signer,
-				Msg:    sig.Msg,
-			}
-		} else {
-			elided.Signatures[i] = sig
+		switch {
+		case len(sig.Msg) != 0:
+			signatures[i] = sig
+		case tx.LegacyFees:
+			signatures[i] = &FrameSignature{Scheme: sig.Scheme, Signer: sig.Signer, Msg: sig.Msg}
+		default:
+			signatures[i] = []any{sig.Scheme, sig.Signer, sig.Msg, uint64(sig.SignatureLength())}
 		}
 	}
 
-	return prefixedRlpHash(FrameTxType, elided.envelope())
+	return prefixedRlpHash(FrameTxType, hashed.envelopeWith(signatures)), nil
+}
+
+// SignatureLength returns the length of the entry's signature bytes, or the length a
+// protocol-validated scheme produces while the entry is still unsigned.
+func (s *FrameSignature) SignatureLength() int {
+	if len(s.Signature) != 0 {
+		return len(s.Signature)
+	}
+
+	switch s.Scheme {
+	case SigSchemeSecp256k1:
+		return secp256k1SignatureLength
+	case SigSchemeP256:
+		return p256SignatureLength
+	default:
+		return 0
+	}
+}
+
+// DeriveMaxFee sets an unset max_fee to the budget the per-gas caps buy: MaxGas at
+// GasFeeCap plus the blob gas at BlobFeeCap, with unsigned entries counted at their
+// full length. Signing calls it, since max_fee is part of the signature hash.
+func (tx *FrameTx) DeriveMaxFee() error {
+	if tx.LegacyFees || tx.Fees.MaxFee != nil {
+		return nil
+	}
+
+	maxFee, err := tx.budgetFromCaps()
+	if err != nil {
+		return err
+	}
+
+	tx.Fees.MaxFee = maxFee
+
+	return nil
+}
+
+// budgetFromCaps returns the max_fee DeriveMaxFee sets.
+func (tx *FrameTx) budgetFromCaps() (*uint256.Int, error) {
+	bound := &FrameTx{
+		NonceKeys: tx.NonceKeys, NonceSeq: tx.NonceSeq, Sender: tx.Sender, Frames: tx.Frames,
+		Signatures: make([]*FrameSignature, len(tx.Signatures)), Extensions: tx.Extensions,
+	}
+
+	for i, sig := range tx.Signatures {
+		bound.Signatures[i] = sig
+		if len(sig.Signature) == 0 {
+			bound.Signatures[i] = &FrameSignature{
+				Scheme: sig.Scheme, Signer: sig.Signer, Msg: sig.Msg,
+				Signature: bytes.Repeat([]byte{0xff}, sig.SignatureLength()),
+			}
+		}
+	}
+
+	maxFee := new(big.Int).Mul(new(big.Int).SetUint64(bound.MaxGas()), u256ToBig(tx.Fees.GasFeeCap))
+	maxFee.Add(maxFee, tx.blobGasCost(u256ToBig(tx.Fees.BlobFeeCap)))
+
+	converted, overflow := uint256.FromBig(maxFee)
+	if overflow {
+		return nil, fmt.Errorf("%w: max fee overflows 256 bits", ErrInvalidFrameTx)
+	}
+
+	return converted, nil
 }
 
 // SignPayload signs every unsigned SECP256K1 entry that the key is the signer for.
@@ -762,20 +956,23 @@ func (tx *FrameTx) SignPayload(chainID *big.Int, key *ecdsa.PrivateKey) error {
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	signed := 0
 
-	for i, sig := range tx.Signatures {
-		if sig.Scheme != SigSchemeSecp256k1 || len(sig.Signature) != 0 {
-			continue
-		}
+	// Explicit-msg entries first: the canonical hash commits their raw bytes.
+	for _, explicit := range []bool{true, false} {
+		for i, sig := range tx.Signatures {
+			if (len(sig.Msg) != 0) != explicit || sig.Scheme != SigSchemeSecp256k1 || len(sig.Signature) != 0 {
+				continue
+			}
 
-		if len(sig.Signer) != 0 && common.BytesToAddress(sig.Signer) != address {
-			continue
-		}
+			if len(sig.Signer) != 0 && common.BytesToAddress(sig.Signer) != address {
+				continue
+			}
 
-		if err := tx.SignEntry(i, key); err != nil {
-			return err
-		}
+			if err := tx.SignEntry(i, key); err != nil {
+				return err
+			}
 
-		signed++
+			signed++
+		}
 	}
 
 	if signed == 0 {
@@ -881,9 +1078,21 @@ func P256Signer(qx, qy *big.Int) common.Address {
 
 // entryDigest returns the digest a signature entry authorizes.
 func (tx *FrameTx) entryDigest(sig *FrameSignature) (common.Hash, error) {
+	if err := tx.DeriveMaxFee(); err != nil {
+		return common.Hash{}, err
+	}
+
 	switch len(sig.Msg) {
 	case 0:
-		return tx.SigHash(), nil
+		// The canonical hash commits the raw bytes of explicit-msg entries, so one that
+		// is still unsigned would leave this signature over a hash the transaction loses.
+		for i, other := range tx.Signatures {
+			if len(other.Msg) != 0 && len(other.Signature) == 0 && other.Scheme != SigSchemeArbitrary {
+				return common.Hash{}, fmt.Errorf("signature %d carries an explicit msg and is unsigned; sign it before any canonical-hash entry", i)
+			}
+		}
+
+		return tx.SigHash()
 	case 32:
 		return common.BytesToHash(sig.Msg), nil
 	default:
@@ -923,12 +1132,22 @@ func (tx *FrameTx) IntrinsicGas() uint64 {
 	}
 
 	for _, sig := range tx.Signatures {
-		gas = saturatingAdd(gas, calldataCost(sig.Signer)+calldataCost(sig.Msg)+calldataCost(sig.Signature))
+		gas = saturatingAdd(gas, calldataCost(sig.Signer)+calldataCost(sig.Msg)+tx.signatureBytesCost(sig))
 	}
 
 	gas = saturatingAdd(gas, calldataCost(tx.extensionCalldata()))
 
 	return saturatingAdd(gas, tx.keyedNonceAccessCost())
+}
+
+// signatureBytesCost prices an entry's signature bytes. Bytes the signature hash elides
+// are committed by length only, so they are priced as if all non-zero (EIPs#12502).
+func (tx *FrameTx) signatureBytesCost(sig *FrameSignature) uint64 {
+	if len(sig.Msg) == 0 && !tx.LegacyFees {
+		return StandardTokenCost * floorTokens(sig.Signature)
+	}
+
+	return calldataCost(sig.Signature)
 }
 
 // keyedNonceAccessCost returns EIP-8250's keyed_nonce_access_cost, charged in both the
@@ -943,7 +1162,8 @@ func (tx *FrameTx) keyedNonceAccessCost() uint64 {
 }
 
 // extensionCalldata returns the encoding the envelope extension prices as transaction
-// data: EIP-8250's nonce fields, rlp(nonce_keys) || rlp(nonce_seq).
+// data: EIP-8250's nonce fields, rlp(nonce_keys) || rlp(nonce_seq). The single-use
+// sequence is exempt (EIPs#12534).
 func (tx *FrameTx) extensionCalldata() []byte {
 	if !tx.Extensions.Has(FrameExtKeyedNonces) {
 		return nil
@@ -953,6 +1173,10 @@ func (tx *FrameTx) extensionCalldata() []byte {
 
 	if err := rlp.Encode(&buf, tx.NonceKeys); err != nil {
 		return nil
+	}
+
+	if tx.UsesSingleUseNonce() {
+		return buf.Bytes()
 	}
 
 	if err := rlp.Encode(&buf, tx.NonceSeq); err != nil {
@@ -1027,11 +1251,34 @@ func (tx *FrameTx) MaxGas() uint64 {
 	return standard
 }
 
-// MaxCost returns the amount the payer is charged up front when payment is approved.
-func (tx *FrameTx) MaxCost(blobBaseFee *big.Int) *big.Int {
-	cost := new(big.Int).Mul(new(big.Int).SetUint64(tx.MaxGas()), u256ToBig(tx.Fees.GasFeeCap))
+// MaxCost returns the amount the payer is charged up front when payment is approved at
+// the given base fees. Under a max_fee budget that is the worst-case base fee charge
+// plus the largest tip the budget leaves room for; a transaction whose max_fee is below
+// that charge is invalid at these base fees and reports nil. Under LegacyFees it is
+// MaxGas at the fee cap plus the blob fee, and baseFee is unused.
+func (tx *FrameTx) MaxCost(baseFee, blobBaseFee *big.Int) *big.Int {
+	maxGas := new(big.Int).SetUint64(tx.MaxGas())
 
-	return cost.Add(cost, tx.blobGasCost(blobBaseFee))
+	if tx.LegacyFees {
+		cost := new(big.Int).Mul(maxGas, u256ToBig(tx.Fees.GasFeeCap))
+
+		return cost.Add(cost, tx.blobGasCost(blobBaseFee))
+	}
+
+	required := new(big.Int).Mul(maxGas, bigOrZero(baseFee))
+	required.Add(required, tx.blobGasCost(blobBaseFee))
+
+	headroom := new(big.Int).Sub(u256ToBig(tx.Fees.MaxFee), required)
+	if headroom.Sign() < 0 {
+		return nil
+	}
+
+	tip := new(big.Int).Mul(maxGas, u256ToBig(tx.Fees.GasTipCap))
+	if tip.Cmp(headroom) > 0 {
+		tip = headroom
+	}
+
+	return required.Add(required, tip)
 }
 
 // saturatingAdd returns a+b, or math.MaxUint64 when the sum does not fit, so that a
@@ -1095,30 +1342,42 @@ func floorTokens(data []byte) uint64 {
 }
 
 // jsonFrame is a frame as reported by JSON-RPC. EIP-8141 does not specify a JSON
-// encoding; these key names follow ethrex, the first client to ship the type.
+// encoding, so every field is read in each spelling and each number format clients use:
+// a quantity string or a bare JSON number, which nethermind writes for a frame's mode and
+// flags where the others quote them.
 type jsonFrame struct {
-	Mode         *hexutil.Uint64 `json:"mode"`
-	Flags        *hexutil.Uint64 `json:"flags"`
-	To           *common.Address `json:"to"`
-	Target       *common.Address `json:"target"`
-	GasLimit     *hexutil.Uint64 `json:"gasLimit"`
-	ExecutionGas *hexutil.Uint64 `json:"executionGas"`
-	Value        *hexutil.Big    `json:"value"`
-	Data         *hexutil.Bytes  `json:"data"`
+	Mode   *flexUint64     `json:"mode"`
+	Flags  *flexUint64     `json:"flags"`
+	To     *common.Address `json:"to"`
+	Target *common.Address `json:"target"`
+	Value  *hexutil.Big    `json:"value"`
+	Data   *hexutil.Bytes  `json:"data"`
+
+	// The execution gas limit follows whichever name the client gives the dimension:
+	// gasLimit for reth and ethrex, executionGasLimit for nethermind, matching the
+	// executionGasUsed it reports on a receipt; executionGas for some ethrex builds.
+	GasLimit          *flexUint64 `json:"gasLimit"`
+	ExecutionGasLimit *flexUint64 `json:"executionGasLimit"`
+	ExecutionGas      *flexUint64 `json:"executionGas"`
 
 	// ethrex has shipped both spellings of the state gas limit. Reading only one of
 	// them decodes every frame from the other build with a state limit of zero and
 	// nothing says so, which changes the transaction's hash on re-encoding.
-	StateLimit    *hexutil.Uint64 `json:"stateLimit"`
-	StateGasLimit *hexutil.Uint64 `json:"stateGasLimit"`
-	StateGas      *hexutil.Uint64 `json:"stateGas"`
+	StateLimit    *flexUint64 `json:"stateLimit"`
+	StateGasLimit *flexUint64 `json:"stateGasLimit"`
+	StateGas      *flexUint64 `json:"stateGas"`
 }
 
+// executionLimit returns whichever spelling the client used.
 func (f *jsonFrame) executionLimit() uint64 {
-	if f.GasLimit != nil {
+	switch {
+	case f.GasLimit != nil:
 		return uint64(*f.GasLimit)
+	case f.ExecutionGasLimit != nil:
+		return uint64(*f.ExecutionGasLimit)
 	}
-	return jsonUint64(f.ExecutionGas)
+
+	return flexValue(f.ExecutionGas)
 }
 
 // stateLimit returns whichever spelling the client used.
@@ -1130,22 +1389,24 @@ func (f *jsonFrame) stateLimit() uint64 {
 	if f.StateGasLimit != nil {
 		return uint64(*f.StateGasLimit)
 	}
-	return jsonUint64(f.StateGas)
+
+	return flexValue(f.StateGas)
 }
 
 // jsonFrameSignature is a signature entry as reported by JSON-RPC.
 type jsonFrameSignature struct {
-	Scheme    *hexutil.Uint64 `json:"scheme"`
-	Signer    *hexutil.Bytes  `json:"signer"`
-	Msg       *hexutil.Bytes  `json:"msg"`
-	Signature *hexutil.Bytes  `json:"signature"`
+	Scheme    *flexUint64    `json:"scheme"`
+	Signer    *hexutil.Bytes `json:"signer"`
+	Msg       *hexutil.Bytes `json:"msg"`
+	Signature *hexutil.Bytes `json:"signature"`
 }
 
 // jsonFrameTx holds the frame-specific fields of a JSON-RPC transaction object.
 type jsonFrameTx struct {
 	Sender     *common.Address       `json:"sender"`
+	MaxFee     *hexutil.Big          `json:"maxFee"`
 	NonceKeys  []*hexutil.Big        `json:"nonceKeys"`
-	NonceSeq   *hexutil.Uint64       `json:"nonceSeq"`
+	NonceSeq   *flexUint64           `json:"nonceSeq"`
 	Frames     []*jsonFrame          `json:"frames"`
 	Signatures []*jsonFrameSignature `json:"signatures"`
 }
@@ -1174,16 +1435,29 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 
 	// Clients report the EIP-8250 sequence as "nonce"; "nonceSeq" is what EncodeJSONTx
 	// writes, so accept both.
-	nonceSeq := dec.NonceSeq
-	if nonceSeq == nil {
-		nonceSeq = fields.Nonce
+	tx.NonceSeq = jsonUint64(fields.Nonce)
+	if dec.NonceSeq != nil {
+		tx.NonceSeq = uint64(*dec.NonceSeq)
 	}
 
-	tx.NonceSeq = jsonUint64(nonceSeq)
-	tx.Fees = FrameFees{
-		GasTipCap:  jsonU256(fields.MaxPriorityFeePerGas),
-		GasFeeCap:  jsonU256(fields.MaxFeePerGas),
-		BlobFeeCap: jsonU256(fields.MaxFeePerBlobGas),
+	// A max_fee budget is reported as "maxFee" in place of the per-gas caps. A node that
+	// reports neither leaves the layout, and with it the hash, undecidable.
+	switch {
+	case dec.MaxFee != nil:
+		tx.LegacyFees = false
+		tx.Fees = FrameFees{
+			MaxFee:    jsonU256(dec.MaxFee),
+			GasTipCap: jsonU256(fields.MaxPriorityFeePerGas),
+		}
+	case fields.MaxFeePerGas != nil:
+		tx.LegacyFees = true
+		tx.Fees = FrameFees{
+			GasTipCap:  jsonU256(fields.MaxPriorityFeePerGas),
+			GasFeeCap:  jsonU256(fields.MaxFeePerGas),
+			BlobFeeCap: jsonU256(fields.MaxFeePerBlobGas),
+		}
+	default:
+		return errors.New("frame transaction object carries neither maxFee nor maxFeePerGas")
 	}
 	tx.BlobHashes = fields.BlobVersionedHashes
 
@@ -1219,8 +1493,8 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 		}
 
 		tx.Frames = append(tx.Frames, &Frame{
-			Mode:   FrameMode(jsonUint64(frame.Mode)),
-			Flags:  uint8(jsonUint64(frame.Flags)),
+			Mode:   FrameMode(flexValue(frame.Mode)),
+			Flags:  uint8(flexValue(frame.Flags)),
 			Target: copyAddressPtr(target),
 			Limits: FrameLimits{
 				Execution: frame.executionLimit(),
@@ -1241,7 +1515,7 @@ func (tx *FrameTx) DecodeJSONTx(fields *JSONTxFields) error {
 		}
 
 		entry := &FrameSignature{
-			Scheme:    FrameSigScheme(jsonUint64(sig.Scheme)),
+			Scheme:    FrameSigScheme(flexValue(sig.Scheme)),
 			Signer:    signer,
 			Msg:       jsonBytes(sig.Msg),
 			Signature: jsonBytes(sig.Signature),
@@ -1261,10 +1535,15 @@ func (tx *FrameTx) EncodeJSONTx(fields map[string]any) {
 
 	fields["sender"] = tx.Sender
 	fields["chainId"] = (*hexutil.Big)(tx.GetChainID())
-	fields["maxFeePerGas"] = (*hexutil.Big)(tx.GetGasFeeCap())
 	fields["maxPriorityFeePerGas"] = (*hexutil.Big)(tx.GetGasTipCap())
-	fields["maxFeePerBlobGas"] = (*hexutil.Big)(tx.GetBlobGasFeeCap())
 	fields["blobVersionedHashes"] = tx.BlobHashes
+
+	if tx.LegacyFees {
+		fields["maxFeePerGas"] = (*hexutil.Big)(tx.GetGasFeeCap())
+		fields["maxFeePerBlobGas"] = (*hexutil.Big)(tx.GetBlobGasFeeCap())
+	} else {
+		fields["maxFee"] = (*hexutil.Big)(tx.GetMaxFee())
+	}
 
 	if tx.HasKeyedNonces() {
 		nonceKeys := make([]*hexutil.Big, 0, len(tx.NonceKeys))

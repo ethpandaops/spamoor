@@ -126,7 +126,7 @@ func TestFrameSigHashElision(t *testing.T) {
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 	tx := buildTransferTx(t, sender)
 
-	before := tx.SigHash()
+	before := sigHash(t, tx)
 
 	if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
 		t.Fatalf("failed signing: %v", err)
@@ -136,7 +136,7 @@ func TestFrameSigHashElision(t *testing.T) {
 		t.Fatalf("secp256k1 entry should be 65 bytes, got %d", len(tx.Signatures[0].Signature))
 	}
 
-	if after := tx.SigHash(); after != before {
+	if after := sigHash(t, tx); after != before {
 		t.Fatal("signing an empty-msg entry changed the signature hash")
 	}
 
@@ -149,11 +149,11 @@ func TestFrameSigHashElision(t *testing.T) {
 		Msg:    digest.Bytes(),
 	})
 
-	withEmpty := tx.SigHash()
+	withEmpty := sigHash(t, tx)
 
 	tx.Signatures[1].Signature = bytes.Repeat([]byte{0xaa}, 65)
 
-	if withFilled := tx.SigHash(); withFilled == withEmpty {
+	if withFilled := sigHash(t, tx); withFilled == withEmpty {
 		t.Fatal("an explicit-digest entry's signature bytes should be covered by the hash")
 	}
 }
@@ -168,7 +168,7 @@ func TestFrameSignatureRecovery(t *testing.T) {
 
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 	tx := buildTransferTx(t, sender)
-	digest := tx.SigHash()
+	digest := sigHash(t, tx)
 
 	if err := tx.SignPayload(testChainID.ToBig(), key); err != nil {
 		t.Fatalf("failed signing: %v", err)
@@ -230,7 +230,7 @@ func TestFrameP256Signature(t *testing.T) {
 	// The signer is part of the canonical signature hash, so the entry has to verify
 	// against the hash the finished transaction has rather than the one it had while
 	// the signer field was still empty.
-	digest := tx.SigHash()
+	digest := sigHash(t, tx)
 	r := new(big.Int).SetBytes(tx.Signatures[1].Signature[0:32])
 	s := new(big.Int).SetBytes(tx.Signatures[1].Signature[32:64])
 
@@ -263,8 +263,8 @@ func TestFrameIntrinsicGas(t *testing.T) {
 	// The user op carries value to a foreign target.
 	want += TxValueCost
 	// The envelope extension prices its own encoding as transaction data. The default
-	// [0] key set encodes as rlp([0]) || rlp(0) = c1 80 80: three non-zero bytes.
-	extensionTokens := uint64(3 * 4)
+	// empty key set encodes as rlp([]) || rlp(0) = c0 80: two non-zero bytes.
+	extensionTokens := uint64(2 * 4)
 	want += StandardTokenCost * extensionTokens
 
 	if got := tx.IntrinsicGas(); got != want {
@@ -287,9 +287,20 @@ func TestFrameIntrinsicGas(t *testing.T) {
 		t.Fatalf("state gas = %d, want 1000", got)
 	}
 
-	// MaxCost is what APPROVE collects from the payer up front.
-	wantCost := new(big.Int).Mul(big.NewInt(int64(wantMax)), big.NewInt(1e9))
-	if got := tx.MaxCost(nil); got.Cmp(wantCost) != 0 {
+	// The per-gas cap buys a max_fee budget of MaxGas at that cap.
+	if err := tx.DeriveMaxFee(); err != nil {
+		t.Fatalf("failed deriving max fee: %v", err)
+	}
+
+	wantBudget := new(big.Int).Mul(big.NewInt(int64(wantMax)), big.NewInt(1e9))
+	if got := tx.GetMaxFee(); got.Cmp(wantBudget) != 0 {
+		t.Fatalf("max fee = %s, want %s", got, wantBudget)
+	}
+
+	// MaxCost is what APPROVE collects from the payer up front: with no tip, the
+	// worst-case base fee charge.
+	wantCost := new(big.Int).Mul(big.NewInt(int64(wantMax)), big.NewInt(4e8))
+	if got := tx.MaxCost(big.NewInt(4e8), nil); got.Cmp(wantCost) != 0 {
 		t.Fatalf("max cost = %s, want %s", got, wantCost)
 	}
 }
@@ -382,7 +393,10 @@ func TestFrameValidatePayload(t *testing.T) {
 		{"short signer", func(tx *FrameTx) { tx.Signatures[0].Signer = []byte{0x01} }},
 		{"bad msg length", func(tx *FrameTx) { tx.Signatures[0].Msg = []byte{0x01} }},
 		{"zero explicit digest", func(tx *FrameTx) { tx.Signatures[0].Msg = make([]byte, 32) }},
-		{"blob fee without blobs", func(tx *FrameTx) { tx.Fees.BlobFeeCap = uint256.NewInt(1) }},
+		{"blob fee without blobs", func(tx *FrameTx) {
+			tx.LegacyFees = true
+			tx.Fees.BlobFeeCap = uint256.NewInt(1)
+		}},
 		{"bad blob hash version", func(tx *FrameTx) {
 			tx.BlobHashes = []common.Hash{{0x02}}
 			tx.Fees.BlobFeeCap = uint256.NewInt(1)

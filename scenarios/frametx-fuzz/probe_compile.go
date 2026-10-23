@@ -9,6 +9,7 @@ package frametxfuzz
 import (
 	_ "embed"
 	"fmt"
+	"math/big"
 	"sync"
 
 	geas "github.com/fjl/geas/asm"
@@ -81,13 +82,29 @@ func DeploymentInitCode(runtime []byte) ([]byte, error) {
 	return initcode, nil
 }
 
-// compileContract assembles the embedded source once.
-func compileContract() {
+// compileProbeRuntime assembles the probe's runtime code with the EIP-7906 opcode bytes
+// of the given revision.
+func compileProbeRuntime(ops *assertTable) ([]byte, error) {
 	compiler := geas.NewCompiler(nil)
+
+	if ops.txDiff != 0 {
+		compiler.SetGlobal("TXDIFF", big.NewInt(int64(ops.txDiff)))
+		compiler.SetGlobal("EVENTDATACOPY", big.NewInt(int64(ops.eventDataCopy)))
+	}
 
 	runtime := compiler.CompileString(contractSource)
 	if runtime == nil || compiler.Failed() {
-		compileFailure = fmt.Errorf("failed to compile the frame probe contract: %v", compiler.Errors())
+		return nil, fmt.Errorf("failed to compile the frame probe contract: %v", compiler.Errors())
+	}
+
+	return runtime, nil
+}
+
+// compileContract assembles the embedded source once.
+func compileContract() {
+	runtime, err := compileProbeRuntime(assertOps())
+	if err != nil {
+		compileFailure = err
 
 		return
 	}

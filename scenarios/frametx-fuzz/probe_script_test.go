@@ -152,7 +152,6 @@ func TestScriptFrameInstructionsAreReached(t *testing.T) {
 		{"framedata", NewProbeScript().ReadFrameData(0, 0)},
 		{"sigdata", NewProbeScript().ReadSigData(0, 0)},
 		{"txtrace", NewProbeScript().ReadTxTrace(TxTraceBalancesChanged, 0)},
-		{"txdiff", NewProbeScript().ReadTxDiff(TxDiffChangeFlags, common.Address{}, common.Hash{})},
 		{"eventdata", NewProbeScript().ReadEventData(0, 0, 32)},
 		{"approve", NewProbeScript().Approve(txtypes.ApproveExecutionAndPayment)},
 	} {

@@ -123,7 +123,7 @@ func (tx *FrameTx) WithLegacyNonce() *FrameTx {
 		return tx
 	}
 
-	if LegacyNonceKeyZero {
+	if tx.UsesLegacyNonceKeyZero() {
 		tx.NonceKeys = []*uint256.Int{new(uint256.Int)}
 	} else {
 		tx.NonceKeys = nil

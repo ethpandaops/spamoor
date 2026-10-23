@@ -810,3 +810,613 @@ func TestReceiptLogsWithoutPosition(t *testing.T) {
 		t.Fatal("log's own position fields should win")
 	}
 }
+
+// The same frame transaction's receipt as each client of the frames devnet reports it,
+// with the transaction-level logs dropped. EIP-8141 specifies no JSON-RPC encoding for
+// the per-frame results and every client spells them differently: reth nests the two gas
+// dimensions in an object, nethermind reports them as sibling fields and writes the
+// status as a bare number, ethrex reports a flat gasUsed beside stateGasUsed, and geth
+// reports no frame content at all. The values behind the spellings are the same, so any
+// of them has to decode to the same frames.
+var clientFrameReceipts = []struct {
+	client string
+	raw    string
+	frames []FrameReceipt
+}{
+	{
+		client: "geth",
+		raw: `{
+  "blockHash": "0x4c1456b035b64c18b5e140f01c32acaeb68f70d9068ae6224d5533e99a52cacb",
+  "blockNumber": "0x2240",
+  "contractAddress": null,
+  "cumulativeGasUsed": "0x5457",
+  "from": "0x846c1aa48ca796975ebffde156a076c520b356ea",
+  "gasUsed": "0x5457",
+  "logs": [],
+  "status": "0x1",
+  "to": null,
+  "transactionHash": "0xca99acee1f763a885d979993dc24d23e78f0bab2b7068ec1d0de5b22ad19afc2",
+  "transactionIndex": "0x0",
+  "type": "0x6"
+}`,
+	},
+	{
+		client: "reth",
+		raw: `{
+  "blobGasPrice": "0x1",
+  "blobGasUsed": "0x0",
+  "blockHash": "0x4c1456b035b64c18b5e140f01c32acaeb68f70d9068ae6224d5533e99a52cacb",
+  "blockNumber": "0x2240",
+  "contractAddress": null,
+  "cumulativeGasUsed": "0x5457",
+  "frameReceipts": [
+    {
+      "gasUsed": {
+        "execution": "0x64",
+        "state": "0x0"
+      },
+      "logs": [],
+      "status": "0x1"
+    },
+    {
+      "gasUsed": {
+        "execution": "0xbb8",
+        "state": "0x0"
+      },
+      "logs": [],
+      "status": "0x1"
+    },
+    {
+      "gasUsed": {
+        "execution": "0x64",
+        "state": "0x0"
+      },
+      "logs": [],
+      "status": "0x1"
+    },
+    {
+      "gasUsed": {
+        "execution": "0x64",
+        "state": "0x0"
+      },
+      "logs": [],
+      "status": "0x1"
+    },
+    {
+      "gasUsed": {
+        "execution": "0x64",
+        "state": "0x0"
+      },
+      "logs": [],
+      "status": "0x1"
+    }
+  ],
+  "from": "0x846c1aa48ca796975ebffde156a076c520b356ea",
+  "gasUsed": "0x5457",
+  "logs": [],
+  "payer": "0x846c1aa48ca796975ebffde156a076c520b356ea",
+  "status": "0x1",
+  "to": "0x846c1aa48ca796975ebffde156a076c520b356ea",
+  "transactionHash": "0xca99acee1f763a885d979993dc24d23e78f0bab2b7068ec1d0de5b22ad19afc2",
+  "transactionIndex": "0x0",
+  "type": "0x6"
+}`,
+		frames: []FrameReceipt{
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0xbb8, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+		},
+	},
+	{
+		client: "nethermind",
+		raw: `{
+  "blockGasUsed": "0x5457",
+  "blockHash": "0x4c1456b035b64c18b5e140f01c32acaeb68f70d9068ae6224d5533e99a52cacb",
+  "blockNumber": "0x2240",
+  "contractAddress": null,
+  "cumulativeGasUsed": "0x5457",
+  "executionGasUsed": "0x5457",
+  "frameReceipts": [
+    {
+      "executionGasUsed": "0x64",
+      "logs": [],
+      "stateGasUsed": "0x0",
+      "status": 1
+    },
+    {
+      "executionGasUsed": "0xbb8",
+      "logs": [],
+      "stateGasUsed": "0x0",
+      "status": 1
+    },
+    {
+      "executionGasUsed": "0x64",
+      "logs": [],
+      "stateGasUsed": "0x0",
+      "status": 1
+    },
+    {
+      "executionGasUsed": "0x64",
+      "logs": [],
+      "stateGasUsed": "0x0",
+      "status": 1
+    },
+    {
+      "executionGasUsed": "0x64",
+      "logs": [],
+      "stateGasUsed": "0x0",
+      "status": 1
+    }
+  ],
+  "from": "0x846c1aa48ca796975ebffde156a076c520b356ea",
+  "gasUsed": "0x5457",
+  "logs": [],
+  "payer": "0x846c1aa48ca796975ebffde156a076c520b356ea",
+  "status": "0x1",
+  "to": null,
+  "transactionHash": "0xca99acee1f763a885d979993dc24d23e78f0bab2b7068ec1d0de5b22ad19afc2",
+  "transactionIndex": "0x0",
+  "type": "0x6"
+}`,
+		frames: []FrameReceipt{
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0xbb8, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+		},
+	},
+	{
+		client: "ethrex",
+		raw: `{
+  "blockHash": "0x4c1456b035b64c18b5e140f01c32acaeb68f70d9068ae6224d5533e99a52cacb",
+  "blockNumber": "0x2240",
+  "contractAddress": null,
+  "cumulativeGasUsed": "0x5457",
+  "frameReceipts": [
+    {
+      "gasUsed": "0x64",
+      "logs": [],
+      "stateGasUsed": "0x0",
+      "status": "0x1"
+    },
+    {
+      "gasUsed": "0xbb8",
+      "logs": [],
+      "stateGasUsed": "0x0",
+      "status": "0x1"
+    },
+    {
+      "gasUsed": "0x64",
+      "logs": [],
+      "stateGasUsed": "0x0",
+      "status": "0x1"
+    },
+    {
+      "gasUsed": "0x64",
+      "logs": [],
+      "stateGasUsed": "0x0",
+      "status": "0x1"
+    },
+    {
+      "gasUsed": "0x64",
+      "logs": [],
+      "stateGasUsed": "0x0",
+      "status": "0x1"
+    }
+  ],
+  "from": "0x846c1aa48ca796975ebffde156a076c520b356ea",
+  "gasUsed": "0x5457",
+  "logs": [],
+  "payer": "0x846c1aa48ca796975ebffde156a076c520b356ea",
+  "status": "0x1",
+  "to": null,
+  "transactionHash": "0xca99acee1f763a885d979993dc24d23e78f0bab2b7068ec1d0de5b22ad19afc2",
+  "transactionIndex": "0x0",
+  "type": "0x6"
+}`,
+		frames: []FrameReceipt{
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0xbb8, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+			{Status: FrameStatusSuccess, ExecutionGas: 0x64, StateGas: 0},
+		},
+	},
+}
+
+// framePayer is the payer every client that reports one reports for that transaction.
+const framePayer = "0x846c1aa48ca796975ebffde156a076c520b356ea"
+
+// A frame transaction's result must read the same whichever client served the receipt:
+// the encoding is a client's choice, the content is the chain's.
+func TestFrameReceiptDecodesEveryClientSpelling(t *testing.T) {
+	for _, tc := range clientFrameReceipts {
+		t.Run(tc.client, func(t *testing.T) {
+			var receipt Receipt
+			if err := json.Unmarshal([]byte(tc.raw), &receipt); err != nil {
+				t.Fatalf("receipt does not decode: %v", err)
+			}
+
+			extra := receipt.FrameExtra()
+
+			if tc.frames == nil {
+				// A client that reports no frame content still yields the ordinary
+				// receipt rather than failing the response it arrived in.
+				if extra != nil {
+					t.Fatalf("frame content decoded from a receipt that carries none: %+v", extra)
+				}
+
+				if receipt.Status != ReceiptStatusSuccessful {
+					t.Errorf("status = %d, want %d", receipt.Status, ReceiptStatusSuccessful)
+				}
+
+				return
+			}
+
+			if extra == nil {
+				t.Fatal("the frame results were not decoded")
+			}
+
+			if got := extra.Payer.Hex(); !strings.EqualFold(got, framePayer) {
+				t.Errorf("payer = %s, want %s", got, framePayer)
+			}
+
+			if len(extra.Frames) != len(tc.frames) {
+				t.Fatalf("frames = %d, want %d", len(extra.Frames), len(tc.frames))
+			}
+
+			for i, want := range tc.frames {
+				got := extra.Frames[i]
+				if got.Status != want.Status || got.ExecutionGas != want.ExecutionGas ||
+					got.StateGas != want.StateGas {
+					t.Errorf("frame %d = {status %d, execution %d, state %d}, want {status %d, execution %d, state %d}",
+						i, got.Status, got.ExecutionGas, got.StateGas,
+						want.Status, want.ExecutionGas, want.StateGas)
+				}
+			}
+		})
+	}
+}
+
+// A frame's two gas dimensions reach the decoder in whichever shape the client chose:
+// nested in an object, as the two-element array the consensus encoding uses, as sibling
+// fields, or as a lone value. EIP-8037's execution dimension answers to two names, and
+// any of these numbers may be written as a quantity or as a bare JSON number. None of
+// that changes what the frame spent, so every spelling has to decode to the same pair.
+func TestFrameGasUsedAcceptsEverySpelling(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		fields           string
+		execution, state uint64
+	}{
+		{"array", `"gasUsed":["0x64","0x7"]`, 0x64, 0x7},
+		{"object", `"gasUsed":{"execution":"0x64","state":"0x7"}`, 0x64, 0x7},
+		{"object regular", `"gasUsed":{"regular":"0x64","state":"0x7"}`, 0x64, 0x7},
+		{"flat", `"gasUsed":"0x64","stateGasUsed":"0x7"`, 0x64, 0x7},
+		{"siblings", `"executionGasUsed":"0x64","stateGasUsed":"0x7"`, 0x64, 0x7},
+		{"siblings regular", `"regularGasUsed":"0x64","stateGasUsed":"0x7"`, 0x64, 0x7},
+		{"numbers", `"executionGasUsed":100,"stateGasUsed":7`, 0x64, 0x7},
+		{"combined", `"gasUsed":"0x64"`, 0x64, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{
+				"type": "0x6",
+				"transactionHash": "0xaaaa000000000000000000000000000000000000000000000000000000000021",
+				"payer": "0xdddd000000000000000000000000000000000004",
+				"logs": [],
+				"frameReceipts": [{"status":"0x1","logs":[],` + tc.fields + `}]
+			}`
+
+			var receipt Receipt
+			if err := json.Unmarshal([]byte(raw), &receipt); err != nil {
+				t.Fatalf("receipt does not decode: %v", err)
+			}
+
+			extra := receipt.FrameExtra()
+			if extra == nil || len(extra.Frames) != 1 {
+				t.Fatal("the frame was not decoded")
+			}
+
+			frame := extra.Frames[0]
+			if frame.ExecutionGas != tc.execution || frame.StateGas != tc.state {
+				t.Errorf("gas = {execution %d, state %d}, want {execution %d, state %d}",
+					frame.ExecutionGas, frame.StateGas, tc.execution, tc.state)
+			}
+		})
+	}
+}
+
+// The same frame transaction as each client of the frames devnet reports it over
+// eth_getTransactionByHash, with the block position fields dropped. EIP-8141 specifies no
+// JSON encoding here either: reth and ethrex name a frame's execution budget gasLimit
+// while nethermind calls it executionGasLimit and writes mode, flags and a signature
+// scheme as bare numbers instead of quantities, and geth reports a type 0x6 transaction
+// with none of its frame fields at all. Reading a limit under the wrong name is worse than
+// failing, because the frame decodes with a budget of zero and the transaction then
+// re-encodes to a different hash - so each spelling is checked against the hash the chain
+// knows the transaction by.
+var clientFrameTransactions = []struct {
+	client string
+	raw    string
+	frames bool
+}{
+	{
+		client: "geth",
+		raw: `{
+  "from": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "gas": "0x14335",
+  "gasPrice": "0x4a817c800",
+  "hash": "0x19913e328c64448454a530c1bd77921e0af678f768e8222b520c9c7b65a993a7",
+  "input": "0x",
+  "nonce": "0xd33",
+  "r": null,
+  "s": null,
+  "to": null,
+  "type": "0x6",
+  "v": null,
+  "value": "0x0"
+}`,
+		frames: false,
+	},
+	{
+		client: "reth",
+		raw: `{
+  "blobVersionedHashes": [],
+  "chainId": "0x1a3453829",
+  "frames": [
+    {
+      "data": "0x",
+      "flags": "0x3",
+      "gasLimit": "0x1388",
+      "mode": "0x1",
+      "stateLimit": "0x0",
+      "to": null,
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x4",
+      "gasLimit": "0x7530",
+      "mode": "0x2",
+      "stateLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x4",
+      "gasLimit": "0x1",
+      "mode": "0x2",
+      "stateLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x0",
+      "gasLimit": "0x7530",
+      "mode": "0x2",
+      "stateLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    }
+  ],
+  "from": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "gasPrice": "0x77359407",
+  "hash": "0x19913e328c64448454a530c1bd77921e0af678f768e8222b520c9c7b65a993a7",
+  "maxFeePerBlobGas": "0x0",
+  "maxFeePerGas": "0x4a817c800",
+  "maxPriorityFeePerGas": "0x77359400",
+  "nonce": "0xd33",
+  "sender": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "signatures": [
+    {
+      "msg": "0x",
+      "scheme": "0x1",
+      "signature": "0x0192867c8205c20a9b9675f2673f931aa7732b169904b66bcac8ddb946561c02da0f999c8a348b8b8101a3045611994bf6f4ef5a4a6627d92ff0b6ac88e8a0ab1d",
+      "signer": null
+    }
+  ],
+  "type": "0x6"
+}`,
+		frames: true,
+	},
+	{
+		client: "nethermind",
+		raw: `{
+  "accessList": [],
+  "blobVersionedHashes": [],
+  "chainId": "0x1a3453829",
+  "frames": [
+    {
+      "data": "0x",
+      "executionGasLimit": "0x1388",
+      "flags": 3,
+      "mode": 1,
+      "stateGasLimit": "0x0",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "executionGasLimit": "0x7530",
+      "flags": 4,
+      "mode": 2,
+      "stateGasLimit": "0x0",
+      "target": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "executionGasLimit": "0x1",
+      "flags": 4,
+      "mode": 2,
+      "stateGasLimit": "0x0",
+      "target": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "executionGasLimit": "0x7530",
+      "flags": 0,
+      "mode": 2,
+      "stateGasLimit": "0x0",
+      "target": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    }
+  ],
+  "from": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "gas": "0xfde9",
+  "gasPrice": "0x77359407",
+  "hash": "0x19913e328c64448454a530c1bd77921e0af678f768e8222b520c9c7b65a993a7",
+  "input": "0x",
+  "maxFeePerBlobGas": "0x0",
+  "maxFeePerGas": "0x4a817c800",
+  "maxPriorityFeePerGas": "0x77359400",
+  "nonce": "0xd33",
+  "r": "0x0",
+  "s": "0x0",
+  "signatures": [
+    {
+      "msg": "0x",
+      "scheme": 1,
+      "signature": "0x0192867c8205c20a9b9675f2673f931aa7732b169904b66bcac8ddb946561c02da0f999c8a348b8b8101a3045611994bf6f4ef5a4a6627d92ff0b6ac88e8a0ab1d"
+    }
+  ],
+  "to": null,
+  "type": "0x6",
+  "v": "0x0",
+  "value": "0x0",
+  "yParity": "0x0"
+}`,
+		frames: true,
+	},
+	{
+		client: "ethrex",
+		raw: `{
+  "blobVersionedHashes": [],
+  "chainId": "0x1a3453829",
+  "frames": [
+    {
+      "data": "0x",
+      "flags": "0x3",
+      "gasLimit": "0x1388",
+      "mode": "0x1",
+      "stateGasLimit": "0x0",
+      "to": null,
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x4",
+      "gasLimit": "0x7530",
+      "mode": "0x2",
+      "stateGasLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x4",
+      "gasLimit": "0x1",
+      "mode": "0x2",
+      "stateGasLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    },
+    {
+      "data": "0x",
+      "flags": "0x0",
+      "gasLimit": "0x7530",
+      "mode": "0x2",
+      "stateGasLimit": "0x0",
+      "to": "0x02dc5238fc5aabcbed86daa15e2c42212ca5f490",
+      "value": "0x0"
+    }
+  ],
+  "from": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "hash": "0x19913e328c64448454a530c1bd77921e0af678f768e8222b520c9c7b65a993a7",
+  "maxFeePerBlobGas": "0x0",
+  "maxFeePerGas": "0x4a817c800",
+  "maxPriorityFeePerGas": "0x77359400",
+  "nonce": "0xd33",
+  "sender": "0xeedd4d5d54b0205efc2e14aef9c97ae6668f2770",
+  "signatures": [
+    {
+      "msg": "0x",
+      "scheme": "0x1",
+      "signature": "0x0192867c8205c20a9b9675f2673f931aa7732b169904b66bcac8ddb946561c02da0f999c8a348b8b8101a3045611994bf6f4ef5a4a6627d92ff0b6ac88e8a0ab1d",
+      "signer": null
+    }
+  ],
+  "type": "0x6"
+}`,
+		frames: true,
+	},
+}
+
+// A frame transaction must read the same whichever client served the JSON, and a client
+// that reports no frame fields must still leave an indexable transaction behind.
+func TestFrameTxDecodesEveryClientSpelling(t *testing.T) {
+	var reference *FrameTx
+
+	for _, tc := range clientFrameTransactions {
+		t.Run(tc.client, func(t *testing.T) {
+			tx, err := UnmarshalJSONTx([]byte(tc.raw))
+			if err != nil {
+				t.Fatalf("transaction does not decode: %v", err)
+			}
+
+			if tx.Type() != FrameTxType {
+				t.Fatalf("type = %d, want %d", tx.Type(), FrameTxType)
+			}
+
+			frameTx, ok := tx.Inner().(*FrameTx)
+			if !tc.frames {
+				// Nothing can reconstruct frames a client did not report, but the
+				// transaction still has to survive as its generic self.
+				if ok {
+					t.Fatal("frames decoded from an object that carries none")
+				}
+
+				return
+			}
+
+			if !ok {
+				t.Fatalf("decoded as %T, want a frame transaction", tx.Inner())
+			}
+
+			encoded, err := tx.MarshalBinary()
+			if err != nil {
+				t.Fatalf("re-encode failed: %v", err)
+			}
+
+			// Any field read under the wrong name or dropped shows up here.
+			if got := crypto.Keccak256Hash(encoded); got != tx.Hash() {
+				t.Errorf("re-encoded hash = %s, want the reported %s", got, tx.Hash())
+			}
+
+			if reference == nil {
+				reference = frameTx
+
+				return
+			}
+
+			if frameTx.Sender != reference.Sender || len(frameTx.Frames) != len(reference.Frames) ||
+				len(frameTx.Signatures) != len(reference.Signatures) {
+				t.Fatalf("envelope differs from the first client's: %+v", frameTx)
+			}
+
+			for i, frame := range frameTx.Frames {
+				want := reference.Frames[i]
+				if frame.Mode != want.Mode || frame.Flags != want.Flags ||
+					frame.Limits != want.Limits {
+					t.Errorf("frame %d = {mode %d, flags %d, limits %+v}, want {mode %d, flags %d, limits %+v}",
+						i, frame.Mode, frame.Flags, frame.Limits, want.Mode, want.Flags, want.Limits)
+				}
+			}
+		})
+	}
+}

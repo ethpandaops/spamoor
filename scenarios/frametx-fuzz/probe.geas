@@ -15,7 +15,12 @@
 ;;; Instructions the assembler does not know are emitted with #bytes:
 ;;;   0xaa APPROVE  0xb0 TXPARAM  0xb1 FRAMEDATALOAD  0xb3 FRAMEPARAM
 ;;;   0xb4 SIGPARAM  0xb5 SIGDATACOPY
-;;;   0xb6 TXTRACE  0xb7 TXDIFF  0xb8 EVENTDATACOPY (EIP-7906, ASSERT frames only)
+;;;   0xb6 TXTRACE  0xb7 EVENTDATACOPY (EIP-7906, ASSERT frames only)
+;;;
+;;; bogota-devnet-1's EIP-7906 has TXDIFF at 0xb7 and EVENTDATACOPY at 0xb8; the compiler
+;;; overrides these two for it.
+#define TXDIFF = 0xb7
+#define EVENTDATACOPY = 0xb7
 
 ;; cursor = 0
 push 0
@@ -396,7 +401,7 @@ op_read_txdiff:
 	push 32
 	add
 	calldataload
-	#bytes 0xb7
+	#bytes TXDIFF
 	pop
 	push @next
 	jump
@@ -417,7 +422,7 @@ op_read_eventdata:
 	push 32
 	add
 	calldataload
-	#bytes 0xb8
+	#bytes EVENTDATACOPY
 	push @next
 	jump
 
