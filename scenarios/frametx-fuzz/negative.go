@@ -284,7 +284,7 @@ var violations = []violation{
 		name:          "zero-key-mixed",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
-			if !tx.HasKeyedNonces() || !txtypes.LegacyNonceKeyZero {
+			if !tx.HasKeyedNonces() || !tx.UsesLegacyNonceKeyZero() {
 				return errViolationNotApplicable
 			}
 
@@ -299,7 +299,7 @@ var violations = []violation{
 		name:          "empty-nonce-keys",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
-			if !tx.HasKeyedNonces() || !txtypes.LegacyNonceKeyZero {
+			if !tx.HasKeyedNonces() || !tx.UsesLegacyNonceKeyZero() {
 				return errViolationNotApplicable
 			}
 
@@ -372,9 +372,14 @@ var violations = []violation{
 		},
 	},
 	{
+		// Only with per-gas fees; a max_fee budget has no blob fee cap.
 		name:          "blob-fee-without-blobs",
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
+			if !tx.LegacyFees {
+				return errViolationNotApplicable
+			}
+
 			tx.Fees.BlobFeeCap = uint256.NewInt(1)
 
 			return nil

@@ -265,8 +265,18 @@ func TestFrameTxUsesAccountNonce(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "key zero aliases the account nonce",
+			name: "empty key set is the account nonce",
+			tx:   (&FrameTx{}).WithNonceKeys(nil, 3),
+			want: true,
+		},
+		{
+			name: "key zero is an independent domain",
 			tx:   (&FrameTx{}).WithNonceKeys([]*uint256.Int{uint256.NewInt(0)}, 3),
+			want: false,
+		},
+		{
+			name: "key zero aliases the account nonce under LegacyFees",
+			tx:   (&FrameTx{LegacyFees: true}).WithNonceKeys([]*uint256.Int{uint256.NewInt(0)}, 3),
 			want: true,
 		},
 		{

@@ -16,6 +16,7 @@ import (
 	"github.com/ethpandaops/spamoor/plugin"
 	"github.com/ethpandaops/spamoor/scenarios"
 	"github.com/ethpandaops/spamoor/spamoor"
+	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
 	"github.com/ethpandaops/spamoor/webui"
 	"github.com/ethpandaops/spamoor/webui/types"
@@ -68,6 +69,7 @@ func main() {
 	flags.Uint64Var(&cliArgs.startupDelay, "startup-delay", 30, "Delay in seconds before starting spammers on daemon startup (to allow cancellation)")
 	flags.StringArrayVar(&cliArgs.plugins, "plugin", []string{}, "Plugin tar.gz files or local directories to load (can be specified multiple times)")
 	flags.BoolVar(&cliArgs.preAmsterdamFeeModel, "pre-amsterdam-fee-model", false, "Use the legacy pre-Amsterdam (pre-EIP-8037) gas/fee model. Default is the Amsterdam fee model, which is safe on non-Amsterdam chains because its gas budgets are strictly higher.")
+	flags.BoolVar(&txtypes.LegacyFrameFees, "legacy-frame-fees", false, "Build EIP-8141 frame transactions in the layout before EIPs#12414 and #12502 (per-gas fee caps, unsized signature elision, [0] as the account nonce key), as bogota-devnet-1 runs. Default is the max_fee budget layout.")
 	flags.Parse(os.Args)
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -422,7 +422,7 @@ func (s *Scenario) recipeFor(txIdx uint64) *Recipe {
 		AllowProbe:    s.env.probe != nil,
 
 		// The key-zero revision of EIP-8250 has no single-use form.
-		AllowSingleUseNonce: s.env.nonces != nil && !txtypes.LegacyNonceKeyZero,
+		AllowSingleUseNonce: s.env.nonces != nil && !(txtypes.LegacyFrameFees && txtypes.LegacyNonceKeyZero),
 		AllowCode:           s.env.factory != (common.Address{}),
 		AllowFuzzedAccount:  s.env.accounts.available(),
 

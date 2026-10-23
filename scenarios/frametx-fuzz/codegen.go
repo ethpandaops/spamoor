@@ -20,7 +20,6 @@ const (
 	opcodeSigParam      = 0xb4
 	opcodeSigDataCopy   = 0xb5
 	opcodeTxTrace       = OpTxTrace
-	opcodeTxDiff        = OpTxDiff
 	opcodeEventDataCopy = OpEventDataCopy
 )
 
@@ -104,21 +103,8 @@ func frameOpcodeDefinitions(rng *utils.DeterministicRNG) []*evmfuzz.OpcodeInfo {
 			Name: "TXTRACE", Opcode: opcodeTxTrace, StackInput: 0, StackOutput: 1, GasCost: 100,
 			Probability: 0.4,
 			Template: func() []byte {
-				// Deepest first: index, then param on top; 0x16 is one past the end.
-				return concat(push1(byte(rng.Intn(4))), push1(byte(rng.Intn(0x17))), []byte{opcodeTxTrace})
-			},
-		},
-		{
-			// The live-state parameters cost a cold account access when the address is
-			// untouched (3000 under EIP-8038); the view parameters a warm read.
-			Name: "TXDIFF", Opcode: opcodeTxDiff, StackInput: 0, StackOutput: 1, GasCost: 3_000,
-			Probability: 0.4,
-			Template: func() []byte {
-				// Deepest first: key, address, then param on top. Small addresses are
-				// the precompiles and the family's predeploys, which is as good a lookup
-				// as any; 0x0d is one past the end.
-				return concat(push1(byte(rng.Intn(4))), push1(byte(rng.Intn(0x10))), push1(byte(rng.Intn(0x0e))),
-					[]byte{opcodeTxDiff})
+				// Deepest first: index, then param on top; 0x1b is one past the end.
+				return concat(push1(byte(rng.Intn(4))), push1(byte(rng.Intn(0x1c))), []byte{opcodeTxTrace})
 			},
 		},
 		{

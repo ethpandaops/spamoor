@@ -14,14 +14,15 @@ import (
 // single-use form, EIP-7906's ASSERT batch rules, EIP-8272's verification gas, and the
 // static validation issues found while aligning with them.
 
-// setLegacyNonceKeyZero selects the EIP-8250 revision for the test's duration.
+// setLegacyNonceKeyZero selects the EIP-8250 revision for the test's duration. The
+// key-zero revision only exists alongside the per-gas fees, so it selects those too.
 func setLegacyNonceKeyZero(t *testing.T, value bool) {
 	t.Helper()
 
-	previous := LegacyNonceKeyZero
-	LegacyNonceKeyZero = value
+	previous, previousFees := LegacyNonceKeyZero, LegacyFrameFees
+	LegacyNonceKeyZero, LegacyFrameFees = value, value
 
-	t.Cleanup(func() { LegacyNonceKeyZero = previous })
+	t.Cleanup(func() { LegacyNonceKeyZero, LegacyFrameFees = previous, previousFees })
 }
 
 // signedKeyedTx builds a self-relayed transaction with the given key set and sequence,

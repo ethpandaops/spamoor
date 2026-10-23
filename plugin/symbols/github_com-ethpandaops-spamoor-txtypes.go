@@ -65,6 +65,7 @@ func init() {
 		"IsTxTypeSupported":          reflect.ValueOf(txtypes.IsTxTypeSupported),
 		"KeyedNonceAccessCost":       reflect.ValueOf(constant.MakeFromLiteral("12100", token.INT, 0)),
 		"KeyedNonceFirstUseStateGas": reflect.ValueOf(constant.MakeFromLiteral("97920", token.INT, 0)),
+		"LegacyFrameFees":            reflect.ValueOf(&txtypes.LegacyFrameFees).Elem(),
 		"LegacyNonceKeyZero":         reflect.ValueOf(&txtypes.LegacyNonceKeyZero).Elem(),
 		"LegacyTxType":               reflect.ValueOf(constant.MakeFromLiteral("0", token.INT, 0)),
 		"MaxFrames":                  reflect.ValueOf(constant.MakeFromLiteral("64", token.INT, 0)),
