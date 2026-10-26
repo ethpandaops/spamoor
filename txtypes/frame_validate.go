@@ -78,7 +78,7 @@ func (tx *FrameTx) ValidatePayload() error {
 		return fmt.Errorf("%w: frame count %d must be between 1 and %d", ErrInvalidFrameTx, len(tx.Frames), MaxFrames)
 	}
 
-	if len(tx.BlobHashes) == 0 && tx.Fees.BlobFeeCap != nil && !tx.Fees.BlobFeeCap.IsZero() {
+	if tx.LegacyFees && len(tx.BlobHashes) == 0 && tx.Fees.BlobFeeCap != nil && !tx.Fees.BlobFeeCap.IsZero() {
 		return fmt.Errorf("%w: blob fee cap must be zero without blobs", ErrInvalidFrameTx)
 	}
 
@@ -169,7 +169,7 @@ func (tx *FrameTx) validateNonce() error {
 		}
 	}
 
-	if LegacyNonceKeyZero {
+	if tx.UsesLegacyNonceKeyZero() {
 		if len(tx.NonceKeys) == 0 {
 			return fmt.Errorf("%w: nonce key set is empty; this revision selects the account nonce with [0]", ErrInvalidFrameTx)
 		}
@@ -234,7 +234,7 @@ func (tx *FrameTx) validateSignatures() error {
 func (tx *FrameTx) validateSignatureBytes(index int, sig *FrameSignature) error {
 	switch sig.Scheme {
 	case SigSchemeSecp256k1:
-		if len(sig.Signature) != 65 {
+		if len(sig.Signature) != secp256k1SignatureLength {
 			return fmt.Errorf("%w: signature %d must be 65 bytes, got %d", ErrInvalidFrameTx, index, len(sig.Signature))
 		}
 
@@ -248,7 +248,7 @@ func (tx *FrameTx) validateSignatureBytes(index int, sig *FrameSignature) error 
 		return validateCurveValues(index, r, s, crypto.S256().Params().N)
 
 	case SigSchemeP256:
-		if len(sig.Signature) != 128 {
+		if len(sig.Signature) != p256SignatureLength {
 			return fmt.Errorf("%w: signature %d must be 128 bytes, got %d", ErrInvalidFrameTx, index, len(sig.Signature))
 		}
 
@@ -575,7 +575,10 @@ func matchesRecognizedPrefix(shape []FrameSpecies) bool {
 // It is kept separate from ValidatePayload because it does curve arithmetic, while
 // ValidatePayload only checks what is decidable from the encoded fields.
 func (tx *FrameTx) VerifySignatures() error {
-	sigHash := tx.SigHash()
+	sigHash, err := tx.SigHash()
+	if err != nil {
+		return err
+	}
 
 	for i, sig := range tx.Signatures {
 		if sig.Scheme == SigSchemeArbitrary {

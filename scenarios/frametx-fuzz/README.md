@@ -68,7 +68,7 @@ axis with equal weight. An axis whose EIP the chain does not run is disabled aut
 | `signatures` | ARBITRARY witnesses and P256 entries alongside the sender's own |
 | `nonces` | EIP-8250 keyed nonce domains, including how many see their first use, and the single-use form |
 | `roots` | EIP-8272 recent root verifier frames, including the window edges and the cases that must be refused |
-| `assert` | EIP-7906 `ASSERT` frames, and the `TXTRACE`/`TXDIFF`/`EVENTDATACOPY` sweep that only exists inside them |
+| `assert` | EIP-7906 `ASSERT` frames, and the `TXTRACE`/`EVENTDATACOPY` sweep that only exists inside them |
 | `probe` | Calls into the fixed probe contract, including the introspection sweep |
 | `code` | Deploying fuzzed contracts from one frame and calling them from another, and the fuzzed sender and paymaster roles |
 | `deploy` | The deploy-led validation prefixes, which create the sender's account in the transaction that uses it |
@@ -82,7 +82,8 @@ introduces would ever execute. Two contracts do that work.
 script: revert, write storage, emit a log, burn gas, `APPROVE`, and execute each
 introspection instruction. The read operations discard their results — the point is to
 reach the instruction, not to decide what it should have returned. Opcode bytes are those the
-EIPs assign: EIP-7906's `TXTRACE`, `TXDIFF` and `EVENTDATACOPY` sit at `0xb6`-`0xb8` and are
+EIPs assign: EIP-7906's `TXTRACE` and `EVENTDATACOPY` sit at `0xb6`-`0xb7` (with
+`--legacy-frame-fees`, bogota-devnet-1's `TXTRACE`, `TXDIFF`, `EVENTDATACOPY` at `0xb6`-`0xb8`) and are
 only defined inside an `ASSERT` frame, which is where the probe runs them.
 
 The same code plays paymaster and contract sender through an EIP-7702 delegation, because

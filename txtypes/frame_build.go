@@ -247,6 +247,7 @@ func NewFrameTxWithExtensions(extensions FrameExtensions, chainID *uint256.Int, 
 		Signatures: signatures,
 		Fees:       fees,
 		Extensions: extensions,
+		LegacyFees: LegacyFrameFees,
 	}
 
 	return tx.WithLegacyNonce()

@@ -65,6 +65,7 @@ func init() {
 		"IsTxTypeSupported":          reflect.ValueOf(txtypes.IsTxTypeSupported),
 		"KeyedNonceAccessCost":       reflect.ValueOf(constant.MakeFromLiteral("12100", token.INT, 0)),
 		"KeyedNonceFirstUseStateGas": reflect.ValueOf(constant.MakeFromLiteral("97920", token.INT, 0)),
+		"LegacyFrameFees":            reflect.ValueOf(&txtypes.LegacyFrameFees).Elem(),
 		"LegacyNonceKeyZero":         reflect.ValueOf(&txtypes.LegacyNonceKeyZero).Elem(),
 		"LegacyTxType":               reflect.ValueOf(constant.MakeFromLiteral("0", token.INT, 0)),
 		"MaxFrames":                  reflect.ValueOf(constant.MakeFromLiteral("64", token.INT, 0)),
@@ -150,6 +151,7 @@ func init() {
 		"Bloom":                reflect.ValueOf((*txtypes.Bloom)(nil)),
 		"DynamicFeeTx":         reflect.ValueOf((*txtypes.DynamicFeeTx)(nil)),
 		"ECDSASignedTx":        reflect.ValueOf((*txtypes.ECDSASignedTx)(nil)),
+		"ExpiringTx":           reflect.ValueOf((*txtypes.ExpiringTx)(nil)),
 		"ExplicitSenderTx":     reflect.ValueOf((*txtypes.ExplicitSenderTx)(nil)),
 		"Frame":                reflect.ValueOf((*txtypes.Frame)(nil)),
 		"FrameExtensions":      reflect.ValueOf((*txtypes.FrameExtensions)(nil)),
@@ -187,6 +189,7 @@ func init() {
 		"_AuthListTxData":      reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_AuthListTxData)(nil)),
 		"_BlobTxData":          reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_BlobTxData)(nil)),
 		"_ECDSASignedTx":       reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ECDSASignedTx)(nil)),
+		"_ExpiringTx":          reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ExpiringTx)(nil)),
 		"_ExplicitSenderTx":    reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_ExplicitSenderTx)(nil)),
 		"_IndependentNonceTx":  reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_IndependentNonceTx)(nil)),
 		"_JSONTxData":          reflect.ValueOf((*_github_com_ethpandaops_spamoor_txtypes_JSONTxData)(nil)),
@@ -257,6 +260,16 @@ func (W _github_com_ethpandaops_spamoor_txtypes_ECDSASignedTx) SetSignatureValue
 }
 func (W _github_com_ethpandaops_spamoor_txtypes_ECDSASignedTx) SigningHash(chainID *big.Int) common.Hash {
 	return W.WSigningHash(chainID)
+}
+
+// _github_com_ethpandaops_spamoor_txtypes_ExpiringTx is an interface wrapper for ExpiringTx type
+type _github_com_ethpandaops_spamoor_txtypes_ExpiringTx struct {
+	IValue          interface{}
+	WExpiryDeadline func() (uint64, bool)
+}
+
+func (W _github_com_ethpandaops_spamoor_txtypes_ExpiringTx) ExpiryDeadline() (uint64, bool) {
+	return W.WExpiryDeadline()
 }
 
 // _github_com_ethpandaops_spamoor_txtypes_ExplicitSenderTx is an interface wrapper for ExplicitSenderTx type

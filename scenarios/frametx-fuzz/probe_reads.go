@@ -1,6 +1,10 @@
 package frametxfuzz
 
-import "github.com/ethereum/go-ethereum/common"
+import (
+	"github.com/ethereum/go-ethereum/common"
+
+	"github.com/ethpandaops/spamoor/txtypes"
+)
 
 // The introspection sweep: operations that make each instruction EIP-8141 and its
 // extensions introduce execute inside a frame. Returned values are discarded.
@@ -12,8 +16,8 @@ import "github.com/ethereum/go-ethereum/common"
 //   - SIGPARAM's resolved signer halts on an ARBITRARY entry and its raw length halts on
 //     every other scheme;
 //   - SIGDATACOPY is defined for ARBITRARY entries only;
-//   - TXTRACE, TXDIFF and EVENTDATACOPY exist only inside an ASSERT frame, and their
-//     indexed parameters halt past the end of the table they index.
+//   - TXTRACE and EVENTDATACOPY (and TXDIFF, on bogota-devnet-1) exist only inside an
+//     ASSERT frame, and their indexed parameters halt past the end of the table they index.
 
 // appendReads adds the introspection sweep for a frame at the given index.
 func appendReads(script *ProbeScript, recipe *Recipe, frameIndex int) {
@@ -26,12 +30,17 @@ func appendReads(script *ProbeScript, recipe *Recipe, frameIndex int) {
 func appendTxParamReads(script *ProbeScript, recipe *Recipe) {
 	for _, param := range []uint8{
 		TxParamTxType, TxParamNonce, TxParamSender,
-		TxParamGasTipCap, TxParamGasFeeCap, TxParamBlobFeeCap,
-		TxParamMaxCost, TxParamBlobHashCount, TxParamSigHash,
+		TxParamGasTipCap, TxParamMaxFee, TxParamBlobHashCount, TxParamSigHash,
 		TxParamFrameCount, TxParamFrameIndex, TxParamSignatureCount,
 		TxParamStateGasLeft,
 	} {
 		script.ReadTxParam(param)
+	}
+
+	if txtypes.LegacyFrameFees {
+		for _, param := range legacyTxParamReads {
+			script.ReadTxParam(param)
+		}
 	}
 
 	if recipe.NonceKeys > 0 {
@@ -94,32 +103,29 @@ func appendSigParamReads(script *ProbeScript, recipe *Recipe) {
 // frame emitted a log, and even then a batch unroll can have discarded it: a halt there
 // is the whole-body revert EIP-7906 specifies, which is as much a case as the read.
 func appendAssertReads(script *ProbeScript, recipe *Recipe, sender common.Address) {
-	for _, param := range []uint8{
-		TxTraceBalancesChanged, TxTraceSlotsChanged, TxTraceContractsDeployed,
-		TxTraceEventCount, TxTraceGasPreCharge, TxTraceGasPayer,
-	} {
+	ops := assertOps()
+
+	for _, param := range ops.traceCounts {
 		script.ReadTxTrace(param, 0)
 	}
 
-	for _, param := range []uint8{TxTraceBalanceAddress, TxTraceBalanceBefore, TxTraceBalanceAfter} {
+	for _, param := range ops.traceBalance {
 		script.ReadTxTrace(param, 0)
 	}
 
-	for _, param := range []uint8{
-		TxDiffBalanceBefore, TxDiffBalanceAfter, TxDiffCodeHashBefore, TxDiffCodeHashAfter,
-		TxDiffSlotCount, TxDiffEventCount, TxDiffChangeFlags,
-	} {
+	for _, param := range ops.diffAccount {
 		script.ReadTxDiff(param, sender, common.Hash{})
 	}
 
-	script.ReadTxDiff(TxDiffSlotBefore, sender, common.HexToHash("0x01"))
-	script.ReadTxDiff(TxDiffSlotAfter, sender, common.HexToHash("0x01"))
+	for _, param := range ops.diffSlot {
+		script.ReadTxDiff(param, sender, common.HexToHash("0x01"))
+	}
 
 	if !recipe.emitsLog() {
 		return
 	}
 
-	for _, param := range []uint8{TxTraceEventAddress, TxTraceEventTopicCount, TxTraceEventTopic0, TxTraceEventDataLength} {
+	for _, param := range ops.traceEvent {
 		script.ReadTxTrace(param, 0)
 	}
 

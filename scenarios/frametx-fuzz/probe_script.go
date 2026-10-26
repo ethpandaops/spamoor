@@ -291,7 +291,7 @@ func (s *ProbeScript) ReadTxTrace(param uint8, index uint64) *ProbeScript {
 
 // ReadTxDiff executes EIP-7906's TXDIFF for one address and discards the result. The
 // key is the storage slot for the slot parameters, a per-address index for the index
-// parameters, and must be zero otherwise.
+// parameters, and must be zero otherwise. Only bogota-devnet-1's revision has TXDIFF.
 //
 // Defined only inside an ASSERT frame. The live-state parameters cost a cold access
 // when the address or slot has not been touched, so the budget assumes cold.

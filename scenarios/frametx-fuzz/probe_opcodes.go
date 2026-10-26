@@ -1,5 +1,7 @@
 package frametxfuzz
 
+import "github.com/ethpandaops/spamoor/txtypes"
+
 // Instructions and parameter indices introduced by the frame transaction EIPs.
 //
 // They live here rather than in txtypes because they describe the EVM, not the
@@ -7,7 +9,7 @@ package frametxfuzz
 // emits these bytes, and the assertion helpers name these indices.
 //
 // The opcode bytes are those the EIPs assign: EIP-8141 takes 0xB0-0xB5 and EIP-7906
-// 0xB6-0xB8. A byte above them that no enabled EIP allocates is an invalid instruction.
+// 0xB6-0xB7. A byte above them that no enabled EIP allocates is an invalid instruction.
 
 // Instruction opcodes.
 const (
@@ -37,24 +39,18 @@ const (
 	// only inside an ASSERT frame.
 	OpTxTrace = 0xb6
 
-	// OpTxDiff is EIP-7906's TXDIFF: the state diff looked up by address and slot.
-	// Valid only inside an ASSERT frame.
-	OpTxDiff = 0xb7
-
 	// OpEventDataCopy is EIP-7906's EVENTDATACOPY: an emitted event's data, copied to
 	// memory. Valid only inside an ASSERT frame.
-	OpEventDataCopy = 0xb8
+	OpEventDataCopy = 0xb7
 )
 
-// TXPARAM parameter indices (EIP-8141).
+// TXPARAM parameter indices (EIP-8141). 0x05 and 0x06 went with the per-gas fee caps.
 const (
 	TxParamTxType         = 0x00
 	TxParamNonce          = 0x01
 	TxParamSender         = 0x02
 	TxParamGasTipCap      = 0x03
-	TxParamGasFeeCap      = 0x04
-	TxParamBlobFeeCap     = 0x05
-	TxParamMaxCost        = 0x06
+	TxParamMaxFee         = 0x04
 	TxParamBlobHashCount  = 0x07
 	TxParamSigHash        = 0x08
 	TxParamFrameCount     = 0x09
@@ -106,44 +102,86 @@ const (
 // TXTRACE parameters (EIP-7906). The count parameters take a zero second operand; the
 // others take an index into the table the count describes.
 const (
-	TxTraceBalancesChanged   = 0x00
-	TxTraceSlotsChanged      = 0x01
-	TxTraceContractsDeployed = 0x02
-	TxTraceBalanceAddress    = 0x03
-	TxTraceBalanceBefore     = 0x04
-	TxTraceBalanceAfter      = 0x05
-	TxTraceSlotAddress       = 0x06
-	TxTraceSlotKey           = 0x07
-	TxTraceSlotBefore        = 0x08
-	TxTraceSlotAfter         = 0x09
-	TxTraceDeployedAddress   = 0x0a
-	TxTraceDeployedCodeHash  = 0x0b
-	TxTraceEventCount        = 0x0c
-	TxTraceEventAddress      = 0x0d
-	TxTraceEventTopicCount   = 0x0e
-	TxTraceEventTopic0       = 0x0f
-	TxTraceEventTopic1       = 0x10
-	TxTraceEventTopic2       = 0x11
-	TxTraceEventTopic3       = 0x12
-	TxTraceEventDataLength   = 0x13
-	TxTraceGasPreCharge      = 0x14
-	TxTraceGasPayer          = 0x15
+	TxTraceBalancesChanged = 0x00
+	TxTraceSlotsChanged    = 0x01
+	TxTraceCodesChanged    = 0x02
+	TxTraceNoncesChanged   = 0x03
+	TxTraceBalanceAddress  = 0x04
+	TxTraceBalanceBefore   = 0x05
+	TxTraceBalanceAfter    = 0x06
+	TxTraceSlotAddress     = 0x07
+	TxTraceSlotBefore      = 0x08
+	TxTraceSlotAfter       = 0x09
+	TxTraceSlotKey         = 0x0a
+	TxTraceCodeAddress     = 0x0b
+	TxTraceCodeBefore      = 0x0c
+	TxTraceCodeAfter       = 0x0d
+	TxTraceNonceAddress    = 0x0e
+	TxTraceNonceBefore     = 0x0f
+	TxTraceNonceAfter      = 0x10
+	TxTraceEventCount      = 0x11
+	TxTraceEventAddress    = 0x12
+	TxTraceEventTopicCount = 0x13
+	TxTraceEventTopic0     = 0x14
+	TxTraceEventTopic1     = 0x15
+	TxTraceEventTopic2     = 0x16
+	TxTraceEventTopic3     = 0x17
+	TxTraceEventDataLength = 0x18
+	TxTraceGasPreCharge    = 0x19
+	TxTraceGasPayer        = 0x1a
 )
 
-// TXDIFF parameters (EIP-7906), keyed by address and, for the slot parameters, a slot
-// key or a per-address index; the topic parameters are keyed by a topic value instead.
-const (
-	TxDiffSlotBefore      = 0x00
-	TxDiffSlotAfter       = 0x01
-	TxDiffBalanceBefore   = 0x02
-	TxDiffBalanceAfter    = 0x03
-	TxDiffCodeHashBefore  = 0x04
-	TxDiffCodeHashAfter   = 0x05
-	TxDiffSlotCount       = 0x06
-	TxDiffSlotIndex       = 0x07
-	TxDiffEventCount      = 0x08
-	TxDiffEventIndex      = 0x09
-	TxDiffChangeFlags     = 0x0a
-	TxDiffTopicEventCount = 0x0b
-	TxDiffTopicEventIndex = 0x0c
-)
+// assertTable is the part of EIP-7906 the probe and the generator encode. bogota-devnet-2
+// changed it (EIPs#12530): TXDIFF is gone, EVENTDATACOPY moved down to its byte and
+// TXTRACE gained the code and nonce tables. bogota-devnet-1 runs the earlier table.
+type assertTable struct {
+	txDiff        byte // zero where the revision has no TXDIFF
+	eventDataCopy byte
+
+	traceParamEnd uint8   // one past the last TXTRACE parameter
+	traceCounts   []uint8 // TXTRACE parameters that take a zero index
+	traceBalance  []uint8 // balance table: address, before, after
+	traceEvent    []uint8 // event table: address, topic count, topic0, data length
+
+	diffAccount []uint8 // TXDIFF parameters keyed by address alone
+	diffSlot    []uint8 // TXDIFF parameters keyed by address and slot
+	diffParams  uint8   // one past the last TXDIFF parameter
+}
+
+var currentAssertTable = assertTable{
+	eventDataCopy: OpEventDataCopy,
+	traceParamEnd: TxTraceGasPayer + 1,
+	traceCounts: []uint8{
+		TxTraceBalancesChanged, TxTraceSlotsChanged, TxTraceCodesChanged, TxTraceNoncesChanged,
+		TxTraceEventCount, TxTraceGasPreCharge, TxTraceGasPayer,
+	},
+	traceBalance: []uint8{TxTraceBalanceAddress, TxTraceBalanceBefore, TxTraceBalanceAfter},
+	traceEvent:   []uint8{TxTraceEventAddress, TxTraceEventTopicCount, TxTraceEventTopic0, TxTraceEventDataLength},
+}
+
+// legacyAssertTable is EIP-7906 at 4be9e59f, the text bogota-devnet-1 runs.
+var legacyAssertTable = assertTable{
+	txDiff:        0xb7,
+	eventDataCopy: 0xb8,
+	traceParamEnd: 0x16,
+	traceCounts:   []uint8{0x00, 0x01, 0x02, 0x0c, 0x14, 0x15}, // balances, slots, deployed, events, pre-charge, payer
+	traceBalance:  []uint8{0x03, 0x04, 0x05},
+	traceEvent:    []uint8{0x0d, 0x0e, 0x0f, 0x13},
+	diffAccount:   []uint8{0x02, 0x03, 0x04, 0x05, 0x06, 0x08, 0x0a}, // balance, code hash, slot and event counts, change flags
+	diffSlot:      []uint8{0x00, 0x01},
+	diffParams:    0x0d,
+}
+
+// assertOps returns the table for the revision the builders produce, which
+// --legacy-frame-fees selects together with the envelope.
+func assertOps() *assertTable {
+	if txtypes.LegacyFrameFees {
+		return &legacyAssertTable
+	}
+
+	return &currentAssertTable
+}
+
+// legacyTxParamReads are the TXPARAM indices only the per-gas fee revision defines:
+// max_fee_per_blob_gas and max cost. 0x04 is max_fee_per_gas there and max_fee now.
+var legacyTxParamReads = []uint8{0x05, 0x06}

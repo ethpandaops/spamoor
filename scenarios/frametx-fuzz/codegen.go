@@ -20,8 +20,6 @@ const (
 	opcodeSigParam      = 0xb4
 	opcodeSigDataCopy   = 0xb5
 	opcodeTxTrace       = OpTxTrace
-	opcodeTxDiff        = OpTxDiff
-	opcodeEventDataCopy = OpEventDataCopy
 )
 
 // push1 emits a single-byte push.
@@ -48,8 +46,9 @@ func frameOpcodeDefinitions(rng *utils.DeterministicRNG) []*evmfuzz.OpcodeInfo {
 	length := func() []byte { return push1(byte(rng.Intn(0x40))) }
 	frameIndex := func() []byte { return push1(byte(rng.Intn(8))) }
 	sigIndex := func() []byte { return push1(byte(rng.Intn(4))) }
+	ops := assertOps()
 
-	return []*evmfuzz.OpcodeInfo{
+	definitions := []*evmfuzz.OpcodeInfo{
 		{
 			Name: "TXPARAM", Opcode: opcodeTxParam, StackInput: 0, StackOutput: 1, GasCost: 2,
 			Probability: 1.5,
@@ -104,30 +103,18 @@ func frameOpcodeDefinitions(rng *utils.DeterministicRNG) []*evmfuzz.OpcodeInfo {
 			Name: "TXTRACE", Opcode: opcodeTxTrace, StackInput: 0, StackOutput: 1, GasCost: 100,
 			Probability: 0.4,
 			Template: func() []byte {
-				// Deepest first: index, then param on top; 0x16 is one past the end.
-				return concat(push1(byte(rng.Intn(4))), push1(byte(rng.Intn(0x17))), []byte{opcodeTxTrace})
+				// Deepest first: index, then param on top, up to one past the end.
+				return concat(push1(byte(rng.Intn(4))), push1(byte(rng.Intn(int(ops.traceParamEnd)+1))),
+					[]byte{opcodeTxTrace})
 			},
 		},
 		{
-			// The live-state parameters cost a cold account access when the address is
-			// untouched (3000 under EIP-8038); the view parameters a warm read.
-			Name: "TXDIFF", Opcode: opcodeTxDiff, StackInput: 0, StackOutput: 1, GasCost: 3_000,
-			Probability: 0.4,
-			Template: func() []byte {
-				// Deepest first: key, address, then param on top. Small addresses are
-				// the precompiles and the family's predeploys, which is as good a lookup
-				// as any; 0x0d is one past the end.
-				return concat(push1(byte(rng.Intn(4))), push1(byte(rng.Intn(0x10))), push1(byte(rng.Intn(0x0e))),
-					[]byte{opcodeTxDiff})
-			},
-		},
-		{
-			Name: "EVENTDATACOPY", Opcode: opcodeEventDataCopy, StackInput: 0, StackOutput: 0, GasCost: 6,
+			Name: "EVENTDATACOPY", Opcode: uint16(ops.eventDataCopy), StackInput: 0, StackOutput: 0, GasCost: 6,
 			Probability: 0.8,
 			Template: func() []byte {
 				// Deepest first: length, dataOffset, memOffset, eventIndex.
 				return concat(length(), push1(byte(rng.Intn(0x40))), memOffset(), push1(byte(rng.Intn(4))),
-					[]byte{opcodeEventDataCopy})
+					[]byte{ops.eventDataCopy})
 			},
 		},
 		{
@@ -140,6 +127,23 @@ func frameOpcodeDefinitions(rng *utils.DeterministicRNG) []*evmfuzz.OpcodeInfo {
 			},
 		},
 	}
+
+	if ops.txDiff == 0 {
+		return definitions
+	}
+
+	return append(definitions, &evmfuzz.OpcodeInfo{
+		// The live-state parameters cost a cold account access when the address is
+		// untouched (3000 under EIP-8038); the view parameters a warm read.
+		Name: "TXDIFF", Opcode: uint16(ops.txDiff), StackInput: 0, StackOutput: 1, GasCost: 3_000,
+		Probability: 0.4,
+		Template: func() []byte {
+			// Deepest first: key, address, then param on top. Small addresses are the
+			// precompiles and the family's predeploys, as good a lookup as any.
+			return concat(push1(byte(rng.Intn(4))), push1(byte(rng.Intn(0x10))),
+				push1(byte(rng.Intn(int(ops.diffParams)+1))), []byte{ops.txDiff})
+		},
+	})
 }
 
 // GenerateContractCode returns fuzzed runtime code for a contract a frame deploys.
