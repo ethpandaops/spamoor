@@ -50,6 +50,7 @@ type Scenario struct {
 	fixtureBlock   uint64
 
 	casesRun     atomic.Uint64
+	casesErrored atomic.Uint64
 	checksPassed atomic.Uint64
 	checksFailed atomic.Uint64
 }
@@ -189,6 +190,9 @@ func (s *Scenario) Run(ctx context.Context) error {
 			params.NotifySubmitted()
 
 			err := s.cases[idx](ctx, run)
+			if err != nil {
+				s.casesErrored.Add(1)
+			}
 
 			params.OrderedLogCb(func() {
 				switch {
@@ -213,8 +217,8 @@ func (s *Scenario) Run(ctx context.Context) error {
 }
 
 func (s *Scenario) logSummary() {
-	s.logger.Infof("codeadopt checks: %d cases, %d checks passed, %d failed",
-		s.casesRun.Load(), s.checksPassed.Load(), s.checksFailed.Load())
+	s.logger.Infof("codeadopt checks: %d cases (%d did not complete), %d checks passed, %d failed",
+		s.casesRun.Load(), s.casesErrored.Load(), s.checksPassed.Load(), s.checksFailed.Load())
 }
 
 func (s *Scenario) client() *spamoor.Client {
