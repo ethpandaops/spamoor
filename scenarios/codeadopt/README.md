@@ -47,7 +47,8 @@ transactions:
 | `sendall-runtime` | deploy a funded contract with storage, call its `SENDALL` | balance moved; code, storage and nonce kept |
 | `sendall-initcode` | creation that writes storage and `SENDALL`s from initcode | balance moved; the account survives with nonce 1 and its storage, where EIP-6780 would have deleted it |
 
-A failed check is logged as a warning with what was read, and a summary of passed and failed checks
+A failed check is logged as a warning with what was read, and a summary of cases that did not complete
+and of passed and failed checks
 is logged every 50 cases and at the end.
 
 ## Configuration
