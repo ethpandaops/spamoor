@@ -15,6 +15,7 @@ import (
 	blobreplacements "github.com/ethpandaops/spamoor/scenarios/blob-replacements"
 	"github.com/ethpandaops/spamoor/scenarios/blobs"
 	"github.com/ethpandaops/spamoor/scenarios/calltx"
+	"github.com/ethpandaops/spamoor/scenarios/codeadopt"
 	curveswaps "github.com/ethpandaops/spamoor/scenarios/curve-swaps"
 	deploydestruct "github.com/ethpandaops/spamoor/scenarios/deploy-destruct"
 	"github.com/ethpandaops/spamoor/scenarios/deploytx"
@@ -59,6 +60,7 @@ var nativeScenarioCategories = []*scenario.Category{
 			&blobconflicting.ScenarioDescriptor,
 			&blobs.ScenarioDescriptor,
 			&blobreplacements.ScenarioDescriptor,
+			&codeadopt.ScenarioDescriptor,
 			&curveswaps.ScenarioDescriptor,
 			&deploydestruct.ScenarioDescriptor,
 			&ensnames.ScenarioDescriptor,
