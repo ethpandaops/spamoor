@@ -41,6 +41,17 @@ The `--call-args` parameter supports the following placeholders:
 - `{random:N}` - Random number between 0 and N
 - `{randomaddr}` - Random Ethereum address
 
+### CREATE2 Receiver Address List (alternative to --call-data / --call-abi)
+- `--targets-file` - YAML file with CREATE2 receiver patterns; calltx encodes them as `callAttack` call data
+- `--call-value` - Wei sent by each CALL the target contract makes (`0` or `1`)
+- `--gas-buffer` - Gas the target contract leaves unspent before it stops looping (default: 50000)
+- `--salt-stride` - Salts to advance between consecutive txs of one pattern (default: 0 = every tx restarts at `start_salt`)
+
+These are mutually exclusive with `--call-data`, `--call-abi`, `--call-abi-file`,
+`--call-fn-name`, `--call-fn-sig` and `--call-args`: when a target list is set,
+calltx encodes the call data itself. See
+[Target list format](#target-list-format).
+
 ### Transaction Settings
 - `--basefee` - Max fee per gas in gwei (default: 20)
 - `--tipfee` - Max tip per gas in gwei (default: 2)
@@ -170,3 +181,89 @@ spamoor calltx -p "<PRIVKEY>" -h http://rpc-host:8545 -t 5 \
   --contract-addr-path ".0.1" \
   --call-data "0x06fdde03"
 ```
+
+## Target list format
+
+`--targets-file` points at a list of deterministic CREATE2 receiver patterns.
+calltx never enumerates the addresses itself: it passes the three CREATE2 inputs
+- factory, initcode hash and salt range - to the contract being called, which
+derives the addresses on-chain. The call data it builds is
+
+```
+callAttack(address factory, bytes32 initCodeHash, uint256 startSalt, uint256 callValue, uint256 gasBuffer)
+```
+
+so the contract at `--contract-code` / `--contract-address` has to implement that
+signature. `startSalt` is where that transaction begins its walk; the contract is
+expected to increment the salt from there.
+
+The file uses the same YAML shape as the `targets` block of the `eoatx`
+scenario, so one file can be pointed at either scenario:
+
+```yaml
+create2_patterns:
+  - name: minimal-contracts
+    factory: "{factory_address}"
+    initcode: "0x60006001f3"
+    start_salt: 0
+    count: 20000
+  - name: max-code-contracts
+    factory: "{factory_address}"
+    initcode_file: "./bloat-initcode.hex"
+    start_salt: 0
+    count: 20000
+```
+
+It can also be wrapped in a top-level `targets` key, so the same block works as
+a scenario config and as a `--targets-file`. In a config file or in daemon mode
+the block goes inline under `targets:` instead, which is mutually exclusive with
+`targets_file`.
+
+### Fields
+
+- `factory` accepts the `{factory_address}` placeholder, which expands to the
+  well-known CREATE2 factory of the `factorydeploytx` scenario. Prefer it over a
+  literal address: that factory is derived from the root wallet rather than being
+  a global constant, so a hardcoded address only works for one deployment. A
+  literal address still works when the factory was deployed elsewhere -
+  `factorydeploytx` logs it as `using CREATE2 factory at: 0x...`.
+- Exactly one of `initcode`, `initcode_file` or `initcode_hash` must be set.
+  Relative `initcode_file` paths resolve relative to the targets file. Only the
+  hash is needed to derive addresses, so `initcode_hash` alone is enough.
+- `start_salt` and `count` describe the deployed salt range, and must match what
+  `factorydeploytx` was run with. `start_salt` uses the same uint64 big-endian
+  bytes32 encoding as that scenario.
+- `addresses`, `order`, `repeat` and `seed` exist in the eoatx block but have
+  nothing to map onto here, because the addresses are derived on-chain from a
+  salt range rather than listed. They are ignored with a warning, which keeps a
+  file shareable between the two scenarios.
+
+### Multiple patterns
+
+Consecutive transactions round-robin over the patterns, so one run can mix
+target code sizes: tx 0 uses the first pattern, tx 1 the second, and so on.
+
+### Choosing a salt stride
+
+`--salt-stride` decides how far `start_salt` moves between consecutive txs of
+one pattern:
+
+- `0` (the default) restarts every tx at `start_salt`, so all txs re-walk the
+  same prefix of the range. EIP-2929 warmth is per-tx, so each tx still pays the
+  full cold-access cost, while the client's own state cache stays warm across
+  them.
+- A non-zero stride gives each tx a disjoint slice and wraps back to
+  `start_salt` once the range is exhausted, which spreads the walk over the
+  whole range.
+
+Set it to the number of iterations a single transaction can pay for at
+`--gas-limit`. `count` must be at least the stride, and should be well above it
+so the walk covers a useful span before wrapping. When `count` is not a multiple
+of the stride, the trailing partial slice is skipped rather than truncated, so a
+transaction never walks past the deployed range - which matters with
+`--call-value 1`, where a salt that was never deployed is charged the 25000 gas
+account-creation cost instead of a plain cold access.
+
+`--call-value 1` also needs the called contract to hold balance, since it sends
+wei per iteration. `--amount` tops it up with every call tx (in gwei); calltx
+warns when `--call-value` is set and `--amount` is 0.
