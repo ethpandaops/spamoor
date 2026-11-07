@@ -1,0 +1,83 @@
+;;; CALL account-access attack - runtime code
+;;;
+;;; Derives CREATE2 addresses from `factory`, `initCodeHash` and a salt starting
+;;; at `startSalt` (incremented by one per iteration, no wrap-around), and CALLs
+;;; each one with `callValue` wei until gasleft() <= `gasBuffer`.
+;;;
+;;; Calldata (ABI: callAttack(address,bytes32,uint256,uint256,uint256),
+;;; selector not checked):
+;;;
+;;;   0x04  address factory
+;;;   0x24  bytes32 initCodeHash
+;;;   0x44  uint256 startSalt
+;;;   0x64  uint256 callValue
+;;;   0x84  uint256 gasBuffer
+
+#pragma target "shanghai"
+
+;;; CREATE2 preimage buffer
+;;;
+;;;   mem[0x0b]        = 0xff
+;;;   mem[0x0c..0x1f]  = factory
+;;;   mem[0x20..0x3f]  = salt
+;;;   mem[0x40..0x5f]  = initCodeHash
+
+push 0x04
+calldataload           ;; [factory]
+push 0
+mstore                 ;; mem[0x00..0x1f] = zero padding || factory
+
+push 0xff
+push 0x0b
+mstore8                ;; mem[0x0b] = 0xff
+
+push 0x24
+calldataload           ;; [initCodeHash]
+push 0x40
+mstore                 ;; mem[0x40..0x5f] = initCodeHash
+
+;;; Loop state: [salt, callValue, gasBuffer]
+
+push 0x84
+calldataload           ;; [gasBuffer]
+push 0x64
+calldataload           ;; [callValue, gasBuffer]
+push 0x44
+calldataload           ;; [salt, callValue, gasBuffer]
+
+loop:
+    ;; stop once gasleft() <= gasBuffer
+    gas                ;; [gas, salt, callValue, gasBuffer]
+    dup4               ;; [gasBuffer, gas, salt, callValue, gasBuffer]
+    lt                 ;; [gasBuffer < gas, salt, callValue, gasBuffer]
+    iszero             ;; [gas <= gasBuffer, salt, callValue, gasBuffer]
+    jumpi @done        ;; [salt, callValue, gasBuffer]
+
+    dup1               ;; [salt, salt, callValue, gasBuffer]
+    push 0x20
+    mstore             ;; [salt, callValue, gasBuffer]
+
+    ;; target = keccak256(0xff ++ factory ++ salt ++ initCodeHash)
+    push 0x55          ;; [85, salt, callValue, gasBuffer]
+    push 0x0b          ;; [11, 85, salt, callValue, gasBuffer]
+    keccak256          ;; [target, salt, callValue, gasBuffer]
+
+    ;; CALL(gas(), target, callValue, 0, 0, 0, 0)
+    push 0             ;; [retSize, target, ...]
+    push 0             ;; [retOffset, retSize, target, ...]
+    push 0             ;; [argsSize, retOffset, retSize, target, ...]
+    push 0             ;; [argsOffset, argsSize, retOffset, retSize, target, ...]
+    dup7               ;; [callValue, argsOffset, argsSize, retOffset, retSize, target, ...]
+    dup6               ;; [target, callValue, argsOffset, argsSize, retOffset, retSize, target, ...]
+    gas                ;; [gas, target, callValue, argsOffset, argsSize, retOffset, retSize, target, ...]
+    call               ;; [success, target, salt, callValue, gasBuffer]
+    pop                ;; [target, salt, callValue, gasBuffer]
+    pop                ;; [salt, callValue, gasBuffer]
+
+    ;; salt = salt + 1
+    push 1             ;; [1, salt, callValue, gasBuffer]
+    add                ;; [salt, callValue, gasBuffer]
+    jump @loop
+
+done:
+    stop

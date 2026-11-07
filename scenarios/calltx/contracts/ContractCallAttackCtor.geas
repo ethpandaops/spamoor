@@ -1,0 +1,21 @@
+;;; Minimal CALL account-access attack - constructor code
+;;;
+;;; Deploy code for ContractCallAttack.geas. Compile this file to get the
+;;; bytecode for `calltx --contract-code` / `contract_code:`:
+;;;
+;;;   geas scenarios/calltx/contracts/ContractCallAttackCtor.geas
+;;;
+;;; The runtime lives in its own compile unit so its jump labels stay relative
+;;; to the deployed code rather than to this constructor prefix.
+
+#pragma target "shanghai"
+
+    push len(code)     ;; [size]
+    dup1               ;; [size, size]
+    push @code         ;; [offset, size, size]
+    push 0             ;; [0, offset, size, size]
+    codecopy           ;; [size]
+    push 0             ;; [0, size]
+    return             ;; []
+
+#bytes code: assemble("ContractCallAttack.geas")
