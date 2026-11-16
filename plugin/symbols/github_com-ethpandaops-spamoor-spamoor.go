@@ -30,6 +30,7 @@ func init() {
 		"NewTxPool":                    reflect.ValueOf(spamoor.NewTxPool),
 		"NewWallet":                    reflect.ValueOf(spamoor.NewWallet),
 		"NewWalletPool":                reflect.ValueOf(spamoor.NewWalletPool),
+		"RedactRPCURL":                 reflect.ValueOf(spamoor.RedactRPCURL),
 		"ResolveFees":                  reflect.ValueOf(spamoor.ResolveFees),
 		"SelectClientByIndex":          reflect.ValueOf(&spamoor.SelectClientByIndex).Elem(),
 		"SelectClientProxy":            reflect.ValueOf(&spamoor.SelectClientProxy).Elem(),
