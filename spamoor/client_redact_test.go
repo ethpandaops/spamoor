@@ -1,6 +1,7 @@
 package spamoor
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -27,6 +28,22 @@ func TestRedactRPCURL(t *testing.T) {
 				t.Fatalf("RedactRPCURL(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCallRPCRedactsRequestError(t *testing.T) {
+	client, err := NewClient(&ClientOptions{RpcHost: "http://apikey@127.0.0.1:1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = client.GetChainId(context.Background())
+	if err == nil {
+		t.Fatal("expected an error from an unreachable host")
+	}
+
+	if strings.Contains(err.Error(), "apikey") {
+		t.Fatalf("error contains the username: %v", err)
 	}
 }
 

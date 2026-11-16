@@ -202,13 +202,7 @@ func NewClient(options *ClientOptions) (*Client, error) {
 
 	rpcClient, err := rpc.DialOptions(ctx, rpchost, dialOpts...)
 	if err != nil {
-		// URL parse errors quote the full URL, so redact it before returning.
-		var urlErr *url.Error
-		if errors.As(err, &urlErr) {
-			urlErr.URL = RedactRPCURL(urlErr.URL)
-		}
-
-		return nil, err
+		return nil, redactRPCError(err)
 	}
 
 	for hKey, hVal := range headers {
@@ -345,6 +339,18 @@ func RedactRPCURL(rawURL string) string {
 	return rawURL
 }
 
+// redactRPCError redacts, in place, the URL of a *url.Error in err (as
+// returned by URL parsing and HTTP requests) and returns err. Errors that
+// already wrapped it with fmt.Errorf keep their formatted text.
+func redactRPCError(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		urlErr.URL = RedactRPCURL(urlErr.URL)
+	}
+
+	return err
+}
+
 // UpdateWallet refreshes the wallet's chain ID, nonce, and balance by querying the blockchain.
 // If the wallet doesn't have a chain ID set, it will be fetched and assigned.
 func (client *Client) UpdateWallet(ctx context.Context, wallet *Wallet) error {
@@ -436,7 +442,7 @@ func (client *Client) callRPC(ctx context.Context, isTxRequest bool, result any,
 	err := client.rpcClient.CallContext(ctx, result, method, args...)
 	client.incrementRequestStats(isTxRequest, err != nil)
 
-	return err
+	return redactRPCError(err)
 }
 
 // GetChainId returns the chain ID of the connected Ethereum network.

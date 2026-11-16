@@ -125,11 +125,11 @@ func (t *proxyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	if len(batch) == 1 {
-		batch[0].Error = backend.rpcClient.CallContext(ctx, batch[0].Result, batch[0].Method, batch[0].Args...)
+		batch[0].Error = redactRPCError(backend.rpcClient.CallContext(ctx, batch[0].Result, batch[0].Method, batch[0].Args...))
 		backend.incrementRequestStats(batch[0].Method == "eth_sendRawTransaction", batch[0].Error != nil)
 	} else if err := backend.rpcClient.BatchCallContext(ctx, batch); err != nil {
 		backend.incrementRequestStats(false, true)
-		return nil, err
+		return nil, redactRPCError(err)
 	} else {
 		backend.incrementRequestStats(false, false)
 	}
