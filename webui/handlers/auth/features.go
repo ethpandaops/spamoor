@@ -6,10 +6,13 @@ import (
 	authpkg "github.com/ethpandaops/service-authenticatoor/pkg/auth"
 )
 
-// Privileged features of spamoor. A token needs an explicit grant for each
-// ("spamoor:plugins", "spamoor:all", "all:all"); basic access to spamoor
-// covers everything else.
+// Features of spamoor. A token needs an explicit grant for each
+// ("spamoor:write", "spamoor:all", "all:all"); basic access to spamoor is
+// read-only.
 const (
+	// FeatureWrite: create, change, start, pause, delete and import spammers
+	// and spammer groups, and reclaim their funds.
+	FeatureWrite = "write"
 	// FeaturePlugins: register, reload and delete plugins (code that runs
 	// inside spamoor).
 	FeaturePlugins = "plugins"

@@ -392,7 +392,7 @@ func (ah *APIHandler) GetSpammerList(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer [post]
 func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 
@@ -434,7 +434,7 @@ func (ah *APIHandler) CreateSpammer(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/start [post]
 func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 
@@ -471,7 +471,7 @@ func (ah *APIHandler) StartSpammer(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [put]
 func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 
@@ -523,7 +523,7 @@ func (ah *APIHandler) UpdateSpammer(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/pause [post]
 func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 
@@ -561,7 +561,7 @@ func (ah *APIHandler) PauseSpammer(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id} [delete]
 func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 
@@ -608,7 +608,7 @@ func (ah *APIHandler) DeleteSpammer(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/reclaim [post]
 func (ah *APIHandler) ReclaimFunds(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 
@@ -1445,7 +1445,7 @@ func (ah *APIHandler) ExportSpammers(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammers/import [post]
 func (ah *APIHandler) ImportSpammers(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 

@@ -50,16 +50,17 @@ Browser users are redirected to the authenticatoor's login page by the web UI; t
 
 ### Features
 
-The token's `services` claim must allow `spamoor`. A few privileged operations also need an explicit grant of a feature (`spamoor:<feature>`, `spamoor:all` or `all:all` in the authenticatoor's grants):
+The token's `services` claim must allow `spamoor`. Basic access is read-only: every write needs an explicit grant of a feature (`spamoor:<feature>`, `spamoor:all` or `all:all` in the authenticatoor's grants):
 
 | Feature | Endpoints |
 |---|---|
+| `write` | `POST /api/spammer`, `POST /api/spammer/{id}/start`, `/pause`, `/reclaim`, `PUT` and `DELETE /api/spammer/{id}`, `PUT` and `DELETE /api/spammer/{id}/group`, `POST /api/spammer-group`, `PUT /api/spammer-group/{id}`, `PUT /api/spammer-group/{id}/members/order`, `POST /api/spammers/import` |
 | `plugins` | `POST /api/plugins`, `DELETE /api/plugins/{name}`, `POST /api/plugins/{name}/reload` |
 | `wallet` | `POST /api/root-wallet/send-transaction` |
 | `clients` | `PUT /api/client/{index}/group`, `/enabled`, `/name`, `/type` |
 | `pprof` | `/debug/pprof/*` |
 
-Everything else needs basic access to `spamoor` only. A valid token without the feature gets a `403`. A token without a `services` claim, as issued by an authenticatoor without grants, has every feature.
+Reads (lists, details, logs, effective config, export, plugins list, audit log, graphs) need basic access to `spamoor` only. A valid token without the feature gets a `403`. A token without a `services` claim, as issued by an authenticatoor without grants, has every feature.
 
 ## Spammer Management
 
