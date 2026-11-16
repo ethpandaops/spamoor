@@ -26,6 +26,7 @@ const pprofTokenCookie = "spamoor_debug_token"
 // interface so tests can stand in a fake verifier.
 type pprofTokenChecker interface {
 	CheckAuthToken(tokenStr, host string) *jwt.Token
+	FeatureAllowed(token *jwt.Token, feature string) bool
 }
 
 // pprofAuditFunc records a profile download. profile is the path below
@@ -41,7 +42,8 @@ type pprofAuditFunc func(r *http.Request, token *jwt.Token, profile string, stat
 // profile download lands in the audit log via audit; only the index page
 // with its counts does not. A browser without a valid token gets the gate
 // page, which sets the cookie from the session and reloads, or asks for a
-// login; everything else is a 401.
+// login; everything else is a 401. A valid token without a grant for the
+// pprof feature gets a 403.
 func newPprofHandler(checker pprofTokenChecker, audit pprofAuditFunc, gate, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("Authorization")
@@ -53,6 +55,12 @@ func newPprofHandler(checker pprofTokenChecker, audit pprofAuditFunc, gate, next
 
 		token := checker.CheckAuthToken(header, auth.StripPort(r.Host))
 		if token != nil && token.Valid {
+			if !checker.FeatureAllowed(token, auth.FeaturePprof) {
+				http.Error(w, "forbidden: this login has no grant for spamoor:"+auth.FeaturePprof, http.StatusForbidden)
+
+				return
+			}
+
 			profile := strings.Trim(strings.TrimPrefix(r.URL.Path, pprofPathPrefix), "/")
 			if profile == "" {
 				next.ServeHTTP(w, r)

@@ -48,6 +48,19 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/spammers
 
 Browser users are redirected to the authenticatoor's login page by the web UI; the token is then stored client-side and attached automatically.
 
+### Features
+
+The token's `services` claim must allow `spamoor`. A few privileged operations also need an explicit grant of a feature (`spamoor:<feature>`, `spamoor:all` or `all:all` in the authenticatoor's grants):
+
+| Feature | Endpoints |
+|---|---|
+| `plugins` | `POST /api/plugins`, `DELETE /api/plugins/{name}`, `POST /api/plugins/{name}/reload` |
+| `wallet` | `POST /api/root-wallet/send-transaction` |
+| `clients` | `PUT /api/client/{index}/group`, `/enabled`, `/name`, `/type` |
+| `pprof` | `/debug/pprof/*` |
+
+Everything else needs basic access to `spamoor` only. A valid token without the feature gets a `403`. A token without a `services` claim, as issued by an authenticatoor without grants, has every feature.
+
 ## Spammer Management
 
 ### List All Spammers
@@ -594,7 +607,7 @@ GET /debug/pprof/goroutine?debug=2
 GET /debug/pprof/profile?seconds=30
 ```
 
-A profile contains the process internals, including RPC credentials and wallet private keys. With `--auth-provider-url` set, every request needs a login: a bearer header for tools, or the `spamoor_debug_token` cookie that the web UI's gate page sets for a browser (path-scoped to `/debug/pprof`, SameSite=Strict, at most 30 minutes). Requests without a valid token get a `401` with `WWW-Authenticate: Bearer`; a browser (`Accept: text/html`) gets the gate page instead. Every profile download is written to the audit log as `pprof_download` with the profile name and query string; the index page is not audited.
+A profile contains the process internals, including RPC credentials and wallet private keys. With `--auth-provider-url` set, every request needs a login: a bearer header for tools, or the `spamoor_debug_token` cookie that the web UI's gate page sets for a browser (path-scoped to `/debug/pprof`, SameSite=Strict, at most 30 minutes). Requests without a valid token get a `401` with `WWW-Authenticate: Bearer`; a browser (`Accept: text/html`) gets the gate page instead. A valid token without the `pprof` feature (see [Features](#features)) gets a `403`. Every profile download is written to the audit log as `pprof_download` with the profile name and query string; the index page is not audited.
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/debug/pprof/heap -o heap.pprof

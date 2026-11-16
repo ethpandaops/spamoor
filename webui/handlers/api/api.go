@@ -26,6 +26,7 @@ import (
 	"github.com/ethpandaops/spamoor/spamoor"
 	"github.com/ethpandaops/spamoor/txtypes"
 	"github.com/ethpandaops/spamoor/utils"
+	"github.com/ethpandaops/spamoor/webui/handlers/auth"
 )
 
 // CreateSpammerRequest represents the request body for creating a new spammer
@@ -1124,7 +1125,7 @@ func (ah *APIHandler) GetClients(w http.ResponseWriter, r *http.Request) {
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/group [put]
 func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureClients) {
 		return
 	}
 
@@ -1196,7 +1197,7 @@ func (ah *APIHandler) UpdateClientGroup(w http.ResponseWriter, r *http.Request) 
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/enabled [put]
 func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureClients) {
 		return
 	}
 
@@ -1256,7 +1257,7 @@ func (ah *APIHandler) UpdateClientEnabled(w http.ResponseWriter, r *http.Request
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/name [put]
 func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureClients) {
 		return
 	}
 
@@ -1316,7 +1317,7 @@ func (ah *APIHandler) UpdateClientName(w http.ResponseWriter, r *http.Request) {
 // @Failure 404 {string} string "Client not found"
 // @Router /api/client/{index}/type [put]
 func (ah *APIHandler) UpdateClientType(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureClients) {
 		return
 	}
 
@@ -2136,7 +2137,7 @@ func sendError(w http.ResponseWriter, message string, statusCode int) {
 // @Failure 500 {object} ErrorResponse "Server Error"
 // @Router /api/root-wallet/send-transaction [post]
 func (ah *APIHandler) SendTransaction(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWallet) {
 		return
 	}
 
