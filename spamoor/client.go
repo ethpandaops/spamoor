@@ -300,11 +300,18 @@ func (client *Client) GetRPCHost() string {
 }
 
 // RedactRPCURL returns the RPC URL in a form suitable for logs and error
-// messages, with any password in the userinfo replaced by "xxxxx".
+// messages, with any password in the userinfo replaced by "xxxxx". A username
+// without a password is replaced as well, as it may hold an API key.
 // If the URL cannot be parsed, everything up to the last '@' of the
 // authority is dropped instead, so no userinfo is returned.
 func RedactRPCURL(rawURL string) string {
 	if parsed, err := url.Parse(rawURL); err == nil && parsed.Opaque == "" {
+		if parsed.User != nil {
+			if _, hasPassword := parsed.User.Password(); !hasPassword {
+				parsed.User = url.User("xxxxx")
+			}
+		}
+
 		return parsed.Redacted()
 	}
 
