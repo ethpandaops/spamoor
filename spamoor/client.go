@@ -211,13 +211,13 @@ func NewClient(options *ClientOptions) (*Client, error) {
 	// while GetClientGroups still reports "default", so refuse it rather than
 	// silently shipping a client nothing can ever reach.
 	if len(clientGroups) == 0 {
-		return nil, fmt.Errorf("client %s has no client groups left: the group(...) prefix removed every group", rpchost)
+		return nil, fmt.Errorf("client %s has no client groups left: the group(...) prefix removed every group", RedactRPCURL(rpchost))
 	}
 
 	return &Client{
 		rpcClient:    rpcClient,
 		rpchost:      rpchost,
-		logger:       logrus.WithField("rpc", rpchost),
+		logger:       logrus.WithField("rpc", RedactRPCURL(rpchost)),
 		clientGroups: clientGroups,
 		clientType:   clientType,
 		enabled:      true,
@@ -294,8 +294,35 @@ func (client *Client) GetEthClient() *ethclient.Client {
 }
 
 // GetRPCHost returns the original RPC host URL used to create this client.
+// The returned URL may contain credentials; use RedactRPCURL before logging it.
 func (client *Client) GetRPCHost() string {
 	return client.rpchost
+}
+
+// RedactRPCURL returns the RPC URL in a form suitable for logs and error
+// messages, with any password in the userinfo replaced by "xxxxx".
+// If the URL cannot be parsed, everything up to the last '@' of the
+// authority is dropped instead, so no userinfo is returned.
+func RedactRPCURL(rawURL string) string {
+	if parsed, err := url.Parse(rawURL); err == nil && parsed.Opaque == "" {
+		return parsed.Redacted()
+	}
+
+	authorityStart := 0
+	if idx := strings.Index(rawURL, "://"); idx >= 0 {
+		authorityStart = idx + 3
+	}
+
+	authorityEnd := len(rawURL)
+	if idx := strings.IndexAny(rawURL[authorityStart:], "/?#"); idx >= 0 {
+		authorityEnd = authorityStart + idx
+	}
+
+	if at := strings.LastIndex(rawURL[authorityStart:authorityEnd], "@"); at >= 0 {
+		return rawURL[:authorityStart] + rawURL[authorityStart+at+1:]
+	}
+
+	return rawURL
 }
 
 // UpdateWallet refreshes the wallet's chain ID, nonce, and balance by querying the blockchain.

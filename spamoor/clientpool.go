@@ -139,7 +139,7 @@ func (pool *ClientPool) InitClients(clientOptions []*ClientOptions) error {
 	for _, clientOption := range clientOptions {
 		client, err := NewClient(clientOption)
 		if err != nil {
-			pool.logger.Errorf("failed creating client for '%v': %v", clientOption.RpcHost, err.Error())
+			pool.logger.Errorf("failed creating client for '%v': %v", RedactRPCURL(clientOption.RpcHost), err.Error())
 			continue
 		}
 
@@ -149,7 +149,7 @@ func (pool *ClientPool) InitClients(clientOptions []*ClientOptions) error {
 			client.Timeout = 10 * time.Second
 			cliChainId, err := client.GetChainId(pool.ctx)
 			if err != nil {
-				pool.logger.Errorf("failed getting chainid from '%v': %v", client.GetRPCHost(), err.Error())
+				pool.logger.Errorf("failed getting chainid from '%v': %v", RedactRPCURL(client.GetRPCHost()), err.Error())
 				continue
 			}
 			chainId = cliChainId
