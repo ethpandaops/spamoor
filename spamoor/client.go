@@ -2,10 +2,12 @@ package spamoor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -200,6 +202,12 @@ func NewClient(options *ClientOptions) (*Client, error) {
 
 	rpcClient, err := rpc.DialOptions(ctx, rpchost, dialOpts...)
 	if err != nil {
+		// URL parse errors quote the full URL, so redact it before returning.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			urlErr.URL = RedactRPCURL(urlErr.URL)
+		}
+
 		return nil, err
 	}
 
@@ -299,12 +307,17 @@ func (client *Client) GetRPCHost() string {
 	return client.rpchost
 }
 
+var rpcHostHeadersPattern = regexp.MustCompile(`headers\([^)]*\)`)
+
 // RedactRPCURL returns the RPC URL in a form suitable for logs and error
 // messages, with any password in the userinfo replaced by "xxxxx". A username
-// without a password is replaced as well, as it may hold an API key.
+// without a password is replaced as well, as it may hold an API key, and the
+// contents of a headers(...) prefix are replaced with "xxxxx".
 // If the URL cannot be parsed, everything up to the last '@' of the
 // authority is dropped instead, so no userinfo is returned.
 func RedactRPCURL(rawURL string) string {
+	rawURL = rpcHostHeadersPattern.ReplaceAllString(rawURL, "headers(xxxxx)")
+
 	if parsed, err := url.Parse(rawURL); err == nil && parsed.Opaque == "" {
 		if parsed.User != nil {
 			if _, hasPassword := parsed.User.Password(); !hasPassword {
