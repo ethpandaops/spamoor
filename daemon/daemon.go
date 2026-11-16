@@ -710,7 +710,7 @@ func (d *Daemon) LoadAndApplyClientConfigs() error {
 			}
 
 			d.logger.Debugf("Applied config for client %s: enabled=%v, name=%s, type=%s, groups=%v",
-				rpcUrl, config.Enabled, config.Name, config.ClientType, client.GetClientGroups())
+				spamoor.RedactRPCURL(rpcUrl), config.Enabled, config.Name, config.ClientType, client.GetClientGroups())
 		}
 	}
 
@@ -731,7 +731,7 @@ func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags, clientType string, enabl
 	}
 
 	if targetClient == nil {
-		return fmt.Errorf("client with RPC URL %s not found", rpcUrl)
+		return fmt.Errorf("client with RPC URL %s not found", spamoor.RedactRPCURL(rpcUrl))
 	}
 
 	// Update the client configuration
@@ -826,7 +826,7 @@ func (d *Daemon) UpdateClientConfig(rpcUrl, name, tags, clientType string, enabl
 	}
 
 	d.logger.Infof("Updated client config: %s (enabled=%v, name=%s, type=%s, tags=%s)",
-		rpcUrl, enabled, name, clientType, tags)
+		spamoor.RedactRPCURL(rpcUrl), enabled, name, clientType, tags)
 
 	return nil
 }

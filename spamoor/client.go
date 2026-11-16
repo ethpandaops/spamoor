@@ -2,10 +2,12 @@ package spamoor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -200,7 +202,7 @@ func NewClient(options *ClientOptions) (*Client, error) {
 
 	rpcClient, err := rpc.DialOptions(ctx, rpchost, dialOpts...)
 	if err != nil {
-		return nil, err
+		return nil, redactRPCError(err)
 	}
 
 	for hKey, hVal := range headers {
@@ -211,13 +213,13 @@ func NewClient(options *ClientOptions) (*Client, error) {
 	// while GetClientGroups still reports "default", so refuse it rather than
 	// silently shipping a client nothing can ever reach.
 	if len(clientGroups) == 0 {
-		return nil, fmt.Errorf("client %s has no client groups left: the group(...) prefix removed every group", rpchost)
+		return nil, fmt.Errorf("client %s has no client groups left: the group(...) prefix removed every group", RedactRPCURL(rpchost))
 	}
 
 	return &Client{
 		rpcClient:    rpcClient,
 		rpchost:      rpchost,
-		logger:       logrus.WithField("rpc", rpchost),
+		logger:       logrus.WithField("rpc", RedactRPCURL(rpchost)),
 		clientGroups: clientGroups,
 		clientType:   clientType,
 		enabled:      true,
@@ -294,8 +296,59 @@ func (client *Client) GetEthClient() *ethclient.Client {
 }
 
 // GetRPCHost returns the original RPC host URL used to create this client.
+// The returned URL may contain credentials; use RedactRPCURL before logging it.
 func (client *Client) GetRPCHost() string {
 	return client.rpchost
+}
+
+var rpcHostHeadersPattern = regexp.MustCompile(`headers\([^)]*\)`)
+
+// RedactRPCURL returns the RPC URL in a form suitable for logs and error
+// messages, with any password in the userinfo replaced by "xxxxx". A username
+// without a password is replaced as well, as it may hold an API key, and the
+// contents of a headers(...) prefix are replaced with "xxxxx".
+// If the URL cannot be parsed, everything up to the last '@' of the
+// authority is dropped instead, so no userinfo is returned.
+func RedactRPCURL(rawURL string) string {
+	rawURL = rpcHostHeadersPattern.ReplaceAllString(rawURL, "headers(xxxxx)")
+
+	if parsed, err := url.Parse(rawURL); err == nil && parsed.Opaque == "" {
+		if parsed.User != nil {
+			if _, hasPassword := parsed.User.Password(); !hasPassword {
+				parsed.User = url.User("xxxxx")
+			}
+		}
+
+		return parsed.Redacted()
+	}
+
+	authorityStart := 0
+	if idx := strings.Index(rawURL, "://"); idx >= 0 {
+		authorityStart = idx + 3
+	}
+
+	authorityEnd := len(rawURL)
+	if idx := strings.IndexAny(rawURL[authorityStart:], "/?#"); idx >= 0 {
+		authorityEnd = authorityStart + idx
+	}
+
+	if at := strings.LastIndex(rawURL[authorityStart:authorityEnd], "@"); at >= 0 {
+		return rawURL[:authorityStart] + rawURL[authorityStart+at+1:]
+	}
+
+	return rawURL
+}
+
+// redactRPCError redacts, in place, the URL of a *url.Error in err (as
+// returned by URL parsing and HTTP requests) and returns err. Errors that
+// already wrapped it with fmt.Errorf keep their formatted text.
+func redactRPCError(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		urlErr.URL = RedactRPCURL(urlErr.URL)
+	}
+
+	return err
 }
 
 // UpdateWallet refreshes the wallet's chain ID, nonce, and balance by querying the blockchain.
@@ -389,7 +442,7 @@ func (client *Client) callRPC(ctx context.Context, isTxRequest bool, result any,
 	err := client.rpcClient.CallContext(ctx, result, method, args...)
 	client.incrementRequestStats(isTxRequest, err != nil)
 
-	return err
+	return redactRPCError(err)
 }
 
 // GetChainId returns the chain ID of the connected Ethereum network.
