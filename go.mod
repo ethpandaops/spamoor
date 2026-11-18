@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/consensys/gnark-crypto v0.21.0
 	github.com/ethereum/go-ethereum v1.17.5
-	github.com/ethpandaops/service-authenticatoor v0.0.3
+	github.com/ethpandaops/service-authenticatoor v0.0.4-0.20261116121942-b69364b3c7ff
 	github.com/fjl/geas v0.3.3
 	github.com/glebarez/go-sqlite v1.23.0
 	github.com/golang-jwt/jwt/v5 v5.3.1

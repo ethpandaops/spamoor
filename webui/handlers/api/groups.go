@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/ethpandaops/spamoor/daemon/configs"
+	"github.com/ethpandaops/spamoor/webui/handlers/auth"
 )
 
 // SpammerGroupRequest is the body for creating or updating a spammer group.
@@ -66,7 +67,7 @@ type ReorderMembersRequest struct {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer-group [post]
 func (ah *APIHandler) CreateSpammerGroup(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 
@@ -103,7 +104,7 @@ func (ah *APIHandler) CreateSpammerGroup(w http.ResponseWriter, r *http.Request)
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer-group/{id} [put]
 func (ah *APIHandler) UpdateSpammerGroup(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 
@@ -144,7 +145,7 @@ func (ah *APIHandler) UpdateSpammerGroup(w http.ResponseWriter, r *http.Request)
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/group [put]
 func (ah *APIHandler) SetSpammerGroup(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 
@@ -187,7 +188,7 @@ func (ah *APIHandler) SetSpammerGroup(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer/{id}/group [delete]
 func (ah *APIHandler) RemoveSpammerGroup(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 
@@ -222,7 +223,7 @@ func (ah *APIHandler) RemoveSpammerGroup(w http.ResponseWriter, r *http.Request)
 // @Failure 500 {string} string "Server Error"
 // @Router /api/spammer-group/{id}/members/order [put]
 func (ah *APIHandler) ReorderGroupMembers(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeatureWrite) {
 		return
 	}
 

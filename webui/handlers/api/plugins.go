@@ -9,6 +9,7 @@ import (
 	"github.com/ethpandaops/spamoor/daemon"
 	"github.com/ethpandaops/spamoor/daemon/db"
 	"github.com/ethpandaops/spamoor/plugin"
+	"github.com/ethpandaops/spamoor/webui/handlers/auth"
 	"github.com/gorilla/mux"
 )
 
@@ -92,7 +93,7 @@ func (ah *APIHandler) GetPlugins(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/plugins [post]
 func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeaturePlugins) {
 		return
 	}
 
@@ -247,7 +248,7 @@ func (ah *APIHandler) RegisterPlugin(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/plugins/{name} [delete]
 func (ah *APIHandler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeaturePlugins) {
 		return
 	}
 
@@ -297,7 +298,7 @@ func (ah *APIHandler) DeletePlugin(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "Server Error"
 // @Router /api/plugins/{name}/reload [post]
 func (ah *APIHandler) ReloadPlugin(w http.ResponseWriter, r *http.Request) {
-	if !ah.checkAuth(w, r) {
+	if !ah.checkFeature(w, r, auth.FeaturePlugins) {
 		return
 	}
 

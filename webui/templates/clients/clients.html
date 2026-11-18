@@ -366,11 +366,15 @@ async function submitClientGroupsEdit() {
 
   try {
     const url = '/api/client/' + currentClientIndex + '/group';
-    await spamoor.authFetch(url, {
+    const res = await spamoor.authFetch(url, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({groups: currentGroups})
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText);
+    }
     
     const tableRows = document.querySelectorAll('#clients tbody tr');
     const targetRow = tableRows[parseInt(currentClientIndex)];
@@ -402,11 +406,15 @@ async function toggleClientEnabled(index, currentEnabled) {
 
   try {
     const url = '/api/client/' + index + '/enabled';
-    await spamoor.authFetch(url, {
+    const res = await spamoor.authFetch(url, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({enabled: newEnabled})
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText);
+    }
     
     const tableRows = document.querySelectorAll('#clients tbody tr');
     const targetRow = tableRows[parseInt(index)];
@@ -472,11 +480,15 @@ async function submitClientTypeEdit() {
 
   try {
     const url = '/api/client/' + currentClientIndex + '/type';
-    await spamoor.authFetch(url, {
+    const res = await spamoor.authFetch(url, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({client_type: newType})
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText);
+    }
     
     const tableRows = document.querySelectorAll('#clients tbody tr');
     const targetRow = tableRows[parseInt(currentClientIndex)];

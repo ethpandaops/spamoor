@@ -10,15 +10,21 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/ethpandaops/spamoor/webui/handlers"
+	"github.com/ethpandaops/spamoor/webui/handlers/auth"
 	"github.com/ethpandaops/spamoor/webui/server"
 	"github.com/ethpandaops/spamoor/webui/types"
 )
 
 // fakeChecker accepts exactly one token string (with or without the
 // "Bearer " prefix). With accepted == "" it behaves like open mode and
-// accepts everything.
+// accepts everything. noPprof denies the pprof feature to every token.
 type fakeChecker struct {
 	accepted string
+	noPprof  bool
+}
+
+func (f *fakeChecker) FeatureAllowed(_ *jwt.Token, feature string) bool {
+	return !f.noPprof || feature != auth.FeaturePprof
 }
 
 func (f *fakeChecker) CheckAuthToken(tokenStr, _ string) *jwt.Token {
@@ -151,6 +157,21 @@ func TestPprofHandlerAuth(t *testing.T) {
 			header:     "Bearer tok",
 			wantStatus: http.StatusOK,
 			wantBody:   "profile:/debug/pprof",
+		},
+		{
+			name:       "valid token without the pprof grant gets 403",
+			checker:    &fakeChecker{accepted: "tok", noPprof: true},
+			path:       "/debug/pprof/heap",
+			header:     "Bearer tok",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "browser without the pprof grant gets 403, not the gate",
+			checker:    &fakeChecker{accepted: "tok", noPprof: true},
+			path:       "/debug/pprof/",
+			accept:     "text/html",
+			cookie:     "tok",
+			wantStatus: http.StatusForbidden,
 		},
 		{
 			name:       "failed download is audited with its status",
