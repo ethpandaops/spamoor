@@ -60,7 +60,7 @@ The token's `services` claim must allow `spamoor`. Basic access is read-only: ev
 | `clients` | `PUT /api/client/{index}/group`, `/enabled`, `/name`, `/type` |
 | `pprof` | `/debug/pprof/*` |
 
-Reads (lists, details, logs, effective config, export, plugins list, audit log, graphs) need basic access to `spamoor` only. A valid token without the feature gets a `403`. A token without a `services` claim, as issued by an authenticatoor without grants, has every feature.
+Reads need no feature. Most are served without a token (spammer list and details, clients, pending transactions, graphs, library index, plugins, audit log); logs, export and SSE streams need a valid token with basic `spamoor` access. A valid token without the feature gets a `403`. A token without a `services` claim, as issued by an authenticatoor without grants, has every feature.
 
 ## Spammer Management
 

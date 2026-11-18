@@ -39,7 +39,7 @@ func (ah *APIHandler) checkFeature(w http.ResponseWriter, r *http.Request, featu
 	}
 
 	if !ah.authHandler.FeatureAllowed(token, feature) {
-		http.Error(w, "forbidden: this login has no grant for spamoor:"+feature, http.StatusForbidden)
+		sendError(w, "this login has no grant for spamoor:"+feature, http.StatusForbidden)
 		return false
 	}
 
