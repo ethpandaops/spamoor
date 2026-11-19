@@ -1093,18 +1093,7 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 	var submitErr error
 
 	submitTx := func(client *Client) error {
-		if options.hasEncodeFn() {
-			txBytes, err := options.invokeEncode(tx)
-			if err != nil {
-				return fmt.Errorf("failed to encode transaction: %w", err)
-			}
-
-			if len(txBytes) > 0 {
-				return client.SendRawTransaction(ctx, txBytes)
-			}
-		}
-
-		return client.SendTransaction(ctx, tx)
+		return sendToClient(ctx, client, tx, options)
 	}
 
 	if submitNow {
@@ -1590,9 +1579,14 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 				},
 			}
 
+			// The transaction goes back out the way it was sent: one that was encoded or
+			// submitted through a callback cannot be rebroadcast without it.
 			if tx.Options != nil {
 				txOptions.LogFn = tx.Options.LogFn
 				txOptions.ClientGroup = tx.Options.ClientGroup
+				txOptions.OnSubmit = tx.Options.OnSubmit
+				txOptions.OnEncode = tx.Options.OnEncode
+				txOptions.OnGethEncode = tx.Options.OnGethEncode
 			}
 
 			err := pool.submitTransaction(ctx, tx.FromWallet, tx.Tx, txOptions, false)
@@ -2029,6 +2023,28 @@ func (pool *TxPool) calculateBackoffDelay(retryCount uint64) time.Duration {
 	return delay
 }
 
+// sendToClient hands a transaction to one client, for a first submission or a
+// rebroadcast: through the submit callback when the options carry one, otherwise with
+// eth_sendRawTransaction in the encoding the encode callback or the transaction gives.
+func sendToClient(ctx context.Context, client *Client, tx *txtypes.Transaction, options *SendTransactionOptions) error {
+	if options.OnSubmit != nil {
+		return options.OnSubmit(ctx, client, tx)
+	}
+
+	if options.hasEncodeFn() {
+		txBytes, err := options.invokeEncode(tx)
+		if err != nil {
+			return fmt.Errorf("failed to encode transaction: %w", err)
+		}
+
+		if len(txBytes) > 0 {
+			return client.SendRawTransaction(ctx, txBytes)
+		}
+	}
+
+	return client.SendTransaction(ctx, tx)
+}
+
 // rebroadcastStartOffset picks the client a rebroadcast attempt starts at.
 //
 // The transaction hash spreads the starting point across the client pool, the way
@@ -2052,18 +2068,7 @@ func rebroadcastStartOffset(configured int, hash common.Hash, retryCount uint64)
 // This method encapsulates the existing rebroadcast logic for reuse.
 func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Transaction, options *SendTransactionOptions, retryCount uint64) {
 	submitTx := func(client *Client) error {
-		if options.hasEncodeFn() {
-			txBytes, err := options.invokeEncode(tx)
-			if err != nil {
-				return fmt.Errorf("failed to encode transaction: %w", err)
-			}
-
-			if len(txBytes) > 0 {
-				return client.SendRawTransaction(ctx, txBytes)
-			}
-		}
-
-		return client.SendTransaction(ctx, tx)
+		return sendToClient(ctx, client, tx, options)
 	}
 
 	clientCount := len(pool.options.ClientPool.GetAllGoodClients())

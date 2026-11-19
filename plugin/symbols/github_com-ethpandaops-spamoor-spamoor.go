@@ -80,6 +80,7 @@ func init() {
 		"TxLogFn":                reflect.ValueOf((*spamoor.TxLogFn)(nil)),
 		"TxPool":                 reflect.ValueOf((*spamoor.TxPool)(nil)),
 		"TxPoolOptions":          reflect.ValueOf((*spamoor.TxPoolOptions)(nil)),
+		"TxSubmitFn":             reflect.ValueOf((*spamoor.TxSubmitFn)(nil)),
 		"Wallet":                 reflect.ValueOf((*spamoor.Wallet)(nil)),
 		"WalletInfo":             reflect.ValueOf((*spamoor.WalletInfo)(nil)),
 		"WalletInfoProvider":     reflect.ValueOf((*spamoor.WalletInfoProvider)(nil)),

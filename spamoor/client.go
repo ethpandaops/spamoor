@@ -577,6 +577,19 @@ func (client *Client) SendRawTransaction(ctx context.Context, tx []byte) error {
 	return client.callRPC(ctx, true, nil, "eth_sendRawTransaction", hexutil.Encode(tx))
 }
 
+// SendProofWrapper submits an encoded EIP-8288 mempool wrapper using the
+// eth_sendProofWrapper RPC call, which is how transactions with dependency frames
+// reach a node: eth_sendRawTransaction refuses them. It returns the hashes of the
+// transactions the node admitted.
+func (client *Client) SendProofWrapper(ctx context.Context, wrapper []byte) ([]common.Hash, error) {
+	var hashes []common.Hash
+	if err := client.callRPC(ctx, true, &hashes, "eth_sendProofWrapper", hexutil.Encode(wrapper)); err != nil {
+		return nil, err
+	}
+
+	return hashes, nil
+}
+
 // GetTransactionReceipt retrieves the receipt for a given transaction hash.
 // Returns a nil receipt without error when the transaction is not yet mined.
 func (client *Client) GetTransactionReceipt(ctx context.Context, txHash common.Hash) (*txtypes.Receipt, error) {

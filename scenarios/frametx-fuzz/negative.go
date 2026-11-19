@@ -137,7 +137,7 @@ var violations = []violation{
 		alwaysInvalid: true,
 		apply: func(tx *txtypes.FrameTx) error {
 			frame := txtypes.UserOpFrame(nil, nil, nil, txtypes.FrameLimits{Execution: 21_000})
-			frame.Mode = txtypes.FrameModeAssert + 1
+			frame.Mode = txtypes.FrameModeDepVerify + 1
 			tx.Frames = append(tx.Frames, frame)
 
 			return nil

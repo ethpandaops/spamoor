@@ -2,6 +2,7 @@ package spamoor
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -98,5 +99,41 @@ func TestUpdateSlotDuration(t *testing.T) {
 	pool.updateSlotDuration(&BlockInfo{Timestamp: 2000, SlotNumber: 200}, &BlockInfo{Timestamp: 2027, SlotNumber: 203})
 	if pool.GetSlotDuration() != 9*time.Second {
 		t.Fatalf("expected 9s across missed slots, got %v", pool.GetSlotDuration())
+	}
+}
+
+// A submit callback replaces the eth_sendRawTransaction call entirely: the client is
+// handed to it untouched, and so is whatever it returns.
+func TestSendToClientUsesSubmitCallback(t *testing.T) {
+	tx := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 7})
+	client := &Client{}
+	refused := errors.New("refused")
+
+	var (
+		calls     int
+		gotClient *Client
+		gotTx     *txtypes.Transaction
+	)
+
+	options := &SendTransactionOptions{
+		OnSubmit: func(_ context.Context, client *Client, tx *txtypes.Transaction) error {
+			calls++
+			gotClient, gotTx = client, tx
+
+			return refused
+		},
+		OnEncode: func(*txtypes.Transaction) ([]byte, error) {
+			t.Error("the encode callback ran although a submit callback is set")
+
+			return nil, nil
+		},
+	}
+
+	if err := sendToClient(context.Background(), client, tx, options); !errors.Is(err, refused) {
+		t.Fatalf("got %v, want the callback's error", err)
+	}
+
+	if calls != 1 || gotClient != client || gotTx != tx {
+		t.Fatalf("callback ran %d times with client %p and tx %p", calls, gotClient, gotTx)
 	}
 }
