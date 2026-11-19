@@ -718,11 +718,16 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 			fromWallet.confirmTx(tx, txFees)
 		}
 
-		var tracked *trackedTx
+		var (
+			tracked     *trackedTx
+			authorities bool
+		)
 
 		tracked, completions = pool.processTransactionInclusion(blockNumber, txFrom, tx, receipt, completions)
+		authorities, completions = pool.processAuthorizations(tx, completions)
 
-		if fromWallet != nil || toWallet != nil || tracked != nil {
+		// kept for a reorg, which has to undo all of this
+		if fromWallet != nil || toWallet != nil || tracked != nil || authorities {
 			txInfo := &TxInfo{
 				TxHash:     txHash,
 				From:       txFrom,
@@ -757,8 +762,6 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		if toWallet != nil {
 			toWallet.AddBalance(tx.Value())
 		}
-
-		completions = pool.processAuthorizations(tx, completions)
 	}
 
 	// Clean up old confirmed transactions
@@ -1371,7 +1374,13 @@ func (pool *TxPool) completeTx(tracked *trackedTx, receipt *txtypes.Receipt, err
 // exception: it needs its keys unused, so nothing else on them was ever included.
 func (pool *TxPool) retireTxs(retired []*trackedTx, txHash common.Hash, seq uint64, receipt *txtypes.Receipt, completions []txCompletion) []txCompletion {
 	for _, tracked := range retired {
-		if tracked.hash != txHash && tracked.seq != seq && seq != txtypes.MaxNonceSeq {
+		passedUnseen := tracked.hash != txHash && tracked.seq != seq && seq != txtypes.MaxNonceSeq
+		if passedUnseen && tracked.keys != nil && tracked.seq == txtypes.MaxNonceSeq {
+			// a single-use transaction on a key that was used: it was never valid since
+			passedUnseen = false
+		}
+
+		if passedUnseen {
 			pool.resolveTx(tracked)
 
 			continue
@@ -1433,23 +1442,27 @@ func (pool *TxPool) processTransactionInclusion(blockNumber uint64, txFrom commo
 	// Transactions outside the lanes are only known by their hash.
 	completions = pool.retireTxs(confirmed, txHash, 0, receipt, completions)
 
-	if len(confirmed) == 0 {
-		return nil, completions
+	// the entry of whoever submitted it, not of someone only waiting for it
+	for _, tracked := range confirmed {
+		if !tracked.Options.observer {
+			return tracked, completions
+		}
 	}
 
-	return confirmed[0], completions
+	return nil, completions
 }
 
 // processAuthorizations applies the EIP-7702 authorizations of an included transaction.
 // A valid authorization uses up the authority's account nonce without a transaction from
 // it, which retires whatever the authority had pending on that nonce.
-func (pool *TxPool) processAuthorizations(tx *txtypes.Transaction, completions []txCompletion) []txCompletion {
+func (pool *TxPool) processAuthorizations(tx *txtypes.Transaction, completions []txCompletion) (bool, []txCompletion) {
 	authList := tx.AuthList()
 	if len(authList) == 0 {
-		return completions
+		return false, completions
 	}
 
 	chainID := tx.ChainId()
+	applied := false
 
 	for i := range authList {
 		auth := &authList[i]
@@ -1467,6 +1480,8 @@ func (pool *TxPool) processAuthorizations(tx *txtypes.Transaction, completions [
 			continue
 		}
 
+		applied = true
+
 		if sender := pool.tracker.getSender(authority); sender != nil {
 			sender.mu.Lock()
 			retired := sender.retire(nil, auth.Nonce)
@@ -1477,7 +1492,7 @@ func (pool *TxPool) processAuthorizations(tx *txtypes.Transaction, completions [
 		}
 	}
 
-	return completions
+	return applied, completions
 }
 
 // runRecovery runs a stale sender check within the recovery concurrency limit.
@@ -1574,6 +1589,9 @@ func staleCheckInterval(staleChecks uint64) uint64 {
 	return 10 << min(staleChecks, 2)
 }
 
+// keyedCheckInterval is the number of blocks between checks of a sender's keyed lanes.
+const keyedCheckInterval = 40
+
 // processStaleSenders recovers senders whose pending transactions made no progress:
 // it re-reads their on-chain nonces to catch confirmations and replacements block
 // processing did not see, and rebroadcasts what is still pending.
@@ -1596,9 +1614,16 @@ func (pool *TxPool) processStaleSenders(blockNumber uint64) {
 			sender.lastProgress = blockNumber
 			sender.staleChecks++
 		}
+
+		// The keyed lanes are independent of each other and of the account nonce, so
+		// they are also checked while the sender confirms other transactions.
+		keyedDue := len(sender.keyed) > 0 && (due || blockNumber > sender.lastKeyedCheck+keyedCheckInterval)
+		if keyedDue {
+			sender.lastKeyedCheck = blockNumber
+		}
 		sender.mu.Unlock()
 
-		if !due {
+		if !due && !keyedDue {
 			continue
 		}
 
@@ -1607,7 +1632,7 @@ func (pool *TxPool) processStaleSenders(blockNumber uint64) {
 		go func() {
 			defer wg.Done()
 
-			pool.runRecovery(func() { pool.recoverSender(blockNumber, sender) })
+			pool.runRecovery(func() { pool.recoverSender(blockNumber, sender, due) })
 		}()
 	}
 
@@ -1624,9 +1649,9 @@ func (pool *TxPool) markSendersSuspect() {
 	}
 }
 
-func (pool *TxPool) recoverSender(blockNumber uint64, sender *txSender) {
+func (pool *TxPool) recoverSender(blockNumber uint64, sender *txSender, accountLane bool) {
 	sender.mu.Lock()
-	hasAccountTxs := !sender.account.empty()
+	hasAccountTxs := accountLane && !sender.account.empty()
 
 	var keyedHeads []*trackedTx
 
@@ -1643,8 +1668,10 @@ func (pool *TxPool) recoverSender(blockNumber uint64, sender *txSender) {
 		pool.recoverAccountLane(blockNumber, sender)
 	}
 
+	chainTime := pool.blockTime(blockNumber)
+
 	for _, tracked := range keyedHeads {
-		pool.recoverKeyedTx(sender, tracked)
+		pool.recoverKeyedTx(sender, tracked, chainTime)
 	}
 }
 
@@ -1674,6 +1701,16 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 	if err != nil {
 		logrus.WithError(err).Warnf("failed to get on-chain nonce for %v", sender.address.String())
 		return
+	}
+
+	// A nonce below what was seen confirmed is suspect: the client may lag or sit on
+	// another fork. A second one is asked before anything is filled as a gap.
+	if onChainNonce < wallet.confirmedNonce() {
+		if second := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientRandom)); second != nil {
+			if nonce, err := second.GetNonceAt(pool.options.Context, sender.address, big.NewInt(int64(blockNumber))); err == nil {
+				onChainNonce = max(onChainNonce, nonce)
+			}
+		}
 	}
 
 	var (
@@ -1730,9 +1767,7 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 	}
 
 	if !sender.account.empty() {
-		// Nonces below the wallet's confirmed nonce are used, whatever a client that
-		// lags or sits on another fork reports.
-		for nonce := max(onChainNonce, wallet.GetConfirmedNonce()); nonce < sender.account.slots[0].seq; nonce++ {
+		for nonce := onChainNonce; nonce < sender.account.slots[0].seq; nonce++ {
 			nonceGaps = append(nonceGaps, nonce)
 		}
 	}
@@ -1750,9 +1785,7 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 		}
 
 		logrus.Debugf("recovering stale confirmed transaction for %v (nonce %v)", sender.address.String(), tracked.seq)
-
-		receipt, err := pool.loadTransactionReceipt(pool.options.Context, tracked.Tx, receiptLookupClients)
-		pool.completeTx(tracked, receipt, err)
+		pool.resolveTx(tracked)
 	}
 
 	// Retire expired transactions, which hold a nonce nothing can ever confirm. The
@@ -1778,20 +1811,25 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 			"txhash": tracked.hash.Hex(),
 		}).Debugf("rebroadcasting stale transaction")
 
-		pool.queueRebroadcast(tracked, true)
+		// to every client only once a plain rebroadcast did not help
+		sender.mu.Lock()
+		fanout := tracked.RebroadcastCount > 0
+		sender.mu.Unlock()
+
+		pool.queueRebroadcast(tracked, fanout)
 	}
 }
 
 // recoverKeyedTx recovers the lowest pending transaction of an EIP-8250 keyed lane. Its
 // receipt tells whether it was included, the key's on-chain sequence whether another
 // transaction used it up.
-func (pool *TxPool) recoverKeyedTx(sender *txSender, tracked *trackedTx) {
+func (pool *TxPool) recoverKeyedTx(sender *txSender, tracked *trackedTx, chainTime uint64) {
 	if tracked.done.Load() {
 		return
 	}
 
 	// One client is enough to probe: nothing is concluded from it not knowing the
-	// transaction, the key's sequence is checked for that.
+	// transaction, the keys' sequences are checked for that.
 	receipt, err := pool.loadTransactionReceipt(pool.options.Context, tracked.Tx, 1)
 	if err != nil {
 		// not known either way, the next stale check asks again
@@ -1809,25 +1847,38 @@ func (pool *TxPool) recoverKeyedTx(sender *txSender, tracked *trackedTx) {
 			go pool.notifyTx(completion.tx, completion.receipt, nil)
 		}
 
+		pool.tracker.dropIdle(sender)
+
 		return
 	}
 
-	if pool.isKeyedLanePassed(sender.address, tracked) {
-		// Something used the key up. Which of the transactions waiting on it that
-		// was, if any, is for their receipts to tell.
+	if passedKeys := pool.passedNonceKeys(sender.address, tracked); len(passedKeys) > 0 {
+		// Something used those keys up. Which of the transactions waiting on them
+		// that was, if any, is for their receipts to tell.
 		sender.mu.Lock()
-		retired := sender.retire(tracked.keys, tracked.seq)
+		retired := sender.retire(passedKeys, tracked.seq)
 		sender.mu.Unlock()
 
 		for _, passed := range retired {
 			pool.resolveTx(passed)
 		}
 
+		pool.tracker.dropIdle(sender)
+
+		return
+	}
+
+	// Past its deadline it can never be included. Its keys were not used, so there
+	// is nothing to replace: it is dropped.
+	if isExpiredTx(tracked.Tx, chainTime) {
+		pool.completeTx(tracked, nil, nil)
+
 		return
 	}
 
 	sender.mu.Lock()
 	due := tracked.Options.Rebroadcast && time.Since(tracked.LastRebroadcast) >= pool.calculateBackoffDelay(tracked.RebroadcastCount)
+	fanout := tracked.RebroadcastCount > 0
 	sender.mu.Unlock()
 
 	if !due {
@@ -1839,33 +1890,39 @@ func (pool *TxPool) recoverKeyedTx(sender *txSender, tracked *trackedTx) {
 		"txhash": tracked.hash.Hex(),
 	}).Debugf("rebroadcasting stale transaction")
 
-	pool.queueRebroadcast(tracked, true)
+	pool.queueRebroadcast(tracked, fanout)
 }
 
-// isKeyedLanePassed reports whether the first nonce key of a transaction has moved past
-// the sequence number the transaction needs it at.
-func (pool *TxPool) isKeyedLanePassed(address common.Address, tracked *trackedTx) bool {
-	if len(tracked.keys) == 0 {
-		return false
-	}
-
+// passedNonceKeys returns the nonce keys of a transaction that have moved past the
+// sequence number the transaction needs them at.
+func (pool *TxPool) passedNonceKeys(address common.Address, tracked *trackedTx) []uint256.Int {
 	client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
 	if client == nil {
-		return false
+		return nil
 	}
 
-	value, err := client.GetStorageAt(pool.options.Context, txtypes.NonceManager, txtypes.NonceManagerSlot(address, &tracked.keys[0]))
-	if err != nil {
-		return false
-	}
+	var passed []uint256.Int
 
-	current := new(uint256.Int).SetBytes(value[:])
-	if tracked.seq == txtypes.MaxNonceSeq {
+	for i := range tracked.keys {
+		value, err := client.GetStorageAt(pool.options.Context, txtypes.NonceManager, txtypes.NonceManagerSlot(address, &tracked.keys[i]))
+		if err != nil {
+			return nil
+		}
+
+		current := new(uint256.Int).SetBytes(value[:])
+
 		// single-use: the key has to be unused
-		return !current.IsZero()
+		used := !current.IsZero()
+		if tracked.seq != txtypes.MaxNonceSeq {
+			used = !current.IsUint64() || current.Uint64() > tracked.seq
+		}
+
+		if used {
+			passed = append(passed, tracked.keys[i])
+		}
 	}
 
-	return !current.IsUint64() || current.Uint64() > tracked.seq
+	return passed
 }
 
 // errReceiptLookupFailed is the completion error of a transaction whose sequence number
@@ -1899,9 +1956,11 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Tran
 
 	clients = min(clients, len(candidates))
 	offset := rand.Intn(len(candidates))
+	notFound := make([]bool, len(candidates))
 
 	for attempt := 0; ; attempt++ {
-		client := candidates[(offset+attempt)%len(candidates)]
+		candidate := (offset + attempt) % len(candidates)
+		client := candidates[candidate]
 
 		reqCtx, reqCtxCancel := context.WithTimeout(ctx, 5*time.Second)
 
@@ -1920,7 +1979,11 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Tran
 		// A client that does not know the transaction may only be behind, so a few
 		// are asked. Their agreement is an answer, not a failure to wait on.
 		if errors.Is(err, ethereum.NotFound) {
-			notFoundCount++
+			if !notFound[candidate] {
+				notFound[candidate] = true
+				notFoundCount++
+			}
+
 			if notFoundCount >= clients {
 				return nil, nil
 			}
@@ -2010,6 +2073,9 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 
 	// remove reorged out blocks & txs from cache
 	pool.blocksMutex.Lock()
+	// the base block's transactions were collected above, so they go as well
+	delete(pool.confirmedTxs, reorgBaseBlock.Block.NumberU64())
+
 	for blockNum := reorgBaseBlock.Block.NumberU64() + 1; blockNum <= blockNumber; blockNum++ {
 		delete(pool.blocks, blockNum)
 		delete(pool.confirmedTxs, blockNum)
@@ -2088,10 +2154,11 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 		}
 
 		// An authorization's nonce bump is undone with the block as well.
-		for i := range tx.Tx.AuthList() {
-			if authority, err := tx.Tx.AuthList()[i].Authority(); err == nil {
+		authList := tx.Tx.AuthList()
+		for i := len(authList) - 1; i >= 0; i-- {
+			if authority, err := authList[i].Authority(); err == nil {
 				if authorityWallet := pool.lookupWallet(authority); authorityWallet != nil {
-					authorityWallet.MarkNeedResync()
+					authorityWallet.undoAuthorization(authList[i].Nonce)
 				}
 			}
 		}
@@ -2591,6 +2658,7 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 	}
 
 	startOffset := rebroadcastStartOffset(options.ClientsStartOffset, tx.Hash(), retryCount)
+	asked := make(map[*Client]struct{}, clientCount)
 
 	for j := 0; j < clientCount; j++ {
 		if ctx.Err() != nil {
@@ -2612,6 +2680,13 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 		if client == nil {
 			break
 		}
+
+		// the selection wraps around when fewer clients are eligible than exist
+		if _, done := asked[client]; done {
+			break
+		}
+
+		asked[client] = struct{}{}
 
 		err := submitTx(client)
 

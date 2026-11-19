@@ -21,6 +21,7 @@ func init() {
 		"ClientTypeClient":             reflect.ValueOf(spamoor.ClientTypeClient),
 		"CostPerStateByte":             reflect.ValueOf(spamoor.CostPerStateByte),
 		"ErrNoReadyClient":             reflect.ValueOf(&spamoor.ErrNoReadyClient).Elem(),
+		"ErrTransactionReplaced":       reflect.ValueOf(&spamoor.ErrTransactionReplaced).Elem(),
 		"GetDefaultLogFn":              reflect.ValueOf(spamoor.GetDefaultLogFn),
 		"GetDefaultWalletConfig":       reflect.ValueOf(spamoor.GetDefaultWalletConfig),
 		"InitRootWallet":               reflect.ValueOf(spamoor.InitRootWallet),

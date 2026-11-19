@@ -2,6 +2,7 @@ package spamoor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -153,13 +154,27 @@ func (p *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *txtyp
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case res := <-result:
-		// the completion of a cancelled wait carries no outcome
-		if res.receipt == nil && res.err == nil && ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-
-		return res.receipt, res.err
+		return awaitedResult(ctx, res.receipt, res.err)
 	}
+}
+
+// ErrTransactionReplaced is returned by the awaiting helpers for a transaction that
+// completed without a receipt: another transaction took its nonce.
+var ErrTransactionReplaced = errors.New("transaction was replaced before it was included")
+
+// awaitedResult turns a completion into what an awaiting caller gets. A receipt comes
+// with a nil error only; callers use it without checking it again.
+func awaitedResult(ctx context.Context, receipt *txtypes.Receipt, err error) (*txtypes.Receipt, error) {
+	if receipt != nil || err != nil {
+		return receipt, err
+	}
+
+	// the completion of a cancelled wait carries no outcome
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	return nil, ErrTransactionReplaced
 }
 
 // SendAndAwaitTransaction submits a transaction with custom options and waits for confirmation.
@@ -211,12 +226,7 @@ func (p *TxPool) SendAndAwaitTransaction(ctx context.Context, wallet *Wallet, tx
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case result := <-resultChan:
-		// the completion of a cancelled wait carries no outcome
-		if result.receipt == nil && result.err == nil && ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-
-		return result.receipt, result.err
+		return awaitedResult(ctx, result.receipt, result.err)
 	}
 }
 

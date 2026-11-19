@@ -1283,6 +1283,12 @@ func (pool *WalletPool) getFundingFees(client *Client, gas uint64) (feeCap *big.
 	maxFee := big.NewInt(100000000000) // 100 gwei
 	if gas > 0 {
 		if perGas := new(big.Int).Div(maxFundingTxFee, new(big.Int).SetUint64(gas)); perGas.Cmp(maxFee) < 0 {
+			// Priced below what the chain asks, the transaction would be accepted and
+			// never included, holding a root wallet nonce for good.
+			if perGas.Cmp(feeCap) < 0 {
+				return nil, nil, fmt.Errorf("funding transaction with %d gas cannot pay %v wei per gas within the %v wei fee limit", gas, feeCap, maxFundingTxFee)
+			}
+
 			maxFee = perGas
 		}
 	}

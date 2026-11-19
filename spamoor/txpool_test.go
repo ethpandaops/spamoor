@@ -148,7 +148,7 @@ func includeTestTx(pool *TxPool, from common.Address, tx *txtypes.Transaction) *
 	receipt := &txtypes.Receipt{TxHash: tx.Hash()}
 
 	_, completions := pool.processTransactionInclusion(1, from, tx, receipt, nil)
-	completions = pool.processAuthorizations(tx, completions)
+	_, completions = pool.processAuthorizations(tx, completions)
 
 	for _, completion := range completions {
 		go pool.notifyTx(completion.tx, completion.receipt, nil)
@@ -753,5 +753,79 @@ func TestAwaitTransactionIsNotAttributed(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("AwaitTransaction did not return")
+	}
+}
+
+// A sequenced transaction that uses a key ends every single-use transaction waiting on
+// that key: it needs the key unused.
+func TestSequencedInclusionRetiresSingleUse(t *testing.T) {
+	ctx := context.Background()
+	pool := newTrackingTestPool(ctx)
+	wallet := NewWallet(nil, common.HexToAddress("0xa1"))
+
+	key := func(n uint64) []*uint256.Int { return []*uint256.Int{uint256.NewInt(n)} }
+
+	singleUse := trackTestTx(t, pool, ctx, wallet, txtypes.NewTx((&txtypes.FrameTx{Sender: wallet.GetAddress()}).WithSingleUseNonceKeys(key(5))))
+	otherKey := trackTestTx(t, pool, ctx, wallet, txtypes.NewTx((&txtypes.FrameTx{Sender: wallet.GetAddress()}).WithSingleUseNonceKeys(key(6))))
+
+	includeTestTx(pool, wallet.GetAddress(), txtypes.NewTx((&txtypes.FrameTx{Sender: wallet.GetAddress()}).WithNonceKeys(key(5), 0)))
+
+	expectTxResult(t, "single use on the used key", singleUse, nil)
+	expectTxPending(t, "single use on another key", otherKey)
+}
+
+// An authorization that was applied is taken back when its block is reorged out.
+func TestAuthorizationUndo(t *testing.T) {
+	wallet := NewWallet(nil, common.HexToAddress("0xa1"))
+	wallet.SetNonce(3)
+
+	if !wallet.applyAuthorization(3) || wallet.GetConfirmedNonce() != 4 {
+		t.Fatalf("authorization not applied, confirmed nonce %d", wallet.GetConfirmedNonce())
+	}
+
+	wallet.undoAuthorization(7)
+
+	if wallet.GetConfirmedNonce() != 4 {
+		t.Fatal("an authorization that was not the last nonce was undone")
+	}
+
+	wallet.undoAuthorization(3)
+
+	if wallet.GetConfirmedNonce() != 3 {
+		t.Fatalf("authorization not undone, confirmed nonce %d", wallet.GetConfirmedNonce())
+	}
+}
+
+// The awaiting helpers never hand out a nil receipt with a nil error: callers use the
+// receipt right after checking the error.
+func TestAwaitedResult(t *testing.T) {
+	receipt := &txtypes.Receipt{}
+	failure := errors.New("rejected")
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name        string
+		ctx         context.Context
+		receipt     *txtypes.Receipt
+		err         error
+		wantReceipt *txtypes.Receipt
+		wantErr     error
+	}{
+		{"confirmed", context.Background(), receipt, nil, receipt, nil},
+		{"failed", context.Background(), nil, failure, nil, failure},
+		{"replaced", context.Background(), nil, nil, nil, ErrTransactionReplaced},
+		{"cancelled", cancelled, nil, nil, nil, context.Canceled},
+		{"confirmed while cancelling", cancelled, receipt, nil, receipt, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotReceipt, gotErr := awaitedResult(tt.ctx, tt.receipt, tt.err)
+			if gotReceipt != tt.wantReceipt || !errors.Is(gotErr, tt.wantErr) {
+				t.Fatalf("got %v / %v, want %v / %v", gotReceipt, gotErr, tt.wantReceipt, tt.wantErr)
+			}
+		})
 	}
 }

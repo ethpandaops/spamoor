@@ -146,6 +146,20 @@ func (lane *txLane) retire(seq uint64, retired []*trackedTx) []*trackedTx {
 	return retired
 }
 
+// retireAt removes and returns the transactions at exactly seq.
+func (lane *txLane) retireAt(seq uint64, retired []*trackedTx) []*trackedTx {
+	idx, found := lane.find(seq)
+	if !found {
+		return retired
+	}
+
+	retired = append(retired, lane.slots[idx].txs...)
+	lane.slots[idx].txs = nil
+	lane.trim()
+
+	return retired
+}
+
 func (lane *txLane) empty() bool {
 	return len(lane.slots) == 0
 }
@@ -168,6 +182,10 @@ type txSender struct {
 	lastProgress uint64
 	staleChecks  uint64
 	suspect      bool
+
+	// lastKeyedCheck is the block the keyed lanes were last checked at. They are
+	// independent of each other, so progress on one says nothing about the rest.
+	lastKeyedCheck uint64
 }
 
 // lanes calls fn for each lane a transaction with the given keys occupies.
@@ -208,6 +226,12 @@ func (sender *txSender) retire(keys []uint256.Int, seq uint64) []*trackedTx {
 
 	sender.lanes(keys, false, func(lane *txLane) {
 		retired = lane.retire(seq, retired)
+
+		// a key that was used is not unused anymore, which is what a single-use
+		// transaction waiting on it needs
+		if keys != nil && seq != txtypes.MaxNonceSeq {
+			retired = lane.retireAt(txtypes.MaxNonceSeq, retired)
+		}
 	})
 
 	for _, t := range retired {

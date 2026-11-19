@@ -362,6 +362,24 @@ func (wallet *Wallet) applyAuthorization(nonce uint64) bool {
 	return true
 }
 
+// undoAuthorization takes back applyAuthorization for a block that was reorged out.
+func (wallet *Wallet) undoAuthorization(nonce uint64) {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	if wallet.confirmedTxCount == nonce+1 {
+		wallet.confirmedTxCount = nonce
+	}
+}
+
+// confirmedNonce is GetConfirmedNonce under the lock the confirmation path writes it with.
+func (wallet *Wallet) confirmedNonce() uint64 {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	return wallet.confirmedTxCount
+}
+
 // raiseConfirmedNonce moves the confirmed nonce up to the on-chain nonce.
 func (wallet *Wallet) raiseConfirmedNonce(nonce uint64) {
 	wallet.txNonceMutex.Lock()
