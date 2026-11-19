@@ -145,8 +145,22 @@ func TestAddDataPointReplacesReprocessedBlock(t *testing.T) {
 
 	add(10, 100)
 	add(11, 200)
-	add(12, 300)
+
+	// block 12 saw recovery work and submissions before it was reorged out
+	m.addDataPoint(&BlockDataPoint{
+		Timestamp: time.Now(), StartBlockNumber: 12, EndBlockNumber: 12, BlockCount: 1, TotalGasUsed: 300, Rebroadcasts: 4, Reorgs: 1,
+		SpammerGasData: map[uint64]*SpammerBlockData{7: {ConfirmedTxCount: 9, SubmittedTxDelta: 6, FailedTxCount: 2}},
+	})
+
 	add(11, 50)
+
+	if point := m.dataPoints[1]; point.Rebroadcasts != 4 || point.Reorgs != 1 {
+		t.Fatalf("recovery counters of the dropped point were lost: %+v", point)
+	}
+
+	if data := m.dataPoints[1].SpammerGasData[7]; data == nil || data.SubmittedTxDelta != 6 || data.FailedTxCount != 2 || data.ConfirmedTxCount != 0 {
+		t.Fatalf("unexpected spammer values carried over: %+v", data)
+	}
 
 	if len(m.dataPoints) != 2 || m.dataPoints[1].StartBlockNumber != 11 || m.dataPoints[1].TotalGasUsed != 50 {
 		t.Fatalf("unexpected data points after reprocessing: %+v", m.dataPoints)

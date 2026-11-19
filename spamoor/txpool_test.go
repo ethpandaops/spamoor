@@ -675,3 +675,83 @@ func TestCancelledTxKeepsItsNonce(t *testing.T) {
 		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
 	}
 }
+
+// A transaction that was retired from its lane with its outcome still open is not on
+// the lane anymore. Cancelling it then must not leave a placeholder behind that nothing
+// can release.
+func TestCancelOfRetiredTxLeavesNoPlaceholder(t *testing.T) {
+	pool := newTrackingTestPool(context.Background())
+	wallet := pool.RegisterWallet(NewWallet(nil, common.HexToAddress("0xa1")), context.Background())
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	passed := trackTestTx(t, pool, cancelCtx, wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 0}))
+
+	// what an inclusion of a higher nonce does to it, up to the receipt lookup
+	sender := pool.tracker.getSender(wallet.GetAddress())
+	sender.mu.Lock()
+	retired := sender.retire(nil, 1)
+	sender.mu.Unlock()
+
+	if len(retired) != 1 {
+		t.Fatalf("expected the transaction to be retired, got %d", len(retired))
+	}
+
+	cancel()
+	expectTxResult(t, "cancelled", passed, nil)
+
+	sender.mu.Lock()
+	placeholders := sender.placeholders
+	sender.mu.Unlock()
+
+	if placeholders != 0 {
+		t.Fatalf("%d placeholders counted for a transaction that is not on its lane", placeholders)
+	}
+
+	if txs, senders := pool.tracker.count(); txs != 0 || senders != 0 {
+		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
+	}
+}
+
+// Waiting for a transaction does not make it a transaction of the waiting pool.
+func TestAwaitTransactionIsNotAttributed(t *testing.T) {
+	baseCtx := context.Background()
+	pool := newTrackingTestPool(baseCtx)
+
+	scopeCtx, cancel := context.WithCancel(WithWalletPoolScope(baseCtx))
+	walletPool := NewWalletPool(scopeCtx, logrus.New(), &RootWallet{wallet: NewWallet(nil, common.HexToAddress("0x01"))}, nil, pool)
+	walletPool.SetTransactionTracker(func(error) { t.Error("result reported for a transaction that was only awaited") })
+
+	wallet := NewWallet(nil, common.HexToAddress("0xa1"))
+	tx := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 0})
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := pool.AwaitTransaction(scopeCtx, wallet, tx)
+		done <- err
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(pool.tracker.byHash(tx.Hash())) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("awaited transaction is not tracked")
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+
+	if walletPool.GetPendingTxCount() != 0 {
+		t.Fatal("awaited transaction counts as pending for the pool")
+	}
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("unexpected error %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("AwaitTransaction did not return")
+	}
+}

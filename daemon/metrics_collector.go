@@ -296,13 +296,37 @@ func (mgm *MultiGranularityMetrics) addDataPoint(block *BlockDataPoint) *BlockDa
 	// confirmed again count for the new points. An aggregated point cannot give
 	// anything back, so there they stay counted once, where they were first.
 	if mgm.blockGranularity == 1 {
-		for len(mgm.dataPoints) > 0 && mgm.dataPoints[len(mgm.dataPoints)-1].StartBlockNumber >= block.StartBlockNumber {
-			mgm.dataPoints = mgm.dataPoints[:len(mgm.dataPoints)-1]
-		}
-
 		counted := block.copy()
 		for _, data := range counted.SpammerGasData {
 			data.ConfirmedTxCount += data.reincludedTxCount
+		}
+
+		// What the dropped points counted of things that happened once (transactions
+		// submitted and failed, recovery work) moves to the point replacing them.
+		for len(mgm.dataPoints) > 0 && mgm.dataPoints[len(mgm.dataPoints)-1].StartBlockNumber >= block.StartBlockNumber {
+			dropped := &mgm.dataPoints[len(mgm.dataPoints)-1]
+
+			counted.Reorgs += dropped.Reorgs
+			counted.ReorgedTxs += dropped.ReorgedTxs
+			counted.Rebroadcasts += dropped.Rebroadcasts
+			counted.GapFills += dropped.GapFills
+
+			if counted.SpammerGasData == nil {
+				counted.SpammerGasData = make(map[uint64]*SpammerBlockData, len(dropped.SpammerGasData))
+			}
+
+			for spammerID, data := range dropped.SpammerGasData {
+				kept := counted.SpammerGasData[spammerID]
+				if kept == nil {
+					kept = &SpammerBlockData{PendingTxCount: data.PendingTxCount, SubmittedTxCount: data.SubmittedTxCount}
+					counted.SpammerGasData[spammerID] = kept
+				}
+
+				kept.SubmittedTxDelta += data.SubmittedTxDelta
+				kept.FailedTxCount += data.FailedTxCount
+			}
+
+			mgm.dataPoints = mgm.dataPoints[:len(mgm.dataPoints)-1]
 		}
 
 		block = &counted

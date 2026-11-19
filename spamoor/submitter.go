@@ -54,6 +54,10 @@ type SendTransactionOptions struct {
 	OnGethConfirm  GethTxConfirmFn
 	OnGethComplete GethTxCompleteFn
 	OnGethEncode   GethTxEncodeFn
+
+	// observer marks options that only wait for a transaction submitted elsewhere, so
+	// that it is not counted as one more transaction of a wallet pool.
+	observer bool
 }
 
 // BatchOptions contains options for batch transaction submission.
@@ -136,6 +140,7 @@ func (p *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *txtyp
 	result := make(chan awaited, 1)
 
 	_, err := p.trackTransaction(ctx, wallet, tx, &SendTransactionOptions{
+		observer: true,
 		OnComplete: func(_ *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
 			result <- awaited{receipt, err}
 		},

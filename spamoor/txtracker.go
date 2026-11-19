@@ -98,6 +98,12 @@ func (lane *txLane) remove(seq uint64, t *trackedTx) {
 	lane.trim()
 }
 
+func (lane *txLane) contains(seq uint64, t *trackedTx) bool {
+	idx, found := lane.find(seq)
+
+	return found && slices.Contains(lane.slots[idx].txs, t)
+}
+
 // trim drops empty slots from both ends.
 func (lane *txLane) trim() {
 	head := 0
@@ -423,7 +429,9 @@ func (tracker *txTracker) remove(t *trackedTx, keepNonce bool) {
 	}
 
 	sender.mu.Lock()
-	if t.laned && keepNonce && t.keys == nil {
+	if t.laned && keepNonce && t.keys == nil && sender.account.contains(t.seq, t) {
+		// only what is still on the lane can hold its nonce there: a transaction
+		// retired just before, with its outcome still open, is not
 		t.placeholder.Store(true)
 		sender.placeholders++
 	} else if t.laned {

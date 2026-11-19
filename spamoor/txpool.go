@@ -1158,7 +1158,8 @@ func (pool *TxPool) trackTransaction(ctx context.Context, wallet *Wallet, tx *tx
 		return nil, ctx.Err()
 	}
 
-	if walletPool == nil {
+	// A transaction that is only waited for is not one more transaction of a pool.
+	if walletPool == nil && !options.observer {
 		walletPool = attributeTx(ctx, wallet)
 	}
 
@@ -1224,6 +1225,11 @@ func (pool *TxPool) trackTransaction(ctx context.Context, wallet *Wallet, tx *tx
 	if !laned {
 		go func() {
 			receipt, err := pool.loadTransactionReceipt(ctx, tx, receiptLookupClients)
+			if ctx.Err() != nil {
+				// cancelled, which completes without an error
+				err = nil
+			}
+
 			pool.completeTx(tracked, receipt, err)
 		}()
 	}
@@ -1576,8 +1582,11 @@ func (pool *TxPool) processStaleSenders(blockNumber uint64) {
 
 	for _, sender := range pool.tracker.allSenders() {
 		// Placeholders hold a nonce for as long as their wallet is in use.
-		if pool.GetRegisteredWallet(sender.address) == nil {
+		if wallet := pool.GetRegisteredWallet(sender.address); wallet == nil {
 			pool.tracker.dropPlaceholders(sender)
+		} else if wallet.sender.Load() != sender {
+			// a wallet registered anew for the address sees what is pending on it
+			wallet.sender.Store(sender)
 		}
 
 		sender.mu.Lock()
@@ -1641,7 +1650,12 @@ func (pool *TxPool) recoverSender(blockNumber uint64, sender *txSender) {
 
 // recoverAccountLane reconciles a sender's account nonce lane with the on-chain nonce.
 func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
-	wallet := sender.wallet
+	// The registered wallet is the one in use; the sender may still know an earlier
+	// object for the same address.
+	wallet := pool.lookupWallet(sender.address)
+	if wallet == nil {
+		wallet = sender.wallet
+	}
 
 	var onChainNonce uint64
 	var err error
@@ -1871,15 +1885,23 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Tran
 	notFoundCount := 0
 
 	// different clients are asked in turn, starting at a random one
-	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
-	clients = min(clients, max(clientCount, 1))
-	offset := rand.Intn(max(clientCount, 1))
+	candidates := make([]*Client, 0, 8)
+
+	for _, client := range pool.options.ClientPool.GetAllGoodClients() {
+		if !client.IsBuilder() {
+			candidates = append(candidates, client)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil, errReceiptLookupFailed
+	}
+
+	clients = min(clients, len(candidates))
+	offset := rand.Intn(len(candidates))
 
 	for attempt := 0; ; attempt++ {
-		client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, offset+attempt))
-		if client == nil {
-			return nil, errReceiptLookupFailed
-		}
+		client := candidates[(offset+attempt)%len(candidates)]
 
 		reqCtx, reqCtxCancel := context.WithTimeout(ctx, 5*time.Second)
 
