@@ -24,6 +24,7 @@ const (
 	SpeciesUserOp       FrameSpecies = "user_op"       // SENDER
 	SpeciesPostOp       FrameSpecies = "post_op"       // DEFAULT with flags
 	SpeciesAssert       FrameSpecies = "assert"        // ASSERT (EIP-7906)
+	SpeciesDepVerify    FrameSpecies = "dep_verify"    // DEP_VERIFY (EIP-8288)
 	SpeciesOther        FrameSpecies = "other"
 
 	// SpeciesRecentRootVerify is EIP-8272's canonical frame: VERIFY, flags 0x0, target
@@ -66,6 +67,9 @@ func (f *Frame) Species(sender common.Address) FrameSpecies {
 
 	case FrameModeAssert:
 		return SpeciesAssert
+
+	case FrameModeDepVerify:
+		return SpeciesDepVerify
 	}
 
 	return SpeciesOther
@@ -290,8 +294,14 @@ func (tx *FrameTx) validateFrames() error {
 	totalGas := uint64(0)
 
 	for i, frame := range tx.Frames {
-		if frame.Mode > FrameModeAssert {
+		if frame.Mode > FrameModeDepVerify {
 			return fmt.Errorf("%w: frame %d has unknown mode %d", ErrInvalidFrameTx, i, frame.Mode)
+		}
+
+		if frame.IsDependency() {
+			if err := tx.validateDependencyFrame(i, frame); err != nil {
+				return err
+			}
 		}
 
 		if frame.Flags&^FrameFlagsMask != 0 {
@@ -401,9 +411,12 @@ func (tx *FrameTx) ValidationPrefixLength() int {
 	return 0
 }
 
-// ValidateMempoolPrefix checks the public mempool policy of EIP-8141 and EIP-8272: the
-// validation prefix, after the optional leading protocol verifier frames, must match
-// one of the four recognized shapes and stay within the verification gas caps.
+// ValidateMempoolPrefix checks the public mempool policy of EIP-8141, EIP-8272 and
+// EIP-8288: the validation prefix, after the optional leading protocol verifier frames,
+// must match one of the four recognized shapes and stay within the verification gas
+// caps, and the transaction within the dependency limits.
+//
+// Dependency frames run no code, so the prefix grammar skips them wherever they sit.
 //
 // A transaction failing this check may still be valid in a block; it just will not
 // propagate through the public mempool.
@@ -413,9 +426,17 @@ func (tx *FrameTx) ValidateMempoolPrefix() error {
 		return fmt.Errorf("%w: no frame approves payment", ErrMempoolPolicy)
 	}
 
-	species := make([]FrameSpecies, prefixLen)
+	// The prefix frames the grammar is matched against, and what each of them is.
+	indices := make([]int, 0, prefixLen)
+	species := make([]FrameSpecies, 0, prefixLen)
+
 	for i := 0; i < prefixLen; i++ {
-		species[i] = tx.Frames[i].Species(tx.Sender)
+		if tx.Frames[i].IsDependency() {
+			continue
+		}
+
+		indices = append(indices, i)
+		species = append(species, tx.Frames[i].Species(tx.Sender))
 	}
 
 	// The protocol verifier frames lead the frame list in a fixed order, an expiry
@@ -434,21 +455,21 @@ func (tx *FrameTx) ValidateMempoolPrefix() error {
 		shape = shape[1:]
 	}
 
-	// A deploy frame leads what remains.
-	deployIndex := prefixLen - len(shape)
-
 	if !matchesRecognizedPrefix(shape) {
 		return fmt.Errorf("%w: validation prefix %v is not a recognized shape", ErrMempoolPolicy, shape)
 	}
 
-	for i := 0; i < prefixLen; i++ {
+	// A deploy frame leads what remains.
+	deployIndex := indices[len(species)-len(shape)]
+
+	for n, i := range indices {
 		frame := tx.Frames[i]
 
 		if frame.IsAtomicBatch() {
 			return fmt.Errorf("%w: frame %d in the validation prefix is batched", ErrMempoolPolicy, i)
 		}
 
-		switch species[i] {
+		switch species[n] {
 		case SpeciesSelfVerify, SpeciesOnlyVerify:
 			if frame.Target != nil && *frame.Target != tx.Sender {
 				return fmt.Errorf("%w: frame %d must verify the sender", ErrMempoolPolicy, i)
@@ -468,45 +489,61 @@ func (tx *FrameTx) ValidateMempoolPrefix() error {
 		}
 	}
 
-	return tx.validatePrefixGas(prefixLen)
+	if err := tx.validatePrefixGas(prefixLen); err != nil {
+		return err
+	}
+
+	return tx.validateDependencyLimits()
 }
 
 // validateProtocolVerifierPlacement checks where the protocol-defined verifier frames
-// may sit for public mempool eligibility: an expiry frame only at index 0, a recent
-// root frame only directly after it or at index 0, and no more than one of each.
+// may sit for public mempool eligibility: an expiry frame only first, a recent root
+// frame only directly after it or first, and no more than one of each. Positions are
+// counted without the dependency frames, which the prefix grammar skips.
 func (tx *FrameTx) validateProtocolVerifierPlacement() error {
-	recentRootIndex := -1
+	position := 0
+	leadingExpiry := false
+	recentRootSeen := false
 
-	for i, frame := range tx.Frames {
-		if frame.IsExpiryVerifier() && i != 0 {
-			return fmt.Errorf("%w: expiry verifier frame must be the first frame", ErrMempoolPolicy)
-		}
-
-		if !frame.IsRecentRootVerifier() {
+	for _, frame := range tx.Frames {
+		if frame.IsDependency() {
 			continue
 		}
 
-		if recentRootIndex >= 0 {
-			return fmt.Errorf("%w: more than one recent root verifier frame", ErrMempoolPolicy)
+		if frame.IsExpiryVerifier() {
+			if position != 0 {
+				return fmt.Errorf("%w: expiry verifier frame must be the first frame", ErrMempoolPolicy)
+			}
+
+			leadingExpiry = true
 		}
 
-		recentRootIndex = i
+		if frame.IsRecentRootVerifier() {
+			if recentRootSeen {
+				return fmt.Errorf("%w: more than one recent root verifier frame", ErrMempoolPolicy)
+			}
 
-		allowed := 0
-		if tx.Frames[0].IsExpiryVerifier() {
-			allowed = 1
+			recentRootSeen = true
+
+			allowed := 0
+			if leadingExpiry {
+				allowed = 1
+			}
+
+			if position != allowed {
+				return fmt.Errorf("%w: recent root verifier frame must directly follow the expiry frame or lead the frame list", ErrMempoolPolicy)
+			}
 		}
 
-		if i != allowed {
-			return fmt.Errorf("%w: recent root verifier frame must directly follow the expiry frame or lead the frame list", ErrMempoolPolicy)
-		}
+		position++
 	}
 
 	return nil
 }
 
 // validatePrefixGas checks the verification gas caps over the validation prefix. Every
-// prefix frame counts, including EIP-8272's recent root verifier frame.
+// prefix frame that runs code counts, including EIP-8272's recent root verifier frame;
+// a dependency frame's budget is not verification work.
 func (tx *FrameTx) validatePrefixGas(prefixLen int) error {
 	sigGas, err := tx.SignatureVerificationGas()
 	if err != nil {
@@ -517,6 +554,10 @@ func (tx *FrameTx) validatePrefixGas(prefixLen int) error {
 	stateGas := uint64(0)
 
 	for i := 0; i < prefixLen; i++ {
+		if tx.Frames[i].IsDependency() {
+			continue
+		}
+
 		executionGas = saturatingAdd(executionGas, tx.Frames[i].Limits.Execution)
 		stateGas = saturatingAdd(stateGas, tx.Frames[i].Limits.State)
 	}

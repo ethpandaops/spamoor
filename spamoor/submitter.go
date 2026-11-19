@@ -26,6 +26,12 @@ type TxLogFn func(client *Client, retry int, rebroadcast int, err error)
 // It receives the transaction and should return the encoded bytes.
 type TxEncodeFn func(tx *txtypes.Transaction) ([]byte, error)
 
+// TxSubmitFn is a callback function called to hand a transaction to one client, in
+// place of the eth_sendRawTransaction call. It runs for the first submission and for
+// every rebroadcast, once per client the transaction is offered to. An error saying
+// the transaction is already known counts as accepted.
+type TxSubmitFn func(ctx context.Context, client *Client, tx *txtypes.Transaction) error
+
 // SendTransactionOptions contains options for transaction submission including
 // client selection, confirmation callbacks, rebroadcast settings, and logging.
 type SendTransactionOptions struct {
@@ -47,6 +53,7 @@ type SendTransactionOptions struct {
 	OnConfirm  TxConfirmFn  // Called only if tx was sent successfully and confirmed
 	OnComplete TxCompleteFn // Always called when processing completes
 	OnEncode   TxEncodeFn   // Called to encode tx to bytes on-demand
+	OnSubmit   TxSubmitFn   // Called to submit tx to a client (uses eth_sendRawTransaction if nil)
 	LogFn      TxLogFn      // Custom logging function (uses default if nil)
 
 	// go-ethereum-typed callbacks for library consumers. They are skipped for

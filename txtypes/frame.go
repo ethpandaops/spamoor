@@ -85,6 +85,10 @@ const (
 	// APPROVE exception, restricted to a trailing suffix of the frame list. Its
 	// failure reverts the whole execution body rather than one atomic batch.
 	FrameModeAssert FrameMode = 3
+
+	// FrameModeDepVerify is EIP-8288's dependency verification mode: the frame runs no
+	// code and its data declares dependencies the block's recursive STARK must prove.
+	FrameModeDepVerify FrameMode = 4
 )
 
 // FrameExtensions records which envelope extensions a frame transaction uses.
@@ -1136,6 +1140,7 @@ func (tx *FrameTx) IntrinsicGas() uint64 {
 	}
 
 	gas = saturatingAdd(gas, calldataCost(tx.extensionCalldata()))
+	gas = saturatingAdd(gas, tx.RecursiveStarkGas())
 
 	return saturatingAdd(gas, tx.keyedNonceAccessCost())
 }
@@ -1209,6 +1214,7 @@ func (tx *FrameTx) CalldataFloorGas() uint64 {
 
 	gas := saturatingAdd(uint64(FrameTxIntrinsicCost)+sigGas, saturatingMul(uint64(len(tx.Frames)), FrameTxPerFrameCost))
 	gas = saturatingAdd(gas, tx.keyedNonceAccessCost())
+	gas = saturatingAdd(gas, tx.RecursiveStarkGas())
 
 	for _, frame := range tx.Frames {
 		gas = saturatingAdd(gas, tx.valueCost(frame))
