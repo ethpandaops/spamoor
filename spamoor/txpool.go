@@ -1579,9 +1579,14 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 				},
 			}
 
+			// The transaction goes back out the way it was sent: one that was encoded or
+			// submitted through a callback cannot be rebroadcast without it.
 			if tx.Options != nil {
 				txOptions.LogFn = tx.Options.LogFn
 				txOptions.ClientGroup = tx.Options.ClientGroup
+				txOptions.OnSubmit = tx.Options.OnSubmit
+				txOptions.OnEncode = tx.Options.OnEncode
+				txOptions.OnGethEncode = tx.Options.OnGethEncode
 			}
 
 			err := pool.submitTransaction(ctx, tx.FromWallet, tx.Tx, txOptions, false)
