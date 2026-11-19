@@ -174,6 +174,7 @@ type TxPool struct {
 	tracker      txTracker
 	recoverySem  chan struct{}
 	rebroadcasts workQueue
+	lookups      workQueue
 
 	reorgCount       atomic.Uint64
 	reorgedTxCount   atomic.Uint64
@@ -707,6 +708,12 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 			toWallet = pool.lookupWallet(*toAddr)
 		}
 
+		// The wallet's nonce moves first: a transaction tracked from here on sees its
+		// nonce as used instead of joining a lane that was already retired.
+		if fromWallet != nil {
+			fromWallet.confirmTx(tx, txFees)
+		}
+
 		var tracked *trackedTx
 
 		tracked, completions = pool.processTransactionInclusion(blockNumber, txFrom, tx, receipt, completions)
@@ -741,7 +748,6 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		if fromWallet != nil {
 			confirmCount++
 			affectedWalletMap[txFrom] = true
-			fromWallet.confirmTx(tx, txFees)
 		}
 
 		if toWallet != nil {
@@ -1168,8 +1174,20 @@ func (pool *TxPool) trackTransaction(ctx context.Context, wallet *Wallet, tx *tx
 
 	pool.tracker.add(tracked, laned, pool.lastBlockNumber)
 
+	// The nonce may have been confirmed while the transaction was being added, after
+	// the lane was retired up to it. It would then wait on the lane for nothing.
+	if laned && tracked.keys == nil {
+		wallet.txNonceMutex.Lock()
+		laned = wallet.confirmedTxCount <= tracked.seq
+		wallet.txNonceMutex.Unlock()
+
+		if !laned {
+			pool.tracker.unlane(tracked)
+		}
+	}
+
 	stopCtx := context.AfterFunc(ctx, func() {
-		if pool.finishTx(tracked) {
+		if pool.finishTx(tracked, true) {
 			pool.notifyTx(tracked, nil, nil)
 		}
 	})
@@ -1285,13 +1303,13 @@ func (pool *TxPool) sendToClients(ctx context.Context, tx *txtypes.Transaction, 
 }
 
 // finishTx ends the tracking of a transaction. It reports false if the transaction
-// was already finished.
-func (pool *TxPool) finishTx(tracked *trackedTx) bool {
+// was already finished. keepNonce is for a cancelled transaction, see txTracker.remove.
+func (pool *TxPool) finishTx(tracked *trackedTx, keepNonce bool) bool {
 	if !tracked.done.CompareAndSwap(false, true) {
 		return false
 	}
 
-	pool.tracker.remove(tracked)
+	pool.tracker.remove(tracked, keepNonce)
 
 	// The finished transaction stays referenced for a reorg, its context hook is not
 	// needed anymore.
@@ -1328,16 +1346,24 @@ func (pool *TxPool) notifyTx(tracked *trackedTx, receipt *txtypes.Receipt, err e
 
 // completeTx finishes a transaction and runs its callbacks on their own goroutine.
 func (pool *TxPool) completeTx(tracked *trackedTx, receipt *txtypes.Receipt, err error) {
-	if pool.finishTx(tracked) {
+	if pool.finishTx(tracked, false) {
 		go pool.notifyTx(tracked, receipt, err)
 	}
 }
 
-// retireTxs finishes the transactions an included transaction retired from their lanes:
-// the included one is confirmed, the others were replaced by it.
-func (pool *TxPool) retireTxs(retired []*trackedTx, txHash common.Hash, receipt *txtypes.Receipt, completions []txCompletion) []txCompletion {
+// retireTxs finishes the transactions an included transaction retired from their lanes.
+// The included one is confirmed. One at the same sequence number was replaced by it.
+// One at a lower sequence number had its turn in a block that was not processed, so
+// only its receipt can tell whether it was included.
+func (pool *TxPool) retireTxs(retired []*trackedTx, txHash common.Hash, seq uint64, receipt *txtypes.Receipt, completions []txCompletion) []txCompletion {
 	for _, tracked := range retired {
-		if !pool.finishTx(tracked) {
+		if tracked.hash != txHash && tracked.seq != seq {
+			pool.resolveTx(tracked)
+
+			continue
+		}
+
+		if !pool.finishTx(tracked, false) {
 			continue
 		}
 
@@ -1350,6 +1376,22 @@ func (pool *TxPool) retireTxs(retired []*trackedTx, txHash common.Hash, receipt 
 	}
 
 	return completions
+}
+
+// resolveTx completes a transaction whose sequence number was passed without its
+// inclusion being seen, by its receipt: confirmed if it has one, replaced if not.
+func (pool *TxPool) resolveTx(tracked *trackedTx) {
+	if tracked.done.Load() {
+		return
+	}
+
+	pool.lookups.push(recoveryConcurrency, func() {
+		if tracked.done.Load() {
+			return
+		}
+
+		pool.completeTx(tracked, pool.loadTransactionReceipt(pool.options.Context, tracked.Tx), nil)
+	})
 }
 
 // processTransactionInclusion handles a transaction included in a block: it completes
@@ -1369,11 +1411,11 @@ func (pool *TxPool) processTransactionInclusion(blockNumber uint64, txFrom commo
 		sender.staleChecks = 0
 		sender.mu.Unlock()
 
-		completions = pool.retireTxs(retired, txHash, receipt, completions)
+		completions = pool.retireTxs(retired, txHash, seq, receipt, completions)
 	}
 
 	// Transactions outside the lanes are only known by their hash.
-	completions = pool.retireTxs(confirmed, txHash, receipt, completions)
+	completions = pool.retireTxs(confirmed, txHash, 0, receipt, completions)
 
 	if len(confirmed) == 0 {
 		return nil, completions
@@ -1414,7 +1456,7 @@ func (pool *TxPool) processAuthorizations(tx *txtypes.Transaction, completions [
 			retired := sender.retire(nil, auth.Nonce)
 			sender.mu.Unlock()
 
-			completions = pool.retireTxs(retired, common.Hash{}, nil, completions)
+			completions = pool.retireTxs(retired, common.Hash{}, auth.Nonce, nil, completions)
 		}
 	}
 
@@ -1490,9 +1532,11 @@ func (pool *TxPool) queueRebroadcast(tracked *trackedTx, fanout bool) {
 		return
 	}
 
+	tracked.sender.mu.Lock()
 	tracked.LastRebroadcast = time.Now()
 	tracked.RebroadcastCount++
 	retryCount := tracked.RebroadcastCount
+	tracked.sender.mu.Unlock()
 
 	pool.rebroadcastCount.Add(1)
 
@@ -1622,17 +1666,26 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 			break
 		}
 
-		if len(slot.txs) == 0 {
-			continue
+		// the most recent transaction still waiting; cancelled ones only hold the nonce
+		var mostRecentTx *trackedTx
+
+		for i := len(slot.txs) - 1; i >= 0 && mostRecentTx == nil; i-- {
+			if !slot.txs[i].done.Load() {
+				mostRecentTx = slot.txs[i]
+			}
 		}
 
-		mostRecentTx := slot.txs[len(slot.txs)-1]
+		if mostRecentTx == nil {
+			continue
+		}
 
 		// A transaction past its own deadline is dead rather than slow: it is
 		// replaced rather than rebroadcast, and regardless of whether the
 		// caller asked for rebroadcasts, because until its nonce is retired
 		// nothing else this wallet sends can confirm.
 		if isExpiredTx(mostRecentTx.Tx, chainTime) {
+			mostRecentTx.RebroadcastCount++
+			mostRecentTx.LastRebroadcast = time.Now()
 			expiredTxs = append(expiredTxs, mostRecentTx)
 
 			continue
@@ -1658,6 +1711,10 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 	// These confirmed in a block that was not processed. Whether as the tracked
 	// transaction or as a replacement of it, only the receipt can tell.
 	for _, tracked := range confirmedTxs {
+		if tracked.done.Load() {
+			continue
+		}
+
 		logrus.Debugf("recovering stale confirmed transaction for %v (nonce %v)", sender.address.String(), tracked.seq)
 		pool.completeTx(tracked, pool.loadTransactionReceipt(pool.options.Context, tracked.Tx), nil)
 	}
@@ -1666,9 +1723,6 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 	// attempt is counted like a rebroadcast, so a replacement a client refuses as
 	// underpriced is retried at a higher price rather than at the same one forever.
 	for _, expired := range expiredTxs {
-		expired.RebroadcastCount++
-		expired.LastRebroadcast = time.Now()
-
 		go pool.replaceExpiredTransaction(pool.options.Context, wallet, &expired.PendingTx, expired.RebroadcastCount)
 	}
 
@@ -1702,21 +1756,39 @@ func (pool *TxPool) recoverKeyedTx(sender *txSender, tracked *trackedTx) {
 
 	receipt := pool.loadTransactionReceipt(pool.options.Context, tracked.Tx)
 
-	if receipt != nil || pool.isKeyedLanePassed(sender.address, tracked) {
-		logrus.Debugf("recovering stale transaction for %v (hash %v)", sender.address.String(), tracked.hash.Hex())
+	if receipt != nil {
+		logrus.Debugf("recovering stale confirmed transaction for %v (hash %v)", sender.address.String(), tracked.hash.Hex())
 
 		sender.mu.Lock()
 		retired := sender.retire(tracked.keys, tracked.seq)
 		sender.mu.Unlock()
 
-		for _, completion := range pool.retireTxs(retired, tracked.hash, receipt, nil) {
+		for _, completion := range pool.retireTxs(retired, tracked.hash, tracked.seq, receipt, nil) {
 			go pool.notifyTx(completion.tx, completion.receipt, nil)
 		}
 
 		return
 	}
 
-	if !tracked.Options.Rebroadcast || time.Since(tracked.LastRebroadcast) < pool.calculateBackoffDelay(tracked.RebroadcastCount) {
+	if pool.isKeyedLanePassed(sender.address, tracked) {
+		// Something used the key up. Which of the transactions waiting on it that
+		// was, if any, is for their receipts to tell.
+		sender.mu.Lock()
+		retired := sender.retire(tracked.keys, tracked.seq)
+		sender.mu.Unlock()
+
+		for _, passed := range retired {
+			pool.resolveTx(passed)
+		}
+
+		return
+	}
+
+	sender.mu.Lock()
+	due := tracked.Options.Rebroadcast && time.Since(tracked.LastRebroadcast) >= pool.calculateBackoffDelay(tracked.RebroadcastCount)
+	sender.mu.Unlock()
+
+	if !due {
 		return
 	}
 
@@ -1754,11 +1826,16 @@ func (pool *TxPool) isKeyedLanePassed(address common.Address, tracked *trackedTx
 	return !current.IsUint64() || current.Uint64() > tracked.seq
 }
 
+// receiptLookupClients is the number of clients that have to report a transaction as
+// unknown before it is taken to have no receipt.
+const receiptLookupClients = 3
+
 // loadTransactionReceipt attempts to load a transaction receipt from multiple clients.
 // It retries up to 5 times with different clients and includes exponential backoff.
 // Returns nil if the receipt cannot be loaded after all retries.
 func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Transaction) *txtypes.Receipt {
 	retryCount := uint64(0)
+	notFoundCount := 0
 
 	for {
 		client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
@@ -1776,10 +1853,19 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Tran
 			return receipt
 		}
 
-		// A transaction the client does not know has no receipt; that is an answer,
-		// not a failure to retry.
-		if ctx.Err() != nil || errors.Is(err, ethereum.NotFound) {
+		if ctx.Err() != nil {
 			return nil
+		}
+
+		// A client that does not know the transaction may only be behind, so a few
+		// are asked. Their agreement is an answer, not a failure to wait on.
+		if errors.Is(err, ethereum.NotFound) {
+			notFoundCount++
+			if notFoundCount >= receiptLookupClients {
+				return nil
+			}
+
+			continue
 		}
 
 		if retryCount > 2 {
@@ -1959,7 +2045,22 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	// re-process the new parent blocks
 	slices.Reverse(newBlockParents)
 	for _, parentBlockInfo := range newBlockParents {
-		pool.processBlockTxs(ctx, client, parentBlockInfo.blockWithHash.Block.NumberU64(), parentBlockInfo.blockWithHash, nil)
+		parent := parentBlockInfo.blockWithHash
+
+		// Recorded as the block at its height, or the next block would be taken for
+		// another reorg.
+		pool.blocksMutex.Lock()
+		pool.blocks[parent.Block.NumberU64()] = &BlockInfo{
+			Number:     parent.Block.NumberU64(),
+			Hash:       parent.Hash,
+			ParentHash: parent.Block.ParentHash,
+			Timestamp:  parent.Block.Timestamp,
+			GasLimit:   parent.Block.GasLimit,
+			SlotNumber: parent.Block.SlotNumber,
+		}
+		pool.blocksMutex.Unlock()
+
+		pool.processBlockTxs(ctx, client, parent.Block.NumberU64(), parent, nil)
 	}
 
 	return nil

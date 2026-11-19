@@ -130,11 +130,11 @@ func TestTxTrackerAddRemove(t *testing.T) {
 
 	// middle first, then alternating ends
 	for i := len(tracked) / 2; i < len(tracked); i++ {
-		tracker.remove(tracked[i])
+		tracker.remove(tracked[i], false)
 	}
 
 	for i := len(tracked)/2 - 1; i >= 0; i-- {
-		tracker.remove(tracked[i])
+		tracker.remove(tracked[i], false)
 	}
 
 	if txs, senders := tracker.count(); txs != 0 || senders != 0 {
@@ -147,5 +147,33 @@ func TestTxTrackerAddRemove(t *testing.T) {
 
 	if _, ok := wallets[0].GetLowestPendingNonce(); ok {
 		t.Fatal("wallet still reports a pending nonce")
+	}
+}
+
+// A transaction taken off its lanes stays tracked by its hash only.
+func TestTxTrackerUnlane(t *testing.T) {
+	tracker := &txTracker{}
+	wallet := NewWallet(nil, common.HexToAddress("0x01"))
+
+	first := newTrackedTx(wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 3}), &SendTransactionOptions{})
+	second := newTrackedTx(wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 4}), &SendTransactionOptions{})
+	tracker.add(first, true, 0)
+	tracker.add(second, true, 0)
+
+	tracker.unlane(first)
+
+	if lowest, _ := wallet.GetLowestPendingNonce(); lowest != 4 {
+		t.Fatalf("unlaned transaction still holds nonce %d", lowest)
+	}
+
+	if len(tracker.byHash(first.hash)) != 1 {
+		t.Fatal("unlaned transaction is not tracked by hash")
+	}
+
+	tracker.remove(first, false)
+	tracker.remove(second, false)
+
+	if txs, senders := tracker.count(); txs != 0 || senders != 0 {
+		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
 	}
 }

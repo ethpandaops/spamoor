@@ -135,6 +135,7 @@
   let eventSource = null;
   let reloadTimer = null;
   let loading = false;
+  let reloadPending = false;
 
   /* ---- formatting ------------------------------------------------------- */
   function fmt(num) {
@@ -489,13 +490,15 @@
 
   /* ---- loading and interaction ----------------------------------------- */
   function render() {
+    if (!model) return;
     updateTiles();
     updateLegend();
     updateCharts();
   }
 
   async function load() {
-    if (loading) return;
+    /* a request made while one is in flight is repeated afterwards, so a changed window is not lost */
+    if (loading) { reloadPending = true; return; }
     loading = true;
 
     try {
@@ -516,6 +519,7 @@
       badge.textContent = 'Update failed: ' + error.message;
     } finally {
       loading = false;
+      if (reloadPending) { reloadPending = false; load(); }
     }
   }
 

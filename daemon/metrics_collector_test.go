@@ -134,12 +134,34 @@ func TestAddDataPointAggregatesByGranularity(t *testing.T) {
 	}
 }
 
-func TestCounterDelta(t *testing.T) {
-	last := map[uint64]uint64{}
+// A block that is processed again after a reorg replaces its earlier data point in the
+// per-block window instead of being added to it.
+func TestAddDataPointReplacesReprocessedBlock(t *testing.T) {
+	m := &MultiGranularityMetrics{blockGranularity: 1, windowDuration: time.Hour, maxDataPoints: 100}
 
-	for _, step := range []struct{ current, want uint64 }{{5, 5}, {12, 7}, {12, 0}, {3, 3}} {
-		if got := counterDelta(last, 1, step.current); got != step.want {
-			t.Fatalf("counter at %d: got delta %d, want %d", step.current, got, step.want)
-		}
+	add := func(block, gas uint64) {
+		m.addDataPoint(&BlockDataPoint{Timestamp: time.Now(), StartBlockNumber: block, EndBlockNumber: block, BlockCount: 1, TotalGasUsed: gas})
+	}
+
+	add(10, 100)
+	add(11, 200)
+	add(12, 300)
+	add(11, 50)
+
+	if len(m.dataPoints) != 2 || m.dataPoints[1].StartBlockNumber != 11 || m.dataPoints[1].TotalGasUsed != 50 {
+		t.Fatalf("unexpected data points after reprocessing: %+v", m.dataPoints)
+	}
+}
+
+func TestSpammerBlockDataMerge(t *testing.T) {
+	data := &SpammerBlockData{GasUsed: 10, ConfirmedTxCount: 1, PendingTxCount: 2, SubmittedTxDelta: 3, FailedTxCount: 1, DelayMedianMs: 1000, DelayP95Ms: 2000}
+	data.merge(&SpammerBlockData{GasUsed: 30, ConfirmedTxCount: 3, PendingTxCount: 5, SubmittedTxDelta: 4, FailedTxCount: 2, DelayMedianMs: 2000, DelayP95Ms: 1500})
+
+	if data.GasUsed != 40 || data.ConfirmedTxCount != 4 || data.PendingTxCount != 7 || data.SubmittedTxDelta != 7 || data.FailedTxCount != 3 {
+		t.Fatalf("counters not added: %+v", data)
+	}
+
+	if data.DelayMedianMs != 1750 || data.DelayP95Ms != 2000 {
+		t.Fatalf("unexpected delays: %+v", data)
 	}
 }

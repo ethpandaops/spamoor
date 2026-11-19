@@ -20,9 +20,8 @@ type TxPoolMetricsCollector struct {
 	longWindow  *MultiGranularityMetrics // 6h with per-32-block precision
 
 	// Cumulative counters seen at the previous block, to derive per-block values
-	lastSubmitted map[uint64]uint64
-	lastFailed    map[uint64]uint64
-	lastRecovery  spamoor.RecoveryStats
+	lastCounters map[*spamoor.WalletPool]poolCounters
+	lastRecovery spamoor.RecoveryStats
 
 	// Real-time update subscribers
 	subscribers      map[uint64]chan *MetricsUpdate
@@ -100,9 +99,8 @@ func NewTxPoolMetricsCollector(txPool *spamoor.TxPool) *TxPoolMetricsCollector {
 		subscribers: make(map[uint64]chan *MetricsUpdate),
 		logger:      logrus.WithField("component", "metrics_collector"),
 
-		lastSubmitted: make(map[uint64]uint64, 16),
-		lastFailed:    make(map[uint64]uint64, 16),
-		lastRecovery:  txPool.GetRecoveryStats(),
+		lastCounters: make(map[*spamoor.WalletPool]poolCounters, 16),
+		lastRecovery: txPool.GetRecoveryStats(),
 	}
 
 	// Subscribe to bulk block updates
@@ -161,17 +159,10 @@ func (mc *TxPoolMetricsCollector) handleBulkBlockUpdate(blockNumber uint64, glob
 	}
 }
 
-// counterDelta returns how far a cumulative counter moved since the previous block. A
-// counter that went backwards belongs to a restarted spammer and starts from zero.
-func counterDelta(last map[uint64]uint64, spammerID uint64, current uint64) uint64 {
-	previous := last[spammerID]
-	last[spammerID] = current
-
-	if current < previous {
-		return current
-	}
-
-	return current - previous
+// poolCounters are a wallet pool's cumulative counters as seen at a block.
+type poolCounters struct {
+	submitted uint64
+	failed    uint64
 }
 
 // buildBlockPoint derives the data point of a single block.
@@ -203,25 +194,40 @@ func (mc *TxPoolMetricsCollector) buildBlockPoint(
 	mc.lastRecovery = recovery
 
 	totalSpammerGas := uint64(0)
+	counters := make(map[*spamoor.WalletPool]poolCounters, len(allWalletPoolStats))
 
 	for walletPool, stats := range allWalletPoolStats {
 		spammerID := walletPool.GetSpammerID()
 		gasUsed := mc.calculateGasUsedFromReceipts(stats.Receipts)
-		submitted := walletPool.GetSubmittedTxCount()
 
-		point.SpammerGasData[spammerID] = &SpammerBlockData{
+		// The counters are per pool: a restarted spammer has a new pool that starts
+		// from zero, which may briefly live next to the old one.
+		current := poolCounters{submitted: walletPool.GetSubmittedTxCount(), failed: walletPool.GetFailedTxCount()}
+		previous := mc.lastCounters[walletPool]
+		counters[walletPool] = current
+
+		data := &SpammerBlockData{
 			GasUsed:          gasUsed,
 			ConfirmedTxCount: stats.ConfirmedTxCount,
 			PendingTxCount:   walletPool.GetPendingTxCount(),
-			SubmittedTxCount: submitted,
-			SubmittedTxDelta: counterDelta(mc.lastSubmitted, spammerID, submitted),
-			FailedTxCount:    counterDelta(mc.lastFailed, spammerID, walletPool.GetFailedTxCount()),
+			SubmittedTxCount: current.submitted,
+			SubmittedTxDelta: current.submitted - previous.submitted,
+			FailedTxCount:    current.failed - previous.failed,
 			DelayMedianMs:    uint64(stats.MedianInclusionDelay.Milliseconds()),
 			DelayP95Ms:       uint64(stats.P95InclusionDelay.Milliseconds()),
 		}
 
+		if existing := point.SpammerGasData[spammerID]; existing != nil {
+			existing.merge(data)
+		} else {
+			point.SpammerGasData[spammerID] = data
+		}
+
 		totalSpammerGas += gasUsed
 	}
+
+	// only the pools that are still there are remembered
+	mc.lastCounters = counters
 
 	if point.TotalGasUsed > totalSpammerGas {
 		point.OthersGasUsed = point.TotalGasUsed - totalSpammerGas
@@ -260,9 +266,33 @@ func (mgm *MultiGranularityMetrics) addBlock(block *BlockDataPoint) *BlockDataPo
 	return nil
 }
 
+// merge adds another set of values for the same period: counters add up, the median
+// delay is weighted by confirmed transactions.
+func (data *SpammerBlockData) merge(other *SpammerBlockData) {
+	if confirmed := data.ConfirmedTxCount + other.ConfirmedTxCount; confirmed > 0 {
+		data.DelayMedianMs = (data.DelayMedianMs*data.ConfirmedTxCount + other.DelayMedianMs*other.ConfirmedTxCount) / confirmed
+	}
+
+	data.DelayP95Ms = max(data.DelayP95Ms, other.DelayP95Ms)
+	data.GasUsed += other.GasUsed
+	data.ConfirmedTxCount += other.ConfirmedTxCount
+	data.PendingTxCount += other.PendingTxCount
+	data.SubmittedTxCount += other.SubmittedTxCount
+	data.SubmittedTxDelta += other.SubmittedTxDelta
+	data.FailedTxCount += other.FailedTxCount
+}
+
 // addDataPoint adds a block to the current data point, or starts a new one once the
 // current one covers blockGranularity blocks.
 func (mgm *MultiGranularityMetrics) addDataPoint(block *BlockDataPoint) *BlockDataPoint {
+	// A block processed again after a reorg replaces what the per-block window holds
+	// for its height and above. An aggregated point cannot give it back.
+	if mgm.blockGranularity == 1 {
+		for len(mgm.dataPoints) > 0 && mgm.dataPoints[len(mgm.dataPoints)-1].StartBlockNumber >= block.StartBlockNumber {
+			mgm.dataPoints = mgm.dataPoints[:len(mgm.dataPoints)-1]
+		}
+	}
+
 	if len(mgm.dataPoints) > 0 {
 		lastPoint := &mgm.dataPoints[len(mgm.dataPoints)-1]
 
@@ -289,18 +319,9 @@ func (mgm *MultiGranularityMetrics) addDataPoint(block *BlockDataPoint) *BlockDa
 					continue
 				}
 
-				// The delay of the aggregate is weighted by confirmed transactions.
-				if confirmed := existing.ConfirmedTxCount + data.ConfirmedTxCount; confirmed > 0 {
-					existing.DelayMedianMs = (existing.DelayMedianMs*existing.ConfirmedTxCount + data.DelayMedianMs*data.ConfirmedTxCount) / confirmed
-				}
-
-				existing.DelayP95Ms = max(existing.DelayP95Ms, data.DelayP95Ms)
-				existing.GasUsed += data.GasUsed
-				existing.ConfirmedTxCount += data.ConfirmedTxCount
+				existing.merge(data)
 				existing.PendingTxCount = data.PendingTxCount
 				existing.SubmittedTxCount = data.SubmittedTxCount
-				existing.SubmittedTxDelta += data.SubmittedTxDelta
-				existing.FailedTxCount += data.FailedTxCount
 			}
 
 			return lastPoint

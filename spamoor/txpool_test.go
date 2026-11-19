@@ -553,3 +553,106 @@ func TestWorkQueue(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// A transaction at a lower nonce than the included one had its turn in a block that was
+// not processed. It is not written off as replaced with the block: its receipt decides.
+func TestPassedNonceIsResolvedByReceipt(t *testing.T) {
+	ctx := context.Background()
+	pool := newTrackingTestPool(ctx)
+	wallet := NewWallet(nil, common.HexToAddress("0xa1"))
+
+	passed := trackTestTx(t, pool, ctx, wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 0}))
+	replaced := trackTestTx(t, pool, ctx, wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 1}))
+	included := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 1, Gas: 21000})
+	includedResult := trackTestTx(t, pool, ctx, wallet, included)
+
+	receipt := &txtypes.Receipt{TxHash: included.Hash()}
+	_, completions := pool.processTransactionInclusion(1, wallet.GetAddress(), included, receipt, nil)
+
+	if len(completions) != 2 {
+		t.Fatalf("expected the included and the replaced transaction to complete with the block, got %d", len(completions))
+	}
+
+	for _, completion := range completions {
+		if completion.tx.seq != 1 {
+			t.Fatalf("transaction at nonce %d completed with the block", completion.tx.seq)
+		}
+
+		go pool.notifyTx(completion.tx, completion.receipt, nil)
+	}
+
+	expectTxResult(t, "included", includedResult, receipt)
+	expectTxResult(t, "replaced", replaced, nil)
+
+	// no client knows a receipt for it here, so the lookup ends as not included
+	expectTxResult(t, "passed", passed, nil)
+
+	if txs, senders := pool.tracker.count(); txs != 0 || senders != 0 {
+		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
+	}
+}
+
+// A cancelled transaction may still be in a mempool, so its nonce stays taken on the
+// lane for as long as the sender has something else pending.
+func TestCancelledTxKeepsItsNonce(t *testing.T) {
+	pool := newTrackingTestPool(context.Background())
+	wallet := NewWallet(nil, common.HexToAddress("0xa1"))
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancelledTx := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 0})
+	cancelled := trackTestTx(t, pool, cancelCtx, wallet, cancelledTx)
+	keyedTx := txtypes.NewTx((&txtypes.FrameTx{Sender: wallet.GetAddress()}).WithNonceKeys([]*uint256.Int{uint256.NewInt(5)}, 0))
+	trackTestTx(t, pool, cancelCtx, wallet, keyedTx)
+
+	liveTx := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 1})
+	live := trackTestTx(t, pool, context.Background(), wallet, liveTx)
+
+	cancel()
+	expectTxResult(t, "cancelled", cancelled, nil)
+
+	if wallet.GetPendingTx(cancelledTx) == nil {
+		t.Fatal("cancelled transaction is not pending anymore")
+	}
+
+	if wallet.GetPendingTx(keyedTx) != nil {
+		t.Fatal("cancelled keyed transaction is still on its lane")
+	}
+
+	if lowest, ok := wallet.GetLowestPendingNonce(); !ok || lowest != 0 {
+		t.Fatalf("unexpected lowest pending nonce: %d %v", lowest, ok)
+	}
+
+	if txs, senders := pool.tracker.count(); txs != 1 || senders != 1 {
+		t.Fatalf("expected only the live transaction to be tracked, got %d of %d senders", txs, senders)
+	}
+
+	// its nonce being included releases the placeholder, and nothing completes twice
+	includeTestTx(pool, wallet.GetAddress(), cancelledTx)
+	expectTxPending(t, "cancelled", cancelled)
+
+	if wallet.GetPendingTx(cancelledTx) != nil {
+		t.Fatal("placeholder outlived its nonce")
+	}
+
+	// the sender goes with its last waiting transaction, placeholders included
+	replay := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 2})
+	replayCtx, cancelReplay := context.WithCancel(context.Background())
+	trackTestTx(t, pool, replayCtx, wallet, replay)
+	cancelReplay()
+
+	receipt := includeTestTx(pool, wallet.GetAddress(), liveTx)
+	expectTxResult(t, "live", live, receipt)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for wallet.GetPendingTx(replay) != nil {
+		if time.Now().After(deadline) {
+			t.Fatal("placeholder outlived its sender")
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+
+	if txs, senders := pool.tracker.count(); txs != 0 || senders != 0 {
+		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
+	}
+}

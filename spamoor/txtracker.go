@@ -314,6 +314,16 @@ func (tracker *txTracker) byHash(hash common.Hash) []*trackedTx {
 func (tracker *txTracker) add(t *trackedTx, lane bool, block uint64) {
 	address := t.wallet.GetAddress()
 
+	// The hash index comes first: once the lanes can retire the transaction, removing
+	// it has to find it there.
+	tracker.hashMutex.Lock()
+	if tracker.hashes == nil {
+		tracker.hashes = make(map[common.Hash][]*trackedTx, 1024)
+	}
+
+	tracker.hashes[t.hash] = append(tracker.hashes[t.hash], t)
+	tracker.hashMutex.Unlock()
+
 	for {
 		tracker.sendersMutex.Lock()
 		if tracker.senders == nil {
@@ -345,20 +355,28 @@ func (tracker *txTracker) add(t *trackedTx, lane bool, block uint64) {
 
 		t.wallet.sender.Store(sender)
 
-		break
+		return
 	}
+}
 
-	tracker.hashMutex.Lock()
-	if tracker.hashes == nil {
-		tracker.hashes = make(map[common.Hash][]*trackedTx, 1024)
+// unlane takes a transaction out of its sender's lanes, leaving it tracked by hash.
+func (tracker *txTracker) unlane(t *trackedTx) {
+	sender := t.sender
+
+	sender.mu.Lock()
+	if t.laned {
+		sender.lanes(t.keys, false, func(l *txLane) { l.remove(t.seq, t) })
+		t.laned = false
 	}
-
-	tracker.hashes[t.hash] = append(tracker.hashes[t.hash], t)
-	tracker.hashMutex.Unlock()
+	sender.mu.Unlock()
 }
 
 // remove stops tracking a transaction and drops its sender once nothing is left on it.
-func (tracker *txTracker) remove(t *trackedTx) {
+//
+// With keepNonce a transaction on the account nonce lane stays there as a placeholder:
+// it was cancelled, not rejected, so it may still be in a mempool and its nonce is not
+// free. The placeholder goes when its nonce is passed or with its sender.
+func (tracker *txTracker) remove(t *trackedTx, keepNonce bool) {
 	tracker.hashMutex.Lock()
 	txs := tracker.hashes[t.hash]
 
@@ -383,7 +401,7 @@ func (tracker *txTracker) remove(t *trackedTx) {
 	}
 
 	sender.mu.Lock()
-	if t.laned {
+	if t.laned && !(keepNonce && t.keys == nil) {
 		sender.lanes(t.keys, false, func(l *txLane) { l.remove(t.seq, t) })
 	}
 
@@ -399,6 +417,8 @@ func (tracker *txTracker) remove(t *trackedTx) {
 	sender.mu.Lock()
 	if sender.pending == 0 && !sender.removed {
 		sender.removed = true
+		sender.account = txLane{}
+		sender.keyed = nil
 		delete(tracker.senders, sender.address)
 	}
 	sender.mu.Unlock()
