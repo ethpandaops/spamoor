@@ -160,7 +160,7 @@ func (mc *TxPoolMetricsCollector) processBlockForWindow(
 	for walletPool, stats := range allWalletPoolStats {
 		spammerID := walletPool.GetSpammerID()
 		gasUsed := mc.calculateGasUsedFromReceipts(stats.Receipts)
-		pendingCount, submittedCount := mc.getWalletPoolTxCounts(walletPool)
+		pendingCount, submittedCount := walletPool.GetPendingTxCount(), walletPool.GetSubmittedTxCount()
 
 		spammerGasData[spammerID] = &SpammerBlockData{
 			GasUsed:          gasUsed,
@@ -308,32 +308,6 @@ func (mc *TxPoolMetricsCollector) calculateGasUsedFromReceipts(receipts []*txtyp
 		}
 	}
 	return totalGas
-}
-
-// getWalletPoolTxCounts efficiently gets both pending and submitted transaction counts for a spammer
-// by iterating through wallets only once
-func (mc *TxPoolMetricsCollector) getWalletPoolTxCounts(walletPool *spamoor.WalletPool) (pendingCount, submittedCount uint64) {
-	if walletPool == nil {
-		return 0, 0
-	}
-
-	allWallets := walletPool.GetAllWallets()
-	totalPending := uint64(0)
-	totalSubmitted := uint64(0)
-
-	for _, wallet := range allWallets {
-		// Get pending count
-		pendingNonce := wallet.GetNonce()
-		confirmedNonce := wallet.GetConfirmedNonce()
-		if pendingNonce > confirmedNonce {
-			totalPending += pendingNonce - confirmedNonce
-		}
-
-		// Get submitted count
-		totalSubmitted += wallet.GetSubmittedTxCount()
-	}
-
-	return totalPending, totalSubmitted
 }
 
 // GetShortWindowMetrics returns the 30-minute per-block metrics

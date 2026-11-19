@@ -42,6 +42,7 @@ func init() {
 		"SelectWalletRoundRobin":       reflect.ValueOf(&spamoor.SelectWalletRoundRobin).Elem(),
 		"WithClientGroup":              reflect.ValueOf(spamoor.WithClientGroup),
 		"WithClientSelectionMode":      reflect.ValueOf(spamoor.WithClientSelectionMode),
+		"WithWalletPoolScope":          reflect.ValueOf(spamoor.WithWalletPoolScope),
 		"WithoutBuilder":               reflect.ValueOf(spamoor.WithoutBuilder),
 		"WithoutClientType":            reflect.ValueOf(spamoor.WithoutClientType),
 

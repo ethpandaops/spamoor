@@ -225,6 +225,7 @@ func main() {
 	rootWallet.InitTxBatcher(ctx, txpool)
 
 	// init wallet pool
+	ctx = spamoor.WithWalletPoolScope(ctx)
 	walletPool := spamoor.NewWalletPool(ctx, logger.WithField("module", "walletpool"), rootWallet, clientPool, txpool)
 	walletPool.SetWalletCount(100)
 

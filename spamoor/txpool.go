@@ -1,8 +1,8 @@
 package spamoor
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -13,7 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/holiman/uint256"
 	"github.com/sirupsen/logrus"
 
 	"github.com/ethpandaops/spamoor/txtypes"
@@ -57,6 +59,10 @@ type TxInfo struct {
 	FromWallet *Wallet
 	ToWallet   *Wallet
 	Options    *SendTransactionOptions
+
+	receipt    *txtypes.Receipt
+	walletPool *WalletPool
+	tracked    *trackedTx
 }
 
 // BlockStatsCallback is called when a block is processed with statistics for a specific wallet pool
@@ -151,6 +157,15 @@ type TxPool struct {
 	hashWatchersMutex sync.Mutex
 	hashWatchers      map[common.Hash]func(*txtypes.Transaction, *txtypes.Receipt)
 	hashWatcherCount  atomic.Int64
+
+	// Pending transaction tracking, see txtracker.go.
+	tracker      txTracker
+	recoverySem  chan struct{}
+	rebroadcasts workQueue
+
+	// Block that failed to process and the attempts made at it, see retryBlock.
+	retryBlockNumber uint64
+	retryBlockCount  int
 }
 
 type txPoolWalletRegistration struct {
@@ -197,6 +212,7 @@ func NewTxPool(options *TxPoolOptions) *TxPool {
 		wallets:              make(map[common.Address]*txPoolWalletRegistration),
 		walletPools:          make(map[*WalletPool]struct{}),
 		processStaleChan:     make(chan uint64, 1),
+		recoverySem:          make(chan struct{}, recoveryConcurrency),
 		blocks:               map[uint64]*BlockInfo{},
 		confirmedTxs:         map[uint64][]*TxInfo{},
 		reorgDepth:           10, // Default value
@@ -410,7 +426,11 @@ func (pool *TxPool) runTxPoolLoop() {
 				}
 
 				if !processedBlock {
-					logrus.Errorf("failed to process block %v", blockNumber)
+					if !pool.retryBlock(blockNumber) {
+						break
+					}
+
+					highestBlockNumber = blockNumber
 				}
 			}
 
@@ -472,7 +492,11 @@ func (pool *TxPool) runExternalBlockSourceLoop() {
 					}
 
 					if !processedBlock {
-						logrus.Errorf("failed to process block %v", blockNumber)
+						if !pool.retryBlock(blockNumber) {
+							break
+						}
+
+						highestBlockNumber = blockNumber
 					}
 				}
 
@@ -500,23 +524,49 @@ func (pool *TxPool) processStaleTransactionsLoop() {
 		case <-pool.options.Context.Done():
 			return
 		case blockNumber := <-pool.processStaleChan:
-			for _, wallet := range pool.getWalletMap() {
-				pool.processStaleConfirmations(blockNumber, wallet)
-			}
+			pool.processStaleSenders(blockNumber)
 		}
 	}
 }
 
-// getWalletMap collects all registered wallets into a single map.
-func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
+// maxBlockRetries is how often a block no client could serve is tried again before it
+// is skipped.
+const maxBlockRetries = 5
+
+// retryBlock counts a failed attempt to process a block and reports whether to give up
+// on it. Until then the block loop stops at it and tries again on its next round, so no
+// confirmation is missed. A skipped block may have held some, so every sender with
+// pending transactions gets its on-chain state checked.
+func (pool *TxPool) retryBlock(blockNumber uint64) bool {
+	if pool.retryBlockNumber != blockNumber {
+		pool.retryBlockNumber = blockNumber
+		pool.retryBlockCount = 0
+	}
+
+	pool.retryBlockCount++
+
+	if pool.retryBlockCount <= maxBlockRetries {
+		logrus.Warnf("failed to process block %v, retrying (%v/%v)", blockNumber, pool.retryBlockCount, maxBlockRetries)
+
+		return false
+	}
+
+	logrus.Errorf("failed to process block %v, skipping it", blockNumber)
+	pool.markSendersSuspect()
+
+	return true
+}
+
+// lookupWallet returns the registered wallet of an address, or nil.
+func (pool *TxPool) lookupWallet(address common.Address) *Wallet {
 	pool.walletsMutex.RLock()
 	defer pool.walletsMutex.RUnlock()
 
-	walletMap := make(map[common.Address]*Wallet)
-	for _, registration := range pool.wallets {
-		walletMap[registration.wallet.address] = registration.wallet
+	if registration := pool.wallets[address]; registration != nil {
+		return registration.wallet
 	}
-	return walletMap
+
+	return nil
 }
 
 // processBlock processes a single block for transaction confirmations and reorg detection.
@@ -526,8 +576,11 @@ func (pool *TxPool) getWalletMap() map[common.Address]*Wallet {
 func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, receipts []*txtypes.Receipt) error {
 	pool.lastBlockNumber = blockNumber
 
-	walletMap := pool.getWalletMap()
-	if len(walletMap) == 0 {
+	pool.walletsMutex.RLock()
+	walletCount := len(pool.wallets)
+	pool.walletsMutex.RUnlock()
+
+	if walletCount == 0 {
 		return nil
 	}
 
@@ -548,7 +601,7 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 			blockNumber, lastBlock.Hash.Hex(), blockWithHash.Block.ParentHash.Hex())
 
 		// Handle reorg
-		pool.handleReorg(ctx, client, blockNumber, blockWithHash, walletMap)
+		pool.handleReorg(ctx, client, blockNumber, blockWithHash)
 	}
 
 	// Store block info
@@ -584,14 +637,14 @@ func (pool *TxPool) processBlock(ctx context.Context, client *Client, blockNumbe
 	}
 	pool.blocksMutex.Unlock()
 
-	return pool.processBlockTxs(ctx, client, blockNumber, blockWithHash, walletMap, receipts)
+	return pool.processBlockTxs(ctx, client, blockNumber, blockWithHash, receipts)
 }
 
 // processBlockTxs processes all transactions in a block for confirmation tracking.
 // It loads block receipts, decodes transaction senders, updates wallet states for
 // confirmed transactions, and tracks transaction information for reorg recovery.
 // Also handles cleanup of old confirmed transaction data.
-func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, walletMap map[common.Address]*Wallet, receipts []*txtypes.Receipt) error {
+func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNumber uint64, blockWithHash *BlockWithHash, receipts []*txtypes.Receipt) error {
 	t1 := time.Now()
 	txCount := len(blockWithHash.Block.Transactions)
 	if receipts == nil {
@@ -611,6 +664,8 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 	pool.confirmedTxs[blockNumber] = []*TxInfo{}
 	pool.txsMutex.Unlock()
 
+	var completions []txCompletion
+
 	for idx, tx := range blockWithHash.Block.Transactions {
 		receipt := receipts[idx]
 		if receipt == nil {
@@ -628,16 +683,19 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 		pool.fireHashWatcher(txHash, tx, receipt)
 
 		txFees := utils.GetTransactionFees(tx, receipt)
-		fromWallet := walletMap[txFrom]
+		fromWallet := pool.lookupWallet(txFrom)
 		toAddr := tx.To()
 		toWallet := (*Wallet)(nil)
 		if toAddr != nil {
-			toWallet = walletMap[*toAddr]
+			toWallet = pool.lookupWallet(*toAddr)
 		}
 
-		if fromWallet != nil || toWallet != nil {
-			pool.txsMutex.Lock()
-			pool.confirmedTxs[blockNumber] = append(pool.confirmedTxs[blockNumber], &TxInfo{
+		var tracked *trackedTx
+
+		tracked, completions = pool.processTransactionInclusion(blockNumber, txFrom, tx, receipt, completions)
+
+		if fromWallet != nil || toWallet != nil || tracked != nil {
+			txInfo := &TxInfo{
 				TxHash:     txHash,
 				From:       txFrom,
 				To:         tx.To(),
@@ -645,19 +703,33 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 				TxFees:     txFees,
 				FromWallet: fromWallet,
 				ToWallet:   toWallet,
-			})
+				receipt:    receipt,
+				tracked:    tracked,
+			}
+
+			if tracked != nil {
+				txInfo.Options = tracked.Options
+				txInfo.walletPool = tracked.walletPool
+			} else if fromWallet != nil {
+				txInfo.walletPool = fromWallet.getOwnerPool()
+			}
+
+			pool.txsMutex.Lock()
+			pool.confirmedTxs[blockNumber] = append(pool.confirmedTxs[blockNumber], txInfo)
 			pool.txsMutex.Unlock()
 		}
 
 		if fromWallet != nil {
 			confirmCount++
 			affectedWalletMap[txFrom] = true
-			pool.processTransactionInclusion(blockNumber, fromWallet, tx, receipt, txFees)
+			fromWallet.confirmTx(tx, txFees)
 		}
 
 		if toWallet != nil {
 			toWallet.AddBalance(tx.Value())
 		}
+
+		completions = pool.processAuthorizations(tx, completions)
 	}
 
 	// Clean up old confirmed transactions
@@ -676,6 +748,18 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 
 	// Notify block subscribers with wallet-specific stats
 	pool.notifyBlockSubscribers(blockNumber, blockWithHash.Block, receipts)
+
+	// The receipts were only kept for the statistics.
+	pool.txsMutex.RLock()
+	for _, txInfo := range pool.confirmedTxs[blockNumber] {
+		txInfo.receipt = nil
+	}
+	pool.txsMutex.RUnlock()
+
+	// Transaction callbacks run last, so they see the block fully processed.
+	for _, completion := range completions {
+		go pool.notifyTx(completion.tx, completion.receipt, nil)
+	}
 
 	return nil
 }
@@ -861,15 +945,10 @@ func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, block *txtypes.Bl
 	blockConfirmedTxs := pool.confirmedTxs[blockNumber]
 	pool.txsMutex.RUnlock()
 
-	confirmedTxMap := make(map[common.Hash]*TxInfo)
-	for _, txInfo := range blockConfirmedTxs {
-		confirmedTxMap[txInfo.TxHash] = txInfo
-	}
-
 	// If we have bulk subscribers, calculate stats for all wallet pools once
 	var globalBlockStats *GlobalBlockStats
 	if len(bulkSubscriptions) > 0 {
-		globalBlockStats = pool.calculateAllWalletPoolStats(confirmedTxMap, block, receipts)
+		globalBlockStats = pool.calculateAllWalletPoolStats(blockConfirmedTxs, block, receipts)
 
 		// Notify bulk subscribers
 		for _, bulkSubscription := range bulkSubscriptions {
@@ -883,51 +962,25 @@ func (pool *TxPool) notifyBlockSubscribers(blockNumber uint64, block *txtypes.Bl
 		if globalBlockStats != nil {
 			// Reuse already calculated stats
 			stats = globalBlockStats.WalletPoolStats[subscription.WalletPool]
-		} else {
+		}
+
+		if stats == nil {
 			// Calculate stats individually
-			stats = pool.calculateWalletPoolStats(subscription.WalletPool, confirmedTxMap, block, receipts)
+			stats = pool.calculateWalletPoolStats(subscription.WalletPool, blockConfirmedTxs, block)
 		}
 		subscription.Callback(blockNumber, stats)
 	}
 }
 
 // calculateWalletPoolStats calculates transaction statistics for a specific wallet pool.
-func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTxMap map[common.Hash]*TxInfo, block *txtypes.Block, receipts []*txtypes.Receipt) *WalletPoolBlockStats {
-	stats := &WalletPoolBlockStats{
-		TotalTxFees:  big.NewInt(0),
-		Block:        block,
-		Receipts:     make([]*txtypes.Receipt, 0, len(confirmedTxMap)),
-		ConfirmedTxs: make([]*TxInfo, 0, len(confirmedTxMap)),
-	}
+func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTxs []*TxInfo, block *txtypes.Block) *WalletPoolBlockStats {
+	stats := newWalletPoolBlockStats(block, len(confirmedTxs))
+	affectedWallets := make(map[common.Address]struct{}, len(confirmedTxs))
 
-	affectedWallets := make(map[common.Address]bool)
-	allWallets := walletPool.GetAllWallets()
-	walletSet := make(map[common.Address]bool)
-
-	for _, wallet := range allWallets {
-		if wallet == nil {
-			continue
-		}
-
-		walletSet[wallet.GetAddress()] = true
-	}
-
-	for idx, tx := range block.Transactions {
-		txInfo, ok := confirmedTxMap[tx.Hash()]
-		if !ok {
-			continue
-		}
-
-		if txInfo.FromWallet != nil && walletSet[txInfo.FromWallet.GetAddress()] {
-			stats.ConfirmedTxCount++
-			if txInfo.TxFees != nil {
-				totalFee := new(big.Int).Add(&txInfo.TxFees.FeeAmount, &txInfo.TxFees.BlobFeeAmount)
-				stats.TotalTxFees.Add(stats.TotalTxFees, totalFee)
-			}
-			affectedWallets[txInfo.FromWallet.GetAddress()] = true
-
-			stats.Receipts = append(stats.Receipts, receipts[idx])
-			stats.ConfirmedTxs = append(stats.ConfirmedTxs, txInfo)
+	for _, txInfo := range confirmedTxs {
+		if txInfo.walletPool == walletPool {
+			stats.addTx(txInfo)
+			affectedWallets[txInfo.From] = struct{}{}
 		}
 	}
 
@@ -936,71 +989,31 @@ func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTx
 	return stats
 }
 
-// calculateAllWalletPoolStats efficiently calculates statistics for ALL active wallet pools in a single pass.
-// This avoids recalculating the same data multiple times for bulk subscribers.
-func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxMap map[common.Hash]*TxInfo, block *txtypes.Block, receipts []*txtypes.Receipt) *GlobalBlockStats {
-	// Get all active wallet pools
+// calculateAllWalletPoolStats calculates statistics for ALL active wallet pools in a single pass.
+func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxs []*TxInfo, block *txtypes.Block, receipts []*txtypes.Receipt) *GlobalBlockStats {
 	activeWalletPools := pool.GetActiveWalletPools()
-
-	// Initialize result map
 	allStats := make(map[*WalletPool]*WalletPoolBlockStats, len(activeWalletPools))
+	affectedWallets := make(map[*WalletPool]map[common.Address]struct{}, len(activeWalletPools))
 
-	// Create wallet address to wallet pool mapping for efficient lookup
-	walletToPool := make(map[common.Address]*WalletPool)
 	for _, walletPool := range activeWalletPools {
-		allWallets := walletPool.GetAllWallets()
-		for _, wallet := range allWallets {
-			if wallet == nil {
-				continue
-			}
-
-			walletToPool[wallet.GetAddress()] = walletPool
-		}
-
-		// Initialize stats for each wallet pool
-		allStats[walletPool] = &WalletPoolBlockStats{
-			TotalTxFees:  big.NewInt(0),
-			Block:        block,
-			Receipts:     make([]*txtypes.Receipt, 0, len(confirmedTxMap)),
-			ConfirmedTxs: make([]*TxInfo, 0, len(confirmedTxMap)),
-		}
+		allStats[walletPool] = newWalletPoolBlockStats(block, 0)
 	}
 
-	// Track affected wallets per pool
-	affectedWallets := make(map[*WalletPool]map[common.Address]bool)
-	for _, walletPool := range activeWalletPools {
-		affectedWallets[walletPool] = make(map[common.Address]bool)
-	}
-
-	// Single pass through confirmed transactions
-	for idx, tx := range block.Transactions {
-		txInfo, ok := confirmedTxMap[tx.Hash()]
-		if !ok {
+	for _, txInfo := range confirmedTxs {
+		stats := allStats[txInfo.walletPool]
+		if stats == nil {
 			continue
 		}
 
-		if txInfo.FromWallet != nil {
-			walletAddr := txInfo.FromWallet.GetAddress()
-			if walletPool, exists := walletToPool[walletAddr]; exists {
-				stats := allStats[walletPool]
+		stats.addTx(txInfo)
 
-				// Update transaction count
-				stats.ConfirmedTxCount++
-
-				// Update total fees
-				if txInfo.TxFees != nil {
-					totalFee := new(big.Int).Add(&txInfo.TxFees.FeeAmount, &txInfo.TxFees.BlobFeeAmount)
-					stats.TotalTxFees.Add(stats.TotalTxFees, totalFee)
-				}
-
-				affectedWallets[walletPool][walletAddr] = true
-				stats.Receipts = append(stats.Receipts, receipts[idx])
-				stats.ConfirmedTxs = append(stats.ConfirmedTxs, txInfo)
-			}
+		if affectedWallets[txInfo.walletPool] == nil {
+			affectedWallets[txInfo.walletPool] = make(map[common.Address]struct{}, 16)
 		}
+
+		affectedWallets[txInfo.walletPool][txInfo.From] = struct{}{}
 	}
 
-	// Set affected wallet counts
 	for walletPool, stats := range allStats {
 		stats.AffectedWallets = len(affectedWallets[walletPool])
 	}
@@ -1012,84 +1025,131 @@ func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxMap map[common.Hash]*
 	}
 }
 
+func newWalletPoolBlockStats(block *txtypes.Block, capacity int) *WalletPoolBlockStats {
+	return &WalletPoolBlockStats{
+		TotalTxFees:  big.NewInt(0),
+		Block:        block,
+		Receipts:     make([]*txtypes.Receipt, 0, capacity),
+		ConfirmedTxs: make([]*TxInfo, 0, capacity),
+	}
+}
+
+// addTx counts a transaction the pool sent.
+func (stats *WalletPoolBlockStats) addTx(txInfo *TxInfo) {
+	stats.ConfirmedTxCount++
+
+	if txInfo.TxFees != nil {
+		totalFee := new(big.Int).Add(&txInfo.TxFees.FeeAmount, &txInfo.TxFees.BlobFeeAmount)
+		stats.TotalTxFees.Add(stats.TotalTxFees, totalFee)
+	}
+
+	stats.Receipts = append(stats.Receipts, txInfo.receipt)
+	stats.ConfirmedTxs = append(stats.ConfirmedTxs, txInfo)
+}
+
+// recoveryConcurrency bounds the stale sender checks running at once, and separately
+// the rebroadcasts (including resubmissions after a reorg). It keeps a large backlog
+// from flooding the clients.
+const recoveryConcurrency = 8
+
+// maxRebroadcastNonces is the number of lowest pending nonces of a sender considered
+// for rebroadcasting.
+const maxRebroadcastNonces = 2
+
+// txCompletion is a transaction that completed while a block was processed.
+type txCompletion struct {
+	tx      *trackedTx
+	receipt *txtypes.Receipt
+}
+
 // submitTransaction handles the core transaction submission logic.
-// It starts a confirmation tracking goroutine, submits the transaction to clients,
-// and optionally sets up automatic rebroadcasting. The submitNow parameter controls
-// whether to immediately submit or just set up confirmation tracking.
+// It tracks the transaction until it completes and submits it to clients. The submitNow
+// parameter controls whether to immediately submit or just set up confirmation tracking.
 func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction, options *SendTransactionOptions, submitNow bool) error {
+	_, err := pool.trackTransaction(ctx, wallet, tx, options, submitNow, nil)
+
+	return err
+}
+
+// trackTransaction is submitTransaction with the wallet pool the transaction is
+// attributed to. A nil walletPool derives it from the context and the wallet.
+func (pool *TxPool) trackTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction, options *SendTransactionOptions, submitNow bool, walletPool *WalletPool) (*trackedTx, error) {
+	if options == nil {
+		options = &SendTransactionOptions{}
+	}
+
 	if ctx.Err() != nil {
 		// OnComplete is documented as always being called once processing ends.
 		// Callers such as WalletPool.ReclaimFunds release a WaitGroup from it and
 		// would hang forever if a pre-cancelled context skipped the callback.
 		options.invokeComplete(tx, nil, ctx.Err())
 
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 
-	confirmCtx, confirmCancel := context.WithCancel(ctx)
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
+	if walletPool == nil {
+		walletPool = attributeTx(ctx, wallet)
+	}
 
-	submissionComplete := make(chan error, 1)
+	tracked := newTrackedTx(wallet, tx, options)
+	tracked.walletPool = walletPool
 
-	go func() {
-		var receipt *txtypes.Receipt
+	if walletPool != nil {
+		walletPool.pendingTxCount.Add(1)
+	}
 
-		var err error
+	// A transaction whose account nonce is already used cannot be confirmed through
+	// its lane anymore; its receipt is looked up instead.
+	laned := true
+	if tracked.keys == nil {
+		wallet.txNonceMutex.Lock()
+		laned = wallet.confirmedTxCount <= tracked.seq
+		wallet.txNonceMutex.Unlock()
+	}
 
-		defer confirmCancel()
+	pool.tracker.add(tracked, laned, pool.lastBlockNumber)
 
-		defer func() {
-			submissionError := <-submissionComplete
-			if submissionError != nil {
-				err = submissionError
-				// special case: since we never sucessfully submitted the tx, we need to drop it from the pending txs as it is not known to the network
-				wallet.dropPendingTx(tx)
-			} else if receipt != nil {
-				options.invokeConfirm(tx, receipt)
+	stopCtx := context.AfterFunc(ctx, func() {
+		if pool.finishTx(tracked) {
+			pool.notifyTx(tracked, nil, nil)
+		}
+	})
+	tracked.stopCtx.Store(&stopCtx)
+
+	if tracked.done.Load() {
+		tracked.stopCtx.Store(nil)
+		stopCtx()
+	}
+
+	if submitNow {
+		submitted, err := pool.sendToClients(ctx, tx, options)
+		if err != nil {
+			pool.completeTx(tracked, nil, err)
+
+			return nil, err
+		}
+
+		if submitted {
+			wallet.IncrementSubmittedTxCount()
+
+			if walletPool != nil {
+				walletPool.submittedTxCount.Add(1)
 			}
+		}
+	}
 
-			options.invokeComplete(tx, receipt, err)
-
-			// Track transaction result for metrics
-			walletPools := pool.GetActiveWalletPools()
-			for _, walletPool := range walletPools {
-				if tracker := walletPool.GetTransactionTracker(); tracker != nil {
-					// Check if this wallet belongs to this pool
-					allWallets := walletPool.GetAllWallets()
-					for _, poolWallet := range allWallets {
-						if poolWallet == nil {
-							continue
-						}
-
-						if poolWallet.GetAddress() == wallet.GetAddress() {
-							tracker(err)
-							break
-						}
-					}
-				}
-			}
+	if !laned {
+		go func() {
+			pool.completeTx(tracked, pool.loadTransactionReceipt(ctx, tx), nil)
 		}()
+	}
 
-		receipt, err = pool.awaitTransaction(confirmCtx, wallet, tx, options, wg)
-		if confirmCtx.Err() != nil {
-			err = nil
-		}
+	return tracked, nil
+}
 
-		if receipt != nil {
-			pool.txsMutex.Lock()
-			for _, tx := range pool.confirmedTxs[receipt.BlockNumber.Uint64()] {
-				if tx.TxHash == receipt.TxHash {
-					tx.Options = options
-					break
-				}
-			}
-			pool.txsMutex.Unlock()
-		}
-	}()
-
-	wg.Wait()
-
+// sendToClients submits a transaction to the clients the options select, until
+// SubmitCount of them accepted it. It reports whether any did, and fails if all refused.
+func (pool *TxPool) sendToClients(ctx context.Context, tx *txtypes.Transaction, options *SendTransactionOptions) (bool, error) {
 	var submitErr error
 
 	submitTx := func(client *Client) error {
@@ -1107,175 +1167,357 @@ func (pool *TxPool) submitTransaction(ctx context.Context, wallet *Wallet, tx *t
 		return client.SendTransaction(ctx, tx)
 	}
 
-	if submitNow {
-		submitCount := options.SubmitCount
-		if submitCount == 0 {
-			submitCount = 3
-		}
+	submitCount := options.SubmitCount
+	if submitCount == 0 {
+		submitCount = 3
+	}
 
-		// Derive start offset for redundant client selection.
-		// When ClientsStartOffset is 0 (the default, never explicitly set by any scenario),
-		// use the tx hash to distribute redundant submissions uniformly across all clients
-		// instead of always targeting clients at index 1 and 2.
-		startOffset := options.ClientsStartOffset
-		if startOffset == 0 && tx != nil {
-			h := tx.Hash()
-			startOffset = int(h[0]) | (int(h[1]) << 8)
-		}
+	// Derive start offset for redundant client selection.
+	// When ClientsStartOffset is 0 (the default, never explicitly set by any scenario),
+	// use the tx hash to distribute redundant submissions uniformly across all clients
+	// instead of always targeting clients at index 1 and 2.
+	startOffset := options.ClientsStartOffset
+	if startOffset == 0 && tx != nil {
+		h := tx.Hash()
+		startOffset = int(h[0]) | (int(h[1]) << 8)
+	}
 
-		success := false
-		clientCount := len(pool.options.ClientPool.GetAllGoodClients())
-		for i := 0; i < clientCount; i++ {
-			client := options.Client
-			if client == nil || i > 0 {
-				if len(options.ClientList) > 0 {
-					client = options.ClientList[(i+startOffset)%len(options.ClientList)]
-				} else {
-					var clientOpts []ClientSelectionOption
-					if options.ClientGroup != "" {
-						clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
-					}
-					clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, i+startOffset))
-					client = pool.options.ClientPool.GetClient(clientOpts...)
+	success := false
+	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
+	for i := 0; i < clientCount; i++ {
+		client := options.Client
+		if client == nil || i > 0 {
+			if len(options.ClientList) > 0 {
+				client = options.ClientList[(i+startOffset)%len(options.ClientList)]
+			} else {
+				var clientOpts []ClientSelectionOption
+				if options.ClientGroup != "" {
+					clientOpts = append(clientOpts, WithClientGroup(options.ClientGroup))
 				}
-			}
-			if client == nil {
-				continue
-			}
-
-			err := submitTx(client)
-
-			if options.LogFn != nil {
-				options.LogFn(client, i, 0, err)
-			}
-			if err == nil || (strings.Contains(err.Error(), "already known") || strings.Contains(err.Error(), "Known transaction")) {
-				success = true
-				submitCount--
-				if submitCount == 0 {
-					break
-				}
-			} else if submitErr == nil {
-				submitErr = err
+				clientOpts = append(clientOpts, WithClientSelectionMode(SelectClientByIndex, i+startOffset))
+				client = pool.options.ClientPool.GetClient(clientOpts...)
 			}
 		}
+		if client == nil {
+			continue
+		}
 
-		if success {
-			wallet.IncrementSubmittedTxCount()
+		err := submitTx(client)
 
-			submitErr = nil
+		if options.LogFn != nil {
+			options.LogFn(client, i, 0, err)
+		}
+		if err == nil || (strings.Contains(err.Error(), "already known") || strings.Contains(err.Error(), "Known transaction")) {
+			success = true
+			submitCount--
+			if submitCount == 0 {
+				break
+			}
+		} else if submitErr == nil {
+			submitErr = err
 		}
 	}
 
-	submissionComplete <- submitErr
-
-	if submitErr != nil {
-		confirmCancel()
-		return submitErr
+	if success {
+		return true, nil
 	}
 
-	return nil
+	return false, submitErr
 }
 
-// awaitTransaction waits for a specific transaction to be confirmed.
-// It uses the wallet's nonce channel system to wait for confirmation and
-// handles cases where the transaction might be replaced or reorged.
-// The wg parameter is signaled when confirmation tracking is set up.
-func (pool *TxPool) awaitTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction, options *SendTransactionOptions, wg *sync.WaitGroup) (*txtypes.Receipt, error) {
+// finishTx ends the tracking of a transaction. It reports false if the transaction
+// was already finished.
+func (pool *TxPool) finishTx(tracked *trackedTx) bool {
+	if !tracked.done.CompareAndSwap(false, true) {
+		return false
+	}
+
+	pool.tracker.remove(tracked)
+
+	// The finished transaction stays referenced for a reorg, its context hook is not
+	// needed anymore.
+	if stopCtx := tracked.stopCtx.Swap(nil); stopCtx != nil {
+		(*stopCtx)()
+	}
+
+	if tracked.walletPool != nil {
+		tracked.walletPool.pendingTxCount.Add(-1)
+	}
+
+	return true
+}
+
+// notifyTx runs the callbacks of a finished transaction. A nil receipt with a nil
+// error means the transaction was cancelled or replaced.
+func (pool *TxPool) notifyTx(tracked *trackedTx, receipt *txtypes.Receipt, err error) {
+	if receipt != nil {
+		tracked.Options.invokeConfirm(tracked.Tx, receipt)
+	}
+
+	tracked.Options.invokeComplete(tracked.Tx, receipt, err)
+
+	if walletPool := tracked.walletPool; walletPool != nil && walletPool.ctx.Err() == nil {
+		if tracker := walletPool.GetTransactionTracker(); tracker != nil {
+			tracker(err)
+		}
+	}
+}
+
+// completeTx finishes a transaction and runs its callbacks on their own goroutine.
+func (pool *TxPool) completeTx(tracked *trackedTx, receipt *txtypes.Receipt, err error) {
+	if pool.finishTx(tracked) {
+		go pool.notifyTx(tracked, receipt, err)
+	}
+}
+
+// retireTxs finishes the transactions an included transaction retired from their lanes:
+// the included one is confirmed, the others were replaced by it.
+func (pool *TxPool) retireTxs(retired []*trackedTx, txHash common.Hash, receipt *txtypes.Receipt, completions []txCompletion) []txCompletion {
+	for _, tracked := range retired {
+		if !pool.finishTx(tracked) {
+			continue
+		}
+
+		completion := txCompletion{tx: tracked}
+		if tracked.hash == txHash {
+			completion.receipt = receipt
+		}
+
+		completions = append(completions, completion)
+	}
+
+	return completions
+}
+
+// processTransactionInclusion handles a transaction included in a block: it completes
+// the tracked transactions with its hash, and every tracked transaction of the same
+// sender that its nonce makes impossible. Returns the tracked transaction it confirms,
+// if any, and the completions to notify once the block is processed.
+func (pool *TxPool) processTransactionInclusion(blockNumber uint64, txFrom common.Address, tx *txtypes.Transaction, receipt *txtypes.Receipt, completions []txCompletion) (*trackedTx, []txCompletion) {
 	txHash := tx.Hash()
-	nonceChan, isFirstPendingTx := wallet.getTxNonceChan(tx, options)
+	confirmed := pool.tracker.byHash(txHash)
 
-	if isFirstPendingTx && pool.lastBlockNumber > wallet.lastConfirmation+1 {
-		wallet.lastConfirmation = pool.lastBlockNumber - 1
+	if sender := pool.tracker.getSender(txFrom); sender != nil {
+		keys, seq := txLanePosition(tx)
+
+		sender.mu.Lock()
+		retired := sender.retire(keys, seq)
+		sender.lastProgress = blockNumber
+		sender.staleChecks = 0
+		sender.mu.Unlock()
+
+		completions = pool.retireTxs(retired, txHash, receipt, completions)
 	}
 
-	if wg != nil {
-		wg.Done()
+	// Transactions outside the lanes are only known by their hash.
+	completions = pool.retireTxs(confirmed, txHash, receipt, completions)
+
+	if len(confirmed) == 0 {
+		return nil, completions
 	}
 
-	if nonceChan != nil {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-nonceChan.channel:
+	return confirmed[0], completions
+}
+
+// processAuthorizations applies the EIP-7702 authorizations of an included transaction.
+// A valid authorization uses up the authority's account nonce without a transaction from
+// it, which retires whatever the authority had pending on that nonce.
+func (pool *TxPool) processAuthorizations(tx *txtypes.Transaction, completions []txCompletion) []txCompletion {
+	authList := tx.AuthList()
+	if len(authList) == 0 {
+		return completions
+	}
+
+	chainID := tx.ChainId()
+
+	for i := range authList {
+		auth := &authList[i]
+		if !auth.ChainID.IsZero() && (chainID == nil || auth.ChainID.CmpBig(chainID) != 0) {
+			continue
 		}
 
-		receipt := nonceChan.receipt
-		if receipt != nil {
-			if bytes.Equal(receipt.TxHash[:], txHash[:]) {
-				return receipt, nil
+		authority, err := auth.Authority()
+		if err != nil {
+			continue
+		}
+
+		wallet := pool.lookupWallet(authority)
+		if wallet == nil || !wallet.applyAuthorization(auth.Nonce) {
+			continue
+		}
+
+		if sender := pool.tracker.getSender(authority); sender != nil {
+			sender.mu.Lock()
+			retired := sender.retire(nil, auth.Nonce)
+			sender.mu.Unlock()
+
+			completions = pool.retireTxs(retired, common.Hash{}, nil, completions)
+		}
+	}
+
+	return completions
+}
+
+// runRecovery runs a stale sender check within the recovery concurrency limit.
+func (pool *TxPool) runRecovery(fn func()) {
+	if pool.recoverySem == nil {
+		fn()
+
+		return
+	}
+
+	select {
+	case pool.recoverySem <- struct{}{}:
+	case <-pool.options.Context.Done():
+		return
+	}
+
+	defer func() { <-pool.recoverySem }()
+
+	fn()
+}
+
+// workQueue runs queued functions in order on a bounded number of workers, which
+// exist only while there is work.
+type workQueue struct {
+	mu      sync.Mutex
+	items   []func()
+	workers int
+}
+
+func (queue *workQueue) push(limit int, fn func()) {
+	queue.mu.Lock()
+	queue.items = append(queue.items, fn)
+
+	spawn := queue.workers < limit
+	if spawn {
+		queue.workers++
+	}
+	queue.mu.Unlock()
+
+	if spawn {
+		go queue.work()
+	}
+}
+
+func (queue *workQueue) work() {
+	for {
+		queue.mu.Lock()
+		if len(queue.items) == 0 {
+			queue.items = nil
+			queue.workers--
+			queue.mu.Unlock()
+
+			return
+		}
+
+		fn := queue.items[0]
+		queue.items[0] = nil
+		queue.items = queue.items[1:]
+		queue.mu.Unlock()
+
+		fn()
+	}
+}
+
+// queueRebroadcast rebroadcasts a tracked transaction through the rebroadcast queue.
+// fanout sends it to every eligible client instead of the first accepting one.
+func (pool *TxPool) queueRebroadcast(tracked *trackedTx, fanout bool) {
+	if !tracked.rebroadcasting.CompareAndSwap(false, true) {
+		return
+	}
+
+	tracked.LastRebroadcast = time.Now()
+	tracked.RebroadcastCount++
+	retryCount := tracked.RebroadcastCount
+
+	pool.rebroadcasts.push(recoveryConcurrency, func() {
+		defer tracked.rebroadcasting.Store(false)
+
+		if tracked.done.Load() || pool.options.Context.Err() != nil {
+			return
+		}
+
+		pool.rebroadcastTransaction(pool.options.Context, tracked.Tx, tracked.Options, retryCount, fanout)
+	})
+}
+
+// staleCheckInterval is the number of blocks a sender may go without a confirmation
+// before its pending transactions are checked, growing with every fruitless check.
+func staleCheckInterval(staleChecks uint64) uint64 {
+	return 10 << min(staleChecks, 2)
+}
+
+// processStaleSenders recovers senders whose pending transactions made no progress:
+// it re-reads their on-chain nonces to catch confirmations and replacements block
+// processing did not see, and rebroadcasts what is still pending.
+func (pool *TxPool) processStaleSenders(blockNumber uint64) {
+	var wg sync.WaitGroup
+
+	for _, sender := range pool.tracker.allSenders() {
+		sender.mu.Lock()
+		due := sender.suspect || blockNumber > sender.lastProgress+staleCheckInterval(sender.staleChecks)
+		if due {
+			sender.suspect = false
+			sender.lastProgress = blockNumber
+			sender.staleChecks++
+		}
+		sender.mu.Unlock()
+
+		if !due {
+			continue
+		}
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			pool.runRecovery(func() { pool.recoverSender(blockNumber, sender) })
+		}()
+	}
+
+	wg.Wait()
+}
+
+// markSendersSuspect makes the next stale pass check every sender, after a block could
+// not be processed and its confirmations may have been missed.
+func (pool *TxPool) markSendersSuspect() {
+	for _, sender := range pool.tracker.allSenders() {
+		sender.mu.Lock()
+		sender.suspect = true
+		sender.mu.Unlock()
+	}
+}
+
+func (pool *TxPool) recoverSender(blockNumber uint64, sender *txSender) {
+	sender.mu.Lock()
+	hasAccountTxs := !sender.account.empty()
+
+	var keyedHeads []*trackedTx
+
+	for _, lane := range sender.keyed {
+		for _, tracked := range lane.slots[0].txs {
+			if !slices.Contains(keyedHeads, tracked) {
+				keyedHeads = append(keyedHeads, tracked)
 			}
-
-			return nil, nil
 		}
 	}
+	sender.mu.Unlock()
 
-	return pool.loadTransactionReceipt(ctx, tx), nil
+	if hasAccountTxs {
+		pool.recoverAccountLane(blockNumber, sender)
+	}
+
+	for _, tracked := range keyedHeads {
+		pool.recoverKeyedTx(sender, tracked)
+	}
 }
 
-// processTransactionInclusion handles the confirmation of a transaction from a tracked wallet.
-// It updates the wallet's nonce state, signals any waiting confirmation channels,
-// and cleans up completed nonce channels. Updates the wallet's confirmation tracking.
-// Also updates the wallet's balance by subtracting the transaction fee and blob fee.
-func (pool *TxPool) processTransactionInclusion(blockNumber uint64, wallet *Wallet, tx *txtypes.Transaction, receipt *txtypes.Receipt, txFees *utils.TxFees) {
-	totalAmount := new(big.Int).Add(tx.Value(), &txFees.FeeAmount)
-	totalAmount = new(big.Int).Add(totalAmount, &txFees.BlobFeeAmount)
-	wallet.SubBalance(totalAmount)
+// recoverAccountLane reconciles a sender's account nonce lane with the on-chain nonce.
+func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
+	wallet := sender.wallet
 
-	if !tx.UsesAccountNonce() {
-		// The transaction's nonce belongs to another sequence domain (EIP-8250 keyed
-		// nonces), so none of the bookkeeping below applies: comparing it against the
-		// account nonce would corrupt every other transaction on this wallet.
-		wallet.confirmTxByHash(blockNumber, tx, receipt)
-
-		return
-	}
-
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	nonce := tx.Nonce()
-	if nonceChan := wallet.txNonceChans[nonce]; nonceChan != nil {
-		nonceChan.receipt = receipt
-	}
-
-	wallet.confirmedTxCount = nonce + 1
-	wallet.advancePendingTxCount(nonce + 1)
-	if blockNumber > wallet.lastConfirmation {
-		wallet.lastConfirmation = blockNumber
-	}
-
-	for n := range wallet.txNonceChans {
-		if n <= nonce {
-			close(wallet.txNonceChans[n].channel)
-			delete(wallet.txNonceChans, n)
-		}
-	}
-
-}
-
-// processStaleConfirmations recovers stale transactions that may have been missed
-// and handles rebroadcasting of pending transactions.
-// It checks if a wallet has pending transactions that are older than 10 blocks,
-// queries the current nonce from the blockchain, recovers any confirmed transactions
-// that weren't properly tracked, and rebroadcasts pending transactions if enabled.
-func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet) {
-	if blockNumber <= wallet.lastConfirmation+10 {
-		return
-	}
-
-	if len(wallet.txNonceChans) == 0 && !wallet.hasPendingHashTxs() {
-		return
-	}
-
-	wallet.lastConfirmation = blockNumber
-
-	pool.processStaleHashTxs(wallet)
-
-	if len(wallet.txNonceChans) == 0 {
-		return
-	}
-
-	// Query on-chain nonce
 	var onChainNonce uint64
 	var err error
 	for retry := 0; retry < 3; retry++ {
@@ -1284,96 +1526,74 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 			continue
 		}
 
-		onChainNonce, err = client.GetNonceAt(pool.options.Context, wallet.address, big.NewInt(int64(blockNumber)))
+		onChainNonce, err = client.GetNonceAt(pool.options.Context, sender.address, big.NewInt(int64(blockNumber)))
 		if err == nil {
 			break
 		}
 	}
 
 	if err != nil {
-		logrus.WithError(err).Warnf("failed to get on-chain nonce for %v", wallet.address.String())
+		logrus.WithError(err).Warnf("failed to get on-chain nonce for %v", sender.address.String())
 		return
 	}
 
-	wallet.txNonceMutex.Lock()
-
-	// Collect pending nonces sorted
-	pendingNonces := make([]uint64, 0, len(wallet.txNonceChans))
-	for n, nc := range wallet.txNonceChans {
-		if len(nc.txs) > 0 {
-			pendingNonces = append(pendingNonces, n)
-		}
-	}
-	slices.Sort(pendingNonces)
-
-	// Find lowest pending nonce
-	lowestPendingNonce := uint64(0)
-	if len(pendingNonces) > 0 {
-		lowestPendingNonce = pendingNonces[0]
-	}
-
-	name := wallet.GetAddress().String()
-	logrus.Debugf("processing stale confirmations for %v (on-chain nonce: %v, confirmed: %v, pending count: %v, lowest pending: %v)",
-		name, onChainNonce, wallet.confirmedTxCount, len(wallet.txNonceChans), lowestPendingNonce)
-
-	// Close channels for confirmed transactions and collect txs to rebroadcast
-	var txsToRebroadcast []*PendingTx
-	var expiredTxs []*PendingTx
-	var nonceGaps []uint64
+	var (
+		confirmedTxs     []*trackedTx
+		txsToRebroadcast []*trackedTx
+		expiredTxs       []*trackedTx
+		nonceGaps        []uint64
+	)
 
 	chainTime := pool.blockTime(blockNumber)
 
-	// Only consider rebroadcasting the 2 lowest pending nonces
-	const maxRebroadcastNonces = 2
-	pendingNoncesChecked := 0
+	sender.mu.Lock()
 
-	for _, nonce := range pendingNonces {
-		nonceChan := wallet.txNonceChans[nonce]
-		if nonce < onChainNonce {
-			// Transaction confirmed - close channel and clean up
-			logrus.Debugf("recovering stale confirmed transaction for %v (nonce %v)", wallet.address.String(), nonce)
-			close(nonceChan.channel)
-			delete(wallet.txNonceChans, nonce)
-		} else if nonce <= onChainNonce+(maxRebroadcastNonces-1) {
-			pendingNoncesChecked++
-			// Get the most recent pending tx for this nonce (last in the list)
-			if len(nonceChan.txs) > 0 {
-				mostRecentTx := nonceChan.txs[len(nonceChan.txs)-1]
+	if onChainNonce > 0 {
+		confirmedTxs = sender.account.retire(onChainNonce-1, nil)
+	}
 
-				// A transaction past its own deadline is dead rather than slow: it is
-				// replaced rather than rebroadcast, and regardless of whether the
-				// caller asked for rebroadcasts, because until its nonce is retired
-				// nothing else this wallet sends can confirm.
-				if isExpiredTx(mostRecentTx.Tx, chainTime) {
-					expiredTxs = append(expiredTxs, mostRecentTx)
+	for _, slot := range sender.account.slots {
+		if slot.seq > onChainNonce+(maxRebroadcastNonces-1) {
+			break
+		}
 
-					continue
-				}
+		if len(slot.txs) == 0 {
+			continue
+		}
 
-				if mostRecentTx.Options != nil && mostRecentTx.Options.Rebroadcast {
-					// Check if enough time has passed since last rebroadcast
-					backoffDelay := pool.calculateBackoffDelay(mostRecentTx.RebroadcastCount)
-					if time.Since(mostRecentTx.LastRebroadcast) >= backoffDelay {
-						txsToRebroadcast = append(txsToRebroadcast, mostRecentTx)
-					}
-				}
-			}
+		mostRecentTx := slot.txs[len(slot.txs)-1]
+
+		// A transaction past its own deadline is dead rather than slow: it is
+		// replaced rather than rebroadcast, and regardless of whether the
+		// caller asked for rebroadcasts, because until its nonce is retired
+		// nothing else this wallet sends can confirm.
+		if isExpiredTx(mostRecentTx.Tx, chainTime) {
+			expiredTxs = append(expiredTxs, mostRecentTx)
+
+			continue
+		}
+
+		if mostRecentTx.Options.Rebroadcast && time.Since(mostRecentTx.LastRebroadcast) >= pool.calculateBackoffDelay(mostRecentTx.RebroadcastCount) {
+			txsToRebroadcast = append(txsToRebroadcast, mostRecentTx)
 		}
 	}
 
-	// Update confirmed nonce
-	if onChainNonce > wallet.confirmedTxCount {
-		wallet.confirmedTxCount = onChainNonce
-	}
-
-	// Check for nonce gaps between on-chain nonce and lowest pending nonce
-	if lowestPendingNonce > onChainNonce {
-		for nonce := onChainNonce; nonce < lowestPendingNonce; nonce++ {
+	if !sender.account.empty() {
+		for nonce := onChainNonce; nonce < sender.account.slots[0].seq; nonce++ {
 			nonceGaps = append(nonceGaps, nonce)
 		}
 	}
 
-	wallet.txNonceMutex.Unlock()
+	sender.mu.Unlock()
+
+	wallet.raiseConfirmedNonce(onChainNonce)
+
+	// These confirmed in a block that was not processed. Whether as the tracked
+	// transaction or as a replacement of it, only the receipt can tell.
+	for _, tracked := range confirmedTxs {
+		logrus.Debugf("recovering stale confirmed transaction for %v (nonce %v)", sender.address.String(), tracked.seq)
+		pool.completeTx(tracked, pool.loadTransactionReceipt(pool.options.Context, tracked.Tx), nil)
+	}
 
 	// Retire expired transactions, which hold a nonce nothing can ever confirm. The
 	// attempt is counted like a rebroadcast, so a replacement a client refuses as
@@ -1382,68 +1602,88 @@ func (pool *TxPool) processStaleConfirmations(blockNumber uint64, wallet *Wallet
 		expired.RebroadcastCount++
 		expired.LastRebroadcast = time.Now()
 
-		go pool.replaceExpiredTransaction(pool.options.Context, wallet, expired, expired.RebroadcastCount)
+		go pool.replaceExpiredTransaction(pool.options.Context, wallet, &expired.PendingTx, expired.RebroadcastCount)
 	}
 
-	// Fill nonce gaps if any
 	if len(nonceGaps) > 0 {
 		logrus.WithFields(logrus.Fields{
-			"wallet": wallet.GetAddress().Hex(),
+			"wallet": sender.address.Hex(),
 			"gaps":   nonceGaps,
 		}).Warnf("detected nonce gaps, filling with dummy transactions")
 		go pool.fillNonceGaps(pool.options.Context, wallet, nonceGaps, nil)
 	}
 
-	// Rebroadcast pending transactions
-	for _, pendingTx := range txsToRebroadcast {
+	for _, tracked := range txsToRebroadcast {
 		logrus.WithFields(logrus.Fields{
-			"wallet": wallet.GetAddress().Hex(),
-			"nonce":  pendingTx.Tx.Nonce(),
-			"txhash": pendingTx.Tx.Hash().Hex(),
+			"wallet": sender.address.Hex(),
+			"nonce":  tracked.seq,
+			"txhash": tracked.hash.Hex(),
 		}).Debugf("rebroadcasting stale transaction")
 
-		pendingTx.LastRebroadcast = time.Now()
-		pendingTx.RebroadcastCount++
-		go pool.rebroadcastTransaction(pool.options.Context, pendingTx.Tx, pendingTx.Options, pendingTx.RebroadcastCount)
+		pool.queueRebroadcast(tracked, true)
 	}
 }
 
-// processStaleHashTxs recovers hash-tracked transactions, which the nonce-based recovery
-// above cannot see: there is no on-chain nonce that would prove one landed, so its
-// receipt is asked for directly and it is rebroadcast if it is missing.
-func (pool *TxPool) processStaleHashTxs(wallet *Wallet) {
-	pendingTxs := wallet.getPendingHashTxs()
-	if len(pendingTxs) == 0 {
+// recoverKeyedTx recovers the lowest pending transaction of an EIP-8250 keyed lane. Its
+// receipt tells whether it was included, the key's on-chain sequence whether another
+// transaction used it up.
+func (pool *TxPool) recoverKeyedTx(sender *txSender, tracked *trackedTx) {
+	if tracked.done.Load() {
 		return
 	}
 
-	for _, pendingTx := range pendingTxs {
-		if receipt := pool.loadTransactionReceipt(pool.options.Context, pendingTx.Tx); receipt != nil {
-			logrus.Debugf("recovering stale confirmed transaction for %v (hash %v)",
-				wallet.GetAddress().String(), pendingTx.Tx.Hash().Hex())
-			wallet.confirmTxByHash(receipt.BlockNumber.Uint64(), pendingTx.Tx, receipt)
+	receipt := pool.loadTransactionReceipt(pool.options.Context, tracked.Tx)
 
-			continue
+	if receipt != nil || pool.isKeyedLanePassed(sender.address, tracked) {
+		logrus.Debugf("recovering stale transaction for %v (hash %v)", sender.address.String(), tracked.hash.Hex())
+
+		sender.mu.Lock()
+		retired := sender.retire(tracked.keys, tracked.seq)
+		sender.mu.Unlock()
+
+		for _, completion := range pool.retireTxs(retired, tracked.hash, receipt, nil) {
+			go pool.notifyTx(completion.tx, completion.receipt, nil)
 		}
 
-		if pendingTx.Options == nil || !pendingTx.Options.Rebroadcast {
-			continue
-		}
-
-		if time.Since(pendingTx.LastRebroadcast) < pool.calculateBackoffDelay(pendingTx.RebroadcastCount) {
-			continue
-		}
-
-		logrus.WithFields(logrus.Fields{
-			"wallet": wallet.GetAddress().Hex(),
-			"txhash": pendingTx.Tx.Hash().Hex(),
-		}).Debugf("rebroadcasting stale transaction")
-
-		pendingTx.LastRebroadcast = time.Now()
-		pendingTx.RebroadcastCount++
-
-		go pool.rebroadcastTransaction(pool.options.Context, pendingTx.Tx, pendingTx.Options, pendingTx.RebroadcastCount)
+		return
 	}
+
+	if !tracked.Options.Rebroadcast || time.Since(tracked.LastRebroadcast) < pool.calculateBackoffDelay(tracked.RebroadcastCount) {
+		return
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"wallet": sender.address.Hex(),
+		"txhash": tracked.hash.Hex(),
+	}).Debugf("rebroadcasting stale transaction")
+
+	pool.queueRebroadcast(tracked, true)
+}
+
+// isKeyedLanePassed reports whether the first nonce key of a transaction has moved past
+// the sequence number the transaction needs it at.
+func (pool *TxPool) isKeyedLanePassed(address common.Address, tracked *trackedTx) bool {
+	if len(tracked.keys) == 0 {
+		return false
+	}
+
+	client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
+	if client == nil {
+		return false
+	}
+
+	value, err := client.GetStorageAt(pool.options.Context, txtypes.NonceManager, txtypes.NonceManagerSlot(address, &tracked.keys[0]))
+	if err != nil {
+		return false
+	}
+
+	current := new(uint256.Int).SetBytes(value[:])
+	if tracked.seq == txtypes.MaxNonceSeq {
+		// single-use: the key has to be unused
+		return !current.IsZero()
+	}
+
+	return !current.IsUint64() || current.Uint64() > tracked.seq
 }
 
 // loadTransactionReceipt attempts to load a transaction receipt from multiple clients.
@@ -1468,7 +1708,9 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Tran
 			return receipt
 		}
 
-		if ctx.Err() != nil {
+		// A transaction the client does not know has no receipt; that is an answer,
+		// not a failure to retry.
+		if ctx.Err() != nil || errors.Is(err, ethereum.NotFound) {
 			return nil
 		}
 
@@ -1492,7 +1734,7 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Tran
 // handleReorg handles a detected chain reorganization by re-submitting affected transactions.
 // It finds the common ancestor, identifies reorged-out transactions, resets wallet nonces,
 // and re-submits the affected transactions as pending. Also processes the new canonical blocks.
-func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlockWithHash *BlockWithHash, walletMap map[common.Address]*Wallet) error {
+func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber uint64, newBlockWithHash *BlockWithHash) error {
 	type newBlockInfo struct {
 		blockWithHash *BlockWithHash
 	}
@@ -1563,7 +1805,14 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 
 	// add reorged out txs as pending txs, reset affected wallets nonce state
 	resetWallets := map[common.Address]bool{}
+	resubmitted := map[common.Address]bool{}
+
 	for _, tx := range reorgedOutTxs {
+		wallet := tx.FromWallet
+		if wallet == nil && tx.tracked != nil {
+			wallet = tx.tracked.wallet
+		}
+
 		if tx.FromWallet != nil {
 			// A transaction outside the account nonce sequence carries no information
 			// about where that sequence should be rewound to.
@@ -1578,13 +1827,15 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 			totalAmount := new(big.Int).Add(tx.Tx.Value(), &tx.TxFees.FeeAmount)
 			totalAmount = new(big.Int).Add(totalAmount, &tx.TxFees.BlobFeeAmount)
 			tx.FromWallet.AddBalance(totalAmount)
+		}
 
+		if wallet != nil {
 			// add tx as pending tx
 			txOptions := &SendTransactionOptions{
 				Client:      client,
 				Rebroadcast: true,
 				OnComplete: func(tx *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
-					if err == nil {
+					if err == nil && receipt != nil {
 						logrus.Infof("reorged out tx %v confirmed", tx.Hash())
 					}
 				},
@@ -1593,11 +1844,36 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 			if tx.Options != nil {
 				txOptions.LogFn = tx.Options.LogFn
 				txOptions.ClientGroup = tx.Options.ClientGroup
+				txOptions.ClientList = tx.Options.ClientList
+				txOptions.OnEncode = tx.Options.OnEncode
+				txOptions.OnGethEncode = tx.Options.OnGethEncode
 			}
 
-			err := pool.submitTransaction(ctx, tx.FromWallet, tx.Tx, txOptions, false)
+			// The transaction as it was sent still has what the block's copy lacks,
+			// such as blob sidecars.
+			reorgedTx := tx.Tx
+			if tx.tracked != nil {
+				reorgedTx = tx.tracked.Tx
+			}
+
+			tracked, err := pool.trackTransaction(ctx, wallet, reorgedTx, txOptions, false, tx.walletPool)
 			if err != nil {
 				logrus.WithError(err).Errorf("error adding pending transaction for reorged out tx %v", tx.Tx.Hash())
+			} else {
+				// Clients may have dropped it with the orphaned block, so it is sent
+				// again right away: the first one of each sender, which the others
+				// depend on, to every client.
+				pool.queueRebroadcast(tracked, !resubmitted[tx.From])
+				resubmitted[tx.From] = true
+			}
+		}
+
+		// An authorization's nonce bump is undone with the block as well.
+		for i := range tx.Tx.AuthList() {
+			if authority, err := tx.Tx.AuthList()[i].Authority(); err == nil {
+				if authorityWallet := pool.lookupWallet(authority); authorityWallet != nil {
+					authorityWallet.MarkNeedResync()
+				}
 			}
 		}
 
@@ -1610,7 +1886,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	// re-process the new parent blocks
 	slices.Reverse(newBlockParents)
 	for _, parentBlockInfo := range newBlockParents {
-		pool.processBlockTxs(ctx, client, parentBlockInfo.blockWithHash.Block.NumberU64(), parentBlockInfo.blockWithHash, walletMap, nil)
+		pool.processBlockTxs(ctx, client, parentBlockInfo.blockWithHash.Block.NumberU64(), parentBlockInfo.blockWithHash, nil)
 	}
 
 	return nil
@@ -2049,8 +2325,10 @@ func rebroadcastStartOffset(configured int, hash common.Hash, retryCount uint64)
 }
 
 // rebroadcastTransaction performs the actual rebroadcast of a transaction.
-// This method encapsulates the existing rebroadcast logic for reuse.
-func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Transaction, options *SendTransactionOptions, retryCount uint64) {
+// With fanout it goes to every eligible client: peers that already saw the hash do not
+// fetch it again from gossip, so a node that dropped it only gets it back directly.
+// Without, it stops at the first client that takes it.
+func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Transaction, options *SendTransactionOptions, retryCount uint64, fanout bool) {
 	submitTx := func(client *Client) error {
 		if options.hasEncodeFn() {
 			txBytes, err := options.invokeEncode(tx)
@@ -2070,7 +2348,7 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 	if len(options.ClientList) > 0 {
 		clientCount = len(options.ClientList)
 	}
-	if clientCount > 5 {
+	if !fanout && clientCount > 5 {
 		clientCount = 5
 	}
 
@@ -2103,7 +2381,7 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 			options.LogFn(client, j, int(retryCount), err)
 		}
 
-		if err == nil || strings.Contains(err.Error(), "already known") {
+		if !fanout && (err == nil || strings.Contains(err.Error(), "already known")) {
 			break
 		}
 	}

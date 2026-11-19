@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,26 +43,17 @@ type Wallet struct {
 	balance          *big.Int
 	protected        bool // When true, GetPrivateKey() returns nil to prevent key extraction
 
-	txNonceChans map[uint64]*nonceStatus
+	// sender is the transaction pool's tracking state for this wallet's pending
+	// transactions, nil until the first one is submitted.
+	sender atomic.Pointer[txSender]
 
-	// txHashChans tracks transactions that are not sequenced by the account nonce, so
-	// their confirmation cannot be keyed by one. EIP-8250 keyed nonces are the only
-	// current case: their sequence lives in protocol storage under NONCE_MANAGER and
-	// says nothing about the account nonce. Guarded by txNonceMutex like txNonceChans.
-	txHashChans map[common.Hash]*nonceStatus
+	// ownerPool is the wallet pool that prepared this wallet.
+	ownerPool atomic.Pointer[WalletPool]
 
-	txNonceMutex     sync.Mutex
-	lastConfirmation uint64
+	txNonceMutex sync.Mutex
 
 	lowBalanceNotifyChan chan<- struct{}
 	lowBalanceThreshold  *big.Int
-}
-
-// nonceStatus tracks the confirmation status of a transaction with a specific nonce
-type nonceStatus struct {
-	txs     []*PendingTx
-	receipt *txtypes.Receipt
-	channel chan bool
 }
 
 type PendingTx struct {
@@ -78,10 +69,8 @@ type PendingTx struct {
 // The privkey parameter accepts hex strings with or without "0x" prefix.
 func NewWallet(privkey *ecdsa.PrivateKey, address common.Address) *Wallet {
 	wallet := &Wallet{
-		privkey:      privkey,
-		address:      address,
-		txNonceChans: map[uint64]*nonceStatus{},
-		txHashChans:  map[common.Hash]*nonceStatus{},
+		privkey: privkey,
+		address: address,
 	}
 
 	return wallet
@@ -337,6 +326,61 @@ func (wallet *Wallet) advancePendingTxCount(target uint64) {
 	}
 }
 
+// confirmTx applies an included transaction this wallet sent to its balance and nonce.
+func (wallet *Wallet) confirmTx(tx *txtypes.Transaction, txFees *utils.TxFees) {
+	totalAmount := new(big.Int).Add(tx.Value(), &txFees.FeeAmount)
+	totalAmount = new(big.Int).Add(totalAmount, &txFees.BlobFeeAmount)
+	wallet.SubBalance(totalAmount)
+
+	// The nonce of a transaction outside the account nonce sequence (EIP-8250 keyed
+	// nonces) says nothing about the account nonce.
+	if !tx.UsesAccountNonce() {
+		return
+	}
+
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	wallet.confirmedTxCount = tx.Nonce() + 1
+	wallet.advancePendingTxCount(wallet.confirmedTxCount)
+}
+
+// applyAuthorization uses up the account nonce an included EIP-7702 authorization
+// carries. It reports false for one that does not match the current nonce, which the
+// chain skips.
+func (wallet *Wallet) applyAuthorization(nonce uint64) bool {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	if nonce != wallet.confirmedTxCount {
+		return false
+	}
+
+	wallet.confirmedTxCount = nonce + 1
+	wallet.advancePendingTxCount(wallet.confirmedTxCount)
+
+	return true
+}
+
+// raiseConfirmedNonce moves the confirmed nonce up to the on-chain nonce.
+func (wallet *Wallet) raiseConfirmedNonce(nonce uint64) {
+	wallet.txNonceMutex.Lock()
+	defer wallet.txNonceMutex.Unlock()
+
+	if nonce > wallet.confirmedTxCount {
+		wallet.confirmedTxCount = nonce
+	}
+}
+
+// getOwnerPool returns the wallet pool that prepared this wallet, while it is running.
+func (wallet *Wallet) getOwnerPool() *WalletPool {
+	if owner := wallet.ownerPool.Load(); owner != nil && owner.ctx.Err() == nil {
+		return owner
+	}
+
+	return nil
+}
+
 // GetNextNonce atomically increments and returns the next available nonce.
 // This is used when building transactions to ensure unique nonces.
 // It first checks for any skipped nonces that can be reused.
@@ -345,11 +389,7 @@ func (wallet *Wallet) GetNextNonce() uint64 {
 	defer wallet.nonceMutex.Unlock()
 
 	if len(wallet.skippedNonces) > 0 {
-		// Sort skipped nonces to use the lowest one first
-		sort.Slice(wallet.skippedNonces, func(i, j int) bool {
-			return wallet.skippedNonces[i] < wallet.skippedNonces[j]
-		})
-
+		// skippedNonces is kept sorted, the lowest one is used first
 		lowestIndex := -1
 
 		for idx, skipped := range wallet.skippedNonces {
@@ -777,13 +817,12 @@ func (wallet *Wallet) MarkSkippedNonce(nonce uint64) {
 		return
 	}
 
-	for _, skipped := range wallet.skippedNonces {
-		if skipped == nonce {
-			return
-		}
+	idx, found := slices.BinarySearch(wallet.skippedNonces, nonce)
+	if found {
+		return
 	}
 
-	wallet.skippedNonces = append(wallet.skippedNonces, nonce)
+	wallet.skippedNonces = slices.Insert(wallet.skippedNonces, idx, nonce)
 }
 
 func (wallet *Wallet) MarkNeedResync() {
@@ -799,262 +838,87 @@ func (wallet *Wallet) signTx(txData txtypes.TxData) (*txtypes.Transaction, error
 	return txtypes.SignTx(txtypes.NewTx(txData), wallet.chainid, wallet.privkey)
 }
 
-// getTxNonceChan returns or creates a nonce status channel for tracking transaction confirmation.
-// It manages a map of nonce channels used to wait for specific transaction confirmations.
-// Returns the nonce status and a boolean indicating if this is the first pending transaction.
-// If the target nonce is already confirmed, returns nil and false.
-func (wallet *Wallet) getTxNonceChan(tx *txtypes.Transaction, options *SendTransactionOptions) (*nonceStatus, bool) {
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	if !tx.UsesAccountNonce() {
-		return wallet.getTxHashChan(tx, options)
-	}
-
-	targetNonce := tx.Nonce()
-
-	if wallet.confirmedTxCount > targetNonce {
-		return nil, false
-	}
-
-	nonceChan := wallet.txNonceChans[targetNonce]
-	if nonceChan != nil {
-		for _, existingTx := range nonceChan.txs {
-			if existingTx.Tx.Hash() == tx.Hash() {
-				if existingTx.Options == nil && options != nil {
-					existingTx.Options = options
-				}
-				return nonceChan, false
-			}
-		}
-
-		nonceChan.txs = append(nonceChan.txs, &PendingTx{
-			Tx:        tx,
-			Submitted: time.Now(),
-			Options:   options,
-		})
-		return nonceChan, false
-	}
-
-	nonceChan = &nonceStatus{
-		txs: []*PendingTx{
-			{
-				Tx:        tx,
-				Submitted: time.Now(),
-				Options:   options,
-			},
-		},
-		channel: make(chan bool),
-	}
-	wallet.txNonceChans[targetNonce] = nonceChan
-
-	return nonceChan, len(wallet.txNonceChans) == 1
-}
-
-// getTxHashChan returns or creates a confirmation channel for a transaction that is not
-// sequenced by the account nonce, keyed by its hash. Such a transaction has no nonce
-// ordering to exploit, so it is tracked on its own and removed when its receipt arrives.
-// Must be called with txNonceMutex held.
-func (wallet *Wallet) getTxHashChan(tx *txtypes.Transaction, options *SendTransactionOptions) (*nonceStatus, bool) {
-	txHash := tx.Hash()
-
-	hashChan := wallet.txHashChans[txHash]
-	if hashChan != nil {
-		for _, existingTx := range hashChan.txs {
-			if existingTx.Options == nil && options != nil {
-				existingTx.Options = options
-			}
-		}
-
-		return hashChan, false
-	}
-
-	hashChan = &nonceStatus{
-		txs: []*PendingTx{
-			{
-				Tx:        tx,
-				Submitted: time.Now(),
-				Options:   options,
-			},
-		},
-		channel: make(chan bool),
-	}
-	wallet.txHashChans[txHash] = hashChan
-
-	return hashChan, len(wallet.txHashChans)+len(wallet.txNonceChans) == 1
-}
-
-// confirmTxByHash completes a hash-tracked transaction and releases its waiters.
-func (wallet *Wallet) confirmTxByHash(blockNumber uint64, tx *txtypes.Transaction, receipt *txtypes.Receipt) {
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	if blockNumber > wallet.lastConfirmation {
-		wallet.lastConfirmation = blockNumber
-	}
-
-	txHash := tx.Hash()
-
-	hashChan := wallet.txHashChans[txHash]
-	if hashChan == nil {
-		return
-	}
-
-	hashChan.receipt = receipt
-	close(hashChan.channel)
-	delete(wallet.txHashChans, txHash)
-}
-
-// getPendingHashTxs returns the hash-tracked transactions still awaiting confirmation.
-func (wallet *Wallet) getPendingHashTxs() []*PendingTx {
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	pendingTxs := make([]*PendingTx, 0, len(wallet.txHashChans))
-	for _, hashChan := range wallet.txHashChans {
-		pendingTxs = append(pendingTxs, hashChan.txs...)
-	}
-
-	sort.Slice(pendingTxs, func(i, j int) bool {
-		return pendingTxs[i].Submitted.Before(pendingTxs[j].Submitted)
-	})
-
-	return pendingTxs
-}
-
-// hasPendingHashTxs reports whether any hash-tracked transaction is outstanding.
-func (wallet *Wallet) hasPendingHashTxs() bool {
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	return len(wallet.txHashChans) > 0
-}
-
-func (wallet *Wallet) dropPendingTx(tx *txtypes.Transaction) {
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	if !tx.UsesAccountNonce() {
-		delete(wallet.txHashChans, tx.Hash())
-
-		return
-	}
-
-	nonceChan := wallet.txNonceChans[tx.Nonce()]
-	if nonceChan == nil {
-		return
-	}
-
-	txs := make([]*PendingTx, 0, len(nonceChan.txs))
-	for _, pendingTx := range nonceChan.txs {
-		if pendingTx.Tx != tx {
-			txs = append(txs, pendingTx)
-		}
-	}
-	nonceChan.txs = txs
-}
-
+// GetPendingTx returns the pending record of a transaction, or nil if it is not tracked.
 func (wallet *Wallet) GetPendingTx(tx *txtypes.Transaction) *PendingTx {
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	nonceChan := wallet.txNonceChans[tx.Nonce()]
-	if !tx.UsesAccountNonce() {
-		nonceChan = wallet.txHashChans[tx.Hash()]
-	}
-
-	if nonceChan == nil {
+	sender := wallet.sender.Load()
+	if sender == nil {
 		return nil
 	}
 
-	for _, pendingTx := range nonceChan.txs {
-		if pendingTx.Tx.Hash() == tx.Hash() {
-			return pendingTx
+	keys, seq := txLanePosition(tx)
+	txHash := tx.Hash()
+
+	sender.mu.Lock()
+	defer sender.mu.Unlock()
+
+	var pendingTx *PendingTx
+
+	sender.lanes(keys, false, func(lane *txLane) {
+		idx, found := lane.find(seq)
+		if !found || pendingTx != nil {
+			return
 		}
-	}
 
-	return nil
-}
+		for _, t := range lane.slots[idx].txs {
+			if t.hash == txHash {
+				pendingTx = &t.PendingTx
 
-func (wallet *Wallet) GetPendingTxs() []*PendingTx {
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	pendingNonces := []uint64{}
-	for nonce := range wallet.txNonceChans {
-		pendingNonces = append(pendingNonces, nonce)
-	}
-
-	sort.Slice(pendingNonces, func(i, j int) bool {
-		return pendingNonces[i] < pendingNonces[j]
+				return
+			}
+		}
 	})
 
-	pendingTxs := []*PendingTx{}
-	for _, nonce := range pendingNonces {
-		pendingTxs = append(pendingTxs, wallet.txNonceChans[nonce].txs...)
+	return pendingTx
+}
+
+// GetPendingTxs returns the pending transactions of this wallet, those sequenced by the
+// account nonce first and in nonce order.
+func (wallet *Wallet) GetPendingTxs() []*PendingTx {
+	sender := wallet.sender.Load()
+	if sender == nil {
+		return []*PendingTx{}
 	}
 
-	for _, hashChan := range wallet.txHashChans {
-		pendingTxs = append(pendingTxs, hashChan.txs...)
-	}
-
-	return pendingTxs
+	return sender.pendingTxs()
 }
 
 // GetLowestPendingNonce returns the lowest pending nonce for this wallet.
 // Returns 0, false if there are no pending transactions.
 func (wallet *Wallet) GetLowestPendingNonce() (uint64, bool) {
-	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
-
-	if len(wallet.txNonceChans) == 0 {
+	sender := wallet.sender.Load()
+	if sender == nil {
 		return 0, false
 	}
 
-	lowestNonce := uint64(0)
-	first := true
-	for nonce := range wallet.txNonceChans {
-		if first || nonce < lowestNonce {
-			lowestNonce = nonce
-			first = false
-		}
+	sender.mu.Lock()
+	defer sender.mu.Unlock()
+
+	if sender.account.empty() {
+		return 0, false
 	}
 
-	return lowestNonce, true
+	return sender.account.slots[0].seq, true
 }
 
 // GetNonceGaps returns missing nonces between confirmedTxCount and the lowest pending nonce.
 // This helps detect nonce gaps that need to be filled with dummy transactions.
 func (wallet *Wallet) GetNonceGaps() []uint64 {
+	lowestPendingNonce, ok := wallet.GetLowestPendingNonce()
+	if !ok {
+		return nil
+	}
+
 	wallet.txNonceMutex.Lock()
-	defer wallet.txNonceMutex.Unlock()
+	confirmed := wallet.confirmedTxCount
+	wallet.txNonceMutex.Unlock()
 
-	if len(wallet.txNonceChans) == 0 {
+	if lowestPendingNonce <= confirmed {
 		return nil
 	}
 
-	// Find the lowest pending nonce
-	lowestPendingNonce := uint64(0)
-	first := true
-	for nonce := range wallet.txNonceChans {
-		if first || nonce < lowestPendingNonce {
-			lowestPendingNonce = nonce
-			first = false
-		}
-	}
-
-	// No gap if lowest pending nonce equals confirmed count
-	if lowestPendingNonce <= wallet.confirmedTxCount {
-		return nil
-	}
-
-	// Build list of missing nonces
-	gaps := make([]uint64, 0, lowestPendingNonce-wallet.confirmedTxCount)
-	for nonce := wallet.confirmedTxCount; nonce < lowestPendingNonce; nonce++ {
-		// Check if this nonce already has a pending tx
-		if _, exists := wallet.txNonceChans[nonce]; !exists {
-			gaps = append(gaps, nonce)
-		}
+	gaps := make([]uint64, 0, lowestPendingNonce-confirmed)
+	for nonce := confirmed; nonce < lowestPendingNonce; nonce++ {
+		gaps = append(gaps, nonce)
 	}
 
 	return gaps

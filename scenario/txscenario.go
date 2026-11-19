@@ -141,6 +141,8 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 	// Subscribe to block updates for stats reporting
 	var lastSubmittedCount uint64
 	if txPool != nil {
+		lastSubmittedCount = options.WalletPool.GetSubmittedTxCount()
+
 		subscriptionID := txPool.SubscribeToBlockUpdates(options.WalletPool, func(blockNumber uint64, walletPoolStats *spamoor.WalletPoolBlockStats) {
 			throughputMutex.Lock()
 			if newSlotDuration := txPool.GetSlotDuration(); newSlotDuration != slotDuration {
@@ -149,19 +151,8 @@ func RunTransactionScenario(ctx context.Context, options TransactionScenarioOpti
 			}
 			throughputMutex.Unlock()
 
-			pendingCount := uint64(0)
-			submittedCount := uint64(0)
-			for _, wallet := range options.WalletPool.GetAllWallets() {
-				// Get pending count
-				pendingNonce := wallet.GetNonce()
-				confirmedNonce := wallet.GetConfirmedNonce()
-				if pendingNonce > confirmedNonce {
-					pendingCount += pendingNonce - confirmedNonce
-				}
-
-				// Get submitted count
-				submittedCount += wallet.GetSubmittedTxCount()
-			}
+			pendingCount := options.WalletPool.GetPendingTxCount()
+			submittedCount := options.WalletPool.GetSubmittedTxCount()
 
 			submittedThisBlock := submittedCount - lastSubmittedCount
 			lastSubmittedCount = submittedCount

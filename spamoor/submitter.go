@@ -128,7 +128,23 @@ func (p *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *txtype
 // It monitors the blockchain for the transaction and handles reorgs by continuing
 // to wait if the transaction gets reorged out of the chain.
 func (p *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction) (*txtypes.Receipt, error) {
-	return p.awaitTransaction(ctx, wallet, tx, nil, nil)
+	result := make(chan *txtypes.Receipt, 1)
+
+	_, err := p.trackTransaction(ctx, wallet, tx, &SendTransactionOptions{
+		OnComplete: func(_ *txtypes.Transaction, receipt *txtypes.Receipt, _ error) {
+			result <- receipt
+		},
+	}, false, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case receipt := <-result:
+		return receipt, nil
+	}
 }
 
 // SendAndAwaitTransaction submits a transaction with custom options and waits for confirmation.

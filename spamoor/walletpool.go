@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
@@ -87,6 +88,10 @@ type WalletPool struct {
 	// Spammer ID for metrics tracking
 	spammerID uint64
 
+	// Transactions attributed to this pool, maintained by the transaction pool.
+	pendingTxCount   atomic.Int64
+	submittedTxCount atomic.Uint64
+
 	// Low balance notification system
 	lowBalanceNotifyChan chan struct{}
 	lastFundingTime      time.Time
@@ -154,9 +159,39 @@ func NewWalletPool(ctx context.Context, logger logrus.FieldLogger, rootWallet *R
 		fundingLoopDone:      make(chan struct{}),
 	}
 
+	if scope, _ := ctx.Value(walletPoolScopeKey{}).(*walletPoolScope); scope != nil {
+		scope.pool.CompareAndSwap(nil, pool)
+	}
+
 	txpool.RegisterWalletPool(pool)
 
 	return pool
+}
+
+type walletPoolScopeKey struct{}
+
+type walletPoolScope struct {
+	pool atomic.Pointer[WalletPool]
+}
+
+// WithWalletPoolScope returns a context that attributes the transactions sent with it,
+// or with a context derived from it, to the first wallet pool created with it. A
+// scenario run with the context its wallet pool was created with has everything it
+// sends counted towards its own pool, whichever wallet it sends from.
+func WithWalletPoolScope(ctx context.Context) context.Context {
+	return context.WithValue(ctx, walletPoolScopeKey{}, &walletPoolScope{})
+}
+
+// attributeTx returns the wallet pool a transaction being sent belongs to: the pool of
+// the context's scope, else the pool that prepared the sending wallet.
+func attributeTx(ctx context.Context, wallet *Wallet) *WalletPool {
+	if scope, _ := ctx.Value(walletPoolScopeKey{}).(*walletPoolScope); scope != nil {
+		if pool := scope.pool.Load(); pool != nil {
+			return pool
+		}
+	}
+
+	return wallet.getOwnerPool()
 }
 
 // GetContext returns the context associated with this wallet pool.
@@ -864,21 +899,22 @@ func (pool *WalletPool) prepareWallet(privkey string, client *Client, refillAmou
 		return nil, nil, err
 	}
 
-	childWallet := pool.txpool.GetRegisteredWallet(address)
+	// Registered under this pool's context even if another pool already holds the
+	// address, so the wallet stays registered until both are gone.
+	childWallet := pool.txpool.RegisterWallet(NewWallet(privateKey, address), pool.ctx)
 	if childWallet == nil {
-		childWallet = NewWallet(privateKey, address)
-
-		childWallet = pool.txpool.RegisterWallet(childWallet, pool.ctx)
-		if childWallet == nil {
-			// RegisterWallet returns nil when the context is already cancelled.
-			// Surface that as an error instead of dereferencing the nil wallet
-			// in the UpdateWallet call below.
-			if ctxErr := pool.ctx.Err(); ctxErr != nil {
-				return nil, nil, fmt.Errorf("wallet registration cancelled: %w", ctxErr)
-			}
-
-			return nil, nil, fmt.Errorf("wallet registration failed for %s", address.Hex())
+		// RegisterWallet returns nil when the context is already cancelled.
+		// Surface that as an error instead of dereferencing the nil wallet
+		// in the UpdateWallet call below.
+		if ctxErr := pool.ctx.Err(); ctxErr != nil {
+			return nil, nil, fmt.Errorf("wallet registration cancelled: %w", ctxErr)
 		}
+
+		return nil, nil, fmt.Errorf("wallet registration failed for %s", address.Hex())
+	}
+
+	if owner := childWallet.ownerPool.Load(); owner == nil || owner.ctx.Err() != nil {
+		childWallet.ownerPool.Store(pool)
 	}
 
 	err = client.UpdateWallet(pool.ctx, childWallet)
@@ -1205,7 +1241,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 				Client: client,
 			},
 			MaxRetries:   3,
-			PendingLimit: 200,
+			PendingLimit: rootWalletTxLimit,
 			LogFn: func(confirmedCount int, totalCount int) {
 				pool.logger.Infof("funding child wallets... (%v/%v)", confirmedCount, totalCount)
 			},
@@ -1230,6 +1266,40 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 	})
 }
 
+// maxFundingTxFee is the most a funding transaction may cost at its fee cap. Clients
+// refuse transactions above 1 ETH on their RPC by default.
+var maxFundingTxFee = big.NewInt(990000000000000000)
+
+// getFundingFees returns the fees for a funding transaction with the given gas limit:
+// the suggested fees with some headroom, capped at 100 gwei and at maxFundingTxFee for
+// the whole transaction.
+func (pool *WalletPool) getFundingFees(client *Client, gas uint64) (feeCap *big.Int, tipCap *big.Int, err error) {
+	feeCap, tipCap, err = client.GetSuggestedFee(pool.ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	maxFee := big.NewInt(100000000000) // 100 gwei
+	if gas > 0 {
+		if perGas := new(big.Int).Div(maxFundingTxFee, new(big.Int).SetUint64(gas)); perGas.Cmp(maxFee) < 0 {
+			maxFee = perGas
+		}
+	}
+
+	feeCap.Add(feeCap, big.NewInt(2000000000)) // +2 gwei
+	if feeCap.Cmp(maxFee) > 0 {
+		feeCap.Set(maxFee)
+	}
+
+	tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
+	// Ensure tipCap never exceeds feeCap (EIP-1559 requirement)
+	if tipCap.Cmp(feeCap) > 0 {
+		tipCap.Set(feeCap)
+	}
+
+	return feeCap, tipCap, nil
+}
+
 // buildWalletFundingTx creates a direct-EOA transaction to fund a single
 // wallet. The per-tx gas limit is sized via FundingGasFor(req.IsEmpty), so
 // non-empty refills use the cheap 21k path while initial fundings to empty
@@ -1241,30 +1311,18 @@ func (pool *WalletPool) buildWalletFundingTx(req *FundingRequest, client *Client
 			return nil, fmt.Errorf("no client available")
 		}
 	}
-	feeCap, tipCap, err := client.GetSuggestedFee(pool.ctx)
+	gas := pool.fundingGasForReq(req)
+
+	feeCap, tipCap, err := pool.getFundingFees(client, gas)
 	if err != nil {
 		return nil, err
-	}
-	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
-		feeCap = big.NewInt(100000000000) // 100 gwei
-	} else {
-		feeCap = feeCap.Add(feeCap, big.NewInt(2000000000)) // +2 gwei
-	}
-	if tipCap.Cmp(big.NewInt(100000000000)) > 0 {
-		tipCap = big.NewInt(100000000000) // 100 gwei
-	} else {
-		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
-	}
-	// Ensure tipCap never exceeds feeCap (EIP-1559 requirement)
-	if tipCap.Cmp(feeCap) > 0 {
-		tipCap = new(big.Int).Set(feeCap)
 	}
 
 	toAddr := req.Wallet.GetAddress()
 	refillTx, err := txbuilder.DynFeeTx(&txbuilder.TxMetadata{
 		GasFeeCap: uint256.MustFromBig(feeCap),
 		GasTipCap: uint256.MustFromBig(tipCap),
-		Gas:       pool.fundingGasForReq(req),
+		Gas:       gas,
 		To:        &toAddr,
 		Value:     req.Amount,
 	})
@@ -1288,30 +1346,17 @@ func (pool *WalletPool) buildWalletFundingBatchTx(requests []*FundingRequest, cl
 			return nil, fmt.Errorf("no client available")
 		}
 	}
-	feeCap, tipCap, err := client.GetSuggestedFee(pool.ctx)
-	if err != nil {
-		return nil, err
-	}
-	if feeCap.Cmp(big.NewInt(100000000000)) > 0 {
-		feeCap = big.NewInt(100000000000) // 100 gwei
-	} else {
-		feeCap = feeCap.Add(feeCap, big.NewInt(2000000000)) // +2 gwei
-	}
-	if tipCap.Cmp(big.NewInt(100000000000)) > 0 {
-		tipCap = big.NewInt(100000000000) // 100 gwei
-	} else {
-		tipCap = tipCap.Add(tipCap, big.NewInt(100000000)) // +0.1 gwei
-	}
-	// Ensure tipCap never exceeds feeCap (EIP-1559 requirement)
-	if tipCap.Cmp(feeCap) > 0 {
-		tipCap = new(big.Int).Set(feeCap)
-	}
 
 	totalAmount := uint256.NewInt(0)
 	gasTotal := pool.batcherBaseGas()
 	for _, req := range requests {
 		totalAmount = totalAmount.Add(totalAmount, req.Amount)
 		gasTotal += pool.batcherGasFor(req)
+	}
+
+	feeCap, tipCap, err := pool.getFundingFees(client, gasTotal)
+	if err != nil {
+		return nil, err
 	}
 
 	batchData, err := batcher.GetRequestCalldata(requests)
@@ -1529,4 +1574,16 @@ func (pool *WalletPool) SetSpammerID(spammerID uint64) {
 // GetSpammerID returns the spammer ID for metrics tracking
 func (pool *WalletPool) GetSpammerID() uint64 {
 	return pool.spammerID
+}
+
+// GetPendingTxCount returns the number of transactions attributed to this pool that
+// are in flight: handed to the transaction pool and not yet confirmed or failed.
+func (pool *WalletPool) GetPendingTxCount() uint64 {
+	return uint64(max(pool.pendingTxCount.Load(), 0))
+}
+
+// GetSubmittedTxCount returns the number of transactions attributed to this pool that
+// were submitted to the network since the pool was created.
+func (pool *WalletPool) GetSubmittedTxCount() uint64 {
+	return pool.submittedTxCount.Load()
 }
