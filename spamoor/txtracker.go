@@ -1,7 +1,6 @@
 package spamoor
 
 import (
-	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -34,10 +33,6 @@ type trackedTx struct {
 
 	done    atomic.Bool
 	stopCtx atomic.Pointer[func() bool]
-
-	// placeholder marks a cancelled transaction that still holds its nonce on the
-	// account lane, see txTracker.remove.
-	placeholder atomic.Bool
 
 	rebroadcasting atomic.Bool
 }
@@ -96,12 +91,6 @@ func (lane *txLane) remove(seq uint64, t *trackedTx) {
 	}
 
 	lane.trim()
-}
-
-func (lane *txLane) contains(seq uint64, t *trackedTx) bool {
-	idx, found := lane.find(seq)
-
-	return found && slices.Contains(lane.slots[idx].txs, t)
 }
 
 // trim drops empty slots from both ends.
@@ -171,21 +160,16 @@ type txSender struct {
 	address common.Address
 	wallet  *Wallet
 
-	account      txLane
-	keyed        map[uint256.Int]*txLane
-	pending      int
-	placeholders int
-	removed      bool
+	account txLane
+	keyed   map[uint256.Int]*txLane
+	pending int
+	removed bool
 
 	// lastProgress is the block of the last confirmation or stale check, staleChecks the
 	// number of stale checks since the last confirmation.
 	lastProgress uint64
 	staleChecks  uint64
 	suspect      bool
-
-	// lastKeyedCheck is the block the keyed lanes were last checked at. They are
-	// independent of each other, so progress on one says nothing about the rest.
-	lastKeyedCheck uint64
 }
 
 // lanes calls fn for each lane a transaction with the given keys occupies.
@@ -233,12 +217,6 @@ func (sender *txSender) retire(keys []uint256.Int, seq uint64) []*trackedTx {
 			retired = lane.retireAt(txtypes.MaxNonceSeq, retired)
 		}
 	})
-
-	for _, t := range retired {
-		if t.placeholder.CompareAndSwap(true, false) {
-			sender.placeholders--
-		}
-	}
 
 	if len(keys) < 2 {
 		return retired
@@ -439,12 +417,7 @@ func (tracker *txTracker) unlane(t *trackedTx) {
 }
 
 // remove stops tracking a transaction and drops its sender once nothing is left on it.
-//
-// With keepNonce a transaction on the account nonce lane stays there as a placeholder:
-// it was cancelled, not rejected, so it may still be in a mempool and its nonce is not
-// free. The placeholder goes when its nonce is passed, or when its wallet is no longer
-// registered (see dropPlaceholders).
-func (tracker *txTracker) remove(t *trackedTx, keepNonce bool) {
+func (tracker *txTracker) remove(t *trackedTx) {
 	tracker.removeHash(t)
 
 	sender := t.sender
@@ -453,12 +426,7 @@ func (tracker *txTracker) remove(t *trackedTx, keepNonce bool) {
 	}
 
 	sender.mu.Lock()
-	if t.laned && keepNonce && t.keys == nil && sender.account.contains(t.seq, t) {
-		// only what is still on the lane can hold its nonce there: a transaction
-		// retired just before, with its outcome still open, is not
-		t.placeholder.Store(true)
-		sender.placeholders++
-	} else if t.laned {
+	if t.laned {
 		sender.lanes(t.keys, false, func(l *txLane) { l.remove(t.seq, t) })
 	}
 
@@ -471,7 +439,7 @@ func (tracker *txTracker) remove(t *trackedTx, keepNonce bool) {
 // dropIdle drops a sender that has nothing left on it.
 func (tracker *txTracker) dropIdle(sender *txSender) {
 	sender.mu.Lock()
-	idle := sender.pending == 0 && sender.placeholders == 0 && !sender.removed
+	idle := sender.pending == 0 && !sender.removed
 	sender.mu.Unlock()
 
 	if !idle {
@@ -480,7 +448,7 @@ func (tracker *txTracker) dropIdle(sender *txSender) {
 
 	tracker.sendersMutex.Lock()
 	sender.mu.Lock()
-	if sender.pending == 0 && sender.placeholders == 0 && !sender.removed {
+	if sender.pending == 0 && !sender.removed {
 		sender.removed = true
 		sender.account = txLane{}
 		sender.keyed = nil
@@ -488,26 +456,6 @@ func (tracker *txTracker) dropIdle(sender *txSender) {
 	}
 	sender.mu.Unlock()
 	tracker.sendersMutex.Unlock()
-}
-
-// dropPlaceholders releases the placeholders of a sender, and with them the sender if
-// nothing else is pending on it.
-func (tracker *txTracker) dropPlaceholders(sender *txSender) {
-	sender.mu.Lock()
-	if sender.placeholders > 0 {
-		for i := range sender.account.slots {
-			slot := &sender.account.slots[i]
-			slot.txs = slices.DeleteFunc(slot.txs, func(t *trackedTx) bool {
-				return t.placeholder.CompareAndSwap(true, false)
-			})
-		}
-
-		sender.account.trim()
-		sender.placeholders = 0
-	}
-	sender.mu.Unlock()
-
-	tracker.dropIdle(sender)
 }
 
 // count returns the number of tracked transactions and senders.

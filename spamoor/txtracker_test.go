@@ -130,11 +130,11 @@ func TestTxTrackerAddRemove(t *testing.T) {
 
 	// middle first, then alternating ends
 	for i := len(tracked) / 2; i < len(tracked); i++ {
-		tracker.remove(tracked[i], false)
+		tracker.remove(tracked[i])
 	}
 
 	for i := len(tracked)/2 - 1; i >= 0; i-- {
-		tracker.remove(tracked[i], false)
+		tracker.remove(tracked[i])
 	}
 
 	if txs, senders := tracker.count(); txs != 0 || senders != 0 {
@@ -170,8 +170,8 @@ func TestTxTrackerUnlane(t *testing.T) {
 		t.Fatal("unlaned transaction is not tracked by hash")
 	}
 
-	tracker.remove(first, false)
-	tracker.remove(second, false)
+	tracker.remove(first)
+	tracker.remove(second)
 
 	if txs, senders := tracker.count(); txs != 0 || senders != 0 {
 		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
@@ -189,7 +189,7 @@ func TestTxTrackerAddOfFinishedTx(t *testing.T) {
 	// retired from its lane and removed before add got to the hash index
 	tracked.done.Store(true)
 	tracker.add(tracked, true, 0)
-	tracker.remove(tracked, false)
+	tracker.remove(tracked)
 
 	if txs, senders := tracker.count(); txs != 0 || senders != 0 {
 		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
@@ -218,7 +218,7 @@ func TestTxTrackerAddOfFinishedTx(t *testing.T) {
 
 			if len(retired) > 0 {
 				racing.done.Store(true)
-				tracker.remove(racing, false)
+				tracker.remove(racing)
 
 				break
 			}

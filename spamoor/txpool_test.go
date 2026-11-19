@@ -170,20 +170,6 @@ func expectTxResult(t *testing.T, name string, result chan txResult, receipt *tx
 	}
 }
 
-// expectTxUnresolved expects a transaction whose outcome could not be looked up.
-func expectTxUnresolved(t *testing.T, name string, result chan txResult) {
-	t.Helper()
-
-	select {
-	case got := <-result:
-		if got.receipt != nil || !errors.Is(got.err, errReceiptLookupFailed) {
-			t.Fatalf("%s: unexpected result %v / %v", name, got.receipt, got.err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("%s: did not complete", name)
-	}
-}
-
 func expectTxPending(t *testing.T, name string, result chan txResult) {
 	t.Helper()
 
@@ -211,8 +197,8 @@ func TestInclusionConfirmsAndReplaces(t *testing.T) {
 
 	receipt := includeTestTx(pool, wallet.GetAddress(), competitor)
 
-	// the lower nonce was passed unseen; no client can tell here what became of it
-	expectTxUnresolved(t, "lower nonce", results[0])
+	// the lower nonce was passed unseen and has no receipt
+	expectTxResult(t, "lower nonce", results[0], nil)
 	expectTxResult(t, "replaced", results[1], nil)
 	expectTxResult(t, "included", competitorResult, receipt)
 	expectTxPending(t, "higher nonce", results[2])
@@ -305,9 +291,6 @@ func TestCancelledAndRejectedTxsAreDropped(t *testing.T) {
 	expectTxResult(t, "cancelled", cancelled, nil)
 	expectTxPending(t, "rejected twice", rejected)
 
-	// the cancelled one holds its nonce until the stale pass finds its wallet unused
-	pool.processStaleSenders(0)
-
 	if txs, senders := pool.tracker.count(); txs != 0 || senders != 0 {
 		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
 	}
@@ -324,7 +307,7 @@ func TestUsedNonceTxCompletes(t *testing.T) {
 	wallet := NewWallet(nil, common.HexToAddress("0xa1"))
 	wallet.SetNonce(5)
 
-	expectTxUnresolved(t, "used nonce", trackTestTx(t, pool, ctx, wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 4})))
+	expectTxResult(t, "used nonce", trackTestTx(t, pool, ctx, wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 4})), nil)
 
 	if txs, _ := pool.tracker.count(); txs != 0 {
 		t.Fatalf("tracker not empty: %d transactions", txs)
@@ -603,109 +586,8 @@ func TestPassedNonceIsResolvedByReceipt(t *testing.T) {
 	expectTxResult(t, "included", includedResult, receipt)
 	expectTxResult(t, "replaced", replaced, nil)
 
-	// there is no client to ask here, so it ends with its outcome unknown
-	expectTxUnresolved(t, "passed", passed)
-
-	if txs, senders := pool.tracker.count(); txs != 0 || senders != 0 {
-		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
-	}
-}
-
-// A cancelled transaction may still be in a mempool, so its nonce stays taken on the
-// lane until it is passed, for as long as its wallet is registered.
-func TestCancelledTxKeepsItsNonce(t *testing.T) {
-	pool := newTrackingTestPool(context.Background())
-
-	walletCtx, unregister := context.WithCancel(context.Background())
-	wallet := pool.RegisterWallet(NewWallet(nil, common.HexToAddress("0xa1")), walletCtx)
-
-	cancelCtx, cancel := context.WithCancel(context.Background())
-	cancelledTx := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 0})
-	cancelled := trackTestTx(t, pool, cancelCtx, wallet, cancelledTx)
-	keyedTx := txtypes.NewTx((&txtypes.FrameTx{Sender: wallet.GetAddress()}).WithNonceKeys([]*uint256.Int{uint256.NewInt(5)}, 0))
-	cancelledKeyed := trackTestTx(t, pool, cancelCtx, wallet, keyedTx)
-	onlyTx := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 1})
-	only := trackTestTx(t, pool, cancelCtx, wallet, onlyTx)
-
-	cancel()
-	expectTxResult(t, "cancelled", cancelled, nil)
-	expectTxResult(t, "cancelled keyed", cancelledKeyed, nil)
-	expectTxResult(t, "cancelled last", only, nil)
-
-	// nothing waits for an outcome anymore, but both nonces are still taken
-	if wallet.GetPendingTx(cancelledTx) == nil || wallet.GetPendingTx(onlyTx) == nil {
-		t.Fatal("cancelled transaction is not pending anymore")
-	}
-
-	if wallet.GetPendingTx(keyedTx) != nil {
-		t.Fatal("cancelled keyed transaction is still on its lane")
-	}
-
-	if lowest, ok := wallet.GetLowestPendingNonce(); !ok || lowest != 0 {
-		t.Fatalf("unexpected lowest pending nonce: %d %v", lowest, ok)
-	}
-
-	if txs, senders := pool.tracker.count(); txs != 0 || senders != 1 {
-		t.Fatalf("expected a sender holding only placeholders, got %d transactions of %d senders", txs, senders)
-	}
-
-	pool.processStaleSenders(0)
-
-	if wallet.GetPendingTx(onlyTx) == nil {
-		t.Fatal("placeholder of a registered wallet was dropped")
-	}
-
-	// its nonce being included releases a placeholder, and nothing completes twice
-	includeTestTx(pool, wallet.GetAddress(), cancelledTx)
-	expectTxPending(t, "cancelled", cancelled)
-
-	if wallet.GetPendingTx(cancelledTx) != nil || wallet.GetPendingTx(onlyTx) == nil {
-		t.Fatal("wrong placeholder released")
-	}
-
-	// the rest goes once the wallet is not in use anymore
-	unregister()
-	pool.processStaleSenders(0)
-
-	if wallet.GetPendingTx(onlyTx) != nil {
-		t.Fatal("placeholder outlived its wallet")
-	}
-
-	if txs, senders := pool.tracker.count(); txs != 0 || senders != 0 {
-		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
-	}
-}
-
-// A transaction that was retired from its lane with its outcome still open is not on
-// the lane anymore. Cancelling it then must not leave a placeholder behind that nothing
-// can release.
-func TestCancelOfRetiredTxLeavesNoPlaceholder(t *testing.T) {
-	pool := newTrackingTestPool(context.Background())
-	wallet := pool.RegisterWallet(NewWallet(nil, common.HexToAddress("0xa1")), context.Background())
-
-	cancelCtx, cancel := context.WithCancel(context.Background())
-	passed := trackTestTx(t, pool, cancelCtx, wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 0}))
-
-	// what an inclusion of a higher nonce does to it, up to the receipt lookup
-	sender := pool.tracker.getSender(wallet.GetAddress())
-	sender.mu.Lock()
-	retired := sender.retire(nil, 1)
-	sender.mu.Unlock()
-
-	if len(retired) != 1 {
-		t.Fatalf("expected the transaction to be retired, got %d", len(retired))
-	}
-
-	cancel()
-	expectTxResult(t, "cancelled", passed, nil)
-
-	sender.mu.Lock()
-	placeholders := sender.placeholders
-	sender.mu.Unlock()
-
-	if placeholders != 0 {
-		t.Fatalf("%d placeholders counted for a transaction that is not on its lane", placeholders)
-	}
+	// it has no receipt, so it was not included
+	expectTxResult(t, "passed", passed, nil)
 
 	if txs, senders := pool.tracker.count(); txs != 0 || senders != 0 {
 		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
@@ -828,4 +710,80 @@ func TestAwaitedResult(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A reorg takes back exactly the authorizations that moved a wallet's nonce in the
+// reorged blocks: several of one authority, but not one the chain skipped.
+func TestReorgUndoesAppliedAuthorizations(t *testing.T) {
+	ctx := context.Background()
+
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setCode := func(salt uint64, nonce uint64) *txtypes.Transaction {
+		auth, err := txtypes.SignAuthorization(txtypes.SetCodeAuthorization{Nonce: nonce}, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return txtypes.NewTx(&txtypes.SetCodeTx{ChainID: uint256.NewInt(1), Nonce: salt, AuthList: []txtypes.SetCodeAuthorization{auth}})
+	}
+
+	// include records a block transaction the way block processing does
+	include := func(pool *TxPool, blockNumber uint64, tx *txtypes.Transaction) {
+		applied, _ := pool.processAuthorizations(tx, nil)
+		pool.confirmedTxs[blockNumber] = append(pool.confirmedTxs[blockNumber], &TxInfo{
+			TxHash: tx.Hash(), From: common.HexToAddress("0xb1"), Tx: tx, authorizations: applied,
+		})
+	}
+
+	reorg := func(pool *TxPool) {
+		parent := common.HexToHash("0x01")
+		pool.blocks = map[uint64]*BlockInfo{9: {Number: 9, Hash: parent}}
+
+		block := &txtypes.Block{}
+		block.Number = 10
+		block.ParentHash = parent
+
+		if err := pool.handleReorg(ctx, nil, 10, &BlockWithHash{Hash: common.HexToHash("0x0b"), Block: block}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("two authorizations of one authority", func(t *testing.T) {
+		pool := newTrackingTestPool(ctx)
+		authority := pool.RegisterWallet(NewWallet(key, crypto.PubkeyToAddress(key.PublicKey)), ctx)
+		authority.SetNonce(5)
+
+		include(pool, 10, setCode(1, 5))
+		include(pool, 10, setCode(2, 6))
+
+		if authority.confirmedNonce() != 7 {
+			t.Fatalf("setup: confirmed nonce %d", authority.confirmedNonce())
+		}
+
+		reorg(pool)
+
+		if got := authority.confirmedNonce(); got != 5 {
+			t.Fatalf("confirmed nonce %d after the reorg, want 5", got)
+		}
+	})
+
+	t.Run("replayed authorization that never applied", func(t *testing.T) {
+		pool := newTrackingTestPool(ctx)
+		authority := pool.RegisterWallet(NewWallet(key, crypto.PubkeyToAddress(key.PublicKey)), ctx)
+		authority.SetNonce(5)
+
+		// applied in a block that stays, then replayed in the one that is reorged out
+		include(pool, 8, setCode(1, 5))
+		include(pool, 10, setCode(2, 5))
+
+		reorg(pool)
+
+		if got := authority.confirmedNonce(); got != 6 {
+			t.Fatalf("confirmed nonce %d after the reorg, want 6", got)
+		}
+	})
 }

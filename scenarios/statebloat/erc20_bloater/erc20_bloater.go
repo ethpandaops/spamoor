@@ -426,12 +426,13 @@ func (s *Scenario) Run(ctx context.Context) error {
 		if err != nil {
 			s.logger.Errorf("failed to send transaction batch: %v", err)
 
-			// Release the nonces of txs that never reached a node. A submission
-			// failure drops the tx from the wallet's pending tracking, whereas a tx
-			// that was submitted but not confirmed yet stays pending and keeps its
-			// nonce. Confirmed nonces are ignored by MarkSkippedNonce.
+			// Release the nonces of txs that never reached a node. The failed batch
+			// is not tracked anymore, so the node is asked: a tx it holds counts
+			// towards the pending nonce and keeps its nonce. Confirmed nonces are
+			// ignored by MarkSkippedNonce.
 			for _, batch := range txBatches {
-				if batch.wallet.GetPendingTx(batch.tx) == nil {
+				pendingNonce, nonceErr := client.GetPendingNonceAt(ctx, batch.wallet.GetAddress())
+				if nonceErr == nil && pendingNonce <= batch.tx.Nonce() {
 					batch.wallet.MarkSkippedNonce(batch.tx.Nonce())
 				}
 			}

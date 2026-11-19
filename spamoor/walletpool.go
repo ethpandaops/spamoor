@@ -1215,11 +1215,23 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 
 		txList := make([]*txtypes.Transaction, 0, batchTxCount)
 		batchTxMap := map[common.Hash][]*FundingRequest{}
+
+		// A transaction that was built took a root wallet nonce. If the rest cannot be
+		// built those nonces go back, or everything sent from the root wallet waits
+		// behind them.
+		abort := func(err error) error {
+			for _, tx := range txList {
+				pool.rootWallet.wallet.MarkSkippedNonce(tx.Nonce())
+			}
+
+			return err
+		}
+
 		if batcher != nil {
 			for _, batch := range batches {
 				tx, err := pool.buildWalletFundingBatchTx(batch, client, batcher)
 				if err != nil {
-					return err
+					return abort(err)
 				}
 				txList = append(txList, tx)
 				batchTxMap[tx.Hash()] = batch
@@ -1228,7 +1240,7 @@ func (pool *WalletPool) processFundingRequests(fundingReqs []*FundingRequest) er
 			for _, req := range fundingReqs {
 				tx, err := pool.buildWalletFundingTx(req, client)
 				if err != nil {
-					return err
+					return abort(err)
 				}
 				txList = append(txList, tx)
 				// Record as a batch of one so the credit loop below (shared with the
