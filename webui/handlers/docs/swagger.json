@@ -438,6 +438,14 @@
                     "Graphs"
                 ],
                 "summary": "Get graphs dashboard data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Time window: short (30 minutes per block, default) or long (6 hours aggregated)",
+                        "name": "window",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "Success",
@@ -2131,13 +2139,33 @@
         "api.GraphsDataPoint": {
             "type": "object",
             "properties": {
+                "baseFee": {
+                    "description": "wei, of the last block",
+                    "type": "integer"
+                },
                 "blocks": {
                     "type": "integer"
                 },
                 "endBlock": {
                     "type": "integer"
                 },
+                "gapFills": {
+                    "type": "integer"
+                },
+                "gasLimit": {
+                    "description": "summed over the blocks of the point",
+                    "type": "integer"
+                },
                 "othersGas": {
+                    "type": "integer"
+                },
+                "rebroadcasts": {
+                    "type": "integer"
+                },
+                "reorgedTxs": {
+                    "type": "integer"
+                },
+                "reorgs": {
                     "type": "integer"
                 },
                 "spammers": {
@@ -2155,6 +2183,10 @@
                 },
                 "ts": {
                     "type": "string"
+                },
+                "txCount": {
+                    "description": "all transactions in the blocks",
+                    "type": "integer"
                 }
             }
         },
@@ -2440,10 +2472,26 @@
                 "confirmed": {
                     "type": "integer"
                 },
+                "delayP50": {
+                    "description": "submission to inclusion, median (ms)",
+                    "type": "integer"
+                },
+                "delayP95": {
+                    "description": "submission to inclusion, 95th percentile (ms)",
+                    "type": "integer"
+                },
+                "failed": {
+                    "description": "failed in the period",
+                    "type": "integer"
+                },
                 "gas": {
                     "type": "integer"
                 },
                 "pending": {
+                    "type": "integer"
+                },
+                "sent": {
+                    "description": "submitted in the period",
                     "type": "integer"
                 },
                 "submitted": {
@@ -2611,6 +2659,13 @@
                 "gasUsed": {
                     "type": "integer"
                 },
+                "groupId": {
+                    "description": "0 if the spammer is not in a group",
+                    "type": "integer"
+                },
+                "groupName": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "integer"
                 },
@@ -2619,6 +2674,9 @@
                 },
                 "pending": {
                     "type": "integer"
+                },
+                "scenario": {
+                    "type": "string"
                 },
                 "status": {
                     "description": "Running status from daemon",
