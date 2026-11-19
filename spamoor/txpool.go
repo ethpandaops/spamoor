@@ -63,6 +63,12 @@ type TxInfo struct {
 	receipt    *txtypes.Receipt
 	walletPool *WalletPool
 	tracked    *trackedTx
+
+	// delay is the time from submission to inclusion, zero if this process did not
+	// submit the transaction. reincluded marks one that was confirmed before and
+	// reorged out.
+	delay      time.Duration
+	reincluded bool
 }
 
 // BlockStatsCallback is called when a block is processed with statistics for a specific wallet pool
@@ -79,6 +85,12 @@ type WalletPoolBlockStats struct {
 	Block            *txtypes.Block
 	ConfirmedTxs     []*TxInfo
 	Receipts         []*txtypes.Receipt
+
+	// Time from submission to inclusion of the transactions the pool submitted itself.
+	MedianInclusionDelay time.Duration
+	P95InclusionDelay    time.Duration
+
+	delays []time.Duration
 }
 
 type GlobalBlockStats struct {
@@ -162,6 +174,11 @@ type TxPool struct {
 	tracker      txTracker
 	recoverySem  chan struct{}
 	rebroadcasts workQueue
+
+	reorgCount       atomic.Uint64
+	reorgedTxCount   atomic.Uint64
+	rebroadcastCount atomic.Uint64
+	gapFillCount     atomic.Uint64
 
 	// Block that failed to process and the attempts made at it, see retryBlock.
 	retryBlockNumber uint64
@@ -710,6 +727,8 @@ func (pool *TxPool) processBlockTxs(ctx context.Context, client *Client, blockNu
 			if tracked != nil {
 				txInfo.Options = tracked.Options
 				txInfo.walletPool = tracked.walletPool
+				txInfo.delay = time.Since(tracked.Submitted)
+				txInfo.reincluded = tracked.reincluded
 			} else if fromWallet != nil {
 				txInfo.walletPool = fromWallet.getOwnerPool()
 			}
@@ -985,6 +1004,7 @@ func (pool *TxPool) calculateWalletPoolStats(walletPool *WalletPool, confirmedTx
 	}
 
 	stats.AffectedWallets = len(affectedWallets)
+	stats.finish()
 
 	return stats
 }
@@ -1016,6 +1036,7 @@ func (pool *TxPool) calculateAllWalletPoolStats(confirmedTxs []*TxInfo, block *t
 
 	for walletPool, stats := range allStats {
 		stats.AffectedWallets = len(affectedWallets[walletPool])
+		stats.finish()
 	}
 
 	return &GlobalBlockStats{
@@ -1034,9 +1055,16 @@ func newWalletPoolBlockStats(block *txtypes.Block, capacity int) *WalletPoolBloc
 	}
 }
 
-// addTx counts a transaction the pool sent.
+// addTx counts a transaction the pool sent. One that is included again after a reorg
+// was counted as confirmed before.
 func (stats *WalletPoolBlockStats) addTx(txInfo *TxInfo) {
-	stats.ConfirmedTxCount++
+	if !txInfo.reincluded {
+		stats.ConfirmedTxCount++
+
+		if txInfo.delay > 0 {
+			stats.delays = append(stats.delays, txInfo.delay)
+		}
+	}
 
 	if txInfo.TxFees != nil {
 		totalFee := new(big.Int).Add(&txInfo.TxFees.FeeAmount, &txInfo.TxFees.BlobFeeAmount)
@@ -1045,6 +1073,37 @@ func (stats *WalletPoolBlockStats) addTx(txInfo *TxInfo) {
 
 	stats.Receipts = append(stats.Receipts, txInfo.receipt)
 	stats.ConfirmedTxs = append(stats.ConfirmedTxs, txInfo)
+}
+
+// finish derives the inclusion delay percentiles once all transactions are added.
+func (stats *WalletPoolBlockStats) finish() {
+	if len(stats.delays) == 0 {
+		return
+	}
+
+	slices.Sort(stats.delays)
+	stats.MedianInclusionDelay = stats.delays[len(stats.delays)/2]
+	stats.P95InclusionDelay = stats.delays[len(stats.delays)*95/100]
+	stats.delays = nil
+}
+
+// RecoveryStats counts what the transaction pool did to keep transactions moving since
+// it started.
+type RecoveryStats struct {
+	Reorgs       uint64 // chain reorganizations handled
+	ReorgedTxs   uint64 // transactions tracked again after being reorged out
+	Rebroadcasts uint64 // pending transactions sent to clients again
+	GapFills     uint64 // nonce gaps detected and filled
+}
+
+// GetRecoveryStats returns the pool's recovery counters.
+func (pool *TxPool) GetRecoveryStats() RecoveryStats {
+	return RecoveryStats{
+		Reorgs:       pool.reorgCount.Load(),
+		ReorgedTxs:   pool.reorgedTxCount.Load(),
+		Rebroadcasts: pool.rebroadcastCount.Load(),
+		GapFills:     pool.gapFillCount.Load(),
+	}
 }
 
 // recoveryConcurrency bounds the stale sender checks running at once, and separately
@@ -1256,6 +1315,10 @@ func (pool *TxPool) notifyTx(tracked *trackedTx, receipt *txtypes.Receipt, err e
 
 	tracked.Options.invokeComplete(tracked.Tx, receipt, err)
 
+	if err != nil && tracked.walletPool != nil {
+		tracked.walletPool.failedTxCount.Add(1)
+	}
+
 	if walletPool := tracked.walletPool; walletPool != nil && walletPool.ctx.Err() == nil {
 		if tracker := walletPool.GetTransactionTracker(); tracker != nil {
 			tracker(err)
@@ -1431,6 +1494,8 @@ func (pool *TxPool) queueRebroadcast(tracked *trackedTx, fanout bool) {
 	tracked.RebroadcastCount++
 	retryCount := tracked.RebroadcastCount
 
+	pool.rebroadcastCount.Add(1)
+
 	pool.rebroadcasts.push(recoveryConcurrency, func() {
 		defer tracked.rebroadcasting.Store(false)
 
@@ -1579,7 +1644,9 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 	}
 
 	if !sender.account.empty() {
-		for nonce := onChainNonce; nonce < sender.account.slots[0].seq; nonce++ {
+		// Nonces below the wallet's confirmed nonce are used, whatever a client that
+		// lags or sits on another fork reports.
+		for nonce := max(onChainNonce, wallet.GetConfirmedNonce()); nonce < sender.account.slots[0].seq; nonce++ {
 			nonceGaps = append(nonceGaps, nonce)
 		}
 	}
@@ -1610,6 +1677,7 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 			"wallet": sender.address.Hex(),
 			"gaps":   nonceGaps,
 		}).Warnf("detected nonce gaps, filling with dummy transactions")
+		pool.gapFillCount.Add(uint64(len(nonceGaps)))
 		go pool.fillNonceGaps(pool.options.Context, wallet, nonceGaps, nil)
 	}
 
@@ -1803,6 +1871,8 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 	pool.blocksMutex.Unlock()
 	pool.txsMutex.Unlock()
 
+	pool.reorgCount.Add(1)
+
 	// add reorged out txs as pending txs, reset affected wallets nonce state
 	resetWallets := map[common.Address]bool{}
 	resubmitted := map[common.Address]bool{}
@@ -1860,6 +1930,9 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 			if err != nil {
 				logrus.WithError(err).Errorf("error adding pending transaction for reorged out tx %v", tx.Tx.Hash())
 			} else {
+				tracked.reincluded = true
+				pool.reorgedTxCount.Add(1)
+
 				// Clients may have dropped it with the orphaned block, so it is sent
 				// again right away: the first one of each sender, which the others
 				// depend on, to every client.

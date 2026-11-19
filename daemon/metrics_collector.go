@@ -19,6 +19,11 @@ type TxPoolMetricsCollector struct {
 	shortWindow *MultiGranularityMetrics // 30min with per-block precision
 	longWindow  *MultiGranularityMetrics // 6h with per-32-block precision
 
+	// Cumulative counters seen at the previous block, to derive per-block values
+	lastSubmitted map[uint64]uint64
+	lastFailed    map[uint64]uint64
+	lastRecovery  spamoor.RecoveryStats
+
 	// Real-time update subscribers
 	subscribers      map[uint64]chan *MetricsUpdate
 	subscribersMux   sync.RWMutex
@@ -46,6 +51,14 @@ type BlockDataPoint struct {
 	TotalGasUsed     uint64                       `json:"totalGasUsed"`
 	SpammerGasData   map[uint64]*SpammerBlockData `json:"spammerGasData"` // spammerID -> data
 	OthersGasUsed    uint64                       `json:"othersGasUsed"`
+
+	GasLimit     uint64 `json:"gasLimit"`     // summed over the blocks of the point
+	BaseFee      uint64 `json:"baseFee"`      // wei, of the last block
+	TxCount      uint64 `json:"txCount"`      // all transactions in the blocks
+	Reorgs       uint64 `json:"reorgs"`       // chain reorganizations handled
+	ReorgedTxs   uint64 `json:"reorgedTxs"`   // transactions reorged out
+	Rebroadcasts uint64 `json:"rebroadcasts"` // pending transactions sent again
+	GapFills     uint64 `json:"gapFills"`     // nonce gaps filled
 }
 
 // SpammerBlockData represents a spammer's metrics within a data point
@@ -54,6 +67,11 @@ type SpammerBlockData struct {
 	ConfirmedTxCount uint64 `json:"confirmedTxCount"`
 	PendingTxCount   uint64 `json:"pendingTxCount"`   // snapshot at end of period
 	SubmittedTxCount uint64 `json:"submittedTxCount"` // total transactions submitted (lifetime)
+
+	SubmittedTxDelta uint64 `json:"submittedTxDelta"` // transactions submitted in the period
+	FailedTxCount    uint64 `json:"failedTxCount"`    // transactions that failed in the period
+	DelayMedianMs    uint64 `json:"delayMedianMs"`    // submission to inclusion, median
+	DelayP95Ms       uint64 `json:"delayP95Ms"`       // submission to inclusion, 95th percentile
 }
 
 // SpammerSnapshot represents current state of a spammer (not aggregated)
@@ -81,6 +99,10 @@ func NewTxPoolMetricsCollector(txPool *spamoor.TxPool) *TxPoolMetricsCollector {
 		longWindow:  NewMultiGranularityMetrics(6*time.Hour, 32),   // 6h, per-32-blocks
 		subscribers: make(map[uint64]chan *MetricsUpdate),
 		logger:      logrus.WithField("component", "metrics_collector"),
+
+		lastSubmitted: make(map[uint64]uint64, 16),
+		lastFailed:    make(map[uint64]uint64, 16),
+		lastRecovery:  txPool.GetRecoveryStats(),
 	}
 
 	// Subscribe to bulk block updates
@@ -114,7 +136,6 @@ func NewMultiGranularityMetrics(windowDuration time.Duration, blockGranularity u
 func (mc *TxPoolMetricsCollector) handleBulkBlockUpdate(blockNumber uint64, globalBlockStats *spamoor.GlobalBlockStats) {
 	// Extract block data
 	block := globalBlockStats.Block
-	receipts := globalBlockStats.Receipts
 
 	// If no block data from spammer stats, we need to get block data another way
 	// For now, we'll handle the case where we have spammer data
@@ -124,8 +145,9 @@ func (mc *TxPoolMetricsCollector) handleBulkBlockUpdate(blockNumber uint64, glob
 	}
 
 	// Process the block for both time windows
-	newDataPoint := mc.processBlockForWindow(mc.shortWindow, blockNumber, block, globalBlockStats.WalletPoolStats, receipts)
-	mc.processBlockForWindow(mc.longWindow, blockNumber, block, globalBlockStats.WalletPoolStats, receipts)
+	point := mc.buildBlockPoint(blockNumber, block, globalBlockStats.WalletPoolStats)
+	newDataPoint := mc.shortWindow.addBlock(point)
+	mc.longWindow.addBlock(point)
 
 	// Send real-time update to subscribers (only for short window)
 	if newDataPoint != nil {
@@ -139,142 +161,154 @@ func (mc *TxPoolMetricsCollector) handleBulkBlockUpdate(blockNumber uint64, glob
 	}
 }
 
-// processBlockForWindow processes a block for a specific time window
-func (mc *TxPoolMetricsCollector) processBlockForWindow(
-	window *MultiGranularityMetrics,
+// counterDelta returns how far a cumulative counter moved since the previous block. A
+// counter that went backwards belongs to a restarted spammer and starts from zero.
+func counterDelta(last map[uint64]uint64, spammerID uint64, current uint64) uint64 {
+	previous := last[spammerID]
+	last[spammerID] = current
+
+	if current < previous {
+		return current
+	}
+
+	return current - previous
+}
+
+// buildBlockPoint derives the data point of a single block.
+func (mc *TxPoolMetricsCollector) buildBlockPoint(
 	blockNumber uint64,
 	block *txtypes.Block,
 	allWalletPoolStats map[*spamoor.WalletPool]*spamoor.WalletPoolBlockStats,
-	receipts []*txtypes.Receipt,
 ) *BlockDataPoint {
-	window.mutex.Lock()
-	defer window.mutex.Unlock()
+	point := &BlockDataPoint{
+		Timestamp:        time.Now(),
+		StartBlockNumber: blockNumber,
+		EndBlockNumber:   blockNumber,
+		BlockCount:       1,
+		TotalGasUsed:     block.GasUsed,
+		SpammerGasData:   make(map[uint64]*SpammerBlockData, len(allWalletPoolStats)),
+		GasLimit:         block.GasLimit,
+		TxCount:          uint64(len(block.Transactions)),
+	}
 
-	now := time.Now()
-	totalGasUsed := block.GasUsed
+	if block.BaseFee != nil && block.BaseFee.IsUint64() {
+		point.BaseFee = block.BaseFee.Uint64()
+	}
 
-	// Calculate spammer metrics for this block
-	spammerGasData := make(map[uint64]*SpammerBlockData)
+	recovery := mc.txPool.GetRecoveryStats()
+	point.Reorgs = recovery.Reorgs - mc.lastRecovery.Reorgs
+	point.ReorgedTxs = recovery.ReorgedTxs - mc.lastRecovery.ReorgedTxs
+	point.Rebroadcasts = recovery.Rebroadcasts - mc.lastRecovery.Rebroadcasts
+	point.GapFills = recovery.GapFills - mc.lastRecovery.GapFills
+	mc.lastRecovery = recovery
+
 	totalSpammerGas := uint64(0)
 
 	for walletPool, stats := range allWalletPoolStats {
 		spammerID := walletPool.GetSpammerID()
 		gasUsed := mc.calculateGasUsedFromReceipts(stats.Receipts)
-		pendingCount, submittedCount := walletPool.GetPendingTxCount(), walletPool.GetSubmittedTxCount()
+		submitted := walletPool.GetSubmittedTxCount()
 
-		spammerGasData[spammerID] = &SpammerBlockData{
+		point.SpammerGasData[spammerID] = &SpammerBlockData{
 			GasUsed:          gasUsed,
 			ConfirmedTxCount: stats.ConfirmedTxCount,
-			PendingTxCount:   pendingCount,
-			SubmittedTxCount: submittedCount,
+			PendingTxCount:   walletPool.GetPendingTxCount(),
+			SubmittedTxCount: submitted,
+			SubmittedTxDelta: counterDelta(mc.lastSubmitted, spammerID, submitted),
+			FailedTxCount:    counterDelta(mc.lastFailed, spammerID, walletPool.GetFailedTxCount()),
+			DelayMedianMs:    uint64(stats.MedianInclusionDelay.Milliseconds()),
+			DelayP95Ms:       uint64(stats.P95InclusionDelay.Milliseconds()),
 		}
 
 		totalSpammerGas += gasUsed
+	}
 
-		// Update spammer snapshot
-		if existing, exists := window.currentSpammers[spammerID]; exists {
-			existing.PendingTxCount = pendingCount
-			existing.TotalConfirmedTx += stats.ConfirmedTxCount
-			existing.TotalSubmittedTx = submittedCount
-			existing.LastUpdate = now
-		} else {
-			window.currentSpammers[spammerID] = &SpammerSnapshot{
-				SpammerID:        spammerID,
-				PendingTxCount:   pendingCount,
-				TotalConfirmedTx: stats.ConfirmedTxCount,
-				TotalSubmittedTx: submittedCount,
-				LastUpdate:       now,
-			}
+	if point.TotalGasUsed > totalSpammerGas {
+		point.OthersGasUsed = point.TotalGasUsed - totalSpammerGas
+	}
+
+	return point
+}
+
+// addBlock adds a block's data point to the window and returns a copy of the window's
+// current point for a per-block window.
+func (mgm *MultiGranularityMetrics) addBlock(block *BlockDataPoint) *BlockDataPoint {
+	mgm.mutex.Lock()
+	defer mgm.mutex.Unlock()
+
+	for spammerID, data := range block.SpammerGasData {
+		snapshot := mgm.currentSpammers[spammerID]
+		if snapshot == nil {
+			snapshot = &SpammerSnapshot{SpammerID: spammerID}
+			mgm.currentSpammers[spammerID] = snapshot
 		}
+
+		snapshot.PendingTxCount = data.PendingTxCount
+		snapshot.TotalConfirmedTx += data.ConfirmedTxCount
+		snapshot.TotalSubmittedTx = data.SubmittedTxCount
+		snapshot.LastUpdate = block.Timestamp
 	}
 
-	othersGasUsed := uint64(0)
-	if totalGasUsed > totalSpammerGas {
-		othersGasUsed = totalGasUsed - totalSpammerGas
-	}
+	updated := mgm.addDataPoint(block)
+	mgm.pruneOldData(block.Timestamp)
 
-	// Add or aggregate data point based on granularity
-	updatedDataPoint := window.addDataPoint(blockNumber, now, totalGasUsed, spammerGasData, othersGasUsed)
-
-	// Clean up old data
-	window.pruneOldData(now)
-
-	mc.logger.Tracef("Processed block %d for window (granularity %d): total_gas=%d, spammer_gas=%d, others_gas=%d",
-		blockNumber, window.blockGranularity, totalGasUsed, totalSpammerGas, othersGasUsed)
-
-	// Return the data point only for short window (granularity 1). Hand back a
-	// copy so subscribers do not read the live map the collector keeps mutating.
-	if window.blockGranularity == 1 {
-		dataPointCopy := updatedDataPoint.copy()
+	if mgm.blockGranularity == 1 {
+		dataPointCopy := updated.copy()
 		return &dataPointCopy
 	}
+
 	return nil
 }
 
-// addDataPoint adds a block's data to the window, aggregating based on granularity
-// Returns the data point that was either updated or newly created
-func (mgm *MultiGranularityMetrics) addDataPoint(
-	blockNumber uint64,
-	timestamp time.Time,
-	totalGasUsed uint64,
-	spammerGasData map[uint64]*SpammerBlockData,
-	othersGasUsed uint64,
-) *BlockDataPoint {
-	// Check if we should aggregate with the last data point
+// addDataPoint adds a block to the current data point, or starts a new one once the
+// current one covers blockGranularity blocks.
+func (mgm *MultiGranularityMetrics) addDataPoint(block *BlockDataPoint) *BlockDataPoint {
 	if len(mgm.dataPoints) > 0 {
 		lastPoint := &mgm.dataPoints[len(mgm.dataPoints)-1]
 
-		// If this block falls within the current granularity window, aggregate
-		if blockNumber < lastPoint.EndBlockNumber+mgm.blockGranularity {
-			// Aggregate into existing data point
-			lastPoint.EndBlockNumber = blockNumber
+		if block.StartBlockNumber < lastPoint.StartBlockNumber+mgm.blockGranularity {
+			lastPoint.EndBlockNumber = block.EndBlockNumber
 			lastPoint.BlockCount++
-			lastPoint.TotalGasUsed += totalGasUsed
-			lastPoint.OthersGasUsed += othersGasUsed
-			lastPoint.Timestamp = timestamp // Update to latest timestamp
+			lastPoint.TotalGasUsed += block.TotalGasUsed
+			lastPoint.OthersGasUsed += block.OthersGasUsed
+			lastPoint.Timestamp = block.Timestamp
+			lastPoint.GasLimit += block.GasLimit
+			lastPoint.BaseFee = block.BaseFee
+			lastPoint.TxCount += block.TxCount
+			lastPoint.Reorgs += block.Reorgs
+			lastPoint.ReorgedTxs += block.ReorgedTxs
+			lastPoint.Rebroadcasts += block.Rebroadcasts
+			lastPoint.GapFills += block.GapFills
 
-			// Aggregate spammer data
-			for spammerID, data := range spammerGasData {
-				if existing, exists := lastPoint.SpammerGasData[spammerID]; exists {
-					existing.GasUsed += data.GasUsed
-					existing.ConfirmedTxCount += data.ConfirmedTxCount
-					existing.PendingTxCount = data.PendingTxCount     // Keep latest pending count
-					existing.SubmittedTxCount = data.SubmittedTxCount // Keep latest submitted count
-				} else {
-					lastPoint.SpammerGasData[spammerID] = &SpammerBlockData{
-						GasUsed:          data.GasUsed,
-						ConfirmedTxCount: data.ConfirmedTxCount,
-						PendingTxCount:   data.PendingTxCount,
-						SubmittedTxCount: data.SubmittedTxCount,
-					}
+			for spammerID, data := range block.SpammerGasData {
+				existing := lastPoint.SpammerGasData[spammerID]
+				if existing == nil {
+					dataCopy := *data
+					lastPoint.SpammerGasData[spammerID] = &dataCopy
+
+					continue
 				}
+
+				// The delay of the aggregate is weighted by confirmed transactions.
+				if confirmed := existing.ConfirmedTxCount + data.ConfirmedTxCount; confirmed > 0 {
+					existing.DelayMedianMs = (existing.DelayMedianMs*existing.ConfirmedTxCount + data.DelayMedianMs*data.ConfirmedTxCount) / confirmed
+				}
+
+				existing.DelayP95Ms = max(existing.DelayP95Ms, data.DelayP95Ms)
+				existing.GasUsed += data.GasUsed
+				existing.ConfirmedTxCount += data.ConfirmedTxCount
+				existing.PendingTxCount = data.PendingTxCount
+				existing.SubmittedTxCount = data.SubmittedTxCount
+				existing.SubmittedTxDelta += data.SubmittedTxDelta
+				existing.FailedTxCount += data.FailedTxCount
 			}
+
 			return lastPoint
 		}
 	}
 
-	// Create new data point
-	spammerDataCopy := make(map[uint64]*SpammerBlockData)
-	for spammerID, data := range spammerGasData {
-		spammerDataCopy[spammerID] = &SpammerBlockData{
-			GasUsed:          data.GasUsed,
-			ConfirmedTxCount: data.ConfirmedTxCount,
-			PendingTxCount:   data.PendingTxCount,
-			SubmittedTxCount: data.SubmittedTxCount,
-		}
-	}
+	mgm.dataPoints = append(mgm.dataPoints, block.copy())
 
-	newPoint := BlockDataPoint{
-		Timestamp:        timestamp,
-		StartBlockNumber: blockNumber,
-		EndBlockNumber:   blockNumber,
-		BlockCount:       1,
-		TotalGasUsed:     totalGasUsed,
-		SpammerGasData:   spammerDataCopy,
-		OthersGasUsed:    othersGasUsed,
-	}
-
-	mgm.dataPoints = append(mgm.dataPoints, newPoint)
 	return &mgm.dataPoints[len(mgm.dataPoints)-1]
 }
 

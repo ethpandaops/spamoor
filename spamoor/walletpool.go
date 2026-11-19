@@ -91,6 +91,7 @@ type WalletPool struct {
 	// Transactions attributed to this pool, maintained by the transaction pool.
 	pendingTxCount   atomic.Int64
 	submittedTxCount atomic.Uint64
+	failedTxCount    atomic.Uint64
 
 	// Low balance notification system
 	lowBalanceNotifyChan chan struct{}
@@ -1586,4 +1587,10 @@ func (pool *WalletPool) GetPendingTxCount() uint64 {
 // were submitted to the network since the pool was created.
 func (pool *WalletPool) GetSubmittedTxCount() uint64 {
 	return pool.submittedTxCount.Load()
+}
+
+// GetFailedTxCount returns the number of transactions attributed to this pool that
+// completed with an error since the pool was created.
+func (pool *WalletPool) GetFailedTxCount() uint64 {
+	return pool.failedTxCount.Load()
 }

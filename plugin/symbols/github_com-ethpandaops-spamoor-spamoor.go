@@ -71,6 +71,7 @@ func init() {
 		"GethTxEncodeFn":         reflect.ValueOf((*spamoor.GethTxEncodeFn)(nil)),
 		"GlobalBlockStats":       reflect.ValueOf((*spamoor.GlobalBlockStats)(nil)),
 		"PendingTx":              reflect.ValueOf((*spamoor.PendingTx)(nil)),
+		"RecoveryStats":          reflect.ValueOf((*spamoor.RecoveryStats)(nil)),
 		"RootWallet":             reflect.ValueOf((*spamoor.RootWallet)(nil)),
 		"SendTransactionOptions": reflect.ValueOf((*spamoor.SendTransactionOptions)(nil)),
 		"TxBatcher":              reflect.ValueOf((*spamoor.TxBatcher)(nil)),

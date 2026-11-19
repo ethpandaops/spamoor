@@ -28,6 +28,9 @@ type trackedTx struct {
 	keys  []uint256.Int
 	laned bool
 
+	// reincluded marks a transaction tracked again after it was reorged out.
+	reincluded bool
+
 	done    atomic.Bool
 	stopCtx atomic.Pointer[func() bool]
 
