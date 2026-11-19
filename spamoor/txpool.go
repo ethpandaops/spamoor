@@ -1595,7 +1595,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 				txOptions.ClientGroup = tx.Options.ClientGroup
 			}
 
-			err := pool.submitTransaction(ctx, tx.FromWallet, tx.Tx, txOptions, false)
+			err := pool.submitTransaction(ctx, tx.FromWallet, tx.Tx, txOptions, true)
 			if err != nil {
 				logrus.WithError(err).Errorf("error adding pending transaction for reorged out tx %v", tx.Tx.Hash())
 			}
@@ -2070,9 +2070,6 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 	if len(options.ClientList) > 0 {
 		clientCount = len(options.ClientList)
 	}
-	if clientCount > 5 {
-		clientCount = 5
-	}
 
 	startOffset := rebroadcastStartOffset(options.ClientsStartOffset, tx.Hash(), retryCount)
 
@@ -2101,10 +2098,6 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 
 		if options.LogFn != nil {
 			options.LogFn(client, j, int(retryCount), err)
-		}
-
-		if err == nil || strings.Contains(err.Error(), "already known") {
-			break
 		}
 	}
 }
