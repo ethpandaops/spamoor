@@ -1,6 +1,7 @@
 package spamoor
 
 import (
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -33,6 +34,10 @@ type trackedTx struct {
 
 	done    atomic.Bool
 	stopCtx atomic.Pointer[func() bool]
+
+	// placeholder marks a cancelled transaction that still holds its nonce on the
+	// account lane, see txTracker.remove.
+	placeholder atomic.Bool
 
 	rebroadcasting atomic.Bool
 }
@@ -146,10 +151,11 @@ type txSender struct {
 	address common.Address
 	wallet  *Wallet
 
-	account txLane
-	keyed   map[uint256.Int]*txLane
-	pending int
-	removed bool
+	account      txLane
+	keyed        map[uint256.Int]*txLane
+	pending      int
+	placeholders int
+	removed      bool
 
 	// lastProgress is the block of the last confirmation or stale check, staleChecks the
 	// number of stale checks since the last confirmation.
@@ -197,6 +203,12 @@ func (sender *txSender) retire(keys []uint256.Int, seq uint64) []*trackedTx {
 	sender.lanes(keys, false, func(lane *txLane) {
 		retired = lane.retire(seq, retired)
 	})
+
+	for _, t := range retired {
+		if t.placeholder.CompareAndSwap(true, false) {
+			sender.placeholders--
+		}
+	}
 
 	if len(keys) < 2 {
 		return retired
@@ -314,16 +326,6 @@ func (tracker *txTracker) byHash(hash common.Hash) []*trackedTx {
 func (tracker *txTracker) add(t *trackedTx, lane bool, block uint64) {
 	address := t.wallet.GetAddress()
 
-	// The hash index comes first: once the lanes can retire the transaction, removing
-	// it has to find it there.
-	tracker.hashMutex.Lock()
-	if tracker.hashes == nil {
-		tracker.hashes = make(map[common.Hash][]*trackedTx, 1024)
-	}
-
-	tracker.hashes[t.hash] = append(tracker.hashes[t.hash], t)
-	tracker.hashMutex.Unlock()
-
 	for {
 		tracker.sendersMutex.Lock()
 		if tracker.senders == nil {
@@ -355,6 +357,41 @@ func (tracker *txTracker) add(t *trackedTx, lane bool, block uint64) {
 
 		t.wallet.sender.Store(sender)
 
+		break
+	}
+
+	tracker.hashMutex.Lock()
+	if tracker.hashes == nil {
+		tracker.hashes = make(map[common.Hash][]*trackedTx, 1024)
+	}
+
+	tracker.hashes[t.hash] = append(tracker.hashes[t.hash], t)
+	tracker.hashMutex.Unlock()
+
+	// From its lanes the transaction can be retired and removed before its hash was
+	// indexed. The removal found nothing there then, so it is undone here.
+	if t.done.Load() {
+		tracker.removeHash(t)
+	}
+}
+
+func (tracker *txTracker) removeHash(t *trackedTx) {
+	tracker.hashMutex.Lock()
+	defer tracker.hashMutex.Unlock()
+
+	txs := tracker.hashes[t.hash]
+
+	for i, other := range txs {
+		if other != t {
+			continue
+		}
+
+		if len(txs) == 1 {
+			delete(tracker.hashes, t.hash)
+		} else {
+			tracker.hashes[t.hash] = append(txs[:i:i], txs[i+1:]...)
+		}
+
 		return
 	}
 }
@@ -375,25 +412,10 @@ func (tracker *txTracker) unlane(t *trackedTx) {
 //
 // With keepNonce a transaction on the account nonce lane stays there as a placeholder:
 // it was cancelled, not rejected, so it may still be in a mempool and its nonce is not
-// free. The placeholder goes when its nonce is passed or with its sender.
+// free. The placeholder goes when its nonce is passed, or when its wallet is no longer
+// registered (see dropPlaceholders).
 func (tracker *txTracker) remove(t *trackedTx, keepNonce bool) {
-	tracker.hashMutex.Lock()
-	txs := tracker.hashes[t.hash]
-
-	for i, other := range txs {
-		if other != t {
-			continue
-		}
-
-		if len(txs) == 1 {
-			delete(tracker.hashes, t.hash)
-		} else {
-			tracker.hashes[t.hash] = append(txs[:i:i], txs[i+1:]...)
-		}
-
-		break
-	}
-	tracker.hashMutex.Unlock()
+	tracker.removeHash(t)
 
 	sender := t.sender
 	if sender == nil {
@@ -401,21 +423,32 @@ func (tracker *txTracker) remove(t *trackedTx, keepNonce bool) {
 	}
 
 	sender.mu.Lock()
-	if t.laned && !(keepNonce && t.keys == nil) {
+	if t.laned && keepNonce && t.keys == nil {
+		t.placeholder.Store(true)
+		sender.placeholders++
+	} else if t.laned {
 		sender.lanes(t.keys, false, func(l *txLane) { l.remove(t.seq, t) })
 	}
 
 	sender.pending--
-	drop := sender.pending == 0 && !sender.removed
 	sender.mu.Unlock()
 
-	if !drop {
+	tracker.dropIdle(sender)
+}
+
+// dropIdle drops a sender that has nothing left on it.
+func (tracker *txTracker) dropIdle(sender *txSender) {
+	sender.mu.Lock()
+	idle := sender.pending == 0 && sender.placeholders == 0 && !sender.removed
+	sender.mu.Unlock()
+
+	if !idle {
 		return
 	}
 
 	tracker.sendersMutex.Lock()
 	sender.mu.Lock()
-	if sender.pending == 0 && !sender.removed {
+	if sender.pending == 0 && sender.placeholders == 0 && !sender.removed {
 		sender.removed = true
 		sender.account = txLane{}
 		sender.keyed = nil
@@ -423,6 +456,26 @@ func (tracker *txTracker) remove(t *trackedTx, keepNonce bool) {
 	}
 	sender.mu.Unlock()
 	tracker.sendersMutex.Unlock()
+}
+
+// dropPlaceholders releases the placeholders of a sender, and with them the sender if
+// nothing else is pending on it.
+func (tracker *txTracker) dropPlaceholders(sender *txSender) {
+	sender.mu.Lock()
+	if sender.placeholders > 0 {
+		for i := range sender.account.slots {
+			slot := &sender.account.slots[i]
+			slot.txs = slices.DeleteFunc(slot.txs, func(t *trackedTx) bool {
+				return t.placeholder.CompareAndSwap(true, false)
+			})
+		}
+
+		sender.account.trim()
+		sender.placeholders = 0
+	}
+	sender.mu.Unlock()
+
+	tracker.dropIdle(sender)
 }
 
 // count returns the number of tracked transactions and senders.

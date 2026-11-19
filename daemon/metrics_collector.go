@@ -71,6 +71,9 @@ type SpammerBlockData struct {
 	FailedTxCount    uint64 `json:"failedTxCount"`    // transactions that failed in the period
 	DelayMedianMs    uint64 `json:"delayMedianMs"`    // submission to inclusion, median
 	DelayP95Ms       uint64 `json:"delayP95Ms"`       // submission to inclusion, 95th percentile
+
+	// confirmed again after a reorg, not part of ConfirmedTxCount
+	reincludedTxCount uint64
 }
 
 // SpammerSnapshot represents current state of a spammer (not aggregated)
@@ -215,6 +218,8 @@ func (mc *TxPoolMetricsCollector) buildBlockPoint(
 			FailedTxCount:    current.failed - previous.failed,
 			DelayMedianMs:    uint64(stats.MedianInclusionDelay.Milliseconds()),
 			DelayP95Ms:       uint64(stats.P95InclusionDelay.Milliseconds()),
+
+			reincludedTxCount: stats.ReincludedTxCount,
 		}
 
 		if existing := point.SpammerGasData[spammerID]; existing != nil {
@@ -280,17 +285,27 @@ func (data *SpammerBlockData) merge(other *SpammerBlockData) {
 	data.SubmittedTxCount += other.SubmittedTxCount
 	data.SubmittedTxDelta += other.SubmittedTxDelta
 	data.FailedTxCount += other.FailedTxCount
+	data.reincludedTxCount += other.reincludedTxCount
 }
 
 // addDataPoint adds a block to the current data point, or starts a new one once the
 // current one covers blockGranularity blocks.
 func (mgm *MultiGranularityMetrics) addDataPoint(block *BlockDataPoint) *BlockDataPoint {
 	// A block processed again after a reorg replaces what the per-block window holds
-	// for its height and above. An aggregated point cannot give it back.
+	// for its height and above, and with it the transactions counted there: the ones
+	// confirmed again count for the new points. An aggregated point cannot give
+	// anything back, so there they stay counted once, where they were first.
 	if mgm.blockGranularity == 1 {
 		for len(mgm.dataPoints) > 0 && mgm.dataPoints[len(mgm.dataPoints)-1].StartBlockNumber >= block.StartBlockNumber {
 			mgm.dataPoints = mgm.dataPoints[:len(mgm.dataPoints)-1]
 		}
+
+		counted := block.copy()
+		for _, data := range counted.SpammerGasData {
+			data.ConfirmedTxCount += data.reincludedTxCount
+		}
+
+		block = &counted
 	}
 
 	if len(mgm.dataPoints) > 0 {

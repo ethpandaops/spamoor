@@ -177,3 +177,57 @@ func TestTxTrackerUnlane(t *testing.T) {
 		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
 	}
 }
+
+// A transaction that is finished while it is being added must not stay behind in the
+// hash index or keep its sender alive.
+func TestTxTrackerAddOfFinishedTx(t *testing.T) {
+	tracker := &txTracker{}
+	wallet := NewWallet(nil, common.HexToAddress("0x01"))
+
+	tracked := newTrackedTx(wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 0}), &SendTransactionOptions{})
+
+	// retired from its lane and removed before add got to the hash index
+	tracked.done.Store(true)
+	tracker.add(tracked, true, 0)
+	tracker.remove(tracked, false)
+
+	if txs, senders := tracker.count(); txs != 0 || senders != 0 {
+		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
+	}
+
+	// adding and finishing concurrently never leaves anything behind either
+	for i := 0; i < 2000; i++ {
+		racing := newTrackedTx(wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: uint64(i)}), &SendTransactionOptions{})
+		added := make(chan struct{})
+
+		go func() {
+			tracker.add(racing, true, 0)
+			close(added)
+		}()
+
+		// what block processing does once it finds the transaction on its lane
+		for {
+			sender := tracker.getSender(wallet.GetAddress())
+			if sender == nil {
+				continue
+			}
+
+			sender.mu.Lock()
+			retired := sender.retire(nil, uint64(i))
+			sender.mu.Unlock()
+
+			if len(retired) > 0 {
+				racing.done.Store(true)
+				tracker.remove(racing, false)
+
+				break
+			}
+		}
+
+		<-added
+
+		if txs, senders := tracker.count(); txs != 0 || senders != 0 {
+			t.Fatalf("round %d: tracker not empty: %d transactions of %d senders", i, txs, senders)
+		}
+	}
+}

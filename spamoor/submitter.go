@@ -128,11 +128,16 @@ func (p *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *txtype
 // It monitors the blockchain for the transaction and handles reorgs by continuing
 // to wait if the transaction gets reorged out of the chain.
 func (p *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction) (*txtypes.Receipt, error) {
-	result := make(chan *txtypes.Receipt, 1)
+	type awaited struct {
+		receipt *txtypes.Receipt
+		err     error
+	}
+
+	result := make(chan awaited, 1)
 
 	_, err := p.trackTransaction(ctx, wallet, tx, &SendTransactionOptions{
-		OnComplete: func(_ *txtypes.Transaction, receipt *txtypes.Receipt, _ error) {
-			result <- receipt
+		OnComplete: func(_ *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
+			result <- awaited{receipt, err}
 		},
 	}, false, nil)
 	if err != nil {
@@ -142,8 +147,13 @@ func (p *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *txtyp
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case receipt := <-result:
-		return receipt, nil
+	case res := <-result:
+		// the completion of a cancelled wait carries no outcome
+		if res.receipt == nil && res.err == nil && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		return res.receipt, res.err
 	}
 }
 
@@ -196,6 +206,11 @@ func (p *TxPool) SendAndAwaitTransaction(ctx context.Context, wallet *Wallet, tx
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case result := <-resultChan:
+		// the completion of a cancelled wait carries no outcome
+		if result.receipt == nil && result.err == nil && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
 		return result.receipt, result.err
 	}
 }

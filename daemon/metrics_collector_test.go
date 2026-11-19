@@ -151,6 +151,30 @@ func TestAddDataPointReplacesReprocessedBlock(t *testing.T) {
 	if len(m.dataPoints) != 2 || m.dataPoints[1].StartBlockNumber != 11 || m.dataPoints[1].TotalGasUsed != 50 {
 		t.Fatalf("unexpected data points after reprocessing: %+v", m.dataPoints)
 	}
+
+	// The transactions confirmed again count for the point that replaces the dropped
+	// ones, but not a second time in an aggregated window.
+	reprocessed := &BlockDataPoint{
+		Timestamp: time.Now(), StartBlockNumber: 11, EndBlockNumber: 11, BlockCount: 1,
+		SpammerGasData: map[uint64]*SpammerBlockData{7: {ConfirmedTxCount: 2, reincludedTxCount: 5}},
+	}
+
+	m.addDataPoint(reprocessed)
+
+	if got := m.dataPoints[1].SpammerGasData[7].ConfirmedTxCount; got != 7 {
+		t.Fatalf("per-block window counts %d confirmed transactions, want 7", got)
+	}
+
+	aggregated := &MultiGranularityMetrics{blockGranularity: 32, windowDuration: time.Hour, maxDataPoints: 100}
+	aggregated.addDataPoint(reprocessed)
+
+	if got := aggregated.dataPoints[0].SpammerGasData[7].ConfirmedTxCount; got != 2 {
+		t.Fatalf("aggregated window counts %d confirmed transactions, want 2", got)
+	}
+
+	if reprocessed.SpammerGasData[7].ConfirmedTxCount != 2 {
+		t.Fatal("the block's own data point was changed")
+	}
 }
 
 func TestSpammerBlockDataMerge(t *testing.T) {

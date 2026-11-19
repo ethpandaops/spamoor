@@ -2,6 +2,7 @@ package spamoor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -169,6 +170,20 @@ func expectTxResult(t *testing.T, name string, result chan txResult, receipt *tx
 	}
 }
 
+// expectTxUnresolved expects a transaction whose outcome could not be looked up.
+func expectTxUnresolved(t *testing.T, name string, result chan txResult) {
+	t.Helper()
+
+	select {
+	case got := <-result:
+		if got.receipt != nil || !errors.Is(got.err, errReceiptLookupFailed) {
+			t.Fatalf("%s: unexpected result %v / %v", name, got.receipt, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s: did not complete", name)
+	}
+}
+
 func expectTxPending(t *testing.T, name string, result chan txResult) {
 	t.Helper()
 
@@ -196,7 +211,8 @@ func TestInclusionConfirmsAndReplaces(t *testing.T) {
 
 	receipt := includeTestTx(pool, wallet.GetAddress(), competitor)
 
-	expectTxResult(t, "lower nonce", results[0], nil)
+	// the lower nonce was passed unseen; no client can tell here what became of it
+	expectTxUnresolved(t, "lower nonce", results[0])
 	expectTxResult(t, "replaced", results[1], nil)
 	expectTxResult(t, "included", competitorResult, receipt)
 	expectTxPending(t, "higher nonce", results[2])
@@ -289,6 +305,9 @@ func TestCancelledAndRejectedTxsAreDropped(t *testing.T) {
 	expectTxResult(t, "cancelled", cancelled, nil)
 	expectTxPending(t, "rejected twice", rejected)
 
+	// the cancelled one holds its nonce until the stale pass finds its wallet unused
+	pool.processStaleSenders(0)
+
 	if txs, senders := pool.tracker.count(); txs != 0 || senders != 0 {
 		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
 	}
@@ -305,7 +324,7 @@ func TestUsedNonceTxCompletes(t *testing.T) {
 	wallet := NewWallet(nil, common.HexToAddress("0xa1"))
 	wallet.SetNonce(5)
 
-	expectTxResult(t, "used nonce", trackTestTx(t, pool, ctx, wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 4})), nil)
+	expectTxUnresolved(t, "used nonce", trackTestTx(t, pool, ctx, wallet, txtypes.NewTx(&txtypes.LegacyTx{Nonce: 4})))
 
 	if txs, _ := pool.tracker.count(); txs != 0 {
 		t.Fatalf("tracker not empty: %d transactions", txs)
@@ -584,8 +603,8 @@ func TestPassedNonceIsResolvedByReceipt(t *testing.T) {
 	expectTxResult(t, "included", includedResult, receipt)
 	expectTxResult(t, "replaced", replaced, nil)
 
-	// no client knows a receipt for it here, so the lookup ends as not included
-	expectTxResult(t, "passed", passed, nil)
+	// there is no client to ask here, so it ends with its outcome unknown
+	expectTxUnresolved(t, "passed", passed)
 
 	if txs, senders := pool.tracker.count(); txs != 0 || senders != 0 {
 		t.Fatalf("tracker not empty: %d transactions of %d senders", txs, senders)
@@ -593,24 +612,28 @@ func TestPassedNonceIsResolvedByReceipt(t *testing.T) {
 }
 
 // A cancelled transaction may still be in a mempool, so its nonce stays taken on the
-// lane for as long as the sender has something else pending.
+// lane until it is passed, for as long as its wallet is registered.
 func TestCancelledTxKeepsItsNonce(t *testing.T) {
 	pool := newTrackingTestPool(context.Background())
-	wallet := NewWallet(nil, common.HexToAddress("0xa1"))
+
+	walletCtx, unregister := context.WithCancel(context.Background())
+	wallet := pool.RegisterWallet(NewWallet(nil, common.HexToAddress("0xa1")), walletCtx)
 
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancelledTx := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 0})
 	cancelled := trackTestTx(t, pool, cancelCtx, wallet, cancelledTx)
 	keyedTx := txtypes.NewTx((&txtypes.FrameTx{Sender: wallet.GetAddress()}).WithNonceKeys([]*uint256.Int{uint256.NewInt(5)}, 0))
-	trackTestTx(t, pool, cancelCtx, wallet, keyedTx)
-
-	liveTx := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 1})
-	live := trackTestTx(t, pool, context.Background(), wallet, liveTx)
+	cancelledKeyed := trackTestTx(t, pool, cancelCtx, wallet, keyedTx)
+	onlyTx := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 1})
+	only := trackTestTx(t, pool, cancelCtx, wallet, onlyTx)
 
 	cancel()
 	expectTxResult(t, "cancelled", cancelled, nil)
+	expectTxResult(t, "cancelled keyed", cancelledKeyed, nil)
+	expectTxResult(t, "cancelled last", only, nil)
 
-	if wallet.GetPendingTx(cancelledTx) == nil {
+	// nothing waits for an outcome anymore, but both nonces are still taken
+	if wallet.GetPendingTx(cancelledTx) == nil || wallet.GetPendingTx(onlyTx) == nil {
 		t.Fatal("cancelled transaction is not pending anymore")
 	}
 
@@ -622,34 +645,30 @@ func TestCancelledTxKeepsItsNonce(t *testing.T) {
 		t.Fatalf("unexpected lowest pending nonce: %d %v", lowest, ok)
 	}
 
-	if txs, senders := pool.tracker.count(); txs != 1 || senders != 1 {
-		t.Fatalf("expected only the live transaction to be tracked, got %d of %d senders", txs, senders)
+	if txs, senders := pool.tracker.count(); txs != 0 || senders != 1 {
+		t.Fatalf("expected a sender holding only placeholders, got %d transactions of %d senders", txs, senders)
 	}
 
-	// its nonce being included releases the placeholder, and nothing completes twice
+	pool.processStaleSenders(0)
+
+	if wallet.GetPendingTx(onlyTx) == nil {
+		t.Fatal("placeholder of a registered wallet was dropped")
+	}
+
+	// its nonce being included releases a placeholder, and nothing completes twice
 	includeTestTx(pool, wallet.GetAddress(), cancelledTx)
 	expectTxPending(t, "cancelled", cancelled)
 
-	if wallet.GetPendingTx(cancelledTx) != nil {
-		t.Fatal("placeholder outlived its nonce")
+	if wallet.GetPendingTx(cancelledTx) != nil || wallet.GetPendingTx(onlyTx) == nil {
+		t.Fatal("wrong placeholder released")
 	}
 
-	// the sender goes with its last waiting transaction, placeholders included
-	replay := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 2})
-	replayCtx, cancelReplay := context.WithCancel(context.Background())
-	trackTestTx(t, pool, replayCtx, wallet, replay)
-	cancelReplay()
+	// the rest goes once the wallet is not in use anymore
+	unregister()
+	pool.processStaleSenders(0)
 
-	receipt := includeTestTx(pool, wallet.GetAddress(), liveTx)
-	expectTxResult(t, "live", live, receipt)
-
-	deadline := time.Now().Add(2 * time.Second)
-	for wallet.GetPendingTx(replay) != nil {
-		if time.Now().After(deadline) {
-			t.Fatal("placeholder outlived its sender")
-		}
-
-		time.Sleep(time.Millisecond)
+	if wallet.GetPendingTx(onlyTx) != nil {
+		t.Fatal("placeholder outlived its wallet")
 	}
 
 	if txs, senders := pool.tracker.count(); txs != 0 || senders != 0 {

@@ -90,6 +90,10 @@ type WalletPoolBlockStats struct {
 	MedianInclusionDelay time.Duration
 	P95InclusionDelay    time.Duration
 
+	// Transactions confirmed again after a reorg. They were counted in
+	// ConfirmedTxCount the first time and are not part of it here.
+	ReincludedTxCount uint64
+
 	delays []time.Duration
 }
 
@@ -1070,6 +1074,8 @@ func (stats *WalletPoolBlockStats) addTx(txInfo *TxInfo) {
 		if txInfo.delay > 0 {
 			stats.delays = append(stats.delays, txInfo.delay)
 		}
+	} else {
+		stats.ReincludedTxCount++
 	}
 
 	if txInfo.TxFees != nil {
@@ -1217,7 +1223,8 @@ func (pool *TxPool) trackTransaction(ctx context.Context, wallet *Wallet, tx *tx
 
 	if !laned {
 		go func() {
-			pool.completeTx(tracked, pool.loadTransactionReceipt(ctx, tx), nil)
+			receipt, err := pool.loadTransactionReceipt(ctx, tx, receiptLookupClients)
+			pool.completeTx(tracked, receipt, err)
 		}()
 	}
 
@@ -1354,10 +1361,11 @@ func (pool *TxPool) completeTx(tracked *trackedTx, receipt *txtypes.Receipt, err
 // retireTxs finishes the transactions an included transaction retired from their lanes.
 // The included one is confirmed. One at the same sequence number was replaced by it.
 // One at a lower sequence number had its turn in a block that was not processed, so
-// only its receipt can tell whether it was included.
+// only its receipt can tell whether it was included. A single-use nonce is the
+// exception: it needs its keys unused, so nothing else on them was ever included.
 func (pool *TxPool) retireTxs(retired []*trackedTx, txHash common.Hash, seq uint64, receipt *txtypes.Receipt, completions []txCompletion) []txCompletion {
 	for _, tracked := range retired {
-		if tracked.hash != txHash && tracked.seq != seq {
+		if tracked.hash != txHash && tracked.seq != seq && seq != txtypes.MaxNonceSeq {
 			pool.resolveTx(tracked)
 
 			continue
@@ -1390,7 +1398,8 @@ func (pool *TxPool) resolveTx(tracked *trackedTx) {
 			return
 		}
 
-		pool.completeTx(tracked, pool.loadTransactionReceipt(pool.options.Context, tracked.Tx), nil)
+		receipt, err := pool.loadTransactionReceipt(pool.options.Context, tracked.Tx, receiptLookupClients)
+		pool.completeTx(tracked, receipt, err)
 	})
 }
 
@@ -1412,6 +1421,7 @@ func (pool *TxPool) processTransactionInclusion(blockNumber uint64, txFrom commo
 		sender.mu.Unlock()
 
 		completions = pool.retireTxs(retired, txHash, seq, receipt, completions)
+		pool.tracker.dropIdle(sender)
 	}
 
 	// Transactions outside the lanes are only known by their hash.
@@ -1457,6 +1467,7 @@ func (pool *TxPool) processAuthorizations(tx *txtypes.Transaction, completions [
 			sender.mu.Unlock()
 
 			completions = pool.retireTxs(retired, common.Hash{}, auth.Nonce, nil, completions)
+			pool.tracker.dropIdle(sender)
 		}
 	}
 
@@ -1543,7 +1554,7 @@ func (pool *TxPool) queueRebroadcast(tracked *trackedTx, fanout bool) {
 	pool.rebroadcasts.push(recoveryConcurrency, func() {
 		defer tracked.rebroadcasting.Store(false)
 
-		if tracked.done.Load() || pool.options.Context.Err() != nil {
+		if (tracked.done.Load() && !tracked.placeholder.Load()) || pool.options.Context.Err() != nil {
 			return
 		}
 
@@ -1564,6 +1575,11 @@ func (pool *TxPool) processStaleSenders(blockNumber uint64) {
 	var wg sync.WaitGroup
 
 	for _, sender := range pool.tracker.allSenders() {
+		// Placeholders hold a nonce for as long as their wallet is in use.
+		if pool.GetRegisteredWallet(sender.address) == nil {
+			pool.tracker.dropPlaceholders(sender)
+		}
+
 		sender.mu.Lock()
 		due := sender.suspect || blockNumber > sender.lastProgress+staleCheckInterval(sender.staleChecks)
 		if due {
@@ -1658,7 +1674,7 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 	sender.mu.Lock()
 
 	if onChainNonce > 0 {
-		confirmedTxs = sender.account.retire(onChainNonce-1, nil)
+		confirmedTxs = sender.retire(nil, onChainNonce-1)
 	}
 
 	for _, slot := range sender.account.slots {
@@ -1666,17 +1682,20 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 			break
 		}
 
-		// the most recent transaction still waiting; cancelled ones only hold the nonce
-		var mostRecentTx *trackedTx
-
-		for i := len(slot.txs) - 1; i >= 0 && mostRecentTx == nil; i-- {
-			if !slot.txs[i].done.Load() {
-				mostRecentTx = slot.txs[i]
-			}
+		if len(slot.txs) == 0 {
+			continue
 		}
 
-		if mostRecentTx == nil {
-			continue
+		// The most recent transaction still waiting, else the placeholder of a
+		// cancelled one: its nonce has to land too, or nothing behind it can.
+		mostRecentTx := slot.txs[len(slot.txs)-1]
+
+		for i := len(slot.txs) - 1; i >= 0; i-- {
+			if !slot.txs[i].done.Load() {
+				mostRecentTx = slot.txs[i]
+
+				break
+			}
 		}
 
 		// A transaction past its own deadline is dead rather than slow: it is
@@ -1706,6 +1725,7 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 
 	sender.mu.Unlock()
 
+	pool.tracker.dropIdle(sender)
 	wallet.raiseConfirmedNonce(onChainNonce)
 
 	// These confirmed in a block that was not processed. Whether as the tracked
@@ -1716,7 +1736,9 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 		}
 
 		logrus.Debugf("recovering stale confirmed transaction for %v (nonce %v)", sender.address.String(), tracked.seq)
-		pool.completeTx(tracked, pool.loadTransactionReceipt(pool.options.Context, tracked.Tx), nil)
+
+		receipt, err := pool.loadTransactionReceipt(pool.options.Context, tracked.Tx, receiptLookupClients)
+		pool.completeTx(tracked, receipt, err)
 	}
 
 	// Retire expired transactions, which hold a nonce nothing can ever confirm. The
@@ -1754,7 +1776,13 @@ func (pool *TxPool) recoverKeyedTx(sender *txSender, tracked *trackedTx) {
 		return
 	}
 
-	receipt := pool.loadTransactionReceipt(pool.options.Context, tracked.Tx)
+	// One client is enough to probe: nothing is concluded from it not knowing the
+	// transaction, the key's sequence is checked for that.
+	receipt, err := pool.loadTransactionReceipt(pool.options.Context, tracked.Tx, 1)
+	if err != nil {
+		// not known either way, the next stale check asks again
+		return
+	}
 
 	if receipt != nil {
 		logrus.Debugf("recovering stale confirmed transaction for %v (hash %v)", sender.address.String(), tracked.hash.Hex())
@@ -1826,6 +1854,11 @@ func (pool *TxPool) isKeyedLanePassed(address common.Address, tracked *trackedTx
 	return !current.IsUint64() || current.Uint64() > tracked.seq
 }
 
+// errReceiptLookupFailed is the completion error of a transaction whose sequence number
+// was passed without its inclusion being seen, and whose receipt no client could be
+// asked for. Whether it was included is not known.
+var errReceiptLookupFailed = errors.New("could not look up the transaction receipt")
+
 // receiptLookupClients is the number of clients that have to report a transaction as
 // unknown before it is taken to have no receipt.
 const receiptLookupClients = 3
@@ -1833,14 +1866,19 @@ const receiptLookupClients = 3
 // loadTransactionReceipt attempts to load a transaction receipt from multiple clients.
 // It retries up to 5 times with different clients and includes exponential backoff.
 // Returns nil if the receipt cannot be loaded after all retries.
-func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Transaction) *txtypes.Receipt {
+func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Transaction, clients int) (*txtypes.Receipt, error) {
 	retryCount := uint64(0)
 	notFoundCount := 0
 
-	for {
-		client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientRandom))
+	// different clients are asked in turn, starting at a random one
+	clientCount := len(pool.options.ClientPool.GetAllGoodClients())
+	clients = min(clients, max(clientCount, 1))
+	offset := rand.Intn(max(clientCount, 1))
+
+	for attempt := 0; ; attempt++ {
+		client := pool.options.ClientPool.GetClient(WithClientSelectionMode(SelectClientByIndex, offset+attempt))
 		if client == nil {
-			return nil
+			return nil, errReceiptLookupFailed
 		}
 
 		reqCtx, reqCtxCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -1850,19 +1888,19 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Tran
 
 		receipt, err := client.GetTransactionReceipt(reqCtx, tx.Hash())
 		if err == nil {
-			return receipt
+			return receipt, nil
 		}
 
 		if ctx.Err() != nil {
-			return nil
+			return nil, ctx.Err()
 		}
 
 		// A client that does not know the transaction may only be behind, so a few
 		// are asked. Their agreement is an answer, not a failure to wait on.
 		if errors.Is(err, ethereum.NotFound) {
 			notFoundCount++
-			if notFoundCount >= receiptLookupClients {
-				return nil
+			if notFoundCount >= clients {
+				return nil, nil
 			}
 
 			continue
@@ -1880,7 +1918,7 @@ func (pool *TxPool) loadTransactionReceipt(ctx context.Context, tx *txtypes.Tran
 
 			retryCount++
 		} else {
-			return nil
+			return nil, fmt.Errorf("%w: %w", errReceiptLookupFailed, err)
 		}
 	}
 }
@@ -2060,7 +2098,11 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 		}
 		pool.blocksMutex.Unlock()
 
-		pool.processBlockTxs(ctx, client, parent.Block.NumberU64(), parent, nil)
+		if err := pool.processBlockTxs(ctx, client, parent.Block.NumberU64(), parent, nil); err != nil {
+			// its confirmations were not seen, so the senders' on-chain state is checked
+			logrus.WithError(err).Errorf("error processing block %v after reorg", parent.Block.NumberU64())
+			pool.markSendersSuspect()
+		}
 	}
 
 	return nil
