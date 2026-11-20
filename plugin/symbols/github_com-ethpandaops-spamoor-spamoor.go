@@ -21,6 +21,7 @@ func init() {
 		"ClientTypeClient":             reflect.ValueOf(spamoor.ClientTypeClient),
 		"CostPerStateByte":             reflect.ValueOf(spamoor.CostPerStateByte),
 		"ErrNoReadyClient":             reflect.ValueOf(&spamoor.ErrNoReadyClient).Elem(),
+		"ErrTransactionReplaced":       reflect.ValueOf(&spamoor.ErrTransactionReplaced).Elem(),
 		"GetDefaultLogFn":              reflect.ValueOf(spamoor.GetDefaultLogFn),
 		"GetDefaultWalletConfig":       reflect.ValueOf(spamoor.GetDefaultWalletConfig),
 		"InitRootWallet":               reflect.ValueOf(spamoor.InitRootWallet),
@@ -42,6 +43,7 @@ func init() {
 		"SelectWalletRoundRobin":       reflect.ValueOf(&spamoor.SelectWalletRoundRobin).Elem(),
 		"WithClientGroup":              reflect.ValueOf(spamoor.WithClientGroup),
 		"WithClientSelectionMode":      reflect.ValueOf(spamoor.WithClientSelectionMode),
+		"WithWalletPoolScope":          reflect.ValueOf(spamoor.WithWalletPoolScope),
 		"WithoutBuilder":               reflect.ValueOf(spamoor.WithoutBuilder),
 		"WithoutClientType":            reflect.ValueOf(spamoor.WithoutClientType),
 
@@ -70,6 +72,7 @@ func init() {
 		"GethTxEncodeFn":         reflect.ValueOf((*spamoor.GethTxEncodeFn)(nil)),
 		"GlobalBlockStats":       reflect.ValueOf((*spamoor.GlobalBlockStats)(nil)),
 		"PendingTx":              reflect.ValueOf((*spamoor.PendingTx)(nil)),
+		"RecoveryStats":          reflect.ValueOf((*spamoor.RecoveryStats)(nil)),
 		"RootWallet":             reflect.ValueOf((*spamoor.RootWallet)(nil)),
 		"SendTransactionOptions": reflect.ValueOf((*spamoor.SendTransactionOptions)(nil)),
 		"TxBatcher":              reflect.ValueOf((*spamoor.TxBatcher)(nil)),

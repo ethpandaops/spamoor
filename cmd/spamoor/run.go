@@ -22,6 +22,7 @@ import (
 // RunSpammer represents a spammer instance for the run command
 type RunSpammer struct {
 	config     configs.SpammerConfig
+	ctx        context.Context
 	scenario   scenario.Scenario
 	walletPool *spamoor.WalletPool
 	logger     *logrus.Entry
@@ -258,7 +259,7 @@ func RunCommand(args []string) {
 		go func(idx int, s *RunSpammer) {
 			defer wg.Done()
 			logger.Infof("Starting spammer %d: %s (%s)", idx, s.config.Name, s.config.Scenario)
-			err := s.scenario.Run(ctx)
+			err := s.scenario.Run(s.ctx)
 			if err != nil {
 				errChan <- fmt.Errorf("spammer %d (%s) failed: %w", idx, s.config.Name, err)
 			}
@@ -307,6 +308,7 @@ func createSpammer(ctx context.Context, config configs.SpammerConfig, configYAML
 	}
 
 	// Create wallet pool for this spammer
+	ctx = spamoor.WithWalletPoolScope(ctx)
 	walletPool := spamoor.NewWalletPool(ctx, spammerLogger.WithField("module", "walletpool"),
 		rootWallet, clientPool, txpool)
 
@@ -325,6 +327,7 @@ func createSpammer(ctx context.Context, config configs.SpammerConfig, configYAML
 	}
 
 	return &RunSpammer{
+		ctx:        ctx,
 		config:     config,
 		scenario:   scenarioInstance,
 		walletPool: walletPool,
