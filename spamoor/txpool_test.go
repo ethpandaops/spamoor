@@ -2,9 +2,12 @@ package spamoor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -786,4 +789,73 @@ func TestReorgUndoesAppliedAuthorizations(t *testing.T) {
 			t.Fatalf("confirmed nonce %d after the reorg, want 6", got)
 		}
 	})
+}
+
+// A transaction that every client refuses on a final rebroadcast fails; one a client
+// still takes stays pending.
+func TestRebroadcastRefusedByAllClientsFails(t *testing.T) {
+	ctx := context.Background()
+
+	// newClient returns a client whose node answers eth_sendRawTransaction with reply
+	newClient := func(reply string) *Client {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+			}
+
+			_ = json.NewDecoder(r.Body).Decode(&req)
+
+			body := `"result":null`
+			if req.Method == "eth_sendRawTransaction" {
+				body = reply
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,%s}`, req.ID, body)
+		}))
+		t.Cleanup(server.Close)
+
+		client, err := NewClient(&ClientOptions{RpcHost: server.URL})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		client.enabled = true
+
+		return client
+	}
+
+	refuse := `"error":{"code":-32000,"message":"invalid transaction"}`
+	accept := `"result":"0x0000000000000000000000000000000000000000000000000000000000000001"`
+
+	rebroadcast := func(final bool, replies ...string) chan txResult {
+		pool := newTrackingTestPool(ctx)
+
+		for _, reply := range replies {
+			pool.options.ClientPool.goodClients = append(pool.options.ClientPool.goodClients, newClient(reply))
+		}
+
+		wallet := pool.RegisterWallet(NewWallet(nil, common.HexToAddress("0xa1")), ctx)
+		wallet.SetNonce(5)
+
+		tx := txtypes.NewTx(&txtypes.LegacyTx{Nonce: 5})
+		result := trackTestTx(t, pool, ctx, wallet, tx)
+
+		pool.queueRebroadcast(pool.tracker.byHash(tx.Hash())[0], true, final)
+
+		return result
+	}
+
+	select {
+	case got := <-rebroadcast(true, refuse, refuse):
+		if got.receipt != nil || got.err == nil {
+			t.Fatalf("refused: unexpected result %v / %v", got.receipt, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("refused: did not complete")
+	}
+
+	expectTxPending(t, "one client takes it", rebroadcast(true, refuse, accept))
+	expectTxPending(t, "not final", rebroadcast(false, refuse, refuse))
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/sirupsen/logrus"
 
 	"github.com/ethpandaops/spamoor/txtypes"
@@ -1563,8 +1564,10 @@ func (queue *workQueue) work() {
 }
 
 // queueRebroadcast rebroadcasts a tracked transaction through the rebroadcast queue.
-// fanout sends it to every eligible client instead of the first accepting one.
-func (pool *TxPool) queueRebroadcast(tracked *trackedTx, fanout bool) {
+// fanout sends it to every eligible client instead of the first accepting one. With
+// final, a transaction that every client refuses fails like one refused on submission:
+// no mempool holds it, so it would be rebroadcast forever and block its lane.
+func (pool *TxPool) queueRebroadcast(tracked *trackedTx, fanout bool, final bool) {
 	if !tracked.rebroadcasting.CompareAndSwap(false, true) {
 		return
 	}
@@ -1584,7 +1587,23 @@ func (pool *TxPool) queueRebroadcast(tracked *trackedTx, fanout bool) {
 			return
 		}
 
-		pool.rebroadcastTransaction(pool.options.Context, tracked.Tx, tracked.Options, retryCount, fanout)
+		refused := pool.rebroadcastTransaction(pool.options.Context, tracked.Tx, tracked.Options, retryCount, fanout)
+		if refused == nil || !final {
+			return
+		}
+
+		// a client also refuses what was included a moment ago
+		if receipt := pool.loadTransactionReceipt(pool.options.Context, tracked.Tx); receipt != nil {
+			pool.completeTx(tracked, receipt, nil)
+			return
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"wallet": tracked.sender.address.Hex(),
+			"txhash": tracked.hash.Hex(),
+		}).Debugf("dropping transaction refused by all clients: %v", refused)
+
+		pool.completeTx(tracked, nil, fmt.Errorf("transaction refused by all clients on rebroadcast: %w", refused))
 	})
 }
 
@@ -1783,14 +1802,13 @@ func (pool *TxPool) recoverAccountLane(blockNumber uint64, sender *txSender) {
 		fanout := tracked.RebroadcastCount > 0
 		sender.mu.Unlock()
 
-		pool.queueRebroadcast(tracked, fanout)
+		pool.queueRebroadcast(tracked, fanout, fanout)
 	}
 }
 
 // recoverKeyedTx recovers the lowest pending transaction of an EIP-8250 keyed lane: it is
 // confirmed if it has a receipt, which means its inclusion was not seen, and rebroadcast
-// otherwise. A transaction that lost its keys to one that was not seen either stays
-// tracked until its context ends.
+// otherwise.
 func (pool *TxPool) recoverKeyedTx(sender *txSender, tracked *trackedTx) {
 	if tracked.done.Load() {
 		return
@@ -1826,7 +1844,7 @@ func (pool *TxPool) recoverKeyedTx(sender *txSender, tracked *trackedTx) {
 		"txhash": tracked.hash.Hex(),
 	}).Debugf("rebroadcasting stale transaction")
 
-	pool.queueRebroadcast(tracked, fanout)
+	pool.queueRebroadcast(tracked, fanout, fanout)
 }
 
 // loadTransactionReceipt loads a transaction receipt from a client. It returns nil if
@@ -2012,7 +2030,7 @@ func (pool *TxPool) handleReorg(ctx context.Context, client *Client, blockNumber
 				// Clients may have dropped it with the orphaned block, so it is sent
 				// again right away: the first one of each sender, which the others
 				// depend on, to every client.
-				pool.queueRebroadcast(tracked, !resubmitted[tx.From])
+				pool.queueRebroadcast(tracked, !resubmitted[tx.From], false)
 				resubmitted[tx.From] = true
 			}
 		}
@@ -2496,8 +2514,9 @@ func rebroadcastStartOffset(configured int, hash common.Hash, retryCount uint64)
 // rebroadcastTransaction performs the actual rebroadcast of a transaction.
 // With fanout it goes to every eligible client: peers that already saw the hash do not
 // fetch it again from gossip, so a node that dropped it only gets it back directly.
-// Without, it stops at the first client that takes it.
-func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Transaction, options *SendTransactionOptions, retryCount uint64, fanout bool) {
+// Without, it stops at the first client that takes it. It returns an error if every
+// client that answered refused the transaction.
+func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Transaction, options *SendTransactionOptions, retryCount uint64, fanout bool) error {
 	submitTx := func(client *Client) error {
 		if options.hasEncodeFn() {
 			txBytes, err := options.invokeEncode(tx)
@@ -2524,9 +2543,15 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 	startOffset := rebroadcastStartOffset(options.ClientsStartOffset, tx.Hash(), retryCount)
 	asked := make(map[*Client]struct{}, clientCount)
 
+	var (
+		refused    error
+		accepted   bool
+		unanswered bool
+	)
+
 	for j := 0; j < clientCount; j++ {
 		if ctx.Err() != nil {
-			break
+			return nil
 		}
 
 		var client *Client
@@ -2558,10 +2583,30 @@ func (pool *TxPool) rebroadcastTransaction(ctx context.Context, tx *txtypes.Tran
 			options.LogFn(client, j, int(retryCount), err)
 		}
 
-		if !fanout && (err == nil || strings.Contains(err.Error(), "already known")) {
+		// only a response of the client is a refusal, a failed request is no answer
+		var rpcErr rpc.Error
+
+		switch {
+		case err == nil || strings.Contains(err.Error(), "already known") || strings.Contains(err.Error(), "Known transaction"):
+			accepted = true
+		case errors.As(err, &rpcErr):
+			if refused == nil {
+				refused = err
+			}
+		default:
+			unanswered = true
+		}
+
+		if !fanout && accepted {
 			break
 		}
 	}
+
+	if accepted || unanswered {
+		return nil
+	}
+
+	return refused
 }
 
 // blockTime returns the timestamp of a processed block.
