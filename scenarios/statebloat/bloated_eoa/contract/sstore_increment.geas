@@ -1,0 +1,13 @@
+;; test_sstore_bloated (write_new_value): s[counter] = counter + 1.
+;; Access op is byte-identical to the EELS sstore_op for this case.
+
+#include "range_loop.geas"
+
+#define %Access {
+    dup1                  ;; [counter, counter, end]
+    dup1                  ;; [counter, counter, counter, end]
+    push 1                ;; [1, counter, counter, counter, end]
+    add                   ;; [counter+1, counter, counter, end]
+    swap1                 ;; [counter, counter+1, counter, end]
+    sstore                ;; [counter, end]
+}

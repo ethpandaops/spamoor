@@ -1,0 +1,45 @@
+;; Shared attack loop for the bloated EOA delegation target (SLOAD mode).
+;;
+;; Port of the runtime used by the EELS bloatnet benchmark
+;; tests/benchmark/stateful/bloatnet/test_sload.py::test_sload_bloated.
+;; SSTORE mode uses range_loop.geas instead.
+;;
+;; - Calls with calldata set the slot counter: s[0] = calldata[0:32].
+;; - Calls without calldata load the counter from s[0], run %Access on
+;;   s[counter], s[counter+1], ... while gas > LoopGasThreshold, then store
+;;   the next counter back to s[0] so the following tx continues on
+;;   untouched slots.
+;;
+;; The including variant file defines %Access (stack: [counter] -> [counter]).
+;; LoopGasThreshold can be overridden by the scenario (--loop-gas-threshold).
+
+#define LoopGasThreshold = 0xffff
+
+    calldatasize            ;; [cds]
+    iszero                  ;; [cds == 0]
+    jumpi @run              ;; []
+
+    ;; set slot counter from calldata
+    push0                   ;; [0]
+    calldataload            ;; [counter]
+    push0                   ;; [0, counter]
+    sstore                  ;; []
+    stop
+
+run:
+    push0                   ;; [0]
+    sload                   ;; [counter]
+
+loop:
+    %Access                 ;; [counter]
+
+    push 1                  ;; [1, counter]
+    add                     ;; [counter+1]
+    push LoopGasThreshold   ;; [threshold, counter+1]
+    gas                     ;; [gas, threshold, counter+1]
+    gt                      ;; [gas > threshold, counter+1]
+    jumpi @loop             ;; [counter+1]
+
+    push0                   ;; [0, counter+1]
+    sstore                  ;; []
+    stop

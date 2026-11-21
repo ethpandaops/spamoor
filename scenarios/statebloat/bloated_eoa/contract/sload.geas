@@ -1,0 +1,9 @@
+;; test_sload_bloated: SLOAD every slot of the bloated EOA.
+
+#include "loop.geas"
+
+#define %Access {
+    dup1                    ;; [counter, counter]
+    sload                   ;; [s[counter], counter]
+    pop                     ;; [counter]
+}

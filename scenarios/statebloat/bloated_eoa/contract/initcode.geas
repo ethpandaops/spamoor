@@ -1,0 +1,13 @@
+;; Constructor: returns the runtime code appended after it.
+
+    push @.start
+    codesize
+    sub
+    dup1
+    push @.start
+    push0
+    codecopy
+    push0
+    return
+
+.start:

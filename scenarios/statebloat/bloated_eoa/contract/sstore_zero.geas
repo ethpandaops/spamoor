@@ -1,0 +1,11 @@
+;; test_sstore_bloated (!existing_slots, !write_new_value):
+;; s[counter] = 0 on empty slots (no-op write).
+;; Access op is byte-identical to the EELS sstore_op for this case.
+
+#include "range_loop.geas"
+
+#define %Access {
+    push0                 ;; [0, counter, end]
+    dup2                  ;; [counter, 0, counter, end]
+    sstore                ;; [counter, end]
+}

@@ -34,6 +34,7 @@ import (
 	safemultisig "github.com/ethpandaops/spamoor/scenarios/safe-multisig"
 	seaporttrades "github.com/ethpandaops/spamoor/scenarios/seaport-trades"
 	"github.com/ethpandaops/spamoor/scenarios/setcodetx"
+	bloatedeoa "github.com/ethpandaops/spamoor/scenarios/statebloat/bloated_eoa"
 	erc20bloater "github.com/ethpandaops/spamoor/scenarios/statebloat/erc20_bloater"
 	"github.com/ethpandaops/spamoor/scenarios/storagerefundtx"
 	"github.com/ethpandaops/spamoor/scenarios/storagespam"
@@ -98,6 +99,7 @@ var nativeScenarioCategories = []*scenario.Category{
 		Name:        "Bloatnet",
 		Description: "Scenarios specifically designed for state bloating",
 		Descriptors: []*scenario.Descriptor{
+			&bloatedeoa.ScenarioDescriptor,
 			&erc20bloater.ScenarioDescriptor,
 		},
 	},
