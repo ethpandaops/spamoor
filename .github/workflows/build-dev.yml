@@ -36,6 +36,7 @@ jobs:
         HAS_DOCKER_IMAGE_LABEL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'build-docker-image') }}
         SAME_REPOSITORY_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         MANUAL_DOCKER_TAG: ${{ inputs.docker_tag }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
         # PR head sha (exact branch HEAD). Read via env to avoid script injection. DO NOT REMOVE.
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         FALLBACK_SHA: ${{ github.sha }}
@@ -62,6 +63,12 @@ jobs:
 
         manual_tag="$MANUAL_DOCKER_TAG"
         if [[ ! -z "$manual_tag" ]]; then
+          # Manual tags must be valid docker tags and must not take reserved names
+          # (master/main/latest/pr and their -suffixed tags, or release tags).
+          if [[ ! "$manual_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$ || "$manual_tag" =~ ^(master|main|latest|pr)(-|$)|^v[0-9] ]]; then
+            echo "::error::reserved or invalid docker tag: use letters, digits, _ . - (write / as -), and no master, main, latest or pr prefix or v<digit> start"
+            exit 1
+          fi
           branch_name="$manual_tag"
           run_builds="true"
           build_docker="true"
@@ -75,6 +82,12 @@ jobs:
           echo "Invalid branch name! Skipping builds"
           run_builds="false"
           build_docker="false"
+        fi
+
+        # PR builds are tagged pr-<number>, never with the PR's branch name, which could
+        # otherwise overwrite any existing tag, such as master or a release.
+        if [[ -n "$PR_NUMBER" ]]; then
+          branch_name="pr-$PR_NUMBER"
         fi
 
         echo "run_builds=$run_builds" >> $GITHUB_OUTPUT
@@ -92,11 +105,18 @@ jobs:
     name: "Build Spamoor"
     needs: [prinfo, check_source]
     if: ${{ needs.prinfo.outputs.run_builds == 'true' && needs.prinfo.outputs.build_docker != 'true' }}
+    # Needed to call _shared-build.yaml at all: GitHub checks its docker jobs'
+    # permissions against this job's even when they are skipped.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/_shared-build.yaml
     with:
       ref: ${{ needs.prinfo.outputs.commit_ref }} # exact branch HEAD, NOT the PR/base merge. DO NOT REMOVE.
       docker: false
-      docker_repository: "ethpandaops/spamoor"
+      docker_repository: "ghcr.io/ethpandaops/spamoor"
       docker_tag_prefix: ${{needs.prinfo.outputs.docker_tag}}
       additional_tags: "['${{needs.prinfo.outputs.docker_tag}}','${{needs.prinfo.outputs.docker_tag}}-latest']"
 
@@ -104,13 +124,17 @@ jobs:
     name: "Build Spamoor and Docker image"
     needs: [prinfo, check_source]
     if: ${{ needs.prinfo.outputs.run_builds == 'true' && needs.prinfo.outputs.build_docker == 'true' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/_shared-build.yaml
     with:
       ref: ${{ needs.prinfo.outputs.commit_ref }} # exact branch HEAD, NOT the PR/base merge. DO NOT REMOVE.
       docker: true
-      docker_repository: "ethpandaops/spamoor"
+      docker_repository: "ghcr.io/ethpandaops/spamoor"
       docker_tag_prefix: ${{needs.prinfo.outputs.docker_tag}}
       additional_tags: "['${{needs.prinfo.outputs.docker_tag}}','${{needs.prinfo.outputs.docker_tag}}-latest']"
     secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      IMAGE_MIRROR_URL: ${{ secrets.IMAGE_MIRROR_URL }}
