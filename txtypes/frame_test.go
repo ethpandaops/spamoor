@@ -384,7 +384,7 @@ func TestFrameValidatePayload(t *testing.T) {
 		}},
 		{"reserved flag bits", func(tx *FrameTx) { tx.Frames[1].Flags = 0x8 }},
 		{"value outside SENDER mode", func(tx *FrameTx) { tx.Frames[0].Value = uint256.NewInt(1) }},
-		{"unknown mode", func(tx *FrameTx) { tx.Frames[1].Mode = 4 }},
+		{"unknown mode", func(tx *FrameTx) { tx.Frames[1].Mode = FrameModeDepVerify + 1 }},
 		{"unknown signature scheme", func(tx *FrameTx) { tx.Signatures[0].Scheme = 0x7 }},
 		{"arbitrary entry with signer", func(tx *FrameTx) {
 			tx.Signatures[0].Scheme = SigSchemeArbitrary
@@ -1034,12 +1034,12 @@ func TestFrameAssertMode(t *testing.T) {
 		t.Fatal("a frame following an ASSERT frame should be rejected")
 	}
 
-	// Mode 4 remains unknown.
+	// The mode after the last defined one remains unknown.
 	bad := build(SelfVerifyFrame(FrameLimits{Execution: 5_000}), userOp())
-	bad.Frames[1].Mode = 4
+	bad.Frames[1].Mode = FrameModeDepVerify + 1
 
 	if err := bad.ValidatePayload(); err == nil {
-		t.Fatal("mode 4 should be rejected")
+		t.Fatal("an undefined mode should be rejected")
 	}
 
 	// An ASSERT frame carrying value is rejected, as for any non-SENDER frame.
