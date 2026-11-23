@@ -2,6 +2,7 @@ package spamoor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -54,6 +55,10 @@ type SendTransactionOptions struct {
 	OnGethConfirm  GethTxConfirmFn
 	OnGethComplete GethTxCompleteFn
 	OnGethEncode   GethTxEncodeFn
+
+	// observer marks options that only wait for a transaction submitted elsewhere, so
+	// that it is not counted as one more transaction of a wallet pool.
+	observer bool
 }
 
 // BatchOptions contains options for batch transaction submission.
@@ -128,7 +133,48 @@ func (p *TxPool) SendTransaction(ctx context.Context, wallet *Wallet, tx *txtype
 // It monitors the blockchain for the transaction and handles reorgs by continuing
 // to wait if the transaction gets reorged out of the chain.
 func (p *TxPool) AwaitTransaction(ctx context.Context, wallet *Wallet, tx *txtypes.Transaction) (*txtypes.Receipt, error) {
-	return p.awaitTransaction(ctx, wallet, tx, nil, nil)
+	type awaited struct {
+		receipt *txtypes.Receipt
+		err     error
+	}
+
+	result := make(chan awaited, 1)
+
+	_, err := p.trackTransaction(ctx, wallet, tx, &SendTransactionOptions{
+		observer: true,
+		OnComplete: func(_ *txtypes.Transaction, receipt *txtypes.Receipt, err error) {
+			result <- awaited{receipt, err}
+		},
+	}, false, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-result:
+		return awaitedResult(ctx, res.receipt, res.err)
+	}
+}
+
+// ErrTransactionReplaced is returned by the awaiting helpers for a transaction that
+// completed without a receipt: another transaction took its nonce.
+var ErrTransactionReplaced = errors.New("transaction was replaced before it was included")
+
+// awaitedResult turns a completion into what an awaiting caller gets. A receipt comes
+// with a nil error only; callers use it without checking it again.
+func awaitedResult(ctx context.Context, receipt *txtypes.Receipt, err error) (*txtypes.Receipt, error) {
+	if receipt != nil || err != nil {
+		return receipt, err
+	}
+
+	// the completion of a cancelled wait carries no outcome
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	return nil, ErrTransactionReplaced
 }
 
 // SendAndAwaitTransaction submits a transaction with custom options and waits for confirmation.
@@ -180,7 +226,7 @@ func (p *TxPool) SendAndAwaitTransaction(ctx context.Context, wallet *Wallet, tx
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case result := <-resultChan:
-		return result.receipt, result.err
+		return awaitedResult(ctx, result.receipt, result.err)
 	}
 }
 

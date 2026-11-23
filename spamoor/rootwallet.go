@@ -12,6 +12,11 @@ import (
 	"github.com/ethpandaops/spamoor/utils"
 )
 
+// rootWalletTxLimit is the number of root wallet transactions that may be pending at
+// once, across all wallet pools. Clients only guarantee an account a small number of
+// executable transaction pool slots (16 in geth), and drop what exceeds it under load.
+const rootWalletTxLimit = 16
+
 // RootWallet represents a primary wallet with transaction rate limiting and batching capabilities.
 // It wraps a standard Wallet with a semaphore-based transaction limiter and optional transaction batcher
 // for managing high-volume transaction scenarios.
@@ -33,7 +38,7 @@ type RootWallet struct {
 
 // InitRootWallet creates and initializes a new RootWallet from a private key.
 // It creates the underlying wallet, updates its state from the blockchain,
-// and sets up transaction rate limiting with a default limit of 200 concurrent transactions.
+// and sets up transaction rate limiting with a limit of rootWalletTxLimit pending transactions.
 // Returns the initialized RootWallet and logs wallet information if logger is provided.
 // If a client fails, it will retry with other available clients before giving up.
 func InitRootWallet(ctx context.Context, privkey string, clientPool *ClientPool, txpool *TxPool, logger logrus.FieldLogger) (*RootWallet, error) {
@@ -90,8 +95,8 @@ func InitRootWallet(ctx context.Context, privkey string, clientPool *ClientPool,
 	rootWalletInstance := &RootWallet{
 		wallet:              rootWallet,
 		deploymentFactory:   newDeploymentFactory(txpool, rootWallet),
-		txSemaphore:         make(chan struct{}, 200),
-		txSemLimit:          200,
+		txSemaphore:         make(chan struct{}, rootWalletTxLimit),
+		txSemLimit:          rootWalletTxLimit,
 		balanceUpdateCtx:    balanceUpdateCtx,
 		balanceUpdateCancel: balanceUpdateCancel,
 		logger:              logger,

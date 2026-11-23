@@ -132,6 +132,9 @@ type SpammerMetricsData struct {
 	GasUsedInWindow  uint64 `json:"gasUsed"`
 	LastUpdate       string `json:"updated"`
 	Status           int    `json:"status"` // Running status from daemon
+	Scenario         string `json:"scenario"`
+	GroupID          int64  `json:"groupId"` // 0 if the spammer is not in a group
+	GroupName        string `json:"groupName"`
 }
 
 // TotalMetricsData represents aggregated metrics across all spammers
@@ -156,6 +159,13 @@ type GraphsDataPoint struct {
 	TotalGasUsed     uint64                       `json:"totalGas"`
 	OthersGasUsed    uint64                       `json:"othersGas"`
 	SpammerData      map[string]*SpammerBlockData `json:"spammers"` // spammerID -> detailed data
+	GasLimit         uint64                       `json:"gasLimit"` // summed over the blocks of the point
+	BaseFee          uint64                       `json:"baseFee"`  // wei, of the last block
+	TxCount          uint64                       `json:"txCount"`  // all transactions in the blocks
+	Reorgs           uint64                       `json:"reorgs"`
+	ReorgedTxs       uint64                       `json:"reorgedTxs"`
+	Rebroadcasts     uint64                       `json:"rebroadcasts"`
+	GapFills         uint64                       `json:"gapFills"`
 }
 
 // SpammerBlockData represents a spammer's data within a time period
@@ -164,6 +174,10 @@ type SpammerBlockData struct {
 	ConfirmedTxCount uint64 `json:"confirmed"`
 	PendingTxCount   uint64 `json:"pending"`
 	SubmittedTxCount uint64 `json:"submitted"`
+	SubmittedTxDelta uint64 `json:"sent"`     // submitted in the period
+	FailedTxCount    uint64 `json:"failed"`   // failed in the period
+	DelayMedianMs    uint64 `json:"delayP50"` // submission to inclusion, median (ms)
+	DelayP95Ms       uint64 `json:"delayP95"` // submission to inclusion, 95th percentile (ms)
 }
 
 // SpammerTimeSeriesResponse represents time-series data for a specific spammer
@@ -1574,6 +1588,7 @@ func (ah *APIHandler) GetSpammerLibraryIndex(w http.ResponseWriter, r *http.Requ
 // @Summary Get graphs dashboard data
 // @Tags Graphs
 // @Description Returns comprehensive graphs data for the dashboard including all spammers, totals, and time-series data
+// @Param window query string false "Time window: short (30 minutes per block, default) or long (6 hours aggregated)"
 // @Produce json
 // @Success 200 {object} GraphsDashboardResponse "Success"
 // @Failure 401 {string} string "Unauthorized"
@@ -1581,12 +1596,16 @@ func (ah *APIHandler) GetSpammerLibraryIndex(w http.ResponseWriter, r *http.Requ
 // @Router /api/graphs/dashboard [get]
 func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request) {
 	shortWindow := ah.daemon.GetShortWindowMetrics()
+	if shortWindow != nil && r.URL.Query().Get("window") == "long" {
+		shortWindow = ah.daemon.GetLongWindowMetrics()
+	}
+
 	if shortWindow == nil {
 		http.Error(w, "Transaction metrics collection is disabled", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Get time range from short window (30 minutes)
+	// Get time range of the selected window
 	startTime, endTime := shortWindow.GetTimeRange()
 
 	// Get current spammer snapshots
@@ -1614,11 +1633,21 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 
 		// Get spammer status
 		status := 0 // Default to stopped
+		scenarioName, groupID, groupName := "", int64(0), ""
+
 		if spammer := ah.daemon.GetSpammer(int64(spammerID)); spammer != nil {
 			status = spammer.GetStatus()
+			scenarioName = spammer.GetScenario()
+
+			if groupID = spammer.GetGroupID(); groupID != 0 {
+				groupName = ah.daemon.GetSpammerName(uint64(groupID))
+			}
 		}
 
 		spammers = append(spammers, SpammerMetricsData{
+			Scenario:         scenarioName,
+			GroupID:          groupID,
+			GroupName:        groupName,
 			ID:               spammerID,
 			Name:             spammerName,
 			PendingTxCount:   snapshot.PendingTxCount,
@@ -1648,10 +1677,21 @@ func (ah *APIHandler) GetGraphsDashboard(w http.ResponseWriter, r *http.Request)
 				ConfirmedTxCount: data.ConfirmedTxCount,
 				PendingTxCount:   data.PendingTxCount,
 				SubmittedTxCount: data.SubmittedTxCount,
+				SubmittedTxDelta: data.SubmittedTxDelta,
+				FailedTxCount:    data.FailedTxCount,
+				DelayMedianMs:    data.DelayMedianMs,
+				DelayP95Ms:       data.DelayP95Ms,
 			}
 		}
 
 		chartDataPoints[i] = GraphsDataPoint{
+			GasLimit:         point.GasLimit,
+			BaseFee:          point.BaseFee,
+			TxCount:          point.TxCount,
+			Reorgs:           point.Reorgs,
+			ReorgedTxs:       point.ReorgedTxs,
+			Rebroadcasts:     point.Rebroadcasts,
+			GapFills:         point.GapFills,
 			Timestamp:        point.Timestamp,
 			StartBlockNumber: point.StartBlockNumber,
 			EndBlockNumber:   point.EndBlockNumber,
