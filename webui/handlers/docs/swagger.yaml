@@ -135,11 +135,25 @@ definitions:
     type: object
   api.GraphsDataPoint:
     properties:
+      baseFee:
+        description: wei, of the last block
+        type: integer
       blocks:
         type: integer
       endBlock:
         type: integer
+      gapFills:
+        type: integer
+      gasLimit:
+        description: summed over the blocks of the point
+        type: integer
       othersGas:
+        type: integer
+      rebroadcasts:
+        type: integer
+      reorgedTxs:
+        type: integer
+      reorgs:
         type: integer
       spammers:
         additionalProperties:
@@ -152,6 +166,9 @@ definitions:
         type: integer
       ts:
         type: string
+      txCount:
+        description: all transactions in the blocks
+        type: integer
     type: object
   api.ImportSpammersRequest:
     properties:
@@ -345,9 +362,21 @@ definitions:
     properties:
       confirmed:
         type: integer
+      delayP50:
+        description: submission to inclusion, median (ms)
+        type: integer
+      delayP95:
+        description: submission to inclusion, 95th percentile (ms)
+        type: integer
+      failed:
+        description: failed in the period
+        type: integer
       gas:
         type: integer
       pending:
+        type: integer
+      sent:
+        description: submitted in the period
         type: integer
       submitted:
         type: integer
@@ -462,12 +491,19 @@ definitions:
         type: integer
       gasUsed:
         type: integer
+      groupId:
+        description: 0 if the spammer is not in a group
+        type: integer
+      groupName:
+        type: string
       id:
         type: integer
       name:
         type: string
       pending:
         type: integer
+      scenario:
+        type: string
       status:
         description: Running status from daemon
         type: integer
@@ -955,6 +991,12 @@ paths:
     get:
       description: Returns comprehensive graphs data for the dashboard including all
         spammers, totals, and time-series data
+      parameters:
+      - description: 'Time window: short (30 minutes per block, default) or long (6
+          hours aggregated)'
+        in: query
+        name: window
+        type: string
       produces:
       - application/json
       responses:

@@ -533,8 +533,10 @@ func (client *Client) GetSuggestedFee(ctx context.Context) (*big.Int, *big.Int, 
 	client.gasSuggestionMutex.Lock()
 	defer client.gasSuggestionMutex.Unlock()
 
+	// Callers get copies: they adjust the values in place, which must not leak into
+	// the cache.
 	if time.Since(client.lastGasSuggestion) < 12*time.Second {
-		return client.lastGasCap, client.lastTipCap, nil
+		return new(big.Int).Set(client.lastGasCap), new(big.Int).Set(client.lastTipCap), nil
 	}
 
 	var gasCapResult hexutil.Big
@@ -555,7 +557,7 @@ func (client *Client) GetSuggestedFee(ctx context.Context) (*big.Int, *big.Int, 
 	client.lastGasCap = gasCap
 	client.lastTipCap = tipCap
 
-	return gasCap, tipCap, nil
+	return new(big.Int).Set(gasCap), new(big.Int).Set(tipCap), nil
 }
 
 // SendTransaction submits a transaction to the network in its network encoding,

@@ -269,7 +269,7 @@ func (s *Spammer) runScenario() {
 	}
 	runningChan := make(chan struct{})
 	s.runningChan = runningChan
-	s.scenarioCtx, s.scenarioCancel = context.WithCancel(s.daemon.ctx)
+	s.scenarioCtx, s.scenarioCancel = context.WithCancel(spamoor.WithWalletPoolScope(s.daemon.ctx))
 
 	var scenarioErr error
 	defer func() {
